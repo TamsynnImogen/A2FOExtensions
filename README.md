@@ -35,7 +35,11 @@ The tested SHA-256 fingerprints are recorded in `docs/addresses.md`.
 
 ## Build
 
-On Fedora/Nobara:
+The target is a 32-bit Windows DLL. GCC/MinGW-w64 is required because the
+project uses GNU assembly and GCC calling-convention attributes; it does not
+currently build with Visual Studio/MSVC.
+
+### Fedora/Nobara
 
 ```sh
 sudo dnf install mingw32-gcc-c++ mingw32-winpthreads-static
@@ -43,7 +47,52 @@ make
 make test
 ```
 
+### Windows (MSYS2)
+
+Install the current 64-bit [MSYS2](https://www.msys2.org/) distribution, then
+open its **MINGW32** shell. The shell itself runs on 64-bit Windows while its
+compiler produces the 32-bit `i686` code required by Armada II.
+
+Install Git, GNU Make, and the 32-bit GCC toolchain:
+
+```sh
+pacman -S --needed git make mingw-w64-i686-gcc
+```
+
+Clone and build the project from the same MINGW32 shell:
+
+```sh
+git clone https://github.com/TamsynnImogen/A2FOExtensions.git
+cd A2FOExtensions
+g++ -dumpmachine
+make CXX_MINGW=g++ CXX_HOST=g++
+make test CXX_HOST=g++
+```
+
+`g++ -dumpmachine` must report `i686-w64-mingw32`. Do not build from an
+UCRT64, CLANG64, or other 64-bit shell: a 64-bit DLL cannot be loaded by the
+32-bit game. The `make smoke` target is intended for Linux/Wine and is not
+needed on Windows.
+
 The DLL is written to `build/A2FOExtensions.dll`.
+
+## Source guide
+
+- `src/dllmain.cpp` contains version validation, runtime state, recursive ODF
+  registration, and the evolver cocoon hooks. Start here for feature behavior.
+- `src/delphi_bridge.S` translates between normal C++ calls, Fleet Ops'
+  Delphi register convention, and Armada's 32-bit MSVC `thiscall` convention.
+- `src/hook.cpp` provides the checked relative-call, relative-jump, and inline
+  gateway patching primitives.
+- `src/fpq_paths.cpp` parses only the metadata needed to discover ODF folders
+  in an `odf.fpq`; it does not decompress archive payloads.
+- `src/odf_paths.cpp` contains platform-independent basename normalization and
+  fallback behavior covered by host tests.
+- `src/startup_proxy.cpp` and `src/startup_proxy.def` load the companion early
+  while preserving Armada's original startup-DLL exports.
+- `docs/addresses.md` records supported hashes and all reverse-engineered RVAs.
+- `tests/` contains the platform-independent parsers/path tests and the optional
+  Windows DLL loading smoke-test program.
 
 ## Install
 

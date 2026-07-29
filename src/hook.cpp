@@ -8,6 +8,9 @@
 namespace a2fo {
 namespace {
 
+// Encode a five-byte x86 near CALL/JMP and pad any remaining whole
+// instructions with NOPs. Callers must validate that `length` ends on an
+// instruction boundary before using this helper.
 bool write_relative_branch(void* source, void* destination, std::size_t length,
                            std::uint8_t opcode) {
     if (length < 5) {
@@ -70,6 +73,9 @@ bool install_inline_hook(void* target, void* replacement, std::size_t length,
         return false;
     }
 
+    // The gateway contains the displaced prologue followed by a jump back to
+    // target+length. Current hook sites were selected so these copied bytes do
+    // not contain relative branches or instruction-pointer-relative operands.
     auto* gateway = static_cast<std::uint8_t*>(VirtualAlloc(
         nullptr, length + 5, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
     if (!gateway) {
