@@ -1,0 +1,4 @@
+LIBRARY "Win2kDisableTaskSwitch"
+EXPORTS
+    ?LowLevelKeyboardProc@@YGJHIJ@Z=a2fo_proxy_low_level_keyboard_proc@12
+    ?SetHookID@@YAXPAUHHOOK__@@@Z=a2fo_proxy_set_hook_id
