@@ -1,5 +1,14 @@
 	.text
 
+	# ABI translation helpers for 32-bit code only.
+	#
+	# C++ calls every symbol below with ordinary cdecl stack arguments. The
+	# wrapper moves them into whichever nonstandard ABI the target expects:
+	#   Delphi register convention: EAX, EDX, ECX, then stack arguments.
+	#   MSVC thiscall:              ECX=this, remaining arguments on stack.
+	# The first C argument is always the target function address.
+
+	# Delphi long-string conversion: EAX=&destination, EDX=source PChar.
 	.globl _a2fo_lstr_from_pchar
 _a2fo_lstr_from_pchar:
 	pushl %ebp
@@ -19,6 +28,8 @@ _a2fo_lstr_clear:
 	leave
 	ret
 
+	# Construct a TFOFSVirtualDirectory. EAX=class/self, EDX=constructor flag,
+	# ECX=Delphi path, followed by the remaining constructor fields.
 	.globl _a2fo_create_virtual_directory
 _a2fo_create_virtual_directory:
 	pushl %ebp
@@ -32,6 +43,7 @@ _a2fo_create_virtual_directory:
 	leave
 	ret
 
+	# Delphi container and filesystem helpers used while extending the ODF VFS.
 	.globl _a2fo_tlist_add
 _a2fo_tlist_add:
 	pushl %ebp
@@ -118,6 +130,7 @@ _a2fo_call_get_file_from_hash:
 	leave
 	ret
 
+	# Armada gameplay methods use MSVC thiscall (ECX=self).
 	.globl _a2fo_call_evolver_build_class
 _a2fo_call_evolver_build_class:
 	pushl %ebp
@@ -162,6 +175,9 @@ _a2fo_load_sod:
 	leave
 	ret
 
+	# Mid-function cocoon splice. Preserve Armada's live volatile registers,
+	# ask C++ for the geometry, place the result in the EDI register expected by
+	# the original continuation, then jump back immediately after the patch.
 	.globl _a2fo_cocoon_selector_hook
 _a2fo_cocoon_selector_hook:
 	pushl %eax

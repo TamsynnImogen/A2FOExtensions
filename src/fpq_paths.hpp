@@ -14,6 +14,9 @@ struct FpqPathResult {
     std::string error;
 };
 
+// Parses an in-memory FPQ metadata prefix and returns normalized ODF directory
+// names. No Fleet Ops types or Windows APIs are required, so this is
+// host-testable.
 FpqPathResult parse_fpq_odf_directories(const std::vector<std::uint8_t>& bytes);
 
 }  // namespace a2fo

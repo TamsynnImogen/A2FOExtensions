@@ -5,12 +5,29 @@
 
 namespace {
 
+// Armada imports two decorated exports from Win2kDisableTaskSwitch.dll very
+// early in startup. This proxy preserves those exports, forwards them to the
+// renamed original DLL, and loads A2FOExtensions before class registration.
 using SetHookIdFunction = void(__cdecl*)(HHOOK);
 using LowLevelKeyboardProcFunction = LRESULT(__stdcall*)(int, WPARAM, LPARAM);
 
 HMODULE g_original = nullptr;
 SetHookIdFunction g_set_hook_id = nullptr;
 LowLevelKeyboardProcFunction g_low_level_keyboard_proc = nullptr;
+
+template <typename Function>
+bool load_export(HMODULE module, const char* name, Function& output) {
+    FARPROC address = GetProcAddress(module, name);
+    if (!address) {
+        return false;
+    }
+    static_assert(sizeof(output) == sizeof(address),
+                  "function pointers must match FARPROC on 32-bit Windows");
+    // Copying the representation avoids GCC's warning for converting the
+    // generic FARPROC signature to each export's real calling convention.
+    std::memcpy(&output, &address, sizeof(output));
+    return true;
+}
 
 bool sibling_path(HMODULE module, const char* filename, char* output,
                   std::size_t output_size) {
@@ -48,12 +65,10 @@ bool load_original_and_extension(HMODULE proxy) {
     if (!g_original) {
         return false;
     }
-    g_set_hook_id = reinterpret_cast<SetHookIdFunction>(GetProcAddress(
-        g_original, "?SetHookID@@YAXPAUHHOOK__@@@Z"));
-    g_low_level_keyboard_proc =
-        reinterpret_cast<LowLevelKeyboardProcFunction>(GetProcAddress(
-            g_original, "?LowLevelKeyboardProc@@YGJHIJ@Z"));
-    if (!g_set_hook_id || !g_low_level_keyboard_proc) {
+    if (!load_export(g_original, "?SetHookID@@YAXPAUHHOOK__@@@Z",
+                     g_set_hook_id) ||
+        !load_export(g_original, "?LowLevelKeyboardProc@@YGJHIJ@Z",
+                     g_low_level_keyboard_proc)) {
         return false;
     }
 
@@ -69,6 +84,8 @@ bool load_original_and_extension(HMODULE proxy) {
 }  // namespace
 
 extern "C" void __cdecl a2fo_proxy_set_hook_id(HHOOK hook) {
+    // Exported as Armada's original ?SetHookID@@YAXPAUHHOOK__@@@Z symbol by
+    // startup_proxy.def.
     if (g_set_hook_id) {
         g_set_hook_id(hook);
     }
@@ -76,6 +93,9 @@ extern "C" void __cdecl a2fo_proxy_set_hook_id(HHOOK hook) {
 
 extern "C" LRESULT __stdcall a2fo_proxy_low_level_keyboard_proc(
     int code, WPARAM wparam, LPARAM lparam) {
+    // Exported under the original decorated keyboard-procedure name. The
+    // proxy never installs or drives input itself; it only forwards Armada's
+    // existing call to the shipped startup DLL.
     if (g_low_level_keyboard_proc) {
         return g_low_level_keyboard_proc(code, wparam, lparam);
     }

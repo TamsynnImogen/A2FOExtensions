@@ -24,6 +24,9 @@ bool has_odf_extension(const std::string& basename) {
 }  // namespace
 
 std::string recursive_odf_basename_key(const std::string& requested_path) {
+    // ParameterDB normally asks FOFS_ItemGet for a bare basename. Supporting
+    // odf\... paths too keeps the helper useful at adjacent filesystem hooks,
+    // while rejecting texture/SOD paths that happen to share a basename.
     const std::string normalized = normalize_virtual_path(requested_path);
     const std::size_t slash = normalized.find_last_of('\\');
     if (slash == std::string::npos) {
@@ -49,6 +52,8 @@ bool find_recursive_odf_alias(
     const std::string& requested_path,
     const std::map<std::string, std::string>& aliases,
     std::string& aliased_path) {
+    // Kept separate from the injected hook so path normalization and fallback
+    // behavior can be exercised by ordinary host unit tests.
     aliased_path.clear();
     const std::string basename = recursive_odf_basename_key(requested_path);
     if (basename.empty()) {

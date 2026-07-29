@@ -18,6 +18,12 @@
 
 namespace {
 
+// This file bridges two different binaries and ABIs:
+//   * ArmadaL.exe owns the gameplay classes and SOD database (MSVC thiscall).
+//   * FleetOpsHook.dll owns the replacement virtual filesystem (Delphi register
+//     convention: EAX/EDX/ECX before any stack arguments).
+// Every address below is an RVA from the supported module's load base, never a
+// process-global absolute address. docs/addresses.md records their provenance.
 constexpr std::uint32_t kArmadaTimestamp = 0x3c4c76bd;
 constexpr std::uint32_t kArmadaImageSize = 0x00403999;
 constexpr std::uint32_t kFleetOpsTimestamp = 0x51f6475c;
@@ -32,6 +38,7 @@ constexpr std::uintptr_t kSodDatabaseRva = 0x3ad508;
 constexpr std::uintptr_t kDefaultCocoonRva = 0x33fccc;
 constexpr std::uintptr_t kAlternativeCocoonRva = 0x33fd3c;
 
+// FleetOpsHook.dll RVAs.
 constexpr std::uintptr_t kLStrClearRva = 0x0056b8;
 constexpr std::uintptr_t kLStrFromPCharRva = 0x0058b0;
 constexpr std::uintptr_t kTListAddRva = 0x080824;
@@ -49,6 +56,9 @@ constexpr std::size_t kBuiltInVirtualDirectoryCount = 28;
 constexpr std::size_t kMaximumVirtualDirectoryCount = 255;
 constexpr std::size_t kMaximumPathLength = 32767;
 
+// A timestamp alone is not enough protection for an injected hook. Each patch
+// also verifies the exact instructions it is about to replace, and fails
+// closed when another Fleet Ops/Armada build is detected.
 const std::uint8_t kExpectedBuildClass[] = {0x55, 0x8b, 0xec, 0x6a, 0xff};
 const std::uint8_t kExpectedDtor[] = {0xc7, 0x01, 0x44, 0x1b, 0x6b, 0x00};
 const std::uint8_t kExpectedCocoonJump[] = {0xe9, 0xa7, 0x07, 0x35, 0x00};
@@ -83,6 +93,9 @@ struct ArchiveInfo {
     std::string absolute_path;
 };
 
+// Reverse-engineered fields used from Fleet Ops' TFOFSFileEntry and mod-info
+// objects. Keep these together: changing one for a different engine build
+// requires revalidating the precedence and hash-chain code below.
 constexpr std::size_t kFileEntryNextOffset = 0x08;
 constexpr std::size_t kFileEntryBasenameOffset = 0x0c;
 constexpr std::size_t kFileEntryPackedOffset = 0x18;
@@ -91,6 +104,9 @@ constexpr std::size_t kFileEntryPrimaryRootOffset = 0x20;
 constexpr std::size_t kFileEntryOverriddenOffset = 0x21;
 constexpr std::size_t kModInfoPriorityOffset = 0x3c;
 
+// Implemented in delphi_bridge.S. Normal C++ calls cannot express all of the
+// Delphi register ABI and Armada's 32-bit thiscall ABI reliably, so these
+// wrappers translate ordinary C stack arguments into the required registers.
 extern "C" void a2fo_lstr_from_pchar(void* function, void** output,
                                       const char* text);
 extern "C" void a2fo_lstr_clear(void* function, void** value);
@@ -142,6 +158,11 @@ std::set<void*> g_logged_cocoon_classes;
 std::map<std::string, std::string> g_recursive_odf_aliases;
 std::map<std::string, void*> g_recursive_odf_winners;
 std::set<std::string> g_logged_recursive_odf_lookups;
+
+// g_recursive_odf_state values:
+//   0 = not registered (or a previous attempt found the VFS unready)
+//   1 = registration is in progress
+//   2 = winner maps are complete and immutable until process exit
 
 std::string lower_ascii(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
@@ -316,6 +337,8 @@ void scan_loose_odfs(const std::string& absolute_directory,
                      const std::string& relative_directory,
                      std::map<std::string, std::string>& directories,
                      unsigned depth = 0) {
+    // Reparse points are skipped to prevent junction loops. The depth limit is
+    // a second guard for unusually deep or malformed mod directory trees.
     if (depth > 64) {
         return;
     }
@@ -350,6 +373,8 @@ void scan_loose_odfs(const std::string& absolute_directory,
 }
 
 bool read_fpq_metadata(const std::string& path, std::vector<std::uint8_t>& bytes) {
+    // Only the FPQ header and metadata tables are needed to discover virtual
+    // ODF directories; compressed file payloads are deliberately not read.
     HANDLE file = CreateFileA(path.c_str(), GENERIC_READ,
                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -397,6 +422,9 @@ bool read_fpq_metadata(const std::string& path, std::vector<std::uint8_t>& bytes
 }
 
 std::unordered_map<void*, void*> map_roots_to_mod_info(void* file_system) {
+    // Fleet Ops stores roots and mod metadata in separate object graphs. File
+    // entries are the reliable link between them, so recover that association
+    // before creating entries for newly discovered directories.
     std::unordered_map<void*, void*> result;
     auto* directories = *reinterpret_cast<DelphiList**>(
         static_cast<std::uint8_t*>(file_system) + 4);
@@ -480,6 +508,10 @@ std::vector<ArchiveInfo> collect_archives(
     return result;
 }
 
+// Fleet Ops' disk/archive scanners always walk the filesystem's directory
+// list. Temporarily presenting only the new directories prevents rescanning
+// and duplicating all 28 built-in directory entries. The original Delphi list
+// storage is restored by the destructor even if C++ unwinds.
 class TemporaryDirectoryList {
 public:
     TemporaryDirectoryList(DelphiList* list, std::vector<void*>& replacement)
@@ -523,6 +555,8 @@ T& field(void* object, std::size_t offset) {
 }
 
 bool file_entry_precedes(void* left, void* right) {
+    // Match Fleet Ops' effective override policy: active mod priority first,
+    // then primary root, then loose files over packed FPQ files.
     void* left_mod = field<void*>(left, kFileEntryModInfoOffset);
     void* right_mod = field<void*>(right, kFileEntryModInfoOffset);
     if (left_mod != right_mod) {
@@ -560,6 +594,8 @@ bool file_entry_precedes(void* left, void* right) {
 
 bool collect_hash_bucket(void* file_system, std::uint32_t index,
                          std::vector<void*>& entries) {
+    // Snapshot one doubly-linked bucket without modifying it. The visited set
+    // and item-count bound turn a damaged/cyclic chain into a safe failure.
     entries.clear();
     const std::uint32_t bucket_count =
         field<std::uint32_t>(file_system, 0x08);
@@ -589,6 +625,9 @@ bool collect_hash_bucket(void* file_system, std::uint32_t index,
 
 std::size_t add_custom_entries_to_hash(
     void* file_system, const std::vector<void*>& custom_directory_list) {
+    // Add only the entries produced by our temporary scan. We intentionally do
+    // not reorder Fleet Ops' global buckets; the parser hook selects a custom
+    // winner directly and leaves unrelated file resolution untouched.
     const std::uint32_t bucket_count =
         field<std::uint32_t>(file_system, 0x08);
     void** buckets = field<void**>(file_system, 0x0c);
@@ -630,6 +669,9 @@ std::size_t add_custom_entries_to_hash(
 
 void build_recursive_odf_winners(
     void* file_system, const std::vector<void*>& custom_directory_list) {
+    // Compute one custom winner per basename after all new entries exist. The
+    // string map is for diagnostics; the pointer map is what the parser hook
+    // returns to Fleet Ops' unmodified file-reading code.
     const std::uint32_t bucket_count =
         field<std::uint32_t>(file_system, 0x08);
     void** buckets = field<void**>(file_system, 0x0c);
@@ -742,6 +784,11 @@ void build_recursive_odf_winners(
 }
 
 bool register_recursive_odfs(void* file_system) {
+    // Registration pipeline:
+    //   1. discover loose and FPQ ODF directories under active mod roots;
+    //   2. create Fleet Ops virtual-directory objects for missing paths;
+    //   3. ask Fleet Ops to populate file entries for just those directories;
+    //   4. publish the entries into its basename hash and calculate winners.
     if (!readable_range(file_system, 0x24)) {
         log_line("Fleet Operations filesystem is not ready; deferring recursive ODF registration");
         return false;
@@ -852,6 +899,9 @@ bool register_recursive_odfs(void* file_system) {
 }
 
 bool register_recursive_odfs_once(void* file_system) {
+    // The first ParameterDB item lookup performs registration. Same-thread
+    // recursion is allowed to fall through, while another thread receives a
+    // bounded wait rather than observing half-built maps.
     constexpr DWORD kRegistrationTimeoutMilliseconds = 30000;
     const DWORD current_thread = GetCurrentThreadId();
     DWORD waited = 0;
@@ -889,6 +939,10 @@ bool register_recursive_odfs_once(void* file_system) {
 
 void* __attribute__((regparm(3))) fofs_item_get_hash_lookup_hook(
     void* file_system, void* delphi_name, std::uintptr_t flags) {
+    // Patched into the one GetFileFromHashTable call inside FOFS_ItemGet. At
+    // this point EAX=file_system, EDX=Delphi filename, and CL=lookup flags.
+    // Registering here is late enough that Fleet Ops has finished its native
+    // VFS index, but early enough to affect ParameterDB's current ODF request.
     if (InterlockedCompareExchange(&g_recursive_odf_state, 0, 0) != 2) {
         log_line("Fleet Operations first ODF item lookup hook reached");
         register_recursive_odfs_once(file_system);
@@ -932,6 +986,8 @@ void* __attribute__((regparm(3))) fofs_item_get_hash_lookup_hook(
 }
 
 std::string normalize_cocoon_name(const char* value) {
+    // ODF authors may omit .sod and add surrounding whitespace. Empty values
+    // deliberately mean "use the original Fleet Ops selection".
     if (!value) {
         return {};
     }
@@ -952,6 +1008,8 @@ std::string normalize_cocoon_name(const char* value) {
 
 void* __attribute__((fastcall)) evolver_class_build_class_hook(
     void* self, void*, void* parameter_db) {
+    // Let Armada construct the complete class first, then associate the final
+    // class object returned in EAX with its optional cocoon setting.
     void* result = a2fo_call_evolver_build_class(g_build_class_hook.gateway,
                                                   self, parameter_db);
     char value[MAX_PATH]{};
@@ -980,6 +1038,8 @@ void* __attribute__((fastcall)) evolver_class_build_class_hook(
 }
 
 void* __attribute__((fastcall)) evolver_class_dtor_hook(void* self, void*) {
+    // Class pointers can be reused after destruction; erase all pointer-keyed
+    // state so a later class cannot inherit an old cocoon choice.
     EnterCriticalSection(&g_state_lock);
     g_class_cocoons.erase(self);
     g_logged_cocoon_classes.erase(self);
@@ -1042,6 +1102,9 @@ bool install_fofs_item_get_lookup_hook() {
 }
 
 DWORD WINAPI initialize(void*) {
+    // DllMain installs immediately when possible. This worker is a fallback
+    // for load orders where FleetOpsHook.dll was not visible at process attach;
+    // it also avoids doing repeated module polling under the loader lock.
     g_armada = GetModuleHandleA(nullptr);
     for (unsigned attempt = 0; attempt < 100 && !g_fleet_ops; ++attempt) {
         g_fleet_ops = GetModuleHandleA("FleetOpsHook.dll");
@@ -1095,6 +1158,9 @@ void* a2fo_cocoon_resume = nullptr;
 }
 
 extern "C" void* a2fo_select_cocoon(void* evolver) {
+    // Called by the small assembly splice at Armada's cocoon-selection site.
+    // Return a cached/custom geometry when possible, otherwise reproduce the
+    // two original Fleet Ops defaults exactly.
     if (!evolver || !g_state_lock_ready) {
         return nullptr;
     }
@@ -1154,6 +1220,9 @@ extern "C" void* a2fo_select_cocoon(void* evolver) {
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
+        // The startup proxy loads us before Armada builds its class database.
+        // Installing the evolver hook here prevents an early class from being
+        // constructed before the new ODF command is visible.
         DisableThreadLibraryCalls(instance);
         open_log();
         log_line("A2FOExtensions initialization started");

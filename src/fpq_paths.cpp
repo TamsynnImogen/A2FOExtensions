@@ -8,6 +8,9 @@
 namespace a2fo {
 namespace {
 
+// FPQ metadata layout (all integer fields are little-endian):
+// header -> fixed-size hash table -> folder records -> file records -> names.
+// File payloads follow these tables and are outside this parser's scope.
 constexpr std::size_t kHeaderSize = 0x1c;
 constexpr std::size_t kHashRecordSize = 12;
 constexpr std::size_t kFolderRecordSize = 12;
@@ -57,6 +60,8 @@ bool valid_component(const std::string& value) {
 }  // namespace
 
 FpqPathResult parse_fpq_odf_directories(const std::vector<std::uint8_t>& bytes) {
+    // Parse untrusted archive metadata defensively. Mods can supply FPQs, so
+    // every offset/count is bounds-checked before iterator or pointer use.
     FpqPathResult result;
     if (bytes.size() < kHeaderSize || bytes[0] != 'F' || bytes[1] != 'P' ||
         bytes[2] != 'Q' || bytes[3] != 0) {
@@ -120,6 +125,8 @@ FpqPathResult parse_fpq_odf_directories(const std::vector<std::uint8_t>& bytes) 
     std::vector<std::string> folders;
     folders.reserve(folder_count);
     for (std::uint32_t index = 0; index < folder_count; ++index) {
+        // Folder records are parent-first. Reconstruct each complete virtual
+        // path as it is encountered so children can reference earlier rows.
         const std::size_t record = folder_table + static_cast<std::size_t>(index) * kFolderRecordSize;
         std::uint32_t parent = 0;
         std::uint32_t name_offset = 0;
@@ -144,6 +151,8 @@ FpqPathResult parse_fpq_odf_directories(const std::vector<std::uint8_t>& bytes) 
 
     std::set<std::string> unique_paths;
     for (std::uint32_t index = 0; index < result.file_count; ++index) {
+        // Only directory names are needed by the runtime scanner. Ignore
+        // non-ODF files and deduplicate paths case-insensitively.
         const std::size_t record = file_table + static_cast<std::size_t>(index) * kFileRecordSize;
         std::uint32_t name_offset = 0;
         std::uint32_t name_length = 0;
