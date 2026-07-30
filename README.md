@@ -3,7 +3,7 @@
 `A2FOExtensions.dll` is a companion DLL for the Fleet Operations 4.0 build of
 Star Trek: Armada II. It does not replace or modify `FleetOpsHook.dll`.
 
-It adds two features:
+It adds three features:
 
 - Recursive ODF discovery. ODF files in arbitrary subdirectories below `odf`
   are registered with Fleet Operations' own virtual filesystem, including ODF
@@ -11,6 +11,7 @@ It adds two features:
   the winning recursive file entry is selected by basename.
 - A per-evolver `cocoon` command. The value is the cocoon SOD filename; `.sod`
   is optional.
+- 'Wingman' has been added as a classlabel alias for craft for a1 compatability.
 
 Example:
 
