@@ -62,6 +62,9 @@ constexpr std::size_t kMaximumPathLength = 32767;
 const std::uint8_t kExpectedBuildClass[] = {0x55, 0x8b, 0xec, 0x6a, 0xff};
 const std::uint8_t kExpectedDtor[] = {0xc7, 0x01, 0x44, 0x1b, 0x6b, 0x00};
 const std::uint8_t kExpectedCocoonJump[] = {0xe9, 0xa7, 0x07, 0x35, 0x00};
+const std::uint8_t kExpectedParameterDbGetString[] = {
+    // Correct instruction bytes still needed.
+};
 const std::uint8_t kExpectedAddDisk[] = {0x55, 0x8b, 0xec, 0x81, 0xc4,
                                          0xa4, 0xfe, 0xff, 0xff};
 const std::uint8_t kExpectedAddPack[] = {0x55, 0x8b, 0xec, 0x83, 0xc4, 0xcc};
@@ -71,6 +74,7 @@ const std::uint8_t kExpectedAddFileToHash[] = {0x53, 0x56, 0x51, 0x8b,
                                                0xf1, 0x89, 0x14, 0x24};
 const std::uint8_t kExpectedFofsItemGetHashLookupCall[] = {
     0xe8, 0x23, 0x3c, 0x00, 0x00};
+
 
 struct DelphiList {
     void* vtable;
@@ -1008,6 +1012,8 @@ std::string normalize_cocoon_name(const char* value) {
     return name;
 }
 
+bool __attribute__((fastcall)) parameter_db_get_string_hook(...)
+
 void* __attribute__((fastcall)) evolver_class_build_class_hook(
     void* self, void*, void* parameter_db) {
     // Let Armada construct the complete class first, then associate the final
@@ -1017,10 +1023,10 @@ void* __attribute__((fastcall)) evolver_class_build_class_hook(
     char value[MAX_PATH]{};
     char basename[MAX_PATH]{};
     if (parameter_db) {
-        a2fo_parameter_db_get_string(at(g_armada, kParameterDbGetStringRva),
+        a2fo_parameter_db_get_string(g_parameter_db_get_string_hook.gateway,
                                      parameter_db, "cocoon", value,
                                      sizeof(value), "");
-        a2fo_parameter_db_get_string(at(g_armada, kParameterDbGetStringRva),
+        a2fo_parameter_db_get_string(g_parameter_db_get_string_hook.gateway,
                                      parameter_db, "basename", basename,
                                      sizeof(basename), "<unnamed>");
     }
@@ -1048,6 +1054,8 @@ void* __attribute__((fastcall)) evolver_class_dtor_hook(void* self, void*) {
     LeaveCriticalSection(&g_state_lock);
     return a2fo_call_evolver_dtor(g_dtor_hook.gateway, self);
 }
+
+bool install_classlabel_alias_hook()
 
 bool install_evolver_hooks() {
     if (std::memcmp(at(g_armada, kEvolverClassBuildClassRva),
@@ -1134,7 +1142,14 @@ DWORD WINAPI initialize(void*) {
     }
 
     try {
-        if (g_evolver_hooks_ready) {
+      try {
+        if (g_classlabel_alias_hook_ready) {
+          log_line("Classlabel alias hook enabled before class loading");
+        } else {
+          g_classlabel_alias_hook_ready =
+            install_classlabel_alias_hook();
+        }
+       if (g_evolver_hooks_ready) {
             log_line("Evolver cocoon ODF command enabled before class loading");
         } else {
             g_evolver_hooks_ready = install_evolver_hooks();
