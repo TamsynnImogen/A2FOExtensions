@@ -150,6 +150,8 @@ bool g_evolver_hooks_ready = false;
 bool g_fofs_item_get_lookup_hook_ready = false;
 a2fo::InlineHook g_build_class_hook;
 a2fo::InlineHook g_dtor_hook;
+a2fo::InlineHook g_parameter_db_get_string_hook;
+bool g_classlabel_alias_hook_ready = false;
 volatile LONG g_recursive_odf_state = 0;
 volatile DWORD g_recursive_odf_owner_thread = 0;
 std::unordered_map<void*, std::string> g_class_cocoons;
