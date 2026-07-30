@@ -1031,7 +1031,7 @@ bool __attribute__((fastcall)) parameter_db_get_string_hook(
     const char* default_value) {
 
     const bool found = a2fo_parameter_db_get_string(
-        g_parameter_db_get_string_hook.gateway,
+        original_parameter_db_get_string(),
         self,
         key,
         output,
