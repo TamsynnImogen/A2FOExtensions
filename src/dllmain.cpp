@@ -63,7 +63,9 @@ const std::uint8_t kExpectedBuildClass[] = {0x55, 0x8b, 0xec, 0x6a, 0xff};
 const std::uint8_t kExpectedDtor[] = {0xc7, 0x01, 0x44, 0x1b, 0x6b, 0x00};
 const std::uint8_t kExpectedCocoonJump[] = {0xe9, 0xa7, 0x07, 0x35, 0x00};
 const std::uint8_t kExpectedParameterDbGetString[] = {
-    // Correct instruction bytes still needed.
+    0x55,
+    0x8b, 0xec,
+    0x81, 0xec, 0x00, 0x01, 0x00, 0x00
 };
 const std::uint8_t kExpectedAddDisk[] = {0x55, 0x8b, 0xec, 0x81, 0xc4,
                                          0xa4, 0xfe, 0xff, 0xff};
@@ -1012,7 +1014,47 @@ std::string normalize_cocoon_name(const char* value) {
     return name;
 }
 
-bool __attribute__((fastcall)) parameter_db_get_string_hook(...)
+void* original_parameter_db_get_string() {
+    if (g_parameter_db_get_string_hook.gateway) {
+        return g_parameter_db_get_string_hook.gateway;
+    }
+
+    return at(g_armada, kParameterDbGetStringRva);
+}
+
+bool __attribute__((fastcall)) parameter_db_get_string_hook(
+    void* self,
+    void*,
+    const char* key,
+    char* output,
+    std::uint32_t output_size,
+    const char* default_value) {
+
+    const bool found = a2fo_parameter_db_get_string(
+        g_parameter_db_get_string_hook.gateway,
+        self,
+        key,
+        output,
+        output_size,
+        default_value);
+
+    if (!key || !output || output_size == 0) {
+        return found;
+    }
+
+    if (_stricmp(key, "classlabel") == 0 &&
+        _stricmp(output, "wingman") == 0) {
+
+        constexpr char replacement[] = "craft";
+
+        if (sizeof(replacement) <= output_size) {
+            std::memcpy(output, replacement, sizeof(replacement));
+            log_line("Classlabel alias applied: wingman -> craft");
+        }
+    }
+
+    return found;
+}
 
 void* __attribute__((fastcall)) evolver_class_build_class_hook(
     void* self, void*, void* parameter_db) {
@@ -1023,10 +1065,10 @@ void* __attribute__((fastcall)) evolver_class_build_class_hook(
     char value[MAX_PATH]{};
     char basename[MAX_PATH]{};
     if (parameter_db) {
-        a2fo_parameter_db_get_string(g_parameter_db_get_string_hook.gateway,
+        a2fo_parameter_db_get_string(original_parameter_db_get_string(),
                                      parameter_db, "cocoon", value,
                                      sizeof(value), "");
-        a2fo_parameter_db_get_string(g_parameter_db_get_string_hook.gateway,
+        a2fo_parameter_db_get_string(original_parameter_db_get_string(),
                                      parameter_db, "basename", basename,
                                      sizeof(basename), "<unnamed>");
     }
@@ -1055,7 +1097,37 @@ void* __attribute__((fastcall)) evolver_class_dtor_hook(void* self, void*) {
     return a2fo_call_evolver_dtor(g_dtor_hook.gateway, self);
 }
 
-bool install_classlabel_alias_hook()
+bool install_classlabel_alias_hook() {
+    if (!g_armada) {
+        log_line("ArmadaL.exe is unavailable; classlabel alias disabled");
+        return false;
+    }
+
+    if (std::memcmp(
+            at(g_armada, kParameterDbGetStringRva),
+            kExpectedParameterDbGetString,
+            sizeof(kExpectedParameterDbGetString)) != 0) {
+
+        log_line(
+            "ParameterDB GetString signature mismatch; "
+            "classlabel alias disabled");
+        return false;
+    }
+
+    if (!a2fo::install_inline_hook(
+            at(g_armada, kParameterDbGetStringRva),
+            reinterpret_cast<void*>(&parameter_db_get_string_hook),
+            sizeof(kExpectedParameterDbGetString),
+            kExpectedParameterDbGetString,
+            g_parameter_db_get_string_hook)) {
+
+        log_line("Could not install ParameterDB GetString hook");
+        return false;
+    }
+
+    log_line("Classlabel alias enabled: wingman -> craft");
+    return true;
+}
 
 bool install_evolver_hooks() {
     if (std::memcmp(at(g_armada, kEvolverClassBuildClassRva),
@@ -1142,24 +1214,23 @@ DWORD WINAPI initialize(void*) {
     }
 
     try {
-      try {
-        if (g_classlabel_alias_hook_ready) {
-          log_line("Classlabel alias hook enabled before class loading");
-        } else {
-          g_classlabel_alias_hook_ready =
-            install_classlabel_alias_hook();
-        }
-       if (g_evolver_hooks_ready) {
-            log_line("Evolver cocoon ODF command enabled before class loading");
-        } else {
-            g_evolver_hooks_ready = install_evolver_hooks();
-        }
-        if (g_fofs_item_get_lookup_hook_ready) {
-            log_line("Recursive ODF parser lookup hook enabled early");
-        } else {
-            g_fofs_item_get_lookup_hook_ready =
-                install_fofs_item_get_lookup_hook();
-        }
+      if (g_classlabel_alias_hook_ready) {
+        log_line("Classlabel alias hook enabled before class loading");
+      } else {
+        g_classlabel_alias_hook_ready =
+          install_classlabel_alias_hook();
+      }
+      if (g_evolver_hooks_ready) {
+          log_line("Evolver cocoon ODF command enabled before class loading");
+      } else {
+          g_evolver_hooks_ready = install_evolver_hooks();
+      }
+      if (g_fofs_item_get_lookup_hook_ready) {
+          log_line("Recursive ODF parser lookup hook enabled early");
+      } else {
+          g_fofs_item_get_lookup_hook_ready =
+              install_fofs_item_get_lookup_hook();
+      }
     } catch (...) {
         log_line("Initialization aborted by an unexpected C++ exception");
         return 1;
@@ -1167,8 +1238,6 @@ DWORD WINAPI initialize(void*) {
     log_line("A2FOExtensions initialization complete");
     return 0;
 }
-
-}  // namespace
 
 extern "C" {
 void* a2fo_cocoon_resume = nullptr;
