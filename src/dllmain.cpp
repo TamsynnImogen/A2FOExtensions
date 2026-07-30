@@ -1237,7 +1237,8 @@ DWORD WINAPI initialize(void*) {
     }
     log_line("A2FOExtensions initialization complete");
     return 0;
-}
+  }
+} //namespace
 
 extern "C" {
 void* a2fo_cocoon_resume = nullptr;
