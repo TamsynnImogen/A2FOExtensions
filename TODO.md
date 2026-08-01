@@ -140,20 +140,30 @@ assimilated ODF and should retain the rank already reached by the Collective.
 Setting the command to `0` would allow special units to opt out of collective
 rank inheritance.
 
-Technical questions:
+Proposed behaviour:
 
-* Which combat, destruction, assimilation, or support events add experience to
-  the collective pool and how duplicate awards are prevented.
-* Whether existing eligible units update immediately when a threshold is
-  crossed or only when they are created or transformed.
-* How collective ranks interact with ODF-specific veteran bonuses and units
-  which have fewer supported rank levels.
-* Whether an assimilated unit contributes its previous experience to the Borg
-  pool and whether its former faction's collective state is affected.
-* How rank inheritance survives intermediate and fully assimilated ODF
-  replacements.
-* How faction-wide XP, thresholds, and inherited ranks are stored in saves and
-  synchronized in multiplayer.
+* Experience enters the collective pool through the same unit-destruction
+  awards which normally grant individual XP. Assimilation and support actions
+  do not add separate XP awards; the implementation must redirect each normal
+  destruction award once so it cannot be counted for both the unit and pool.
+* Every eligible unit updates immediately to the current collective rank when
+  the faction crosses a threshold. Newly created eligible units also begin at
+  the faction's current rank.
+* Collective Borg units do not use individual veteran progression because that
+  conflicts with the shared-XP design. A special unit which needs ordinary
+  personal ranks or veteran bonuses must set `inheritCollectiveRank = 0` and
+  remain outside collective rank inheritance.
+* Assimilating a unit does not add its existing XP to the Borg pool and does
+  not alter the former owner's collective state. Its carried individual XP and
+  rank are reset rather than transferred.
+* An initially captured unit therefore starts again from zero personal XP. On
+  each intermediate or fully assimilated ODF replacement,
+  `inheritCollectiveRank = 1` applies the Borg faction's current collective
+  rank; an opted-out unit remains at its starting rank instead.
+* The collective XP total and current threshold are faction state. They should
+  be saved and synchronized using the same conceptual path Fleet Operations
+  uses for individual XP, but stored once for the faction rather than once per
+  unit. The exact Fleet Ops storage and network hooks still need research.
 
 ### Noxter Features
 
