@@ -1,138 +1,126 @@
-# A2FO Hook Extensions
+# A2FOExtensions modular runtime
 
-`A2FOExtensions.dll` is a companion DLL for the Fleet Operations 4.0 build of
-Star Trek: Armada II. It does not replace or modify `FleetOpsHook.dll`.
+This package preserves the proven startup chain while separating checked engine
+hooks, reusable dispatch, optional native features, and mod-authored Lua logic.
 
-It adds three features:
+## Implemented
 
-- Recursive ODF discovery. ODF files in arbitrary subdirectories below `odf`
-  are registered with Fleet Operations' own virtual filesystem, including ODF
-  directories found inside active `odf.fpq` archives. At ParameterDB load time,
-  the winning recursive file entry is selected by basename.
-- A per-evolver `cocoon` command. The value is the cocoon SOD filename; `.sod`
-  is optional.
-- 'Wingman' has been added as a classlabel alias for craft for a1 compatability.
+- `A2FOExtensions.dll` gains a versioned native-module ABI.
+- Native modules are discovered from `modules\\*.dll` in deterministic filename order.
+- The startup proxy attaches the renamed shipped startup DLL and our core
+  immediately, preserving the proven timing of the recursive ODF and cocoon
+  hooks. Native module discovery runs later on the core's post-attach worker,
+  outside the Windows loader lock.
+- Modules receive logging, Armada/Fleet Ops module handles, root-directory access,
+  and checked inline/CALL/JMP patch helpers.
+- API v2 provides a core-owned FOFS lookup dispatcher so modules do not compete
+  to patch the same Fleet Operations instruction.
+- `A2FOFeaturePack.dll` owns recursive loose-folder/FPQ discovery, the
+  `wingman -> craft` compatibility alias, and the Evolver `cocoon` command.
+- API v3 discovers the shared Data root plus the selected mod's `ParentMod`
+  chain. Native DLLs and Lua scripts use deterministic basename overlay from
+  Data through parents to the active mod.
+- Lua 5.4.8 is embedded in the core, with memory/instruction/file-size limits
+  and a deliberately restricted standard library.
+- API v4 revision 1 adds capability discovery and a core-owned native
+  destroyed-object dispatcher without breaking original v4 modules.
+- Native and Lua startup registrations are transactional: a failed initializer
+  leaves no callbacks or ownership records pointing into rejected code.
+- The Lua API exposes real class-loading callbacks and a bounded temporary ODF
+  view for mod-specific conditional logic. Built-in native features do not use
+  token Lua registration scripts.
+- Destroyed-object handlers declare the ODF fields they need. The core snapshots
+  only the union of those fields, invokes native handlers before Lua, and accepts
+  the first valid replacement.
+- `A2FOFeaturePack.dll` adds ten-slot Ctrl-fill and experimental synchronized,
+  save-persistent Ctrl+Alt continuous production.
+- Fleet Ops mod `info.ini` files can set a first-run `DefaultGameSpeed` and
+  redirect the per-mod `SettingsDirectory` without hard-coded mod paths.
+- An SDK header and minimal example module are included.
 
-Example:
+## Core/module/script boundary
 
-```ini
-classLabel = "evolver"
-cocoon = "my_custom_cocoon.sod"
+The core owns shared call sites, dispatch ordering, engine-object lifetimes, and
+registration rollback. Native modules handle features that need deeper
+engine/filesystem access, such as recursive ODF discovery, cocoon SOD selection,
+and Producer integration. Lua scripts supply optional logic through narrow
+semantic APIs when conditions and composition make scripting worthwhile. See
+[`docs/architecture.md`](docs/architecture.md).
+
+Queue controls and their current validation status are documented in
+[`docs/queue-enhancements.md`](docs/queue-enhancements.md). Supported binary
+identities and checked addresses are recorded in
+[`docs/addresses.md`](docs/addresses.md).
+The two optional Fleet Ops mod-information fields are documented in
+[`docs/fleetops-info-defaults.md`](docs/fleetops-info-defaults.md).
+
+## Expected runtime layout
+
+```text
+Armada II/
+├── A2FOExtensions.dll
+├── Win2kDisableTaskSwitch.dll
+├── Win2kDisableTaskSwitch.original.dll
+├── modules/
+│   └── A2FOFeaturePack.dll
+├── scripts/                 (optional modder scripts)
+└── A2FOExtensions.log
 ```
 
-If `cocoon` is absent or empty, Fleet Operations keeps its existing behavior:
-`8472_cocoon.sod`, or `8472_cocoon2.sod` when its existing
-`crewHitPercent = 0` compatibility rule selects that model.
+The core retains its original log filename. Module and script messages are
+prefixed in the shared log so startup order and overlay selection remain easy
+to diagnose.
 
-## Supported build
+## Building on Nobara/Fedora
 
-The hook deliberately refuses to patch unknown binaries. The initial release
-supports this exact pair:
+This project must be compiled as **32-bit Windows x86**, because Armada II and
+Fleet Operations are 32-bit processes. Do not use the 64-bit MinGW compiler.
 
-- `ArmadaL.exe`: timestamp `0x3c4c76bd`, image size `0x403999`
-- `FleetOpsHook.dll`: timestamp `0x51f6475c`, image size `0x322000`
+Install the toolchain:
 
-The tested SHA-256 fingerprints are recorded in `docs/addresses.md`.
-
-## Build
-
-The target is a 32-bit Windows DLL. GCC/MinGW-w64 is required because the
-project uses GNU assembly and GCC calling-convention attributes; it does not
-currently build with Visual Studio/MSVC.
-
-### Fedora/Nobara
-
-```sh
-sudo dnf install mingw32-gcc-c++ mingw32-winpthreads-static
-make
-make test
+```bash
+sudo dnf install mingw32-gcc-c++ mingw32-binutils make
 ```
 
-### Windows (MSYS2)
+Build the release artifacts:
 
-Install the current 64-bit [MSYS2](https://www.msys2.org/) distribution, then
-open its **MINGW32** shell. The shell itself runs on 64-bit Windows while its
-compiler produces the 32-bit `i686` code required by Armada II.
-
-Install Git, GNU Make, and the 32-bit GCC toolchain:
-
-```sh
-pacman -S --needed git make mingw-w64-i686-gcc
+```bash
+chmod +x build.sh
+./build.sh
 ```
 
-Clone and build the project from the same MINGW32 shell:
+Or use Make directly:
 
-```sh
-git clone https://github.com/TamsynnImogen/A2FOExtensions.git
-cd A2FOExtensions
-g++ -dumpmachine
-make CXX_MINGW=g++ CXX_HOST=g++
-make test CXX_HOST=g++
+```bash
+make -j"$(nproc)"
+make verify
+make smoke
 ```
 
-`g++ -dumpmachine` must report `i686-w64-mingw32`. Do not build from an
-UCRT64, CLANG64, or other 64-bit shell: a 64-bit DLL cannot be loaded by the
-32-bit game. The `make smoke` target is intended for Linux/Wine and is not
-needed on Windows.
+Outputs:
 
-The DLL is written to `build/A2FOExtensions.dll`.
+```text
+build/A2FOExtensions.dll
+build/Win2kDisableTaskSwitch.dll
+build/modules/A2FOFeaturePack.dll
+```
 
-## Source guide
+The SDK example is deliberately excluded from releases. Build and inspect it
+separately with `make sdk-examples verify-sdk`.
 
-- `src/dllmain.cpp` contains version validation, runtime state, recursive ODF
-  registration, and the evolver cocoon hooks. Start here for feature behavior.
-- `src/delphi_bridge.S` translates between normal C++ calls, Fleet Ops'
-  Delphi register convention, and Armada's 32-bit MSVC `thiscall` convention.
-- `src/hook.cpp` provides the checked relative-call, relative-jump, and inline
-  gateway patching primitives.
-- `src/fpq_paths.cpp` parses only the metadata needed to discover ODF folders
-  in an `odf.fpq`; it does not decompress archive payloads.
-- `src/odf_paths.cpp` contains platform-independent basename normalization and
-  fallback behavior covered by host tests.
-- `src/startup_proxy.cpp` and `src/startup_proxy.def` load the companion early
-  while preserving Armada's original startup-DLL exports.
-- `docs/addresses.md` records supported hashes and all reverse-engineered RVAs.
-- `tests/` contains the platform-independent parsers/path tests and the optional
-  Windows DLL loading smoke-test program.
+The build links the MinGW runtime statically. `make verify` rejects outputs
+that depend on deploy-time MinGW DLLs such as `libwinpthread-1.dll`; Armada's
+`Data` directory should not need compiler runtime files added to it.
+On Linux, `make smoke` also verifies under Wine that the core DLL loads and
+exports `A2FO_Initialize`.
 
-## Install
+Before installing the proxy, rename the original shipped startup DLL:
 
-The cocoon hook must be installed before Armada builds its ODF class database.
-For that reason the extension is loaded by a small proxy for Armada's existing
-startup DLL, rather than through dxwrapper's later custom-DLL loader.
+```text
+Win2kDisableTaskSwitch.dll
+    -> Win2kDisableTaskSwitch.original.dll
+```
 
-1. Copy `A2FOExtensions.dll` beside `ArmadaL.exe` in the game's `Data` folder.
-2. In that folder, rename the shipped `Win2kDisableTaskSwitch.dll` to
-   `Win2kDisableTaskSwitch.original.dll`. Keep this file: the proxy forwards
-   Armada's two imports to it, and it still performs Fleet Operations' normal
-   startup work.
-3. Copy `Win2kDisableTaskSwitch.proxy.dll` into the folder and rename the copy
-   to `Win2kDisableTaskSwitch.dll`.
-4. Do not also load `A2FOExtensions.dll` through dxwrapper. If an earlier test
-   added this line to `Data/dxwrapper.ini`, clear it:
-
-   ```ini
-   LoadCustomDllPath =
-   ```
-
-5. Start the game and inspect `Data/A2FOExtensions.log` if initialization fails.
-
-To uninstall, delete the proxy `Win2kDisableTaskSwitch.dll`, rename
-`Win2kDisableTaskSwitch.original.dll` back to `Win2kDisableTaskSwitch.dll`, and
-remove `A2FOExtensions.dll`.
-
-The project only changes process memory after checking the executable and hook
-bytes. It never writes to `ArmadaL.exe` or `FleetOpsHook.dll` on disk.
-
-## Resolution rules
-
-- Only directories containing `.odf` files are added.
-- New directories are ordered case-insensitively by their relative path.
-- Duplicate basenames across different directories follow Fleet Operations'
-  mod-level, primary-root, and loose-file-over-archive precedence. Directory
-  order is only used to break an otherwise exact tie.
-- Recursive selection applies only to bare `.odf` names and `.odf` requests
-  within the virtual `odf` tree. A request without a recursive winner falls
-  back to Fleet Operations' original hash result.
-- A maximum of 227 new directories is accepted because Fleet Operations stores
-  a virtual-directory order in one byte after its 28 built-in entries.
+Then copy the newly built `Win2kDisableTaskSwitch.dll`,
+`A2FOExtensions.dll`, and the `modules` directory into the Fleet Operations
+root directory.

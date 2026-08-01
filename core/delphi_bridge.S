@@ -8,117 +8,6 @@
 	#   MSVC thiscall:              ECX=this, remaining arguments on stack.
 	# The first C argument is always the target function address.
 
-	# Delphi long-string conversion: EAX=&destination, EDX=source PChar.
-	.globl _a2fo_lstr_from_pchar
-_a2fo_lstr_from_pchar:
-	pushl %ebp
-	movl %esp, %ebp
-	movl 12(%ebp), %eax
-	movl 16(%ebp), %edx
-	call *8(%ebp)
-	leave
-	ret
-
-	.globl _a2fo_lstr_clear
-_a2fo_lstr_clear:
-	pushl %ebp
-	movl %esp, %ebp
-	movl 12(%ebp), %eax
-	call *8(%ebp)
-	leave
-	ret
-
-	# Construct a TFOFSVirtualDirectory. EAX=class/self, EDX=constructor flag,
-	# ECX=Delphi path, followed by the remaining constructor fields.
-	.globl _a2fo_create_virtual_directory
-_a2fo_create_virtual_directory:
-	pushl %ebp
-	movl %esp, %ebp
-	pushl 24(%ebp)
-	pushl 20(%ebp)
-	movl 16(%ebp), %ecx
-	movl $1, %edx
-	movl 12(%ebp), %eax
-	call *8(%ebp)
-	leave
-	ret
-
-	# Delphi container and filesystem helpers used while extending the ODF VFS.
-	.globl _a2fo_tlist_add
-_a2fo_tlist_add:
-	pushl %ebp
-	movl %esp, %ebp
-	movl 12(%ebp), %eax
-	movl 16(%ebp), %edx
-	call *8(%ebp)
-	leave
-	ret
-
-	.globl _a2fo_hash_string
-_a2fo_hash_string:
-	pushl %ebp
-	movl %esp, %ebp
-	movl 12(%ebp), %eax
-	xorl %edx, %edx
-	call *8(%ebp)
-	leave
-	ret
-
-	.globl _a2fo_add_file_to_hash
-_a2fo_add_file_to_hash:
-	pushl %ebp
-	movl %esp, %ebp
-	movl 12(%ebp), %eax
-	movl 16(%ebp), %edx
-	movl 20(%ebp), %ecx
-	call *8(%ebp)
-	leave
-	ret
-
-	.globl _a2fo_add_items_from_disk
-_a2fo_add_items_from_disk:
-	pushl %ebp
-	movl %esp, %ebp
-	pushl 28(%ebp)
-	pushl 24(%ebp)
-	movl 20(%ebp), %ecx
-	movl 16(%ebp), %edx
-	movl 12(%ebp), %eax
-	call *8(%ebp)
-	leave
-	ret
-
-	.globl _a2fo_add_items_from_pack
-_a2fo_add_items_from_pack:
-	pushl %ebp
-	movl %esp, %ebp
-	pushl 24(%ebp)
-	movl 20(%ebp), %ecx
-	movl 16(%ebp), %edx
-	movl 12(%ebp), %eax
-	call *8(%ebp)
-	leave
-	ret
-
-	.globl _a2fo_renew_overrides
-_a2fo_renew_overrides:
-	pushl %ebp
-	movl %esp, %ebp
-	movl 12(%ebp), %eax
-	call *8(%ebp)
-	leave
-	ret
-
-	.globl _a2fo_call_file_system_get_file
-_a2fo_call_file_system_get_file:
-	pushl %ebp
-	movl %esp, %ebp
-	movl 12(%ebp), %eax
-	movl 16(%ebp), %edx
-	call *8(%ebp)
-	leave
-	ret
-
 	.globl _a2fo_call_get_file_from_hash
 _a2fo_call_get_file_from_hash:
 	pushl %ebp
@@ -126,6 +15,28 @@ _a2fo_call_get_file_from_hash:
 	movl 12(%ebp), %eax
 	movl 16(%ebp), %edx
 	movl 20(%ebp), %ecx
+	call *8(%ebp)
+	leave
+	ret
+
+	# Delphi routines whose complete ABI is EAX and no stack arguments.
+	.globl _a2fo_call_delphi_one_register
+_a2fo_call_delphi_one_register:
+	pushl %ebp
+	movl %esp, %ebp
+	movl 12(%ebp), %eax
+	call *8(%ebp)
+	leave
+	ret
+
+	# Delphi routines whose complete ABI is EAX, EDX and no stack arguments.
+	# Used for TModificationSupport.getModUserDirectory and System.@LStrAsg.
+	.globl _a2fo_call_delphi_two_registers
+_a2fo_call_delphi_two_registers:
+	pushl %ebp
+	movl %esp, %ebp
+	movl 12(%ebp), %eax
+	movl 16(%ebp), %edx
 	call *8(%ebp)
 	leave
 	ret
@@ -145,6 +56,47 @@ _a2fo_call_evolver_build_class:
 _a2fo_call_evolver_dtor:
 	pushl %ebp
 	movl %esp, %ebp
+	movl 12(%ebp), %ecx
+	call *8(%ebp)
+	leave
+	ret
+
+	.globl _a2fo_call_craft_explode
+_a2fo_call_craft_explode:
+	pushl %ebp
+	movl %esp, %ebp
+	movl 12(%ebp), %ecx
+	call *8(%ebp)
+	leave
+	ret
+
+	.globl _a2fo_call_game_object_method
+_a2fo_call_game_object_method:
+	pushl %ebp
+	movl %esp, %ebp
+	movl 12(%ebp), %ecx
+	call *8(%ebp)
+	leave
+	ret
+
+	.globl _a2fo_call_game_object_construct
+_a2fo_call_game_object_construct:
+	pushl %ebp
+	movl %esp, %ebp
+	pushl 28(%ebp)
+	pushl 24(%ebp)
+	pushl 20(%ebp)
+	pushl 16(%ebp)
+	movl 12(%ebp), %ecx
+	call *8(%ebp)
+	leave
+	ret
+
+	.globl _a2fo_call_game_object_argument
+_a2fo_call_game_object_argument:
+	pushl %ebp
+	movl %esp, %ebp
+	pushl 16(%ebp)
 	movl 12(%ebp), %ecx
 	call *8(%ebp)
 	leave

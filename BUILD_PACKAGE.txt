@@ -1,0 +1,5 @@
+A2FOExtensions modular runtime — buildable package
+
+This directory must contain both Makefile and build.sh.
+Run:
+  ./build.sh
