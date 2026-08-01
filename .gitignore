@@ -1,11 +1,9 @@
 /build/
-
 *.dll
 *.exe
 *.log
 *.o
 *.obj
-
 .DS_Store
 Thumbs.db
 *~
