@@ -63,6 +63,98 @@ Questions to investigate:
 * [ ] Complete the remaining single-player and two-peer multiplayer validation matrix.
 * [ ] Add active/paused build-button overlays.
 
+### Borg Features
+
+#### Race-Specific Assimilation Replacement
+
+[IDEA]
+
+Replace the current mod workaround which uses an automatically firing special
+weapon to detect when a vessel changes owner to the Borg and then swaps its
+ODF. A native ownership-change/capture event could perform the replacement
+directly, without requiring a hidden weapon on every compatible vessel.
+
+Proposed unit ODF commands use indexed race/ODF pairs:
+
+```text
+capture0Race = "borg"
+capture0Odf = "bor_galaxy"
+
+capture1Race = "romulan"
+capture1Odf = "rom_galaxy"
+```
+
+When the unit changes owner, the new owner's race would be compared with each
+`capture<N>Race` entry. A matching `capture<N>Odf` would replace or transform
+the captured unit into the faction-specific version.
+
+Technical questions:
+
+* Which Armada ownership-change function provides a single synchronized event
+  for capture, assimilation, transfer, and scripted ownership changes.
+* Whether the replacement should preserve position, rotation, damage, crew,
+  special energy, veterancy, orders, hotkey groups, and object identity.
+* How to prevent the replacement itself from retriggering the capture rule.
+* Whether the mapping should apply only to assimilation or to every ownership
+  change.
+* How indexed pairs should be validated when an entry is incomplete or its
+  target ODF cannot be found.
+* How the transformation should persist through save/load and remain
+  synchronized in multiplayer.
+
+#### Collective Borg Experience
+
+[IDEA]
+
+Add a faction-selectable experience mode. The normal mode retains per-unit
+experience, while the collective mode contributes experience to a faction-wide
+pool and derives Borg ranks from shared thresholds.
+
+Proposed faction ODF commands:
+
+```text
+xpMode = "collective"
+xpMode = "individual"
+
+collectiveXPRequired1 = 5000
+collectiveXPRequired2 = 15000
+collectiveXPRequired3 = 35000
+collectiveXPRequired4 = 70000
+collectiveXPRequired5 = 120000
+```
+
+`individual` remains the default and therefore does not normally need to be
+declared. In `collective` mode, eligible units contribute to the shared pool
+and receive the collective rank reached by the faction.
+
+Proposed unit ODF command:
+
+```text
+inheritCollectiveRank = 1
+```
+
+The default is `1`. This allows newly built or assimilated units to inherit the
+current collective rank immediately. It is particularly useful for multiphase
+assimilation, where an initially assimilated unit later changes into its fully
+assimilated ODF and should retain the rank already reached by the Collective.
+Setting the command to `0` would allow special units to opt out of collective
+rank inheritance.
+
+Technical questions:
+
+* Which combat, destruction, assimilation, or support events add experience to
+  the collective pool and how duplicate awards are prevented.
+* Whether existing eligible units update immediately when a threshold is
+  crossed or only when they are created or transformed.
+* How collective ranks interact with ODF-specific veteran bonuses and units
+  which have fewer supported rank levels.
+* Whether an assimilated unit contributes its previous experience to the Borg
+  pool and whether its former faction's collective state is affected.
+* How rank inheritance survives intermediate and fully assimilated ODF
+  replacements.
+* How faction-wide XP, thresholds, and inherited ranks are stored in saves and
+  synchronized in multiplayer.
+
 ### Noxter Features
 
 #### Seed and Breeder Production System
