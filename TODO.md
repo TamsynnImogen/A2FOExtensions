@@ -63,6 +63,82 @@ Questions to investigate:
 * [ ] Complete the remaining single-player and two-peer multiplayer validation matrix.
 * [ ] Add active/paused build-button overlays.
 
+### Configurable Ship-System Upgrade Pods
+
+[IDEA, RESEARCH]
+
+Armada II ship-system upgrade pods use `upgradeLevel`, but the supported
+engine path is hardcoded around a maximum level of `3`. Investigate replacing
+that fixed check with a bounded, synchronized policy so mods can deliberately
+enable additional tiers without making arbitrary values valid.
+
+Lua should select the permitted maximum through a semantic API rather than
+receiving raw patch access. A possible startup-only interface is:
+
+```lua
+a2fo.configure_upgrade_pods({
+    maximum_tier = 6
+})
+```
+
+The native bridge would still impose a conservative hard safety ceiling,
+validate the requested value, patch only known supported binaries, and keep the
+vanilla maximum of `3` when no script registers a policy. Because this affects
+simulation data, every multiplayer peer must load the same selected script and
+tier limit.
+
+#### Tiered Upgrade-Station Build Lists
+
+The vanilla upgrade-station layout uses special hardcoded build-list positions:
+
+```text
+buildItem4 = "level_2_pod"
+secondaryBuildItem0 = "level_3_pod"
+```
+
+Tier 1 pods already use the ordinary build list and do not need new commands.
+Add a consistent indexed scheme for tier 2 and above:
+
+```text
+tier2BuildItem0 = "level_2_pod"
+tier2BuildItem1 = "another_level_2_pod"
+
+tier3BuildItem0 = "level_3_pod"
+tier4BuildItem0 = "level_4_pod"
+```
+
+The proposed command family is `tier<Tier>BuildItem<Index>`. Tier and item
+indices should be parsed numerically rather than implemented as a fixed list of
+literal command names.
+
+Backward compatibility:
+
+* Standard tier 1 `buildItem<N>` entries retain their vanilla behaviour.
+* The original `buildItem4` level-2 and `secondaryBuildItem0` level-3 routes
+  continue to work when the corresponding new tier list is absent.
+* When a `tier2BuildItem<N>` or `tier3BuildItem<N>` list is present, it
+  supplies that tier explicitly instead of requiring the legacy slot layout.
+* Tiers above 3 require both an enabled Lua tier limit and matching
+  `tier<Tier>BuildItem<Index>` entries.
+* Missing, invalid, unsupported, or out-of-range tier entries fail closed to
+  vanilla behaviour.
+
+Technical questions:
+
+* Locate every hardcoded level-3 comparison and determine whether the pod,
+  target vessel, UI, build-list routing, and upgrade application code all use
+  the same limit.
+* Determine whether upgrade levels are stored in a sufficiently wide existing
+  field or whether save serialization assumes only levels 1 through 3.
+* Confirm how additional levels affect system statistics, stacked bonuses,
+  replacement ODFs, pod consumption, tooltips, buttons, and AI decisions.
+* Determine the maximum number of indexed build items each tier can safely
+  expose through the existing command-card UI.
+* Decide whether the new tier lists are parsed natively at station class-load
+  time or exposed through a bounded Lua configuration table.
+* Preserve deterministic tier selection and construction in multiplayer and
+  verify old saves and unmodified upgrade stations retain vanilla behaviour.
+
 ### Borg Features
 
 #### Race-Specific Assimilation Replacement
