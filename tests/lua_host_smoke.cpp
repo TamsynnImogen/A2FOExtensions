@@ -36,8 +36,10 @@ int main() {
     CreateDirectoryA(root.c_str(), nullptr);
     CreateDirectoryA((root + "\\scripts").c_str(), nullptr);
     write_text(root + "\\scripts\\01_good.lua",
-        "a2fo.require_api(1, 1)\n"
+        "a2fo.require_api(1, 2)\n"
         "assert(a2fo.has_capability('declared_destroyed_odf_fields'))\n"
+        "assert(a2fo.has_capability('configurable_upgrade_pods'))\n"
+        "a2fo.configure_upgrade_pods({ maximum_tier = 6 })\n"
         "a2fo.on_object_destroyed({'Foo', 'bar'}, function() return nil end)\n");
     write_text(root + "\\scripts\\02_bad.lua",
         "a2fo.on_object_destroyed({'must_not_leak'}, function() return nil end)\n"
@@ -50,6 +52,8 @@ int main() {
     require(!initialized);
     require(host.loaded_script_count == 1);
     require(host.object_destroyed_callbacks.size() == 1);
+    require(host.upgrade_pod_maximum_tier == 6);
+    require(host.upgrade_pod_policy_registered);
     const std::vector<std::string> fields =
         a2fo::object_destroyed_odf_fields(host);
     require(std::find(fields.begin(), fields.end(), "basename") != fields.end());

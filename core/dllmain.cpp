@@ -50,6 +50,9 @@ constexpr std::uintptr_t kAlternativeCocoonRva = 0x33fd3c;
 
 // FleetOpsHook.dll RVAs.
 constexpr std::uintptr_t kFofsItemGetHashLookupCallRva = 0x105fec;
+constexpr std::uintptr_t kFofsItemLocateHashLookupCallRva = 0x1061e2;
+constexpr std::uintptr_t kFofsItemExistsHashLookupCallRva = 0x106263;
+constexpr std::uintptr_t kFofsProjectIdHashLookupCallRva = 0x1063ee;
 constexpr std::uintptr_t kGetFileFromHashTableRva = 0x109c14;
 constexpr std::uintptr_t kGetModUserDirectoryRva = 0x10ab98;
 constexpr std::uintptr_t kFoSettingsGetInstanceRva = 0x13e744;
@@ -88,6 +91,12 @@ const std::uint8_t kExpectedDefaultUserProfileGameSpeed[] = {
     0xb8, 0x05, 0x00, 0x00, 0x00, 0xc3};
 const std::uint8_t kExpectedFofsItemGetHashLookupCall[] = {
     0xe8, 0x23, 0x3c, 0x00, 0x00};
+const std::uint8_t kExpectedFofsItemLocateHashLookupCall[] = {
+    0xe8, 0x2d, 0x3a, 0x00, 0x00};
+const std::uint8_t kExpectedFofsItemExistsHashLookupCall[] = {
+    0xe8, 0xac, 0x39, 0x00, 0x00};
+const std::uint8_t kExpectedFofsProjectIdHashLookupCall[] = {
+    0xe8, 0x21, 0x38, 0x00, 0x00};
 const std::uint8_t kExpectedGetModUserDirectory[] = {
     0x53, 0x56, 0x57, 0x8b, 0xf2};
 const std::uint8_t kExpectedFoSettingsGetInstance[] = {
@@ -1371,19 +1380,44 @@ bool install_fofs_item_get_lookup_hook() {
     if (!g_fleet_ops ||
         std::memcmp(at(g_fleet_ops, kFofsItemGetHashLookupCallRva),
                     kExpectedFofsItemGetHashLookupCall,
-                    sizeof(kExpectedFofsItemGetHashLookupCall)) != 0) {
-        log_line("Fleet Operations ODF item lookup call signature mismatch");
+                    sizeof(kExpectedFofsItemGetHashLookupCall)) != 0 ||
+        std::memcmp(at(g_fleet_ops, kFofsItemLocateHashLookupCallRva),
+                    kExpectedFofsItemLocateHashLookupCall,
+                    sizeof(kExpectedFofsItemLocateHashLookupCall)) != 0 ||
+        std::memcmp(at(g_fleet_ops, kFofsItemExistsHashLookupCallRva),
+                    kExpectedFofsItemExistsHashLookupCall,
+                    sizeof(kExpectedFofsItemExistsHashLookupCall)) != 0 ||
+        std::memcmp(at(g_fleet_ops, kFofsProjectIdHashLookupCallRva),
+                    kExpectedFofsProjectIdHashLookupCall,
+                    sizeof(kExpectedFofsProjectIdHashLookupCall)) != 0) {
+        log_line("Fleet Operations ODF lookup call signature mismatch");
         return false;
     }
     if (!a2fo::patch_call(
             at(g_fleet_ops, kFofsItemGetHashLookupCallRva),
             reinterpret_cast<void*>(&fofs_item_get_hash_lookup_hook),
             kExpectedFofsItemGetHashLookupCall,
-            sizeof(kExpectedFofsItemGetHashLookupCall))) {
-        log_line("Could not install Fleet Operations ODF item lookup hook");
+            sizeof(kExpectedFofsItemGetHashLookupCall)) ||
+        !a2fo::patch_call(
+            at(g_fleet_ops, kFofsItemLocateHashLookupCallRva),
+            reinterpret_cast<void*>(&fofs_item_get_hash_lookup_hook),
+            kExpectedFofsItemLocateHashLookupCall,
+            sizeof(kExpectedFofsItemLocateHashLookupCall)) ||
+        !a2fo::patch_call(
+            at(g_fleet_ops, kFofsItemExistsHashLookupCallRva),
+            reinterpret_cast<void*>(&fofs_item_get_hash_lookup_hook),
+            kExpectedFofsItemExistsHashLookupCall,
+            sizeof(kExpectedFofsItemExistsHashLookupCall)) ||
+        !a2fo::patch_call(
+            at(g_fleet_ops, kFofsProjectIdHashLookupCallRva),
+            reinterpret_cast<void*>(&fofs_item_get_hash_lookup_hook),
+            kExpectedFofsProjectIdHashLookupCall,
+            sizeof(kExpectedFofsProjectIdHashLookupCall))) {
+        log_line("Could not install Fleet Operations ODF lookup hooks");
         return false;
     }
-    log_line("FOFS item lookup dispatcher enabled");
+    log_line("FOFS item lookup dispatcher enabled for get, locate, exists, "
+             "and project IDs");
     return true;
 }
 
@@ -1666,6 +1700,10 @@ const char* A2FO_CALL api_extension_root(std::uint32_t index) {
     return g_extension_roots[index].c_str();
 }
 
+std::uint32_t A2FO_CALL api_upgrade_pod_maximum_tier() {
+    return g_lua_host.upgrade_pod_maximum_tier;
+}
+
 A2FO_ModuleApi make_module_api() {
     A2FO_ModuleApi api{};
     api.struct_size = sizeof(api);
@@ -1685,9 +1723,11 @@ A2FO_ModuleApi make_module_api() {
     api.register_evolver_cocoon_command =
         &api_register_evolver_cocoon_command;
     api.api_revision = A2FO_MODULE_API_REVISION;
-    api.capabilities = A2FO_CAP_OBJECT_DESTROYED_DISPATCH;
+    api.capabilities = A2FO_CAP_OBJECT_DESTROYED_DISPATCH |
+        A2FO_CAP_UPGRADE_POD_POLICY;
     api.register_object_destroyed_handler =
         &api_register_object_destroyed_handler;
+    api.upgrade_pod_maximum_tier = &api_upgrade_pod_maximum_tier;
     return api;
 }
 

@@ -97,6 +97,8 @@ $(MODULE_DIR)/A2FOFeaturePack.dll: \
 		modules/A2FOFeaturePack/odf_recursive.cpp \
 		modules/A2FOFeaturePack/queue_enhancement.cpp \
 		modules/A2FOFeaturePack/queue_enhancement.hpp \
+		modules/A2FOFeaturePack/upgrade_pods.cpp \
+		modules/A2FOFeaturePack/upgrade_pods.hpp \
 		modules/A2FOFeaturePack/delphi_bridge.S \
 		core/fpq_paths.cpp core/fpq_paths.hpp \
 		core/odf_paths.cpp core/odf_paths.hpp \
@@ -105,6 +107,7 @@ $(MODULE_DIR)/A2FOFeaturePack.dll: \
 		-o $@ \
 		modules/A2FOFeaturePack/odf_recursive.cpp \
 		modules/A2FOFeaturePack/queue_enhancement.cpp \
+		modules/A2FOFeaturePack/upgrade_pods.cpp \
 		modules/A2FOFeaturePack/delphi_bridge.S \
 		core/fpq_paths.cpp core/odf_paths.cpp
 

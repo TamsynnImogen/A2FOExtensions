@@ -65,7 +65,7 @@ Questions to investigate:
 
 ### Configurable Ship-System Upgrade Pods
 
-[IDEA, RESEARCH]
+[IMPLEMENTED, MANUAL VALIDATION REQUIRED]
 
 Armada II ship-system upgrade pods use `upgradeLevel`, but the supported
 engine path is hardcoded around a maximum level of `3`. Investigate replacing
@@ -81,11 +81,13 @@ a2fo.configure_upgrade_pods({
 })
 ```
 
-The native bridge would still impose a conservative hard safety ceiling,
-validate the requested value, patch only known supported binaries, and keep the
-vanilla maximum of `3` when no script registers a policy. Because this affects
-simulation data, every multiplayer peer must load the same selected script and
-tier limit.
+The native bridge imposes a hard safety ceiling of `16`, validates the
+requested value, hooks only the known supported binaries, and keeps the vanilla
+maximum of `3` when no script registers a policy. Higher declared levels are
+retained in A2FO sidecar state while the engine-facing value is projected onto
+tier 3, preventing Armada's hardcoded Team upgrade arrays from being indexed
+out of bounds. Because this affects simulation data, every multiplayer peer
+must load the same selected script and tier limit.
 
 #### Tiered Upgrade-Station Build Lists
 
@@ -100,44 +102,69 @@ Tier 1 pods already use the ordinary build list and do not need new commands.
 Add a consistent indexed scheme for tier 2 and above:
 
 ```text
-tier2BuildItem0 = "level_2_pod"
-tier2BuildItem1 = "another_level_2_pod"
+tier0BuildItem0 = "level_2_pod"
+tier0BuildItem1 = "another_level_2_pod"
 
-tier3BuildItem0 = "level_3_pod"
-tier4BuildItem0 = "level_4_pod"
+tier1BuildItem0 = "level_3_pod"
+tier2BuildItem0 = "level_4_pod"
 ```
 
-The proposed command family is `tier<Tier>BuildItem<Index>`. Tier and item
-indices should be parsed numerically rather than implemented as a fixed list of
-literal command names.
+The implemented command family is `tier<Tier>BuildItem<Index>`. The command
+tier is zero-based beyond the vessel's built-in level-1 systems, so command
+tier 0 selects `upgradeLevel = 2`, tier 1 selects level 3, and tier 2 selects
+level 4. Tier and item indices are parsed numerically up to the bounded Fleet
+Ops primary/secondary build-list capacities rather than being implemented as a
+short fixed list of literal command names.
 
 Backward compatibility:
 
 * Standard tier 1 `buildItem<N>` entries retain their vanilla behaviour.
 * The original `buildItem4` level-2 and `secondaryBuildItem0` level-3 routes
   continue to work when the corresponding new tier list is absent.
-* When a `tier2BuildItem<N>` or `tier3BuildItem<N>` list is present, it
-  supplies that tier explicitly instead of requiring the legacy slot layout.
-* Tiers above 3 require both an enabled Lua tier limit and matching
+* A `tier0BuildItem<N>` or `tier1BuildItem<N>` command replaces only index
+  `N` with the explicit level-2 or level-3 item. Unspecified indices retain
+  their legacy entries, so unrelated research is never compacted or moved.
+* Upgrade levels above 3 require both an enabled Lua tier limit and matching
   `tier<Tier>BuildItem<Index>` entries.
-* Missing, invalid, unsupported, or out-of-range tier entries fail closed to
-  vanilla behaviour.
+* The item index identifies the same upgrade chain across every tier. A pod
+  built from `tier2BuildItem4`, for example, replaces the pod previously built
+  from `tier1BuildItem4`; both ODFs must declare the same `upgradeSystem`.
+  Runtime matching uses that system rather than construction order.
+* Missing tier lists preserve the existing vanilla/Fleet Ops build lists.
+  Invalid or out-of-range entries are ignored and logged.
+* Upgrade stations still need enough `podHardpoints` entries for the physical
+  pods they can hold; the new build-list commands do not create hardpoints.
 
-Technical questions:
+Implemented native work:
 
-* Locate every hardcoded level-3 comparison and determine whether the pod,
-  target vessel, UI, build-list routing, and upgrade application code all use
-  the same limit.
-* Determine whether upgrade levels are stored in a sufficiently wide existing
-  field or whether save serialization assumes only levels 1 through 3.
-* Confirm how additional levels affect system statistics, stacked bonuses,
-  replacement ODFs, pod consumption, tooltips, buttons, and AI decisions.
-* Determine the maximum number of indexed build items each tier can safely
-  expose through the existing command-card UI.
-* Decide whether the new tier lists are parsed natively at station class-load
-  time or exposed through a bounded Lua configuration table.
-* Preserve deterministic tier selection and construction in multiplayer and
-  verify old saves and unmodified upgrade stations retain vanilla behaviour.
+* [x] Clamp the engine-facing Team upgrade index to tier 3 while retaining the
+  real configured tier in class and live-pod sidecars.
+* [x] Apply the multiplier belonging to the highest attached tier for each
+  team/system and restore the next-highest attached pod when one is removed.
+* [x] Preserve distinct same-tier checks for tier 4 and above instead of
+  allowing every projected tier-3 pod to compare equal.
+* [x] Parse `tier<Tier>BuildItem<Index>` during ResearchStation class loading,
+  preserving legacy lists when no new list for that tier is supplied.
+* [x] Maintain a private secondary build list for each live upgrade station and
+  advance only the matching occupied system to its next configured tier after
+  replacement, while copying every unrelated native/Fleet Ops research slot
+  unchanged and preserving the native level-2 prerequisite relationship.
+* [x] Add the startup-only Lua configuration API with a default of 3 and a
+  hard maximum of 16.
+
+Manual validation remaining:
+
+* [ ] Confirm tier 4-6 construction, attachment, replacement, destruction, and
+  multiplier changes for all five ship systems.
+* [ ] Confirm a tier-4 pod does not compare as the same pod type as tier 3 or
+  tier 5 after their engine-facing indices are projected to tier 3.
+* [ ] Confirm tier-specific buttons, tooltips, AI choices, pod hardpoints, and
+  station build routing across ordinary and replacement ODFs.
+* [ ] Verify save/load with multiple attached native and extended tiers, then
+  destroy pods after loading and confirm the next-highest multiplier returns.
+* [ ] Verify unmodified stations and old saves retain vanilla behaviour.
+* [ ] Complete a two-peer multiplayer synchronization test with identical
+  scripts and ODFs.
 
 ### Borg Features
 

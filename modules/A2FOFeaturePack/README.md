@@ -9,6 +9,8 @@ features behind the core's versioned semantic dispatchers:
 - Ctrl-click ten-slot queue fill;
 - Ctrl+Alt continuous production, using synchronized build orders and a
   save/load marker.
+- bounded ship-system upgrade tiers selected by Lua;
+- `tier<Tier>BuildItem<Index>` parsing for upgrade stations.
 
 The core owns and signature-checks shared injected call sites, object lifetime
 tracking, and cocoon SOD selection. The feature pack registers the behaviours
@@ -45,3 +47,9 @@ Basic fill, automatic refill, and delete-to-cancel behaviour are confirmed in
 game. The save/load and multiplayer matrix in
 [`../../docs/queue-enhancements.md`](../../docs/queue-enhancements.md) must still
 pass before it should be considered release-proven.
+
+The upgrade-pod hooks retain extended tier identity in sidecar state while
+feeding tier 3 to Armada's fixed Team arrays. The highest attached tier for a
+team/system supplies the effective multiplier. Configuration, ODF examples,
+and the pending manual validation matrix are in
+[`../../docs/upgrade-pods.md`](../../docs/upgrade-pods.md).

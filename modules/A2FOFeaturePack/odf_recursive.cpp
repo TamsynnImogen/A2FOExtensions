@@ -2,11 +2,13 @@
 #include "../../core/fpq_paths.hpp"
 #include "../../core/odf_paths.hpp"
 #include "queue_enhancement.hpp"
+#include "upgrade_pods.hpp"
 
 #include <windows.h>
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -46,7 +48,6 @@ const std::uint8_t kExpectedHashString[] = {
     0x55, 0x8b, 0xec, 0x83, 0xc4, 0xf4, 0x53, 0x56, 0x57};
 const std::uint8_t kExpectedAddFileToHash[] = {
     0x53, 0x56, 0x51, 0x8b, 0xf1, 0x89, 0x14, 0x24};
-
 struct DelphiList {
     void* vtable;
     void** items;
@@ -70,6 +71,7 @@ struct ArchiveInfo {
 
 constexpr std::size_t kFileEntryNextOffset = 0x08;
 constexpr std::size_t kFileEntryBasenameOffset = 0x0c;
+constexpr std::size_t kFileEntryProjectIdOffset = 0x14;
 constexpr std::size_t kFileEntryPackedOffset = 0x18;
 constexpr std::size_t kFileEntryModInfoOffset = 0x1c;
 constexpr std::size_t kFileEntryPrimaryRootOffset = 0x20;
@@ -230,6 +232,10 @@ std::vector<void*> list_items(DelphiList* list) {
 
 bool readable_range(const void* pointer, std::size_t size) {
     return pointer && size != 0 && !IsBadReadPtr(pointer, size);
+}
+
+bool writable_range(void* pointer, std::size_t size) {
+    return pointer && size != 0 && !IsBadWritePtr(pointer, size);
 }
 
 bool readable_list(DelphiList* list, std::int32_t minimum_count,
@@ -464,6 +470,73 @@ T& field(void* object, std::size_t offset) {
     return *reinterpret_cast<T*>(static_cast<std::uint8_t*>(object) + offset);
 }
 
+bool register_fleetops_project_id(void* file_system, void* entry,
+                                  bool& added) {
+    added = false;
+    if (!readable_range(file_system, 0x18) ||
+        !writable_range(
+            entry, kFileEntryProjectIdOffset + sizeof(std::uint32_t))) {
+        return false;
+    }
+
+    const std::uint32_t count =
+        field<std::uint32_t>(file_system, 0x10);
+    void** items = field<void**>(file_system, 0x14);
+    if (count > 1000000 || !items ||
+        reinterpret_cast<std::uintptr_t>(items) < sizeof(std::int32_t) ||
+        !readable_range(
+            items - 1, sizeof(std::int32_t))) {
+        return false;
+    }
+
+    // Fleet Ops stores its Delphi dynamic-array length immediately before the
+    // first item. FOFS_ItemInitCache initially reserves 0x4000 entries and may
+    // grow that array before this extension runs.
+    const std::int32_t signed_capacity =
+        reinterpret_cast<const std::int32_t*>(items)[-1];
+    if (signed_capacity <= 0 || signed_capacity > 1000000) return false;
+    const std::uint32_t capacity =
+        static_cast<std::uint32_t>(signed_capacity);
+    if (count > capacity ||
+        (count != 0 &&
+         !readable_range(
+             items, static_cast<std::size_t>(count) * sizeof(void*)))) {
+        return false;
+    }
+
+    std::uint32_t& project_id =
+        field<std::uint32_t>(entry, kFileEntryProjectIdOffset);
+    if (project_id != 0) {
+        return project_id <= count && items[project_id - 1] == entry;
+    }
+
+    // Repair an entry which is already present but has not yet had its ID
+    // copied back. Normally recursive entries are absent and take the append
+    // path below.
+    for (std::uint32_t index = 0; index < count; ++index) {
+        if (items[index] == entry) {
+            project_id = index + 1;
+            return true;
+        }
+    }
+
+    if (count >= capacity ||
+        !writable_range(items + count, sizeof(void*)) ||
+        !writable_range(static_cast<std::uint8_t*>(file_system) + 0x10,
+                        sizeof(std::uint32_t))) {
+        return false;
+    }
+
+    // Append only. Existing cPrjID values are one-based array positions, so
+    // sorting or rebuilding the array after class loading has begun would
+    // invalidate every ID already held by Armada.
+    items[count] = entry;
+    project_id = count + 1;
+    field<std::uint32_t>(file_system, 0x10) = count + 1;
+    added = true;
+    return true;
+}
+
 bool file_entry_precedes(void* left, void* right) {
     void* left_mod = field<void*>(left, kFileEntryModInfoOffset);
     void* right_mod = field<void*>(right, kFileEntryModInfoOffset);
@@ -660,6 +733,29 @@ void build_recursive_odf_winners(
                               : ""));
             }
         }
+    }
+
+    std::size_t added_project_ids = 0;
+    std::size_t failed_project_ids = 0;
+    for (const auto& winner : winners) {
+        bool added = false;
+        if (register_fleetops_project_id(file_system, winner.second, added)) {
+            if (added) ++added_project_ids;
+        } else {
+            ++failed_project_ids;
+            log_line("Project ID unavailable: " + winner.first);
+        }
+    }
+    if (added_project_ids != 0) {
+        log_line("Project IDs: " + std::to_string(added_project_ids) +
+                 " recursive ODF basename" +
+                 (added_project_ids == 1 ? "" : "s") + " registered");
+    }
+    if (failed_project_ids != 0) {
+        log_line("Project IDs: " + std::to_string(failed_project_ids) +
+                 " recursive ODF basename" +
+                 (failed_project_ids == 1 ? "" : "s") +
+                 " could not be registered");
     }
 
     std::size_t winner_count = 0;
@@ -918,5 +1014,6 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     // Install this optional low-level hook last: no initialization failure may
     // unload the DLL after the core has patched a call into it.
     a2fo::initialize_queue_enhancements(api, g_armada, g_fleet_ops);
+    a2fo::initialize_upgrade_pods(api, g_armada, g_fleet_ops);
     return true;
 }

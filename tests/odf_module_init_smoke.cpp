@@ -8,6 +8,8 @@ namespace {
 HMODULE fleet_ops = nullptr;
 void* fake_armada = nullptr;
 
+std::uint32_t A2FO_CALL upgrade_pod_maximum_tier() { return 6; }
+
 template <std::size_t Size>
 void set_signature(std::uintptr_t rva, const std::uint8_t (&value)[Size]) {
     std::memcpy(static_cast<std::uint8_t*>(fake_armada) + rva,
@@ -28,6 +30,20 @@ void prepare_armada_signatures() {
         {0x55, 0x8b, 0xec, 0x83, 0xec, 0x08};
     const std::uint8_t find_by_project_id[] =
         {0x55, 0x8b, 0xec, 0xa1, 0xf8, 0x0b, 0x74, 0x00};
+    const std::uint8_t pod_detach[] =
+        {0x56, 0x8b, 0xf1, 0x57, 0x8b, 0x7e, 0x40};
+    const std::uint8_t pod_attach[] =
+        {0x55, 0x8b, 0xec, 0x8b, 0x45, 0x08, 0x53, 0x56};
+    const std::uint8_t station_constructor[] =
+        {0x55, 0x8b, 0xec, 0x56, 0x57, 0x8b, 0x7d, 0x08};
+    const std::uint8_t station_destructor[] =
+        {0x55, 0x8b, 0xec, 0x6a, 0xff};
+    const std::uint8_t team_manager[] =
+        {0x55, 0x8b, 0xec, 0x8b, 0x45, 0x08};
+    const std::uint8_t set_multiplier[] =
+        {0x55, 0x8b, 0xec, 0x8b, 0x55, 0x08, 0x8b, 0x45, 0x0c};
+    const std::uint8_t find_by_name[] =
+        {0x55, 0x8b, 0xec, 0x8b, 0x45, 0x08};
     set_signature(0x0d4280, queue_class_command);
     set_signature(0x0d45f0, dequeue_class_command);
     set_signature(0x0b77d0, dtor);
@@ -35,6 +51,13 @@ void prepare_armada_signatures() {
     set_signature(0x0b88d0, load);
     set_signature(0x0b8aa0, save);
     set_signature(0x0cd150, find_by_project_id);
+    set_signature(0x0b95a0, pod_detach);
+    set_signature(0x0b95f0, pod_attach);
+    set_signature(0x0b99b0, station_constructor);
+    set_signature(0x0b9b50, station_destructor);
+    set_signature(0x096340, team_manager);
+    set_signature(0x0987d0, set_multiplier);
+    set_signature(0x0cd370, find_by_name);
 }
 
 void A2FO_CALL log_line(const char*, const char*) {}
@@ -93,7 +116,9 @@ int main() {
     api.register_classlabel_alias = &register_alias;
     api.register_evolver_cocoon_command = &register_cocoon;
     api.api_revision = A2FO_MODULE_API_REVISION;
-    api.capabilities = A2FO_CAP_OBJECT_DESTROYED_DISPATCH;
+    api.capabilities = A2FO_CAP_OBJECT_DESTROYED_DISPATCH |
+        A2FO_CAP_UPGRADE_POD_POLICY;
+    api.upgrade_pod_maximum_tier = &upgrade_pod_maximum_tier;
     if (!init(&api)) return 5;
 
     FreeLibrary(feature);

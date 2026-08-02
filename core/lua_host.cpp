@@ -26,7 +26,8 @@ constexpr std::uint64_t kMaximumScriptBytes = 1024u * 1024u;
 constexpr unsigned kHookInstructionInterval = 1000;
 constexpr unsigned kMaximumInstructionTicks = 1000;
 constexpr lua_Integer kLuaApiVersion = 1;
-constexpr lua_Integer kLuaApiRevision = 1;
+constexpr lua_Integer kLuaApiRevision = 2;
+constexpr lua_Integer kMaximumUpgradePodTier = 16;
 
 std::string join_path(const std::string& left, const std::string& right) {
     if (left.empty()) return right;
@@ -110,9 +111,50 @@ int lua_require_api(lua_State* state) {
 int lua_has_capability(lua_State* state) {
     const char* capability = luaL_checkstring(state, 1);
     const bool available = capability &&
-        std::strcmp(capability, "declared_destroyed_odf_fields") == 0;
+        (std::strcmp(capability, "declared_destroyed_odf_fields") == 0 ||
+         std::strcmp(capability, "configurable_upgrade_pods") == 0);
     lua_pushboolean(state, available ? 1 : 0);
     return 1;
+}
+
+int lua_configure_upgrade_pods(lua_State* state) {
+    LuaHost* host = host_from_state(state);
+    luaL_checktype(state, 1, LUA_TTABLE);
+    if (lua_gettop(state) != 1) {
+        return luaL_error(state,
+                          "configure_upgrade_pods expects one table");
+    }
+    if (!host || host->current_script.empty()) {
+        return luaL_error(
+            state,
+            "upgrade-pod policy can only be configured while a script is loading");
+    }
+    if (host->upgrade_pod_policy_registered) {
+        return luaL_error(state, "upgrade-pod policy is already owned by %s",
+                          host->upgrade_pod_policy_owner.c_str());
+    }
+
+    lua_getfield(state, 1, "maximum_tier");
+    if (!lua_isinteger(state, -1)) {
+        lua_pop(state, 1);
+        return luaL_error(state, "maximum_tier must be an integer");
+    }
+    const lua_Integer maximum_tier = lua_tointeger(state, -1);
+    lua_pop(state, 1);
+    if (maximum_tier < 3 || maximum_tier > kMaximumUpgradePodTier) {
+        return luaL_error(state,
+                          "maximum_tier must be between 3 and %lld",
+                          static_cast<long long>(kMaximumUpgradePodTier));
+    }
+
+    host->upgrade_pod_maximum_tier =
+        static_cast<std::uint32_t>(maximum_tier);
+    host->upgrade_pod_policy_registered = true;
+    host->upgrade_pod_policy_owner = host->current_script;
+    host_log(host, "Lua upgrade-pod maximum tier: " +
+                       std::to_string(maximum_tier) + " by " +
+                       host->current_script);
+    return 0;
 }
 
 int lua_on_classlabel(lua_State* state) {
@@ -403,6 +445,8 @@ void install_a2fo_table(lua_State* state,
     lua_newtable(state);
     lua_pushboolean(state, 1);
     lua_setfield(state, -2, "declared_destroyed_odf_fields");
+    lua_pushboolean(state, 1);
+    lua_setfield(state, -2, "configurable_upgrade_pods");
     lua_setfield(state, -2, "capabilities");
     lua_pushcfunction(state, &lua_a2fo_log);
     lua_setfield(state, -2, "log");
@@ -412,6 +456,8 @@ void install_a2fo_table(lua_State* state,
     lua_setfield(state, -2, "on_evolver_cocoon");
     lua_pushcfunction(state, &lua_on_object_destroyed);
     lua_setfield(state, -2, "on_object_destroyed");
+    lua_pushcfunction(state, &lua_configure_upgrade_pods);
+    lua_setfield(state, -2, "configure_upgrade_pods");
 
     lua_createtable(state, static_cast<int>(roots.size()), 0);
     for (std::size_t index = 0; index < roots.size(); ++index) {
@@ -500,6 +546,12 @@ bool run_script(LuaHost& host, const std::string& path) {
     const std::size_t object_destroyed_count =
         host.object_destroyed_callbacks.size();
     const LuaCallback cocoon_before = host.evolver_cocoon_callback;
+    const std::uint32_t upgrade_pod_maximum_tier_before =
+        host.upgrade_pod_maximum_tier;
+    const bool upgrade_pod_policy_registered_before =
+        host.upgrade_pod_policy_registered;
+    const std::string upgrade_pod_policy_owner_before =
+        host.upgrade_pod_policy_owner;
     host.current_script = path;
     lua_State* state = host.state;
     lua_settop(state, 0);
@@ -537,6 +589,12 @@ bool run_script(LuaHost& host, const std::string& path) {
                        host.evolver_cocoon_callback.reference);
             host.evolver_cocoon_callback = cocoon_before;
         }
+        host.upgrade_pod_maximum_tier =
+            upgrade_pod_maximum_tier_before;
+        host.upgrade_pod_policy_registered =
+            upgrade_pod_policy_registered_before;
+        host.upgrade_pod_policy_owner =
+            upgrade_pod_policy_owner_before;
         host_log(&host, "Lua host: rolled back registrations from " + path);
         lua_settop(state, 0);
         host.current_script.clear();

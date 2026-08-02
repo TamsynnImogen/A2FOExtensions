@@ -3,40 +3,172 @@
 This package preserves the proven startup chain while separating checked engine
 hooks, reusable dispatch, optional native features, and mod-authored Lua logic.
 
-## Implemented
+## User-facing features
 
-- `A2FOExtensions.dll` gains a versioned native-module ABI.
-- Native modules are discovered from `modules\\*.dll` in deterministic filename order.
-- The startup proxy attaches the renamed shipped startup DLL and our core
-  immediately, preserving the proven timing of the recursive ODF and cocoon
-  hooks. Native module discovery runs later on the core's post-attach worker,
-  outside the Windows loader lock.
-- Modules receive logging, Armada/Fleet Ops module handles, root-directory access,
-  and checked inline/CALL/JMP patch helpers.
-- API v2 provides a core-owned FOFS lookup dispatcher so modules do not compete
-  to patch the same Fleet Operations instruction.
-- `A2FOFeaturePack.dll` owns recursive loose-folder/FPQ discovery, the
-  `wingman -> craft` compatibility alias, and the Evolver `cocoon` command.
-- API v3 discovers the shared Data root plus the selected mod's `ParentMod`
-  chain. Native DLLs and Lua scripts use deterministic basename overlay from
-  Data through parents to the active mod.
-- Lua 5.4.8 is embedded in the core, with memory/instruction/file-size limits
-  and a deliberately restricted standard library.
-- API v4 revision 1 adds capability discovery and a core-owned native
-  destroyed-object dispatcher without breaking original v4 modules.
-- Native and Lua startup registrations are transactional: a failed initializer
-  leaves no callbacks or ownership records pointing into rejected code.
-- The Lua API exposes real class-loading callbacks and a bounded temporary ODF
-  view for mod-specific conditional logic. Built-in native features do not use
-  token Lua registration scripts.
-- Destroyed-object handlers declare the ODF fields they need. The core snapshots
-  only the union of those fields, invokes native handlers before Lua, and accepts
-  the first valid replacement.
-- `A2FOFeaturePack.dll` adds ten-slot Ctrl-fill and experimental synchronized,
-  save-persistent Ctrl+Alt continuous production.
-- Fleet Ops mod `info.ini` files can set a first-run `DefaultGameSpeed` and
-  redirect the per-mod `SettingsDirectory` without hard-coded mod paths.
-- An SDK header and minimal example module are included.
+- Recursive ODF discovery from arbitrary subdirectories.
+- Recursive ODF indexing inside active loose roots and `odf.fpq` archives.
+- Correct Data → `ParentMod` → active-mod file precedence.
+- `wingman` classlabel compatibility alias mapped to `craft`.
+- Per-Evolver `cocoon` ODF command for custom cocoon models.
+- Lua-driven wreckage or replacement objects when units are destroyed.
+- Deterministic `wreckageChance` support suitable for synchronized games.
+- Ctrl-click to fill all ten native construction-queue slots.
+- Ctrl+Alt-click for continuous production and automatic queue refilling.
+- Continuous production stops when the queue is manually altered or the yard
+  is destroyed.
+- Resource-shortage pause and automatic production retry.
+- Experimental save/load markers for continuous-production state.
+- `DefaultGameSpeed` field in `info.ini`, accepting speeds 1–6.
+- `SettingsDirectory` field for redirecting mod configuration and profile
+  files.
+- `%APPDATA%`, `%USERPROFILE%`, and other Windows environment-variable
+  expansion.
+- Absolute, relative, shared, and per-mod settings-directory layouts.
+- Data-level shared settings roots with active-mod folders stored below
+  `mods\<folder>`.
+- Configurable ship-system upgrade pods through level 16, with the included
+  Lua policy enabling levels through 6.
+- Tier-indexed upgrade-station lists which preserve unrelated research and
+  progress level 2 → level 3 → higher levels independently for each system.
+- Upgrade-pod progression is independent of the order in which systems are
+  constructed; removing a higher pod restores the next-highest multiplier.
+
+## Modding framework
+
+- Versioned native module API with backward-compatible capability revisions.
+- Automatic deterministic loading of `modules\*.dll`.
+- Data, `ParentMod`, and active-mod module/script overlay.
+- Embedded Lua 5.4.8 runtime.
+- Restricted Lua environment with memory, file-size, and instruction limits.
+- Lua classlabel, Evolver-cocoon, and object-destroyed callbacks.
+- Bounded temporary ODF views exposed safely to Lua.
+- Native destroyed-object event dispatcher.
+- Transactional module and Lua registration with rollback after failed
+  initialization.
+- SDK header and example native module.
+- Central logging for the core, modules, and Lua scripts.
+- Checked hook signatures and supported-binary validation.
+
+## Current modding commands
+
+### `info.ini`
+
+Place these fields in the active mod's `[mod]` section:
+
+```ini
+[mod]
+DefaultGameSpeed = 3
+SettingsDirectory = My Mod
+```
+
+`DefaultGameSpeed` supplies the initial game speed from 1 through 6. An
+existing saved profile still takes precedence.
+
+`SettingsDirectory` redirects the mod's settings files and supports:
+
+- bare directory names;
+- relative paths;
+- absolute Windows and UNC paths;
+- Wine `Z:\` paths;
+- variables such as `%APPDATA%` and `%USERPROFILE%`;
+- a Data-level shared root with active mods stored below
+  `mods\<folder>`.
+
+See [`docs/fleetops-info-defaults.md`](docs/fleetops-info-defaults.md) for the
+full resolution rules.
+
+### Object ODF commands
+
+Treat a compatibility object as an ordinary craft:
+
+```text
+classLabel = "wingman"
+```
+
+Select a custom cocoon model for an Evolver (`.sod` is optional):
+
+```text
+classLabel = "evolver"
+cocoon = "custom_cocoon.sod"
+```
+
+Request a replacement or wreckage object when a craft is destroyed:
+
+```text
+wreckage = "my_ship_wreck"
+wreckageChance = 50
+```
+
+`wreckage` is the replacement ODF basename. `wreckageChance` accepts 0–100,
+defaults to 100, and requires the included `scripts\Wreckage.lua`.
+
+Higher ship-system upgrade pods continue to use Armada's existing field:
+
+```text
+upgradeLevel = 4
+```
+
+A2FO safely retains levels above 3 in sidecar state rather than indexing past
+Armada's fixed Team arrays.
+
+### Upgrade-station ODF commands
+
+The station command tier is zero-based after the ship's built-in level-1
+systems, so command tier 0 selects upgrade level 2:
+
+```text
+tier0BuildItem0 = "pod_weapons_2"
+tier1BuildItem0 = "pod_weapons_3"
+tier2BuildItem0 = "pod_weapons_4"
+tier3BuildItem0 = "pod_weapons_5"
+tier4BuildItem0 = "pod_weapons_6"
+```
+
+Use the same item index and `upgradeSystem` for every level in one chain. Each
+command replaces only its matching index; unspecified indices retain their
+vanilla or Fleet Ops entries. The referenced pod's `upgradeLevel` must equal
+the command tier plus 2. See
+[`docs/upgrade-pods.md`](docs/upgrade-pods.md) for validation and fallback
+rules.
+
+### Lua API commands
+
+The principal public entry points are:
+
+```lua
+a2fo.require_api(1, 2)
+a2fo.has_capability("configurable_upgrade_pods")
+a2fo.log("message")
+
+a2fo.configure_upgrade_pods({ maximum_tier = 6 })
+a2fo.on_classlabel(function(classlabel, odf) end)
+a2fo.on_evolver_cocoon(function(odf) end)
+a2fo.on_object_destroyed({"fieldName"}, function(event) end)
+```
+
+The upgrade-pod maximum accepts 3–16 and defaults to the native maximum of 3
+when no selected script claims the policy. Callback ODF views provide bounded
+`odf:get_string()` access, while destroyed-object events provide deterministic
+`event:roll_percent()`. See [`docs/lua-api.md`](docs/lua-api.md) for callback
+contracts and return values.
+
+### Construction controls
+
+- **Ctrl + click:** fill every remaining position in the ten-slot native
+  construction queue.
+- **Ctrl + Alt + click:** activate continuous production and automatic queue
+  refilling.
+
+While continuous production is active, selecting the active item normally,
+selecting a different item, deleting or clearing an item, or destroying the
+yard disables repeat. Resource shortages pause production and trigger
+automatic retries.
+
+The queue save/load and multiplayer behaviour remain partially validated.
+Basic level-2 → level-3 → level-4 upgrade-pod progression is confirmed in
+game; higher levels, save/load, and multiplayer still need validation. Button
+overlays, configurable hotkeys, and the proposed Noxter mechanics are not yet
+implemented.
 
 ## Core/module/script boundary
 
@@ -53,6 +185,8 @@ identities and checked addresses are recorded in
 [`docs/addresses.md`](docs/addresses.md).
 The two optional Fleet Ops mod-information fields are documented in
 [`docs/fleetops-info-defaults.md`](docs/fleetops-info-defaults.md).
+Upgrade-pod configuration and ODF commands are documented in
+[`docs/upgrade-pods.md`](docs/upgrade-pods.md).
 
 ## Expected runtime layout
 
@@ -63,7 +197,8 @@ Armada II/
 ├── Win2kDisableTaskSwitch.original.dll
 ├── modules/
 │   └── A2FOFeaturePack.dll
-├── scripts/                 (optional modder scripts)
+├── scripts/
+│   └── UpgradePods.lua      (bounded tier policy; mod-overridable)
 └── A2FOExtensions.log
 ```
 

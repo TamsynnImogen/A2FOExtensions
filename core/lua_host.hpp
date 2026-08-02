@@ -70,6 +70,9 @@ struct LuaHost {
     std::uint64_t active_odf_generation = 0;
     std::size_t loaded_script_count = 0;
     unsigned instruction_ticks = 0;
+    std::uint32_t upgrade_pod_maximum_tier = 3;
+    bool upgrade_pod_policy_registered = false;
+    std::string upgrade_pod_policy_owner;
 };
 
 // Loads text-only .lua files from <root>\scripts. Roots use the same
