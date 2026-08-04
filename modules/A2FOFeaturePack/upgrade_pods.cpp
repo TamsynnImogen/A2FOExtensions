@@ -1,5 +1,7 @@
 #include "upgrade_pods.hpp"
 
+#include "hybrid_production_runtime.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -765,6 +767,13 @@ std::uintptr_t __attribute__((fastcall)) station_class_hook(
         load_tier_build_items(station_class, parameter_db);
     } catch (...) {
         log_message("Upgrade station tier build-list parsing failed");
+    }
+    try {
+        register_research_station_hybrid_lists(
+            station_class, parameter_db);
+        publish_research_station_hybrid_items(station_class);
+    } catch (...) {
+        log_message("Hybrid ResearchStation build-list publication failed");
     }
     return result;
 }

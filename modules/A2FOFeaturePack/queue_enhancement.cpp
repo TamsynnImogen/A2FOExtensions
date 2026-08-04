@@ -1,5 +1,7 @@
 #include "queue_enhancement.hpp"
 
+#include "hybrid_production_runtime.hpp"
+
 #include <algorithm>
 #include <cstdio>
 #include <cstdint>
@@ -40,6 +42,7 @@ constexpr std::uint32_t kQueueFillMarkerCommand = 0xa1;
 constexpr std::uint32_t kContinuousMarkerCommand = 0xa2;
 constexpr std::uint32_t kRepeatSaveMarker = 0xa2f0c0deu;
 constexpr unsigned kPausedRetryTicks = 30;
+constexpr unsigned kSynchronizedPushLogLimit = 16;
 
 constexpr std::size_t kObjectHandleOffset = 0x28;
 constexpr std::size_t kClassProjectIdOffset = 0x1cc;
@@ -92,6 +95,7 @@ bool g_queue_lock_ready = false;
 bool g_repeat_ready = false;
 bool g_logged_build_order_path = false;
 bool g_logged_synchronized_build_path = false;
+unsigned g_synchronized_push_log_count = 0;
 
 A2FO_InlineHook g_game_object_queue_class_command_hook{};
 A2FO_InlineHook g_game_object_dequeue_class_command_hook{};
@@ -163,6 +167,10 @@ void stop_continuous(void* producer) {
 
 std::uint32_t fill_queue_checked(void* producer, void* target_class) {
     if (!producer || !target_class) return 0;
+    if (hybrid_production_has_queued_research_conflict(
+            producer, target_class)) {
+        return 0;
+    }
     auto* producer_bytes = bytes(producer);
     const std::uint32_t initial = *reinterpret_cast<std::uint32_t*>(
         producer_bytes + kQueueCountOffset);
@@ -241,6 +249,11 @@ void try_refill(void* producer) {
     }
     if (!target_class) return;
 
+    if (hybrid_production_has_queued_research_conflict(
+            producer, target_class)) {
+        return;
+    }
+
     auto* producer_bytes = bytes(producer);
     const std::uint32_t before = *reinterpret_cast<std::uint32_t*>(
         producer_bytes + kQueueCountOffset);
@@ -263,6 +276,10 @@ void try_refill(void* producer) {
 void __attribute__((fastcall)) game_object_queue_class_command_hook(
     void* game_object, void*, std::uint32_t command,
     void* target_class) {
+    if (command == kBuildCommand && target_class) {
+        retain_hybrid_research_menu_after_order(
+            game_object, target_class);
+    }
     if (command != kBuildCommand || !target_class ||
         !modifier_key_down(kCommandControlPointerRva, VK_CONTROL) ||
         !g_repeat_ready) {
@@ -296,7 +313,15 @@ void __attribute__((fastcall)) producer_command_push_hook(
         return;
     }
 
-    bool suppress = false;
+    // This synchronized receiver is the common path for ordinary, hotkey,
+    // Ctrl-fill, local, and remote orders. Arm the local palette adapter here
+    // as well as at GameObject::QueueClassCommand so every accepted pod click
+    // can survive Fleet Ops resetting menu 3 to root during its next refresh.
+    retain_hybrid_research_menu_after_order(producer, target_class);
+    const bool research_conflict =
+        hybrid_production_has_queued_research_conflict(
+            producer, target_class);
+    bool suppress = research_conflict;
     const std::uint32_t handle = object_handle(producer);
     try {
         EnterCriticalSection(&g_queue_lock);
@@ -320,12 +345,32 @@ void __attribute__((fastcall)) producer_command_push_hook(
         LeaveCriticalSection(&g_queue_lock);
     } catch (...) {
         LeaveCriticalSection(&g_queue_lock);
-        suppress = false;
+        suppress = research_conflict;
     }
 
+    const std::uint32_t before = *reinterpret_cast<const std::uint32_t*>(
+        bytes(producer) + kQueueCountOffset);
     if (!suppress) {
         a2fo_call_thiscall_1(g_fo_command_push_hook.gateway, producer,
                             reinterpret_cast<std::uintptr_t>(target_class));
+    }
+    if (g_synchronized_push_log_count < kSynchronizedPushLogLimit) {
+        ++g_synchronized_push_log_count;
+        const std::uint32_t after =
+            *reinterpret_cast<const std::uint32_t*>(
+                bytes(producer) + kQueueCountOffset);
+        char message[160];
+        std::snprintf(
+            message, sizeof(message),
+            "Synchronized Producer queue result: target %lu, "
+            "count %lu -> %lu (%s)",
+            static_cast<unsigned long>(project_id(target_class)),
+            static_cast<unsigned long>(before),
+            static_cast<unsigned long>(after),
+            research_conflict ? "research conflict rejected"
+                              : suppress ? "repeat marker suppressed"
+                                         : "forwarded");
+        log_message(message);
     }
 }
 

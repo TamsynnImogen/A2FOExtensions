@@ -1,6 +1,8 @@
 #include "../../sdk/include/a2fo_module_api.h"
 #include "../../core/fpq_paths.hpp"
 #include "../../core/odf_paths.hpp"
+#include "bink_video.hpp"
+#include "hybrid_production_runtime.hpp"
 #include "queue_enhancement.hpp"
 #include "upgrade_pods.hpp"
 
@@ -39,6 +41,8 @@ constexpr std::uintptr_t kAddItemsFromPackRva = 0x109650;
 constexpr std::size_t kBuiltInVirtualDirectoryCount = 28;
 constexpr std::size_t kMaximumVirtualDirectoryCount = 255;
 constexpr std::size_t kMaximumPathLength = 32767;
+constexpr std::size_t kDetailedIndexLogLimit = 24;
+constexpr std::size_t kLookupLogLimit = 64;
 
 const std::uint8_t kExpectedAddDisk[] = {
     0x55, 0x8b, 0xec, 0x81, 0xc4, 0xa4, 0xfe, 0xff, 0xff};
@@ -106,6 +110,11 @@ volatile DWORD g_recursive_odf_owner_thread = 0;
 std::map<std::string, std::string> g_recursive_odf_aliases;
 std::map<std::string, void*> g_recursive_odf_winners;
 std::set<std::string> g_logged_recursive_odf_lookups;
+std::unordered_map<void*, std::uint32_t> g_project_ids_by_entry;
+void** g_project_id_items = nullptr;
+std::uint32_t g_project_id_scanned_count = 0;
+std::uint32_t g_project_id_capacity = 0;
+bool g_project_id_capacity_warning_logged = false;
 
 template <typename T = void>
 T* at(HMODULE module, std::uintptr_t rva) {
@@ -470,28 +479,19 @@ T& field(void* object, std::size_t offset) {
     return *reinterpret_cast<T*>(static_cast<std::uint8_t*>(object) + offset);
 }
 
-bool register_fleetops_project_id(void* file_system, void* entry,
-                                  bool& added) {
-    added = false;
-    if (!readable_range(file_system, 0x18) ||
-        !writable_range(
-            entry, kFileEntryProjectIdOffset + sizeof(std::uint32_t))) {
-        return false;
-    }
+bool refresh_project_id_registry(void* file_system) {
+    if (!readable_range(file_system, 0x18)) return false;
 
-    const std::uint32_t count =
-        field<std::uint32_t>(file_system, 0x10);
+    const std::uint32_t count = field<std::uint32_t>(file_system, 0x10);
     void** items = field<void**>(file_system, 0x14);
     if (count > 1000000 || !items ||
         reinterpret_cast<std::uintptr_t>(items) < sizeof(std::int32_t) ||
-        !readable_range(
-            items - 1, sizeof(std::int32_t))) {
+        !readable_range(items - 1, sizeof(std::int32_t))) {
         return false;
     }
 
-    // Fleet Ops stores its Delphi dynamic-array length immediately before the
-    // first item. FOFS_ItemInitCache initially reserves 0x4000 entries and may
-    // grow that array before this extension runs.
+    // Fleet Ops stores the Delphi dynamic-array length immediately before the
+    // first item. FOFS_ItemInitCache normally reserves 0x4000 entries.
     const std::int32_t signed_capacity =
         reinterpret_cast<const std::int32_t*>(items)[-1];
     if (signed_capacity <= 0 || signed_capacity > 1000000) return false;
@@ -499,29 +499,56 @@ bool register_fleetops_project_id(void* file_system, void* entry,
         static_cast<std::uint32_t>(signed_capacity);
     if (count > capacity ||
         (count != 0 &&
-         !readable_range(
-             items, static_cast<std::size_t>(count) * sizeof(void*)))) {
+         !readable_range(items,
+                         static_cast<std::size_t>(count) * sizeof(void*)))) {
+        return false;
+    }
+
+    // Rebuild only if Fleet Ops moved or shortened its dynamic array. In the
+    // common case this scans the native registry once and then only consumes
+    // entries appended since the preceding recursive lookup.
+    if (items != g_project_id_items || count < g_project_id_scanned_count) {
+        g_project_ids_by_entry.clear();
+        g_project_id_items = items;
+        g_project_id_scanned_count = 0;
+    }
+    for (std::uint32_t index = g_project_id_scanned_count;
+         index < count; ++index) {
+        if (items[index]) {
+            g_project_ids_by_entry.emplace(items[index], index + 1);
+        }
+    }
+    g_project_id_scanned_count = count;
+    g_project_id_capacity = capacity;
+    return true;
+}
+
+bool ensure_fleetops_project_id(void* file_system, void* entry,
+                                bool& added) {
+    added = false;
+    if (!entry ||
+        !writable_range(entry,
+                        kFileEntryProjectIdOffset + sizeof(std::uint32_t)) ||
+        !refresh_project_id_registry(file_system)) {
         return false;
     }
 
     std::uint32_t& project_id =
         field<std::uint32_t>(entry, kFileEntryProjectIdOffset);
     if (project_id != 0) {
-        return project_id <= count && items[project_id - 1] == entry;
+        return project_id <= g_project_id_scanned_count &&
+               g_project_id_items[project_id - 1] == entry;
     }
 
-    // Repair an entry which is already present but has not yet had its ID
-    // copied back. Normally recursive entries are absent and take the append
-    // path below.
-    for (std::uint32_t index = 0; index < count; ++index) {
-        if (items[index] == entry) {
-            project_id = index + 1;
-            return true;
-        }
+    const auto existing = g_project_ids_by_entry.find(entry);
+    if (existing != g_project_ids_by_entry.end()) {
+        project_id = existing->second;
+        return true;
     }
 
-    if (count >= capacity ||
-        !writable_range(items + count, sizeof(void*)) ||
+    const std::uint32_t count = g_project_id_scanned_count;
+    if (count >= g_project_id_capacity ||
+        !writable_range(g_project_id_items + count, sizeof(void*)) ||
         !writable_range(static_cast<std::uint8_t*>(file_system) + 0x10,
                         sizeof(std::uint32_t))) {
         return false;
@@ -530,9 +557,11 @@ bool register_fleetops_project_id(void* file_system, void* entry,
     // Append only. Existing cPrjID values are one-based array positions, so
     // sorting or rebuilding the array after class loading has begun would
     // invalidate every ID already held by Armada.
-    items[count] = entry;
+    g_project_id_items[count] = entry;
     project_id = count + 1;
     field<std::uint32_t>(file_system, 0x10) = count + 1;
+    g_project_ids_by_entry.emplace(entry, project_id);
+    g_project_id_scanned_count = count + 1;
     added = true;
     return true;
 }
@@ -610,7 +639,10 @@ std::size_t add_custom_entries_to_hash(
         auto* entries = field<DelphiList*>(directory, 0x0c);
         for (void* entry : list_items(entries)) {
             void* basename = field<void*>(entry, kFileEntryBasenameOffset);
-            if (!basename) continue;
+            if (!basename ||
+                !has_odf_extension(delphi_string_value(basename))) {
+                continue;
+            }
             const std::uint32_t hash = a2fo_odf_hash_string(
                 at(g_fleet_ops, kHashStringRva), basename);
             const std::uint32_t index = hash & (bucket_count - 1);
@@ -632,7 +664,7 @@ std::size_t add_custom_entries_to_hash(
     return added;
 }
 
-void build_recursive_odf_winners(
+std::size_t build_recursive_odf_winners(
     void* file_system, const std::vector<void*>& custom_directories) {
     const std::uint32_t bucket_count =
         field<std::uint32_t>(file_system, 0x08);
@@ -641,35 +673,47 @@ void build_recursive_odf_winners(
         !readable_range(buckets,
                         static_cast<std::size_t>(bucket_count) * sizeof(void*))) {
         log_line("Winner selection: invalid Fleet Operations hash table");
-        return;
+        return 0;
     }
 
     std::map<void*, std::string> custom_entries;
     std::map<std::string, std::vector<void*>> custom_groups;
+    std::size_t logged_entries = 0;
     for (void* directory : custom_directories) {
         auto* entries = field<DelphiList*>(directory, 0x0c);
         for (void* entry : list_items(entries)) {
-            custom_entries.emplace(entry, delphi_string(directory, 4));
             const std::string basename = lower_ascii(
                 delphi_string(entry, kFileEntryBasenameOffset));
-            if (!basename.empty()) custom_groups[basename].push_back(entry);
-            log_line("Entry: " + basename + " from " +
-                     delphi_string(directory, 4) + " (primary=" +
-                     std::to_string(field<std::uint8_t>(
-                         entry, kFileEntryPrimaryRootOffset)) +
-                     ", packed=" +
-                     std::to_string(field<std::uint8_t>(
-                         entry, kFileEntryPackedOffset)) +
-                     ", overridden=" +
-                     std::to_string(field<std::uint8_t>(
-                         entry, kFileEntryOverriddenOffset)) + ")");
+            if (!has_odf_extension(basename)) continue;
+            const std::string directory_path = delphi_string(directory, 4);
+            custom_entries.emplace(entry, directory_path);
+            custom_groups[basename].push_back(entry);
+            if (logged_entries < kDetailedIndexLogLimit) {
+                log_line("Entry: " + basename + " from " + directory_path +
+                         " (primary=" +
+                         std::to_string(field<std::uint8_t>(
+                             entry, kFileEntryPrimaryRootOffset)) +
+                         ", packed=" +
+                         std::to_string(field<std::uint8_t>(
+                             entry, kFileEntryPackedOffset)) +
+                         ", overridden=" +
+                         std::to_string(field<std::uint8_t>(
+                             entry, kFileEntryOverriddenOffset)) + ")");
+                ++logged_entries;
+            }
         }
     }
     log_line("Precedence: " + std::to_string(custom_entries.size()) +
              " custom entries in hash table");
+    if (custom_entries.size() > logged_entries) {
+        log_line("Entry diagnostics: " +
+                 std::to_string(custom_entries.size() - logged_entries) +
+                 " additional entries suppressed");
+    }
 
     std::map<std::string, std::string> aliases;
     std::map<std::string, void*> winners;
+    std::size_t logged_winners = 0;
     for (const auto& group : custom_groups) {
         void* basename_value = field<void*>(
             group.second.front(), kFileEntryBasenameOffset);
@@ -682,16 +726,19 @@ void build_recursive_odf_winners(
             continue;
         }
 
-        std::string contents;
-        for (void* candidate : chain) {
-            if (!contents.empty()) contents += ", ";
-            contents += lower_ascii(delphi_string(
-                candidate, kFileEntryBasenameOffset));
-            if (custom_entries.find(candidate) != custom_entries.end()) {
-                contents += " [recursive]";
+        if (logged_winners < kDetailedIndexLogLimit) {
+            std::string contents;
+            for (void* candidate : chain) {
+                if (!contents.empty()) contents += ", ";
+                contents += lower_ascii(delphi_string(
+                    candidate, kFileEntryBasenameOffset));
+                if (custom_entries.find(candidate) != custom_entries.end()) {
+                    contents += " [recursive]";
+                }
             }
+            log_line("Hash bucket " + std::to_string(bucket) + ": " +
+                     contents);
         }
-        log_line("Hash bucket " + std::to_string(bucket) + ": " + contents);
 
         void* winner = nullptr;
         for (void* candidate : chain) {
@@ -727,35 +774,20 @@ void build_recursive_odf_winners(
                 const bool corrected_override =
                     field<std::uint8_t>(winner,
                                         kFileEntryOverriddenOffset) != 0;
-                log_line("Winner: " + group.first + " -> " + target +
-                         (corrected_override
-                              ? " (recursive precedence corrected override flag)"
-                              : ""));
+                if (logged_winners < kDetailedIndexLogLimit) {
+                    log_line("Winner: " + group.first + " -> " + target +
+                             (corrected_override
+                                  ? " (recursive precedence corrected override flag)"
+                                  : ""));
+                    ++logged_winners;
+                }
             }
         }
     }
-
-    std::size_t added_project_ids = 0;
-    std::size_t failed_project_ids = 0;
-    for (const auto& winner : winners) {
-        bool added = false;
-        if (register_fleetops_project_id(file_system, winner.second, added)) {
-            if (added) ++added_project_ids;
-        } else {
-            ++failed_project_ids;
-            log_line("Project ID unavailable: " + winner.first);
-        }
-    }
-    if (added_project_ids != 0) {
-        log_line("Project IDs: " + std::to_string(added_project_ids) +
-                 " recursive ODF basename" +
-                 (added_project_ids == 1 ? "" : "s") + " registered");
-    }
-    if (failed_project_ids != 0) {
-        log_line("Project IDs: " + std::to_string(failed_project_ids) +
-                 " recursive ODF basename" +
-                 (failed_project_ids == 1 ? "" : "s") +
-                 " could not be registered");
+    if (winners.size() > logged_winners) {
+        log_line("Winner diagnostics: " +
+                 std::to_string(winners.size() - logged_winners) +
+                 " additional winners suppressed");
     }
 
     std::size_t winner_count = 0;
@@ -764,13 +796,21 @@ void build_recursive_odf_winners(
         g_recursive_odf_aliases.swap(aliases);
         g_recursive_odf_winners.swap(winners);
         g_logged_recursive_odf_lookups.clear();
+        g_project_ids_by_entry.clear();
+        g_project_id_items = nullptr;
+        g_project_id_scanned_count = 0;
+        g_project_id_capacity = 0;
+        g_project_id_capacity_warning_logged = false;
         winner_count = g_recursive_odf_winners.size();
     }
     log_line("Precedence ready: " + std::to_string(winner_count) +
              " basename winners published");
+    log_line("Project IDs: recursive winners will be registered lazily");
+    return custom_entries.size();
 }
 
 bool register_recursive_odfs(void* file_system) {
+    const DWORD started_at = GetTickCount();
     if (!readable_range(file_system, 0x24)) {
         log_line("Fleet Operations filesystem is not ready; deferring");
         return false;
@@ -855,7 +895,6 @@ bool register_recursive_odfs(void* file_system) {
 
     auto* item_count = reinterpret_cast<std::uint32_t*>(
         static_cast<std::uint8_t*>(file_system) + 0x20);
-    const std::uint32_t item_count_before = *item_count;
     {
         TemporaryDirectoryList temporary(directory_list, custom_directories);
         for (const RootInfo& root : roots) {
@@ -879,11 +918,12 @@ bool register_recursive_odfs(void* file_system) {
         a2fo_odf_renew_overrides(at(g_fleet_ops, kRenewOverridesRva), directory);
     }
     add_custom_entries_to_hash(file_system, custom_directories);
-    build_recursive_odf_winners(file_system, custom_directories);
+    const std::size_t indexed_entries =
+        build_recursive_odf_winners(file_system, custom_directories);
     log_line("Index ready: " + std::to_string(custom_directories.size()) +
              " custom directories, " +
-             std::to_string(*item_count - item_count_before) +
-             " ODF entries");
+             std::to_string(indexed_entries) + " ODF entries in " +
+             std::to_string(GetTickCount() - started_at) + " ms");
     return true;
 }
 
@@ -943,6 +983,7 @@ bool A2FO_CALL lookup_handler(void* file_system, void* delphi_name,
         void* winner = nullptr;
         std::string winner_path;
         bool first_log = false;
+        bool project_id_failed = false;
         {
             StateLockGuard lock;
             const auto selected = g_recursive_odf_winners.find(key);
@@ -952,13 +993,26 @@ bool A2FO_CALL lookup_handler(void* file_system, void* delphi_name,
                 if (path != g_recursive_odf_aliases.end()) {
                     winner_path = path->second;
                 }
-                first_log = g_logged_recursive_odf_lookups.insert(key).second;
+                if (g_logged_recursive_odf_lookups.size() < kLookupLogLimit) {
+                    first_log =
+                        g_logged_recursive_odf_lookups.insert(key).second;
+                }
+                bool added = false;
+                if (!ensure_fleetops_project_id(file_system, winner, added) &&
+                    !g_project_id_capacity_warning_logged) {
+                    g_project_id_capacity_warning_logged = true;
+                    project_id_failed = true;
+                }
             }
         }
 
         if (!winner) return false;
         if (first_log) {
             log_line("Lookup: " + requested_name + " -> " + winner_path);
+        }
+        if (project_id_failed) {
+            log_line("Project ID registry is full or unavailable; recursive "
+                     "file lookup remains enabled");
         }
         *result = winner;
         return true;
@@ -1013,7 +1067,13 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     log_line("Native feature pack initialized");
     // Install this optional low-level hook last: no initialization failure may
     // unload the DLL after the core has patched a call into it.
+    a2fo::initialize_hybrid_production_registry(
+        api, g_armada, g_fleet_ops);
+    // Hybrid production validates the original Producer finish/cancel bytes,
+    // then calls these entry points at runtime. Install the queue wrappers
+    // afterwards so hybrid jobs retain repeat/refill bookkeeping too.
     a2fo::initialize_queue_enhancements(api, g_armada, g_fleet_ops);
     a2fo::initialize_upgrade_pods(api, g_armada, g_fleet_ops);
+    a2fo::initialize_bink_video_scaling(api, g_armada, g_fleet_ops);
     return true;
 }
