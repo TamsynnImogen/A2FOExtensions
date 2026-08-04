@@ -2,7 +2,6 @@
 #include "../../core/fpq_paths.hpp"
 #include "../../core/odf_paths.hpp"
 #include "bink_video.hpp"
-#include "hybrid_production_runtime.hpp"
 #include "queue_enhancement.hpp"
 #include "upgrade_pods.hpp"
 
@@ -1032,8 +1031,7 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
         !api->armada_module ||
         !api->fleetops_module ||
         !api->register_fofs_item_lookup_handler ||
-        !api->register_classlabel_alias ||
-        !api->register_evolver_cocoon_command) {
+        !api->register_classlabel_alias) {
         return false;
     }
     g_api = api;
@@ -1049,16 +1047,8 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     g_state_lock_ready = true;
     const bool wingman_enabled = api->register_classlabel_alias(
         kModuleName, "wingman", "craft");
-    const bool hybridbuild_enabled = api->register_classlabel_alias(
-        kModuleName, "hybridbuild", "research");
-    const bool cocoon_enabled = api->register_evolver_cocoon_command(
-        kModuleName, "cocoon");
     log_line(std::string("Wingman classlabel alias: ") +
              (wingman_enabled ? "enabled" : "not registered"));
-    log_line(std::string("HybridBuild classlabel alias to ResearchStation: ") +
-             (hybridbuild_enabled ? "enabled" : "not registered"));
-    log_line(std::string("Evolver cocoon ODF command: ") +
-             (cocoon_enabled ? "enabled" : "not registered"));
     if (!api->register_fofs_item_lookup_handler(
             kModuleName, &lookup_handler, nullptr)) {
         DeleteCriticalSection(&g_state_lock);
@@ -1069,13 +1059,6 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
         return false;
     }
     log_line("Native feature pack initialized");
-    // Install this optional low-level hook last: no initialization failure may
-    // unload the DLL after the core has patched a call into it.
-    a2fo::initialize_hybrid_production_registry(
-        api, g_armada, g_fleet_ops);
-    // Hybrid production validates the original Producer finish/cancel bytes,
-    // then calls these entry points at runtime. Install the queue wrappers
-    // afterwards so hybrid jobs retain repeat/refill bookkeeping too.
     a2fo::initialize_queue_enhancements(api, g_armada, g_fleet_ops);
     a2fo::initialize_upgrade_pods(api, g_armada, g_fleet_ops);
     a2fo::initialize_bink_video_scaling(api, g_armada, g_fleet_ops);

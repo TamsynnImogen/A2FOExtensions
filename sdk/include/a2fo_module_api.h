@@ -16,7 +16,7 @@
 #endif
 
 #define A2FO_MODULE_API_VERSION 4u
-#define A2FO_MODULE_API_REVISION 4u
+#define A2FO_MODULE_API_REVISION 5u
 
 // The major version remains 4 so DLLs compiled against the original v4 ABI
 // continue to load. Revisions append fields to A2FO_ModuleApi; never insert or
@@ -27,6 +27,7 @@ enum A2FO_ModuleCapability : std::uint64_t {
     A2FO_CAP_UPGRADE_POD_POLICY = 1ull << 1,
     A2FO_CAP_ORIGINAL_CLASSLABEL = 1ull << 2,
     A2FO_CAP_COCOON_CLASS_ASSOCIATION = 1ull << 3,
+    A2FO_CAP_INFO_INI_DEFAULTS = 1ull << 4,
 };
 
 enum A2FO_ObjectReplacementFlags : std::uint32_t {
@@ -83,6 +84,19 @@ using A2FO_FofsItemLookupHandler = bool (A2FO_CALL*)(
     void* delphi_name,
     std::uint32_t flags,
     void** result,
+    void* user_data);
+
+// Supplies optional Fleet Ops info.ini defaults without placing mod policy in
+// the core hook DLL. `normal_settings_directory` is the native Fleet Ops path
+// when a resolved override is requested and may be null for speed-only calls.
+// Write an empty string to keep the native directory. The callback owns no
+// returned storage; the core copies every value before returning.
+using A2FO_InfoIniDefaultsHandler = bool (A2FO_CALL*)(
+    const char* normal_settings_directory,
+    char* resolved_settings_directory,
+    std::uint32_t resolved_settings_directory_size,
+    std::uint32_t* has_default_game_speed,
+    std::int32_t* default_game_speed,
     void* user_data);
 
 struct A2FO_InlineHook {
@@ -176,6 +190,14 @@ struct A2FO_ModuleApi {
     bool (A2FO_CALL* associate_evolver_cocoon_class)(
         void* class_object,
         void* parameter_db);
+
+    // Revision 5 addition. The core retains the timing-critical native hooks;
+    // one module owns parsing and resolving the SettingsDirectory and
+    // DefaultGameSpeed values supplied by Fleet Ops info.ini files.
+    bool (A2FO_CALL* register_info_ini_defaults_handler)(
+        const char* module_name,
+        A2FO_InfoIniDefaultsHandler handler,
+        void* user_data);
 };
 
 #define A2FO_MODULE_API_V4_BASE_SIZE \

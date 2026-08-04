@@ -12,9 +12,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <fstream>
 #include <set>
-#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -191,12 +189,13 @@ volatile LONG g_user_profile_game_speed_logged = 0;
 volatile PVOID g_fo_settings_instance = nullptr;
 bool g_has_default_game_speed = false;
 int g_default_game_speed = 0;
-std::string g_configured_settings_directory;
-std::string g_shared_settings_root;
 const char* g_delphi_settings_directory = nullptr;
 A2FO_FofsItemLookupHandler g_fofs_item_lookup_handler = nullptr;
 void* g_fofs_item_lookup_user_data = nullptr;
 std::string g_fofs_item_lookup_owner;
+A2FO_InfoIniDefaultsHandler g_info_ini_defaults_handler = nullptr;
+void* g_info_ini_defaults_user_data = nullptr;
+std::string g_info_ini_defaults_owner;
 struct ClasslabelAliasPolicy {
     std::string target;
     std::string owner;
@@ -233,6 +232,9 @@ struct RegistrationTransaction {
     A2FO_FofsItemLookupHandler fofs_handler = nullptr;
     void* fofs_user_data = nullptr;
     std::string fofs_owner;
+    A2FO_InfoIniDefaultsHandler info_ini_defaults_handler = nullptr;
+    void* info_ini_defaults_user_data = nullptr;
+    std::string info_ini_defaults_owner;
     std::unordered_map<std::string, ClasslabelAliasPolicy> classlabel_aliases;
     std::string cocoon_command;
     std::string cocoon_owner;
@@ -363,107 +365,56 @@ void wait_for_deferred_initialization() {
     }
 }
 
-std::string read_small_text_file(const std::string& path) {
-    std::ifstream input(path, std::ios::binary);
-    if (!input) return {};
-    input.seekg(0, std::ios::end);
-    const std::streamoff size = input.tellg();
-    constexpr std::streamoff kMaximumInfoSize = 1024 * 1024;
-    if (size < 0 || size > kMaximumInfoSize) return {};
-    input.seekg(0, std::ios::beg);
-    std::ostringstream contents;
-    contents << input.rdbuf();
-    return contents.str();
-}
-
-std::string expand_environment_strings(const std::string& value) {
-    if (value.empty()) return {};
-    const DWORD required =
-        ExpandEnvironmentStringsA(value.c_str(), nullptr, 0);
-    if (required == 0 || required > kMaximumPathLength) return {};
-    std::vector<char> output(required);
-    const DWORD written = ExpandEnvironmentStringsA(
-        value.c_str(), output.data(), static_cast<DWORD>(output.size()));
-    if (written == 0 || written > output.size()) return {};
-    return std::string(output.data());
-}
-
-std::string default_fleet_ops_config_root() {
-    const DWORD required = GetEnvironmentVariableA("APPDATA", nullptr, 0);
-    if (required == 0 || required > kMaximumPathLength) return {};
-    std::vector<char> app_data(required);
-    const DWORD written = GetEnvironmentVariableA(
-        "APPDATA", app_data.data(), static_cast<DWORD>(app_data.size()));
-    if (written == 0 || written >= app_data.size()) return {};
-    return join_path(std::string(app_data.data()),
-                     "Star Trek Armada II Fleet Ops Config");
-}
-
-void load_fleet_ops_info_defaults() {
+bool query_info_ini_defaults(const char* normal_directory,
+                             std::string* resolved_directory,
+                             bool& has_default_game_speed,
+                             int& default_game_speed) {
     try {
-        const std::string command_line =
-            GetCommandLineA() ? GetCommandLineA() : "";
-        const std::string active_mod =
-            a2fo::active_mod_from_command_line(command_line);
-        const std::string root_info_path =
-            join_path(g_root_directory, "info.ini");
-        const a2fo::FleetOpsInfoDefaults root_defaults =
-            a2fo::fleet_ops_defaults_from_info(
-                read_small_text_file(root_info_path));
-        a2fo::FleetOpsInfoDefaults defaults = root_defaults;
-        if (active_mod.empty()) {
-            g_shared_settings_root.clear();
-        } else if (a2fo::safe_mod_directory_name(active_mod)) {
-            const std::string info_path = join_path(
-                join_path(join_path(g_root_directory, "Mods"), active_mod),
-                "info.ini");
-            defaults = a2fo::fleet_ops_defaults_from_info(
-                read_small_text_file(info_path));
-            g_shared_settings_root =
-                expand_environment_strings(root_defaults.settings_directory);
-            if (!root_defaults.settings_directory.empty() &&
-                g_shared_settings_root.empty()) {
-                log_line("Fleet Ops root info default rejected "
-                         "SettingsDirectory");
-            }
-        } else {
-            log_line("Fleet Ops info defaults rejected an unsafe mod name");
-            return;
+        wait_for_deferred_initialization();
+        A2FO_InfoIniDefaultsHandler handler = nullptr;
+        void* user_data = nullptr;
+        {
+            StateLockGuard lock;
+            handler = g_info_ini_defaults_handler;
+            user_data = g_info_ini_defaults_user_data;
         }
+        if (!handler) return false;
 
-        g_has_default_game_speed = defaults.has_default_game_speed;
-        g_default_game_speed = defaults.default_game_speed;
-        g_configured_settings_directory =
-            expand_environment_strings(defaults.settings_directory);
-        if (!defaults.settings_directory.empty() &&
-            g_configured_settings_directory.empty()) {
-            log_line("Fleet Ops info defaults rejected SettingsDirectory");
+        std::vector<char> output;
+        if (resolved_directory) output.resize(kMaximumPathLength + 1);
+        std::uint32_t has_speed = 0;
+        std::int32_t speed = 0;
+        if (!handler(normal_directory,
+                     output.empty() ? nullptr : output.data(),
+                     static_cast<std::uint32_t>(output.size()),
+                     &has_speed, &speed, user_data)) {
+            return false;
         }
-        if (g_has_default_game_speed) {
-            log_line("Fleet Ops info default: DefaultGameSpeed=" +
-                     std::to_string(g_default_game_speed));
+        if (!output.empty()) {
+            output.back() = '\0';
+            resolved_directory->assign(output.data());
         }
-        if (!g_configured_settings_directory.empty()) {
-            log_line("Fleet Ops info default: SettingsDirectory=" +
-                     g_configured_settings_directory);
-        }
-        if (!g_shared_settings_root.empty()) {
-            log_line("Fleet Ops shared settings root: " +
-                     g_shared_settings_root);
-        }
+        has_default_game_speed = has_speed != 0 && speed >= 1 && speed <= 6;
+        default_game_speed = has_default_game_speed ? speed : 0;
+        return true;
     } catch (...) {
-        g_has_default_game_speed = false;
-        g_configured_settings_directory.clear();
-        g_shared_settings_root.clear();
-        log_line("Fleet Ops info defaults could not be read");
+        log_line("Fleet Ops info.ini defaults provider failed");
+        return false;
     }
 }
 
 void ensure_fleet_ops_info_defaults() {
     const LONG prior = InterlockedCompareExchange(&g_mod_defaults_state, 1, 0);
     if (prior == 0) {
-        load_fleet_ops_info_defaults();
-        InterlockedExchange(&g_mod_defaults_state, 2);
+        bool has_speed = false;
+        int speed = 0;
+        const bool loaded = query_info_ini_defaults(
+            nullptr, nullptr, has_speed, speed);
+        if (loaded) {
+            g_has_default_game_speed = has_speed;
+            g_default_game_speed = speed;
+        }
+        InterlockedExchange(&g_mod_defaults_state, loaded ? 2 : 0);
         return;
     }
     while (InterlockedCompareExchange(&g_mod_defaults_state, 0, 0) == 1) {
@@ -492,27 +443,33 @@ const char* make_static_delphi_string(const std::string& value) {
 
 const char* resolved_settings_directory(const char* normal_directory) {
     ensure_fleet_ops_info_defaults();
-    if (g_configured_settings_directory.empty()) return nullptr;
+    {
+        StateLockGuard lock;
+        if (g_delphi_settings_directory) return g_delphi_settings_directory;
+    }
 
-    StateLockGuard lock;
-    if (g_delphi_settings_directory) return g_delphi_settings_directory;
-
-    const std::string resolved = a2fo::resolve_fleet_ops_settings_directory(
-        normal_directory ? normal_directory : "",
-        g_configured_settings_directory,
-        default_fleet_ops_config_root(),
-        g_shared_settings_root);
-    if (resolved.empty()) {
-        log_line("Fleet Ops SettingsDirectory could not be resolved");
+    std::string resolved;
+    bool has_speed = false;
+    int speed = 0;
+    if (!query_info_ini_defaults(
+            normal_directory, &resolved, has_speed, speed) ||
+        resolved.empty()) {
         return nullptr;
     }
-    g_delphi_settings_directory = make_static_delphi_string(resolved);
-    if (g_delphi_settings_directory) {
+    const char* replacement = make_static_delphi_string(resolved);
+    {
+        StateLockGuard lock;
+        if (!g_delphi_settings_directory) {
+            g_delphi_settings_directory = replacement;
+        }
+        replacement = g_delphi_settings_directory;
+    }
+    if (replacement) {
         log_line("Fleet Ops settings directory: " + resolved);
     } else {
         log_line("Fleet Ops SettingsDirectory allocation failed");
     }
-    return g_delphi_settings_directory;
+    return replacement;
 }
 
 void __attribute__((regparm(2))) mod_user_directory_hook(
@@ -1117,6 +1074,10 @@ void begin_module_registration(const std::string& path) {
         snapshot.fofs_handler = g_fofs_item_lookup_handler;
         snapshot.fofs_user_data = g_fofs_item_lookup_user_data;
         snapshot.fofs_owner = g_fofs_item_lookup_owner;
+        snapshot.info_ini_defaults_handler = g_info_ini_defaults_handler;
+        snapshot.info_ini_defaults_user_data =
+            g_info_ini_defaults_user_data;
+        snapshot.info_ini_defaults_owner = g_info_ini_defaults_owner;
         snapshot.classlabel_aliases = g_classlabel_aliases;
         snapshot.cocoon_command = g_evolver_cocoon_command;
         snapshot.cocoon_owner = g_evolver_cocoon_owner;
@@ -1146,6 +1107,12 @@ void finish_module_registration(const std::string& path, bool initialized) {
                 g_registration_transaction.fofs_user_data;
             g_fofs_item_lookup_owner =
                 std::move(g_registration_transaction.fofs_owner);
+            g_info_ini_defaults_handler =
+                g_registration_transaction.info_ini_defaults_handler;
+            g_info_ini_defaults_user_data =
+                g_registration_transaction.info_ini_defaults_user_data;
+            g_info_ini_defaults_owner = std::move(
+                g_registration_transaction.info_ini_defaults_owner);
             g_classlabel_aliases =
                 std::move(g_registration_transaction.classlabel_aliases);
             g_evolver_cocoon_command =
@@ -2101,6 +2068,34 @@ bool A2FO_CALL api_register_fofs_item_lookup_handler(
     return registered;
 }
 
+bool A2FO_CALL api_register_info_ini_defaults_handler(
+    const char* module_name, A2FO_InfoIniDefaultsHandler handler,
+    void* user_data) {
+    if (!handler || !g_state_lock_ready) return false;
+    const std::string owner = policy_owner(module_name);
+    bool registered = false;
+    std::string existing_owner;
+    {
+        StateLockGuard lock;
+        if (g_policy_registration_open &&
+            g_registration_transaction.active &&
+            !g_info_ini_defaults_handler) {
+            g_info_ini_defaults_handler = handler;
+            g_info_ini_defaults_user_data = user_data;
+            g_info_ini_defaults_owner = owner;
+            registered = true;
+        }
+        existing_owner = g_info_ini_defaults_owner;
+    }
+    if (registered) {
+        log_line("info.ini defaults handler registered by " + owner);
+    } else {
+        log_line("info.ini defaults handler rejected for " + owner +
+                 "; already owned by " + existing_owner);
+    }
+    return registered;
+}
+
 bool A2FO_CALL api_register_classlabel_alias(
     const char* module_name, const char* source, const char* target) {
     try {
@@ -2257,12 +2252,15 @@ A2FO_ModuleApi make_module_api() {
     if (g_evolver_hooks_ready) {
         api.capabilities |= A2FO_CAP_COCOON_CLASS_ASSOCIATION;
     }
+    api.capabilities |= A2FO_CAP_INFO_INI_DEFAULTS;
     api.register_object_destroyed_handler =
         &api_register_object_destroyed_handler;
     api.upgrade_pod_maximum_tier = &api_upgrade_pod_maximum_tier;
     api.get_original_classlabel = &api_get_original_classlabel;
     api.associate_evolver_cocoon_class =
         &api_associate_evolver_cocoon_class;
+    api.register_info_ini_defaults_handler =
+        &api_register_info_ini_defaults_handler;
     return api;
 }
 

@@ -6,7 +6,10 @@
 ## Architecture and Refactoring
 
 * [x] Make Lua destruction callbacks declare which ODF fields they require. The legacy Lua form retains a deprecated wreckage compatibility shim; the core itself no longer hard-codes those fields.
-* [REFACTOR] Move more cocoon-specific state and selection logic from `A2FOExtensions.dll` into `A2FOFeaturePack.dll`.
+* [x] Split HybridBuild and Fleet Ops `info.ini` defaults into dedicated
+  `A2FOHybridBuild.dll` and `A2FOInfoIni.dll` modules. The core retains only
+  shared/timing-sensitive dispatch hooks, and FeaturePack retains shared queue
+  and ResearchStation hook ownership through a callback bridge.
 * [x] Rename the `ODFRecursive` source folder to `A2FOFeaturePack`.
 * [x] Document hook ownership and add a core-owned native destruction dispatcher. See `docs/architecture.md`.
 * [x] Add compatible API revision/capability checks for Lua scripts and native modules.

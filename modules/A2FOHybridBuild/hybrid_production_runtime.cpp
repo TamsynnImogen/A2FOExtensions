@@ -19,7 +19,7 @@ void* __cdecl a2fo_hybrid_build_position_for_command(
 namespace a2fo {
 namespace {
 
-constexpr const char* kModuleName = "A2FOFeaturePack";
+constexpr const char* kModuleName = "A2FOHybridBuild";
 
 // ArmadaL.exe RVAs from the supported Armada 1.1 PDB plus the .text RVA.
 constexpr std::uintptr_t kParameterDbGetProjectIdRva = 0x135200;
@@ -304,10 +304,6 @@ const std::uint8_t kExpectedShipDisplaySingleObjectSimulateCall[] =
     {0xe8, 0x2b, 0xc1, 0x4f, 0x5a};
 const std::uint8_t kExpectedFoProducerStart[] =
     {0x55, 0x8b, 0xec, 0x83, 0xc4, 0xec, 0x53};
-const std::uint8_t kExpectedFoProducerCancel[] =
-    {0x55, 0x8b, 0xec, 0x51, 0x89, 0x4d, 0xfc};
-const std::uint8_t kExpectedFoProducerFinish[] =
-    {0x55, 0x8b, 0xec, 0x51, 0x53};
 const std::uint8_t kExpectedFoProducerPopChecked[] =
     {0x55, 0x8b, 0xec, 0x83, 0xc4, 0xe0};
 const std::uint8_t kExpectedFoResearchStationFinish[] =
@@ -3628,12 +3624,10 @@ bool initialize_hybrid_production_registry(const A2FO_ModuleApi* api,
     signatures_match &= require_signature(
         "FleetOps Producer start", fleet_ops,
         kFoProducerStartRva, kExpectedFoProducerStart);
-    signatures_match &= require_signature(
-        "FleetOps Producer cancel", fleet_ops,
-        kFoProducerCancelRva, kExpectedFoProducerCancel);
-    signatures_match &= require_signature(
-        "FleetOps Producer finish", fleet_ops,
-        kFoProducerFinishRva, kExpectedFoProducerFinish);
+    // A2FOFeaturePack loads first and may already have wrapped these two public
+    // callbacks for continuous-queue bookkeeping. Hybrid jobs intentionally
+    // call the active entries so both modules' policies compose; their original
+    // prologues are therefore not HybridBuild initialization requirements.
     signatures_match &= require_signature(
         "FleetOps checked Producer queue pop", fleet_ops,
         kFoProducerPopCheckedRva, kExpectedFoProducerPopChecked);

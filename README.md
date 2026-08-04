@@ -200,7 +200,9 @@ Armada II/
 ├── Win2kDisableTaskSwitch.dll
 ├── Win2kDisableTaskSwitch.original.dll
 ├── modules/
-│   └── A2FOFeaturePack.dll
+│   ├── A2FOFeaturePack.dll
+│   ├── A2FOHybridBuild.dll
+│   └── A2FOInfoIni.dll
 ├── scripts/
 │   └── UpgradePods.lua      (bounded tier policy; mod-overridable)
 └── A2FOExtensions.log
@@ -242,6 +244,8 @@ Outputs:
 build/A2FOExtensions.dll
 build/Win2kDisableTaskSwitch.dll
 build/modules/A2FOFeaturePack.dll
+build/modules/A2FOHybridBuild.dll
+build/modules/A2FOInfoIni.dll
 ```
 
 The SDK example is deliberately excluded from releases. Build and inspect it

@@ -68,7 +68,9 @@ all: release
 release: \
 	$(BUILD_DIR)/A2FOExtensions.dll \
 	$(BUILD_DIR)/Win2kDisableTaskSwitch.dll \
-	$(MODULE_DIR)/A2FOFeaturePack.dll
+	$(MODULE_DIR)/A2FOFeaturePack.dll \
+	$(MODULE_DIR)/A2FOHybridBuild.dll \
+	$(MODULE_DIR)/A2FOInfoIni.dll
 
 sdk-examples: $(MODULE_DIR)/ExampleModule.dll
 
@@ -98,10 +100,9 @@ $(MODULE_DIR)/A2FOFeaturePack.dll: \
 		modules/A2FOFeaturePack/odf_recursive.cpp \
 		modules/A2FOFeaturePack/bink_video.cpp \
 		modules/A2FOFeaturePack/bink_video.hpp \
-		modules/A2FOFeaturePack/hybrid_production.cpp \
-		modules/A2FOFeaturePack/hybrid_production.hpp \
-		modules/A2FOFeaturePack/hybrid_production_runtime.cpp \
-		modules/A2FOFeaturePack/hybrid_production_runtime.hpp \
+		modules/A2FOFeaturePack/hybrid_bridge_api.hpp \
+		modules/A2FOFeaturePack/hybrid_bridge_client.cpp \
+		modules/A2FOFeaturePack/hybrid_bridge_client.hpp \
 		modules/A2FOFeaturePack/queue_enhancement.cpp \
 		modules/A2FOFeaturePack/queue_enhancement.hpp \
 		modules/A2FOFeaturePack/upgrade_pods.cpp \
@@ -114,13 +115,35 @@ $(MODULE_DIR)/A2FOFeaturePack.dll: \
 		-o $@ \
 		modules/A2FOFeaturePack/odf_recursive.cpp \
 		modules/A2FOFeaturePack/bink_video.cpp \
-		modules/A2FOFeaturePack/hybrid_production.cpp \
-		modules/A2FOFeaturePack/hybrid_production_runtime.cpp \
+		modules/A2FOFeaturePack/hybrid_bridge_client.cpp \
 		modules/A2FOFeaturePack/queue_enhancement.cpp \
 		modules/A2FOFeaturePack/upgrade_pods.cpp \
 		modules/A2FOFeaturePack/delphi_bridge.S \
 		core/fpq_paths.cpp core/odf_paths.cpp \
 		-lgdi32
+
+$(MODULE_DIR)/A2FOHybridBuild.dll: \
+		modules/A2FOHybridBuild/module.cpp \
+		modules/A2FOHybridBuild/delphi_bridge.S \
+		modules/A2FOFeaturePack/hybrid_bridge_api.hpp \
+		modules/A2FOHybridBuild/hybrid_production.cpp \
+		modules/A2FOHybridBuild/hybrid_production.hpp \
+		modules/A2FOHybridBuild/hybrid_production_runtime.cpp \
+		modules/A2FOHybridBuild/hybrid_production_runtime.hpp \
+		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
+		-o $@ \
+		modules/A2FOHybridBuild/module.cpp \
+		modules/A2FOHybridBuild/hybrid_production.cpp \
+		modules/A2FOHybridBuild/hybrid_production_runtime.cpp \
+		modules/A2FOHybridBuild/delphi_bridge.S
+
+$(MODULE_DIR)/A2FOInfoIni.dll: \
+		modules/A2FOInfoIni/module.cpp \
+		core/extension_roots.cpp core/extension_roots.hpp \
+		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
+		-o $@ modules/A2FOInfoIni/module.cpp core/extension_roots.cpp
 
 $(SMOKE_TEST): tests/dll_load_smoke.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -static -static-libgcc -static-libstdc++ \
@@ -164,12 +187,12 @@ $(MODULE_API_TEST): tests/module_api_test.cpp \
 		-Isdk/include -o $@ $<
 
 $(HYBRID_PRODUCTION_TEST): tests/hybrid_production_test.cpp \
-		modules/A2FOFeaturePack/hybrid_production.cpp \
-		modules/A2FOFeaturePack/hybrid_production.hpp | $(BUILD_DIR)
+		modules/A2FOHybridBuild/hybrid_production.cpp \
+		modules/A2FOHybridBuild/hybrid_production.hpp | $(BUILD_DIR)
 	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
-		-Imodules/A2FOFeaturePack -o $@ \
+		-Imodules/A2FOHybridBuild -o $@ \
 		tests/hybrid_production_test.cpp \
-		modules/A2FOFeaturePack/hybrid_production.cpp
+		modules/A2FOHybridBuild/hybrid_production.cpp
 
 verify: release
 	@echo "A2FOExtensions exports:"
@@ -184,11 +207,21 @@ verify: release
 	@$(OBJDUMP) -p $(MODULE_DIR)/A2FOFeaturePack.dll | \
 		grep -E "A2FO_ModuleInit|DLL Name" || true
 	@echo
+	@echo "A2FOHybridBuild module exports:"
+	@$(OBJDUMP) -p $(MODULE_DIR)/A2FOHybridBuild.dll | \
+		grep -E "A2FO_ModuleInit|DLL Name" || true
+	@echo
+	@echo "A2FOInfoIni module exports:"
+	@$(OBJDUMP) -p $(MODULE_DIR)/A2FOInfoIni.dll | \
+		grep -E "A2FO_ModuleInit|DLL Name" || true
+	@echo
 	@echo "Checking for non-system MinGW runtime dependencies:"
 	@for dll in \
 		$(BUILD_DIR)/A2FOExtensions.dll \
 		$(BUILD_DIR)/Win2kDisableTaskSwitch.dll \
-		$(MODULE_DIR)/A2FOFeaturePack.dll; do \
+		$(MODULE_DIR)/A2FOFeaturePack.dll \
+		$(MODULE_DIR)/A2FOHybridBuild.dll \
+		$(MODULE_DIR)/A2FOInfoIni.dll; do \
 		if $(OBJDUMP) -p "$$dll" | \
 			grep -Eiq 'DLL Name: (libgcc|libstdc\+\+|libwinpthread)'; then \
 			echo "Unexpected MinGW runtime dependency in $$dll" >&2; \

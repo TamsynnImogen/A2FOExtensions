@@ -12,14 +12,24 @@ The core permanently owns shared or lifetime-sensitive engine sites:
 - checked patch installation and supported-binary validation;
 - the FOFS item-lookup dispatcher;
 - ParameterDB/classlabel and Evolver/cocoon dispatch;
+- early Fleet Ops settings and profile-default dispatch sites;
 - Craft destruction snapshot, replacement construction, and publication;
 - extension-root overlay and native/Lua loading order.
 
-`A2FOFeaturePack.dll` owns optional policies and feature-specific integration:
+The three built-in native modules separate optional policy:
 
-- recursive loose-folder and FPQ ODF indexing;
-- `wingman -> craft` and the `cocoon` command;
-- Ctrl-fill and Ctrl+Alt continuous Producer queues.
+- `A2FOFeaturePack.dll`: recursive ODF indexing, `wingman -> craft`, queue
+  conveniences, upgrade pods, and Bink scaling;
+- `A2FOHybridBuild.dll`: `hybridbuild -> research`, the `cocoon` command, four
+  production palettes, execution sidecars, queued placements, and previews;
+- `A2FOInfoIni.dll`: `SettingsDirectory` and `DefaultGameSpeed` parsing and
+  resolution.
+
+FeaturePack owns the general Producer queue and ResearchStation class hooks.
+HybridBuild registers a private callback table with FeaturePack so those shared
+native sites are installed exactly once. The core uses the same pattern for
+InfoIni: timing-sensitive hooks remain installed before settings load, while
+revision-5 module registration supplies all optional `info.ini` semantics.
 
 The queue feature chains feature-specific Armada and Fleet Ops Producer sites
 after exact signature checks. If the supported build or any required signature
@@ -43,8 +53,8 @@ after its registrations have been removed.
 
 Registrations are startup-only. Low-level hooks installed directly by a module
 cannot generally be undone safely; modules must therefore validate everything
-that can fail before installing their first hook. The feature pack initializes
-its queue hooks last for this reason.
+that can fail before publishing a callback table or installing their first
+low-level hook.
 
 ## Destroyed-object flow
 
@@ -70,10 +80,11 @@ lifecycle event without competing for the Craft destruction hook.
 
 ## ABI compatibility
 
-The native ABI remains major version 4. Revision 1 only appends fields, exposes
-its revision and capability mask, and provides a member-size macro. Existing v4
-modules continue to receive their original struct prefix. Lua has an independent
-major/revision pair and `a2fo.require_api`.
+The native ABI remains major version 4. Revisions 1 through 5 only append
+fields; revision 1 introduced the revision/capability metadata and member-size
+macro, while revision 5 adds the optional `info.ini` defaults provider.
+Existing v4 modules continue to receive their original struct prefix. Lua has
+an independent major/revision pair and `a2fo.require_api`.
 
 See [`../sdk/README.md`](../sdk/README.md), [`lua-api.md`](lua-api.md), and
 [`addresses.md`](addresses.md).

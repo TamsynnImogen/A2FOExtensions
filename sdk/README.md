@@ -1,4 +1,4 @@
-# Native module SDK v4 revision 4
+# Native module SDK v4 revision 5
 
 A module must be a 32-bit Windows DLL exporting:
 
@@ -96,3 +96,10 @@ policy to an aliased/native class object without requiring that object to pass
 through `EvolverClass::BuildClass`. This is intended for a checked adapter that
 provides its own safe construction-effect storage; it does not make foreign
 Evolver subclass methods safe on an arbitrary class.
+
+Revision 5 appends `register_info_ini_defaults_handler` and
+`A2FO_CAP_INFO_INI_DEFAULTS`. The core installs the timing-critical Fleet Ops
+settings hooks before module loading, waits for deferred registration at the
+first settings call, and copies the handler's results. The module owns parsing
+and path policy; returning an empty settings path and clearing the speed flag
+preserves Fleet Ops' native behavior.

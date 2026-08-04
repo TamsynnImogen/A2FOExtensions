@@ -38,6 +38,7 @@ bool hybrid_ai_button_bind_patched = false;
 bool hybrid_hover_wireframe_patched = false;
 bool wingman_alias_registered = false;
 bool hybridbuild_alias_registered = false;
+bool info_ini_handler_registered = false;
 
 std::uint32_t A2FO_CALL upgrade_pod_maximum_tier() { return 6; }
 bool A2FO_CALL get_original_classlabel(
@@ -258,6 +259,11 @@ void A2FO_CALL log_line(const char* module, const char* message) {
 }
 void* A2FO_CALL armada_module() { return fake_armada; }
 void* A2FO_CALL fleetops_module() { return fleet_ops; }
+const char* A2FO_CALL root_directory() { return "."; }
+std::uint32_t A2FO_CALL extension_root_count() { return 1; }
+const char* A2FO_CALL extension_root(std::uint32_t index) {
+    return index == 0 ? "." : nullptr;
+}
 bool A2FO_CALL register_lookup(
     const char*, A2FO_FofsItemLookupHandler handler, void*) {
     return handler != nullptr;
@@ -278,6 +284,11 @@ bool A2FO_CALL register_alias(const char*, const char* source,
     return false;
 }
 bool A2FO_CALL register_cocoon(const char*, const char*) { return true; }
+bool A2FO_CALL register_info_ini_defaults(
+    const char*, A2FO_InfoIniDefaultsHandler handler, void*) {
+    info_ini_handler_registered = handler != nullptr;
+    return info_ini_handler_registered;
+}
 bool A2FO_CALL install_hook(void* target, void* replacement,
                             std::size_t length,
                             const std::uint8_t* expected,
@@ -432,36 +443,57 @@ int main() {
         static_cast<std::uint8_t*>(static_cast<void*>(fleet_ops)) +
         0x10ad40;
     *object_button_press_slot = object_button_press_original;
-    HMODULE feature = LoadLibraryA("modules\\A2FOFeaturePack.dll");
-    if (!feature) return 3;
-
-    A2FO_ModuleInitFn init = nullptr;
-    FARPROC address = GetProcAddress(feature, "A2FO_ModuleInit");
-    std::memcpy(&init, &address, sizeof(init));
-    if (!init) return 4;
-
     A2FO_ModuleApi api{};
     api.struct_size = sizeof(api);
     api.api_version = A2FO_MODULE_API_VERSION;
     api.log = &log_line;
     api.armada_module = &armada_module;
     api.fleetops_module = &fleetops_module;
+    api.root_directory = &root_directory;
     api.install_inline_hook = &install_hook;
     api.patch_call = &patch_call;
     api.register_fofs_item_lookup_handler = &register_lookup;
+    api.extension_root_count = &extension_root_count;
+    api.extension_root = &extension_root;
     api.register_classlabel_alias = &register_alias;
     api.register_evolver_cocoon_command = &register_cocoon;
     api.api_revision = A2FO_MODULE_API_REVISION;
     api.capabilities = A2FO_CAP_OBJECT_DESTROYED_DISPATCH |
         A2FO_CAP_UPGRADE_POD_POLICY |
         A2FO_CAP_ORIGINAL_CLASSLABEL |
-        A2FO_CAP_COCOON_CLASS_ASSOCIATION;
+        A2FO_CAP_COCOON_CLASS_ASSOCIATION |
+        A2FO_CAP_INFO_INI_DEFAULTS;
     api.upgrade_pod_maximum_tier = &upgrade_pod_maximum_tier;
     api.get_original_classlabel = &get_original_classlabel;
     api.associate_evolver_cocoon_class =
         &associate_evolver_cocoon_class;
-    if (!init(&api)) return 5;
+    api.register_info_ini_defaults_handler =
+        &register_info_ini_defaults;
+
+    const auto initialize_module = [&api](const char* path) -> HMODULE {
+        HMODULE module = LoadLibraryA(path);
+        if (!module) return nullptr;
+        A2FO_ModuleInitFn init = nullptr;
+        FARPROC address = GetProcAddress(module, "A2FO_ModuleInit");
+        std::memcpy(&init, &address, sizeof(init));
+        if (!init || !init(&api)) {
+            FreeLibrary(module);
+            return nullptr;
+        }
+        return module;
+    };
+
+    HMODULE feature = initialize_module(
+        "modules\\A2FOFeaturePack.dll");
+    if (!feature) return 3;
+    HMODULE hybrid = initialize_module(
+        "modules\\A2FOHybridBuild.dll");
+    if (!hybrid) return 4;
+    HMODULE info = initialize_module(
+        "modules\\A2FOInfoIni.dll");
+    if (!info) return 5;
     if (!wingman_alias_registered || !hybridbuild_alias_registered) return 8;
+    if (!info_ini_handler_registered) return 9;
     if (bink_call_patch_count != 4) return 6;
     if (!hybrid_research_start_hooked ||
         !hybrid_research_cancel_hooked ||
@@ -530,6 +562,8 @@ int main() {
         return 7;
     }
 
+    FreeLibrary(info);
+    FreeLibrary(hybrid);
     FreeLibrary(feature);
     FreeLibrary(fleet_ops);
     VirtualFree(fake_armada, 0, MEM_RELEASE);
