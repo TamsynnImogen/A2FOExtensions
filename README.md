@@ -9,7 +9,11 @@ hooks, reusable dispatch, optional native features, and mod-authored Lua logic.
 - Recursive ODF indexing inside active loose roots and `odf.fpq` archives.
 - Correct Data → `ParentMod` → active-mod file precedence.
 - `wingman` classlabel compatibility alias mapped to `craft`.
-- Per-Evolver `cocoon` ODF command for custom cocoon models.
+- `hybridbuild` opt-in classlabel mapped to `research` for the staged
+  HybridBuild implementation, including separate construct/yard/research/evolve
+  menus, one shared ten-slot queue, queued station placement previews, and
+  protected native construction/evolution sidecars.
+- Per-Evolver and HybridBuild `cocoon` ODF command for custom cocoon models.
 - Lua-driven wreckage or replacement objects when units are destroyed.
 - Deterministic `wreckageChance` support suitable for synchronized games.
 - Ctrl-click to fill all ten native construction-queue slots.

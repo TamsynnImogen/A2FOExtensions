@@ -143,3 +143,18 @@ _a2fo_cocoon_selector_hook:
 	popl %ecx
 	popl %eax
 	jmp *_a2fo_cocoon_resume
+
+	# Fleet Ops' second cocoon selector runs inside
+	# Evolver::mUpdateConstructionEffect and expects the selected geometry in
+	# EAX. Reuse the same policy/cache as construction start so a custom cocoon
+	# never falls back to an unloaded default geometry during animation.
+	.globl _a2fo_cocoon_update_selector_hook
+_a2fo_cocoon_update_selector_hook:
+	pushl %ecx
+	pushl %edx
+	pushl %ebx
+	call _a2fo_select_cocoon
+	addl $4, %esp
+	popl %edx
+	popl %ecx
+	jmp *_a2fo_cocoon_update_resume

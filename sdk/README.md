@@ -1,4 +1,4 @@
-# Native module SDK v4 revision 1
+# Native module SDK v4 revision 4
 
 A module must be a 32-bit Windows DLL exporting:
 
@@ -81,3 +81,18 @@ All registrations made by one module initializer form a transaction. Returning
 Registration functions are startup-only. Callbacks and module exports must not
 throw across the C ABI; catch exceptions inside the module and return a safe
 failure value.
+
+Revision 2 appends the dynamic upgrade-pod tier policy query. Revision 3
+appends `get_original_classlabel(parameter_db, output, output_size)` and the
+`A2FO_CAP_ORIGINAL_CLASSLABEL` capability. The core records the normalized ODF
+source before applying a classlabel alias, allowing an aliased feature to keep
+its public identity while Armada constructs the selected native base class.
+The caller supplies the output buffer; no core-owned string escapes the call.
+
+Revision 4 appends
+`associate_evolver_cocoon_class(class_object, parameter_db)` and
+`A2FO_CAP_COCOON_CLASS_ASSOCIATION`. It applies the registered Evolver cocoon
+policy to an aliased/native class object without requiring that object to pass
+through `EvolverClass::BuildClass`. This is intended for a checked adapter that
+provides its own safe construction-effect storage; it does not make foreign
+Evolver subclass methods safe on an arbitrary class.

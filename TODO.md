@@ -1,5 +1,8 @@
 # TODO
 
+- Re-enable the shell display monitor only after its fullscreen handling can be
+  proven not to alter legacy menu and modal-dialog layouts.
+
 ## Architecture and Refactoring
 
 * [x] Make Lua destruction callbacks declare which ODF fields they require. The legacy Lua form retains a deprecated wreckage compatibility shim; the core itself no longer hard-codes those fields.
@@ -268,7 +271,20 @@ Questions to investigate:
 
 #### Hybrid Producer build methods
 
-[IN PROGRESS: YARD/RESEARCH RESEARCHSTATION CANDIDATE IMPLEMENTED]
+[IN PROGRESS: HYBRIDBUILD RESEARCHSTATION SUPPORTS ALL FOUR METHODS]
+
+* [x] Register the staged `hybridbuild -> research` classlabel alias so one
+  stable ODF-facing identity can initially inherit all ResearchStation pod
+  behaviour, then migrate toward sidecars and a standalone factory.
+* [x] Manually confirm that changing the supported station to
+  `classLabel = "hybridbuild"` preserves its pods and all four hybrid
+  menus/queue/execution paths.
+* [x] Preserve the pre-alias classlabel through core API revision 3 and require
+  the `hybridbuild` source identity before publishing hybrid runtime lists.
+  Ordinary `research` stations retain native-only menu/queue behaviour.
+* [x] Manually reconfirm the current hybrid station after source-identity
+  gating and verify a control `research` station does not enter the hybrid
+  registry.
 
 Allow one Producer-derived unit to expose all four explicit production lists
 while retaining `buildItem<N>` as the classLabel-selected compatibility path:
@@ -302,23 +318,43 @@ safety constraint.
   one explicit list to begin at index 0, then retains sparse entries through
   index 56. A generic Producer-class parser was rejected after it destabilized
   the startup class-loading sweep.
-* [x] Publish the first ResearchStation slice with separate stable runtime
-  tables. `yardItem<N>` is shown under the native Build button;
+* [x] Publish the ResearchStation slice with separate stable runtime
+  tables. `constructItem<N>` is shown under its dedicated Construction button;
+  `yardItem<N>` is shown under the native Build button;
   `researchItem<N>` (or the unchanged legacy/tier table when no explicit
-  research list exists) is shown under Research. Yard entries are never
-  appended to the upgrade-pod primary/secondary tables. `constructItem<N>` and
-  `evolveItem<N>` remain registered but unpublished.
+  research list exists) is shown under Research; and `evolveItem<N>` is shown
+  under Evolve. Construct/yard/evolve entries are never appended to upgrade-pod
+  tables.
 * [x] Route ResearchStation `researchItem<N>` through the unmodified native
   research path and `yardItem<N>` through signature-checked generic Producer
   start/cancel/finish/construction-matrix paths, avoiding the overlapping
   ResearchStation and Shipyard subclass tails.
+* [x] Route `evolveItem<N>` through generic Producer timing/FIFO callbacks,
+  a base-only transform matrix, and the safe portion of Evolver's final object
+  handoff. Enforce one terminal evolution barrier across direct, hotkey,
+  Ctrl-fill, repeat, and synchronized command paths.
+* [x] Add API revision 4 cocoon-class association and a protected 28-byte
+  sidecar for hybrid Evolver start/update/stop/cancel/render calls. Restore the
+  overlapping ResearchStation pod fields immediately after every native call,
+  and clean the cocoon before station destruction/final removal.
+* [x] Route `constructItem<N>` through Armada's native cursor placement and a
+  protected ConstructionRig sidecar. Bind one native placement interface to
+  each synchronized queue ID so queued stations retain independent positions
+  and rotations, then select only the active job's transform for construction.
+* [x] Render waiting construction placements through Armada's native
+  placeholder path as yellow translucent station ghosts while their HybridBuild
+  owner remains selected.
 * [x] Reuse ResearchStation's inherited native ten-slot Producer FIFO for both
   yard and research orders. Its one-job busy check is suppressed during both
   hybrid Build and Research UI refreshes, and only while the shared queue has a
   free slot; execution remains one front item at a time.
-* [x] Isolate the hybrid Build category onto Fleet Ops' unused adjacent root
-  control and return a newly selected single hybrid station to root mode once.
-  Native Research, Evolve, and Trade retain their original shared control.
+* [x] Isolate hybrid Build and Evolve onto distinct unused Fleet Ops root
+  controls and return a newly selected single hybrid station to root mode
+  once. Research retains the native shared control; ordinary classes retain
+  native Build/Research/Evolve/Trade behavior.
+* [ ] Finish manual validation of Evolve terminal-barrier cancellation and
+  queue-wireframe combinations. The button/list, final `fresear` replacement,
+  and protected cocoon display/cleanup paths are working in game.
 * [x] Keep hybrid ResearchStations on Fleet Ops' compatible single-object
   display, intercept its two patched dispatcher calls, invoke the native
   callbacks first, then preserve their result registers while binding the ten
@@ -345,10 +381,9 @@ safety constraint.
   do not expose a button until that host/method pair has an execution adapter.
 * [ ] Carry method and queue ID through the synchronized command path so peers
   never infer a method from mutable UI state.
-* [ ] Capture and serialize constructor placement as part of its queued job.
-* [ ] Add the remaining isolated construction, Shipyard-hosted research, and
-  evolution execution adapters. Their state must not share the overlapping
-  native subclass tail.
+* [ ] Serialize captured constructor placements as part of their queued jobs.
+* [ ] Add remaining requested host/method adapters, including Shipyard-hosted
+  research. Their state must not share overlapping native subclass tails.
 * [ ] Stop continuous refill as soon as evolution is queued and keep it blocked
   until the barrier is cancelled; ordinary repeats return to the queue tail.
 * [ ] Disable all four build-list buttons while an evolution barrier exists and
