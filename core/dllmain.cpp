@@ -38,6 +38,7 @@ constexpr std::uintptr_t kCocoonSelectorRva = 0x0b0534;
 constexpr std::uintptr_t kParameterDbGetStringRva = 0x135350;
 constexpr std::uintptr_t kAiMissionGetCurrentRva = 0x00001370;
 constexpr std::uintptr_t kCraftExplodeRva = 0x0c6ab0;
+constexpr std::uintptr_t kGameObjectClassFindProjectIdRva = 0x0cd1f0;
 constexpr std::uintptr_t kGameObjectClassFindRva = 0x0cd370;
 constexpr std::uintptr_t kGameObjectClassConstructRva = 0x0cd390;
 constexpr std::uintptr_t kGameObjectClassGetOdfNameRva = 0x0ce370;
@@ -50,6 +51,9 @@ constexpr std::uintptr_t kAlternativeCocoonRva = 0x33fd3c;
 
 // FleetOpsHook.dll RVAs.
 constexpr std::uintptr_t kFofsItemGetHashLookupCallRva = 0x105fec;
+constexpr std::uintptr_t kFofsItemLocateHashLookupCallRva = 0x1061e2;
+constexpr std::uintptr_t kFofsItemExistsHashLookupCallRva = 0x106263;
+constexpr std::uintptr_t kFofsProjectIdHashLookupCallRva = 0x1063ee;
 constexpr std::uintptr_t kGetFileFromHashTableRva = 0x109c14;
 constexpr std::uintptr_t kGetModUserDirectoryRva = 0x10ab98;
 constexpr std::uintptr_t kFoSettingsGetInstanceRva = 0x13e744;
@@ -75,6 +79,8 @@ const std::uint8_t kExpectedAiMissionGetCurrent[] = {
     0xa1, 0xdc, 0x47, 0x73, 0x00, 0xc3};
 const std::uint8_t kExpectedCraftExplode[] = {
     0x55, 0x8b, 0xec, 0x83, 0xec, 0x20};
+const std::uint8_t kExpectedGameObjectClassFindProjectId[] = {
+    0x55, 0x8b, 0xec, 0x6a, 0xff};
 const std::uint8_t kExpectedGameObjectClassFind[] = {
     0x55, 0x8b, 0xec, 0x8b, 0x45, 0x08};
 const std::uint8_t kExpectedGameObjectClassConstruct[] = {
@@ -88,6 +94,12 @@ const std::uint8_t kExpectedDefaultUserProfileGameSpeed[] = {
     0xb8, 0x05, 0x00, 0x00, 0x00, 0xc3};
 const std::uint8_t kExpectedFofsItemGetHashLookupCall[] = {
     0xe8, 0x23, 0x3c, 0x00, 0x00};
+const std::uint8_t kExpectedFofsItemLocateHashLookupCall[] = {
+    0xe8, 0x2d, 0x3a, 0x00, 0x00};
+const std::uint8_t kExpectedFofsItemExistsHashLookupCall[] = {
+    0xe8, 0xac, 0x39, 0x00, 0x00};
+const std::uint8_t kExpectedFofsProjectIdHashLookupCall[] = {
+    0xe8, 0x21, 0x38, 0x00, 0x00};
 const std::uint8_t kExpectedGetModUserDirectory[] = {
     0x53, 0x56, 0x57, 0x8b, 0xf2};
 const std::uint8_t kExpectedFoSettingsGetInstance[] = {
@@ -143,6 +155,7 @@ a2fo::InlineHook g_build_class_hook;
 a2fo::InlineHook g_dtor_hook;
 a2fo::InlineHook g_parameter_db_get_string_hook;
 a2fo::InlineHook g_craft_explode_hook;
+a2fo::InlineHook g_game_object_class_find_project_id_hook;
 a2fo::InlineHook g_mod_user_directory_hook;
 a2fo::InlineHook g_fo_settings_get_instance_hook;
 a2fo::InlineHook g_game_configuration_new_hook;
@@ -165,6 +178,7 @@ volatile LONG g_fo_settings_first_run = 0;
 volatile LONG g_default_game_speed_logged = 0;
 volatile LONG g_runtime_game_speed_logged = 0;
 volatile LONG g_user_profile_game_speed_logged = 0;
+volatile PVOID g_fo_settings_instance = nullptr;
 bool g_has_default_game_speed = false;
 int g_default_game_speed = 0;
 std::string g_configured_settings_directory;
@@ -188,6 +202,13 @@ struct NativeObjectDestroyedRegistration {
 
 std::unordered_map<std::string, ClasslabelAliasPolicy> g_classlabel_aliases;
 std::unordered_map<std::string, a2fo::LuaOdfSnapshot> g_odf_snapshots;
+
+struct DestroyedOdfLoadContext {
+    a2fo::LuaOdfSnapshot fields;
+};
+
+thread_local DestroyedOdfLoadContext* g_destroyed_odf_load_context = nullptr;
+
 std::string g_evolver_cocoon_command;
 std::string g_evolver_cocoon_owner;
 std::vector<NativeObjectDestroyedRegistration>
@@ -275,7 +296,11 @@ void log_line(const std::string& text) {
     const std::string line = text + "\r\n";
     DWORD written = 0;
     WriteFile(g_log, line.data(), static_cast<DWORD>(line.size()), &written, nullptr);
-    FlushFileBuffers(g_log);
+    // WriteFile makes new diagnostics visible to readers immediately. Forcing
+    // every line through FlushFileBuffers turns large recursive ODF indexes
+    // into hundreds or thousands of synchronous disk commits. Windows flushes
+    // the handle when the process closes; avoid imposing that durability cost
+    // on the game's startup thread.
 }
 
 bool validate_module(HMODULE module, std::uint32_t timestamp,
@@ -500,6 +525,9 @@ void* __attribute__((regparm(1))) fo_settings_get_instance_hook(
     void* settings_class) {
     void* settings = a2fo_call_delphi_one_register(
         g_fo_settings_get_instance_hook.gateway, settings_class);
+    if (settings) {
+        InterlockedExchangePointer(&g_fo_settings_instance, settings);
+    }
     try {
         ensure_fleet_ops_info_defaults();
         if (!g_has_default_game_speed || !settings) return settings;
@@ -521,6 +549,350 @@ void* __attribute__((regparm(1))) fo_settings_get_instance_hook(
         log_line("Fleet Ops first-run Settings.xml default was skipped");
     }
     return settings;
+}
+
+struct ShellDisplaySettings {
+    int display = 0;
+    int width = 0;
+    int height = 0;
+    bool windowed = false;
+};
+
+struct ShellDisplayRuntime {
+    HWND window = nullptr;
+    DWORD windowed_style = 0;
+    DWORD windowed_extended_style = 0;
+    bool window_styles_captured = false;
+    bool settings_logged = false;
+    bool mode_applied = false;
+    bool apply_failure_logged = false;
+    int window_tree_logs = 0;
+    ShellDisplaySettings settings;
+};
+
+struct ArmadaWindowSearch {
+    DWORD process_id = 0;
+    HWND window = nullptr;
+    std::uint64_t score = 0;
+};
+
+struct ArmadaMonitorSearch {
+    int target_index = 0;
+    int current_index = 0;
+    HMONITOR monitor = nullptr;
+};
+
+bool same_shell_display_settings(const ShellDisplaySettings& left,
+                                 const ShellDisplaySettings& right) {
+    return left.display == right.display &&
+           left.width == right.width &&
+           left.height == right.height &&
+           left.windowed == right.windowed;
+}
+
+bool read_shell_display_settings(ShellDisplaySettings& settings) {
+    void* instance = InterlockedCompareExchangePointer(
+        &g_fo_settings_instance, nullptr, nullptr);
+    if (!instance) return false;
+
+    const auto* bytes = static_cast<const std::uint8_t*>(instance);
+    settings.display = *reinterpret_cast<const int*>(bytes + 0x30);
+    settings.width = *reinterpret_cast<const int*>(bytes + 0x34);
+    settings.height = *reinterpret_cast<const int*>(bytes + 0x38);
+    settings.windowed = bytes[0x72] != 0;
+    if (settings.display < 0 || settings.display > 31 ||
+        settings.width < 0 || settings.width > 16384 ||
+        settings.height < 0 || settings.height > 16384) {
+        return false;
+    }
+    return true;
+}
+
+BOOL CALLBACK find_armada_window(HWND window, LPARAM parameter) {
+    auto* search = reinterpret_cast<ArmadaWindowSearch*>(parameter);
+    if (!search || !IsWindowVisible(window)) return TRUE;
+
+    DWORD process_id = 0;
+    GetWindowThreadProcessId(window, &process_id);
+    if (process_id != search->process_id) return TRUE;
+
+    RECT rect{};
+    if (!GetWindowRect(window, &rect)) return TRUE;
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    if (width <= 0 || height <= 0) return TRUE;
+
+    std::uint64_t score = static_cast<std::uint64_t>(width) *
+                          static_cast<std::uint64_t>(height);
+    if (!GetWindow(window, GW_OWNER)) score += (std::uint64_t{1} << 48);
+    if (window == GetForegroundWindow()) score += (std::uint64_t{1} << 52);
+    if (!search->window || score > search->score) {
+        search->window = window;
+        search->score = score;
+    }
+    return TRUE;
+}
+
+HWND get_armada_window() {
+    const HWND foreground = GetForegroundWindow();
+    if (foreground && IsWindowVisible(foreground)) {
+        DWORD process_id = 0;
+        GetWindowThreadProcessId(foreground, &process_id);
+        if (process_id == GetCurrentProcessId()) return foreground;
+    }
+
+    ArmadaWindowSearch search;
+    search.process_id = GetCurrentProcessId();
+    EnumWindows(find_armada_window, reinterpret_cast<LPARAM>(&search));
+    return search.window;
+}
+
+BOOL CALLBACK find_armada_monitor(HMONITOR monitor, HDC, LPRECT,
+                                  LPARAM parameter) {
+    auto* search = reinterpret_cast<ArmadaMonitorSearch*>(parameter);
+    if (!search) return FALSE;
+    if (search->current_index++ == search->target_index) {
+        search->monitor = monitor;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+HMONITOR get_configured_monitor(HWND window, int display) {
+    ArmadaMonitorSearch search;
+    search.target_index = display;
+    EnumDisplayMonitors(nullptr, nullptr, find_armada_monitor,
+                        reinterpret_cast<LPARAM>(&search));
+    if (search.monitor) return search.monitor;
+    return MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+}
+
+void log_armada_window(const char* kind, HWND window) {
+    char title[256]{};
+    char class_name[128]{};
+    GetWindowTextA(window, title, sizeof(title));
+    GetClassNameA(window, class_name, sizeof(class_name));
+    RECT rect{};
+    RECT client{};
+    GetWindowRect(window, &rect);
+    GetClientRect(window, &client);
+    log_line(std::string("Shell display: ") + kind + " window hwnd=" +
+             std::to_string(reinterpret_cast<std::uintptr_t>(window)) +
+             ", title=\"" + title + "\", class=\"" + class_name +
+             "\", outer=" +
+             std::to_string(rect.right - rect.left) + "x" +
+             std::to_string(rect.bottom - rect.top) + "@" +
+             std::to_string(rect.left) + "," + std::to_string(rect.top) +
+             ", client=" +
+             std::to_string(client.right - client.left) + "x" +
+             std::to_string(client.bottom - client.top) +
+             ", parent=" +
+             std::to_string(reinterpret_cast<std::uintptr_t>(
+                 GetParent(window))) +
+             ", owner=" +
+             std::to_string(reinterpret_cast<std::uintptr_t>(
+                 GetWindow(window, GW_OWNER))) +
+             ", style=" +
+             std::to_string(static_cast<DWORD>(
+                 GetWindowLongA(window, GWL_STYLE))));
+}
+
+BOOL CALLBACK log_armada_child_window(HWND window, LPARAM) {
+    log_armada_window("child", window);
+    return TRUE;
+}
+
+BOOL CALLBACK log_armada_top_window(HWND window, LPARAM parameter) {
+    const DWORD expected_process_id = static_cast<DWORD>(parameter);
+    DWORD process_id = 0;
+    GetWindowThreadProcessId(window, &process_id);
+    if (process_id != expected_process_id) return TRUE;
+    log_armada_window("top-level", window);
+    EnumChildWindows(window, log_armada_child_window, 0);
+    return TRUE;
+}
+
+void log_armada_window_tree() {
+    log_line("Shell display: current Armada window tree follows");
+    EnumWindows(log_armada_top_window,
+                static_cast<LPARAM>(GetCurrentProcessId()));
+}
+
+bool set_window_style(HWND window, int index, DWORD style) {
+    SetLastError(ERROR_SUCCESS);
+    const LONG previous = SetWindowLongA(window, index,
+                                         static_cast<LONG>(style));
+    return previous != 0 || GetLastError() == ERROR_SUCCESS;
+}
+
+bool same_rect(const RECT& left, const RECT& right) {
+    return left.left == right.left && left.top == right.top &&
+           left.right == right.right && left.bottom == right.bottom;
+}
+
+void capture_window_styles(ShellDisplayRuntime& runtime, HWND window) {
+    runtime.window = window;
+    runtime.windowed_style =
+        static_cast<DWORD>(GetWindowLongA(window, GWL_STYLE));
+    runtime.windowed_extended_style =
+        static_cast<DWORD>(GetWindowLongA(window, GWL_EXSTYLE));
+    runtime.window_styles_captured = true;
+    runtime.mode_applied = false;
+    runtime.apply_failure_logged = false;
+    log_line("Shell display: Armada window found through Win32");
+}
+
+bool apply_shell_fullscreen(ShellDisplayRuntime& runtime, HWND window,
+                            const MONITORINFO& monitor) {
+    const DWORD style =
+        (runtime.windowed_style &
+         ~(WS_OVERLAPPEDWINDOW | WS_CHILD)) |
+        WS_POPUP | WS_VISIBLE;
+    const DWORD extended_style =
+        runtime.windowed_extended_style &
+        ~(WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE |
+          WS_EX_STATICEDGE);
+    if (static_cast<DWORD>(GetWindowLongA(window, GWL_STYLE)) != style &&
+        !set_window_style(window, GWL_STYLE, style)) {
+        return false;
+    }
+    if (static_cast<DWORD>(GetWindowLongA(window, GWL_EXSTYLE)) !=
+            extended_style &&
+        !set_window_style(window, GWL_EXSTYLE, extended_style)) {
+        return false;
+    }
+
+    RECT current{};
+    if (!GetWindowRect(window, &current)) return false;
+    if (!same_rect(current, monitor.rcMonitor) &&
+        !SetWindowPos(
+            window, HWND_TOP,
+            monitor.rcMonitor.left, monitor.rcMonitor.top,
+            monitor.rcMonitor.right - monitor.rcMonitor.left,
+            monitor.rcMonitor.bottom - monitor.rcMonitor.top,
+            SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_SHOWWINDOW)) {
+        return false;
+    }
+
+    if (!runtime.mode_applied) {
+        log_line("Shell display: borderless fullscreen applied: " +
+                 std::to_string(monitor.rcMonitor.right -
+                                monitor.rcMonitor.left) +
+                 "x" +
+                 std::to_string(monitor.rcMonitor.bottom -
+                                monitor.rcMonitor.top));
+    }
+    return true;
+}
+
+bool apply_shell_windowed_size(ShellDisplayRuntime& runtime, HWND window,
+                               const MONITORINFO& monitor,
+                               const ShellDisplaySettings& settings) {
+    const int target_client_width =
+        settings.width >= 640 ? settings.width : 1200;
+    const int target_client_height =
+        settings.height >= 480 ? settings.height : 900;
+    DWORD style = runtime.windowed_style;
+    if ((style & WS_CAPTION) == 0) {
+        style = (style & ~(WS_POPUP | WS_CHILD)) |
+                WS_OVERLAPPEDWINDOW | WS_VISIBLE;
+    }
+    const DWORD extended_style = runtime.windowed_extended_style;
+    if (static_cast<DWORD>(GetWindowLongA(window, GWL_STYLE)) != style &&
+        !set_window_style(window, GWL_STYLE, style)) {
+        return false;
+    }
+    if (static_cast<DWORD>(GetWindowLongA(window, GWL_EXSTYLE)) !=
+            extended_style &&
+        !set_window_style(window, GWL_EXSTYLE, extended_style)) {
+        return false;
+    }
+
+    RECT outer{0, 0, target_client_width, target_client_height};
+    if (!AdjustWindowRectEx(&outer, style, FALSE, extended_style)) {
+        return false;
+    }
+
+    const int outer_width = outer.right - outer.left;
+    const int outer_height = outer.bottom - outer.top;
+    const int work_width = monitor.rcWork.right - monitor.rcWork.left;
+    const int work_height = monitor.rcWork.bottom - monitor.rcWork.top;
+    const int left = monitor.rcWork.left + (work_width - outer_width) / 2;
+    const int top = monitor.rcWork.top + (work_height - outer_height) / 2;
+    const RECT target{left, top, left + outer_width, top + outer_height};
+    RECT current{};
+    if (!GetWindowRect(window, &current)) return false;
+    if (!same_rect(current, target) &&
+        !SetWindowPos(window, nullptr, left, top, outer_width, outer_height,
+                      SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER |
+                          SWP_FRAMECHANGED | SWP_SHOWWINDOW)) {
+        return false;
+    }
+
+    if (!runtime.mode_applied) {
+        log_line("Shell display: configured windowed size applied: " +
+                 std::to_string(target_client_width) + "x" +
+                 std::to_string(target_client_height));
+    }
+    return true;
+}
+
+void poll_shell_display(ShellDisplayRuntime& runtime) {
+    ShellDisplaySettings settings;
+    if (!read_shell_display_settings(settings)) return;
+    const bool settings_changed =
+        !runtime.settings_logged ||
+        !same_shell_display_settings(runtime.settings, settings);
+    if (settings_changed) {
+        runtime.settings = settings;
+        runtime.settings_logged = true;
+        runtime.mode_applied = false;
+        runtime.apply_failure_logged = false;
+        log_line("Shell display: graphics settings detected: display=" +
+                 std::to_string(settings.display) + ", resolution=" +
+                 std::to_string(settings.width) + "x" +
+                 std::to_string(settings.height) + ", mode=" +
+                 (settings.windowed ? "windowed" : "fullscreen"));
+    }
+
+    const HWND window = get_armada_window();
+    if (!window || !IsWindow(window)) return;
+    if (runtime.window != window || !runtime.window_styles_captured) {
+        capture_window_styles(runtime, window);
+        if (runtime.window_tree_logs++ < 4) log_armada_window_tree();
+    }
+
+    const HMONITOR monitor_handle =
+        get_configured_monitor(window, settings.display);
+    MONITORINFO monitor{};
+    monitor.cbSize = sizeof(monitor);
+    if (!monitor_handle || !GetMonitorInfoA(monitor_handle, &monitor)) return;
+
+    const bool applied = settings.windowed
+        ? apply_shell_windowed_size(runtime, window, monitor, settings)
+        : apply_shell_fullscreen(runtime, window, monitor);
+    if (applied) {
+        runtime.mode_applied = true;
+        runtime.apply_failure_logged = false;
+    } else if (!runtime.apply_failure_logged) {
+        runtime.apply_failure_logged = true;
+        log_line("Shell display: window mode application failed (error " +
+                 std::to_string(GetLastError()) + ")");
+    }
+}
+
+void run_shell_display_monitor() {
+    ShellDisplayRuntime runtime;
+    log_line("Shell display: graphics-settings monitor started");
+    for (;;) {
+        try {
+            poll_shell_display(runtime);
+        } catch (...) {
+            log_line("Shell display: update skipped after an unexpected C++ "
+                     "exception");
+        }
+        Sleep(100);
+    }
 }
 
 void __attribute__((fastcall)) game_configuration_new_hook(
@@ -872,18 +1244,12 @@ bool read_odf_snapshot_value(void* parameter_db, const char* key,
     return found;
 }
 
-void capture_destroyed_object_odf(void* parameter_db) {
-    if (!parameter_db) return;
+void capture_destroyed_object_odf_fields(void* parameter_db) {
+    if (!parameter_db || !g_destroyed_odf_load_context) return;
 
-    a2fo::LuaOdfSnapshot snapshot;
-    std::string basename;
-    if (!read_odf_snapshot_value(parameter_db, "basename", basename)) {
-        return;
-    }
-    const std::string key = normalize_odf_basename(basename);
-    if (key.empty()) return;
-    snapshot.emplace("basename", basename);
-
+    // `basename` is not an ODF command. Capture only the fields requested by
+    // active handlers here; the surrounding GameObjectClass load hook supplies
+    // the real basename once Armada has built the class.
     std::vector<std::string> fields;
     {
         StateLockGuard lock;
@@ -894,12 +1260,9 @@ void capture_destroyed_object_odf(void* parameter_db) {
         if (command == "basename") continue;
         std::string value;
         if (read_odf_snapshot_value(parameter_db, command.c_str(), value)) {
-            snapshot[command] = std::move(value);
+            g_destroyed_odf_load_context->fields[command] = std::move(value);
         }
     }
-
-    StateLockGuard lock;
-    g_odf_snapshots[key] = std::move(snapshot);
 }
 
 bool __attribute__((fastcall)) parameter_db_get_string_hook(
@@ -925,7 +1288,7 @@ bool __attribute__((fastcall)) parameter_db_get_string_hook(
     wait_for_deferred_initialization();
     try {
         if (_stricmp(key, "classlabel") != 0) return found;
-        capture_destroyed_object_odf(self);
+        capture_destroyed_object_odf_fields(self);
         const char* output_end = static_cast<const char*>(
             std::memchr(output, '\0', output_size));
         if (!output_end) return found;
@@ -955,6 +1318,49 @@ bool __attribute__((fastcall)) parameter_db_get_string_hook(
     }
 
     return found;
+}
+
+void* A2FO_CALL game_object_class_find_project_id_hook(
+    const std::uint32_t* project_id) {
+    DestroyedOdfLoadContext context;
+    DestroyedOdfLoadContext* previous_context =
+        g_destroyed_odf_load_context;
+    g_destroyed_odf_load_context = &context;
+
+    using FindProjectIdFunction = void* (A2FO_CALL*)(const std::uint32_t*);
+    const auto original = reinterpret_cast<FindProjectIdFunction>(
+        g_game_object_class_find_project_id_hook.gateway);
+    void* object_class = original(project_id);
+
+    g_destroyed_odf_load_context = previous_context;
+    if (!object_class || context.fields.empty()) return object_class;
+
+    const char* odf_name = static_cast<const char*>(
+        a2fo_call_game_object_method(
+            at(g_armada, kGameObjectClassGetOdfNameRva), object_class));
+    if (!odf_name) return object_class;
+    const char* odf_end = static_cast<const char*>(
+        std::memchr(odf_name, '\0', 256));
+    if (!odf_end) return object_class;
+
+    const std::string basename(
+        odf_name, static_cast<std::size_t>(odf_end - odf_name));
+    const std::string key = normalize_odf_basename(basename);
+    if (key.empty()) return object_class;
+
+    std::string field_names;
+    for (const auto& field : context.fields) {
+        if (!field_names.empty()) field_names += ", ";
+        field_names += field.first;
+    }
+    context.fields["basename"] = basename;
+    {
+        StateLockGuard lock;
+        g_odf_snapshots[key] = std::move(context.fields);
+    }
+    log_line("Destroyed-object ODF fields cached: " + basename +
+             " (" + field_names + ")");
+    return object_class;
 }
 
 struct Matrix34Snapshot {
@@ -991,29 +1397,55 @@ std::uint32_t hash_destroyed_object(const std::string& odf,
 
 DestroyedObjectSnapshot snapshot_destroyed_object(void* self) {
     DestroyedObjectSnapshot snapshot;
-    if (!self) return snapshot;
+    if (!self) {
+        log_line("Object-destroyed snapshot unavailable: null Craft pointer");
+        return snapshot;
+    }
 
     auto* bytes = static_cast<std::uint8_t*>(self);
-    if (bytes[0x113] != 0) return snapshot;
+    if (bytes[0x113] != 0) {
+        log_line("Object-destroyed snapshot unavailable: Craft explosion "
+                 "state was already " + std::to_string(bytes[0x113]));
+        return snapshot;
+    }
     void* object_class = *reinterpret_cast<void**>(bytes + 0x40);
-    if (!object_class) return snapshot;
+    if (!object_class) {
+        log_line("Object-destroyed snapshot unavailable: Craft class was null");
+        return snapshot;
+    }
 
     const char* odf_name = static_cast<const char*>(
         a2fo_call_game_object_method(
             at(g_armada, kGameObjectClassGetOdfNameRva), object_class));
-    if (!odf_name) return snapshot;
+    if (!odf_name) {
+        log_line("Object-destroyed snapshot unavailable: class ODF name was "
+                 "null");
+        return snapshot;
+    }
     const char* odf_end = static_cast<const char*>(
         std::memchr(odf_name, '\0', 256));
-    if (!odf_end) return snapshot;
+    if (!odf_end) {
+        log_line("Object-destroyed snapshot unavailable: class ODF name was "
+                 "not terminated");
+        return snapshot;
+    }
     snapshot.source_odf.assign(
         odf_name, static_cast<std::size_t>(odf_end - odf_name));
     const std::string normalized_odf =
         normalize_odf_basename(snapshot.source_odf);
-    if (normalized_odf.empty()) return snapshot;
+    if (normalized_odf.empty()) {
+        log_line("Object-destroyed snapshot unavailable: class ODF name was "
+                 "empty");
+        return snapshot;
+    }
 
     const void* transform = a2fo_call_game_object_method(
         at(g_armada, kGameObjectGetTransformRva), self);
-    if (!transform) return snapshot;
+    if (!transform) {
+        log_line("Object-destroyed snapshot unavailable: " +
+                 snapshot.source_odf + " had no transform");
+        return snapshot;
+    }
     std::memcpy(snapshot.transform.values.data(), transform,
                 snapshot.transform.values.size() * sizeof(float));
     snapshot.source_team = *reinterpret_cast<const int*>(bytes + 0xec);
@@ -1032,6 +1464,10 @@ DestroyedObjectSnapshot snapshot_destroyed_object(void* self) {
         normalized_odf, snapshot.source_handle, snapshot.source_team,
         snapshot.transform);
     snapshot.valid = true;
+    log_line("Object-destroyed snapshot ready: " + snapshot.source_odf +
+             " (" + std::to_string(snapshot.lua_event.odf.size()) +
+             " ODF field" +
+             (snapshot.lua_event.odf.size() == 1 ? "" : "s") + ")");
     return snapshot;
 }
 
@@ -1201,7 +1637,14 @@ void __attribute__((fastcall)) craft_explode_hook(void* self, void*) {
             replace = a2fo::resolve_object_destroyed(
                 g_lua_host, source.lua_event, replacement);
         }
-        if (replace) spawn_object_replacement(source, replacement);
+        if (replace) {
+            log_line("Object-destroyed event claimed: " +
+                     source.source_odf + " -> " + replacement.odf);
+            spawn_object_replacement(source, replacement);
+        } else if (source.lua_event.odf.size() > 1) {
+            log_line("Object-destroyed event was not claimed for configured "
+                     "ODF: " + source.source_odf);
+        }
     } catch (...) {
         log_line("Object-destroyed callback skipped after an unexpected "
                  "C++ exception");
@@ -1216,6 +1659,9 @@ bool install_object_destroyed_hook() {
         std::memcmp(at(g_armada, kCraftExplodeRva),
                     kExpectedCraftExplode,
                     sizeof(kExpectedCraftExplode)) != 0 ||
+        std::memcmp(at(g_armada, kGameObjectClassFindProjectIdRva),
+                    kExpectedGameObjectClassFindProjectId,
+                    sizeof(kExpectedGameObjectClassFindProjectId)) != 0 ||
         std::memcmp(at(g_armada, kGameObjectClassFindRva),
                     kExpectedGameObjectClassFind,
                     sizeof(kExpectedGameObjectClassFind)) != 0 ||
@@ -1233,6 +1679,15 @@ bool install_object_destroyed_hook() {
         return false;
     }
     if (!a2fo::install_inline_hook(
+            at(g_armada, kGameObjectClassFindProjectIdRva),
+            reinterpret_cast<void*>(&game_object_class_find_project_id_hook),
+            sizeof(kExpectedGameObjectClassFindProjectId),
+            kExpectedGameObjectClassFindProjectId,
+            g_game_object_class_find_project_id_hook)) {
+        log_line("Could not install destroyed-object ODF field capture hook");
+        return false;
+    }
+    if (!a2fo::install_inline_hook(
             at(g_armada, kCraftExplodeRva),
             reinterpret_cast<void*>(&craft_explode_hook),
             sizeof(kExpectedCraftExplode), kExpectedCraftExplode,
@@ -1240,7 +1695,7 @@ bool install_object_destroyed_hook() {
         log_line("Could not install object-destroyed hook");
         return false;
     }
-    log_line("Object-destroyed dispatcher enabled");
+    log_line("Object-destroyed dispatcher and ODF field capture enabled");
     return true;
 }
 
@@ -1371,19 +1826,44 @@ bool install_fofs_item_get_lookup_hook() {
     if (!g_fleet_ops ||
         std::memcmp(at(g_fleet_ops, kFofsItemGetHashLookupCallRva),
                     kExpectedFofsItemGetHashLookupCall,
-                    sizeof(kExpectedFofsItemGetHashLookupCall)) != 0) {
-        log_line("Fleet Operations ODF item lookup call signature mismatch");
+                    sizeof(kExpectedFofsItemGetHashLookupCall)) != 0 ||
+        std::memcmp(at(g_fleet_ops, kFofsItemLocateHashLookupCallRva),
+                    kExpectedFofsItemLocateHashLookupCall,
+                    sizeof(kExpectedFofsItemLocateHashLookupCall)) != 0 ||
+        std::memcmp(at(g_fleet_ops, kFofsItemExistsHashLookupCallRva),
+                    kExpectedFofsItemExistsHashLookupCall,
+                    sizeof(kExpectedFofsItemExistsHashLookupCall)) != 0 ||
+        std::memcmp(at(g_fleet_ops, kFofsProjectIdHashLookupCallRva),
+                    kExpectedFofsProjectIdHashLookupCall,
+                    sizeof(kExpectedFofsProjectIdHashLookupCall)) != 0) {
+        log_line("Fleet Operations ODF lookup call signature mismatch");
         return false;
     }
     if (!a2fo::patch_call(
             at(g_fleet_ops, kFofsItemGetHashLookupCallRva),
             reinterpret_cast<void*>(&fofs_item_get_hash_lookup_hook),
             kExpectedFofsItemGetHashLookupCall,
-            sizeof(kExpectedFofsItemGetHashLookupCall))) {
-        log_line("Could not install Fleet Operations ODF item lookup hook");
+            sizeof(kExpectedFofsItemGetHashLookupCall)) ||
+        !a2fo::patch_call(
+            at(g_fleet_ops, kFofsItemLocateHashLookupCallRva),
+            reinterpret_cast<void*>(&fofs_item_get_hash_lookup_hook),
+            kExpectedFofsItemLocateHashLookupCall,
+            sizeof(kExpectedFofsItemLocateHashLookupCall)) ||
+        !a2fo::patch_call(
+            at(g_fleet_ops, kFofsItemExistsHashLookupCallRva),
+            reinterpret_cast<void*>(&fofs_item_get_hash_lookup_hook),
+            kExpectedFofsItemExistsHashLookupCall,
+            sizeof(kExpectedFofsItemExistsHashLookupCall)) ||
+        !a2fo::patch_call(
+            at(g_fleet_ops, kFofsProjectIdHashLookupCallRva),
+            reinterpret_cast<void*>(&fofs_item_get_hash_lookup_hook),
+            kExpectedFofsProjectIdHashLookupCall,
+            sizeof(kExpectedFofsProjectIdHashLookupCall))) {
+        log_line("Could not install Fleet Operations ODF lookup hooks");
         return false;
     }
-    log_line("FOFS item lookup dispatcher enabled");
+    log_line("FOFS item lookup dispatcher enabled for get, locate, exists, "
+             "and project IDs");
     return true;
 }
 
@@ -1666,6 +2146,10 @@ const char* A2FO_CALL api_extension_root(std::uint32_t index) {
     return g_extension_roots[index].c_str();
 }
 
+std::uint32_t A2FO_CALL api_upgrade_pod_maximum_tier() {
+    return g_lua_host.upgrade_pod_maximum_tier;
+}
+
 A2FO_ModuleApi make_module_api() {
     A2FO_ModuleApi api{};
     api.struct_size = sizeof(api);
@@ -1685,9 +2169,11 @@ A2FO_ModuleApi make_module_api() {
     api.register_evolver_cocoon_command =
         &api_register_evolver_cocoon_command;
     api.api_revision = A2FO_MODULE_API_REVISION;
-    api.capabilities = A2FO_CAP_OBJECT_DESTROYED_DISPATCH;
+    api.capabilities = A2FO_CAP_OBJECT_DESTROYED_DISPATCH |
+        A2FO_CAP_UPGRADE_POD_POLICY;
     api.register_object_destroyed_handler =
         &api_register_object_destroyed_handler;
+    api.upgrade_pod_maximum_tier = &api_upgrade_pod_maximum_tier;
     return api;
 }
 
@@ -1952,9 +2438,10 @@ bool A2FO_CALL A2FO_Initialize() {
 
 DWORD WINAPI initialize_worker(void*) {
     g_initialize_thread_id = GetCurrentThreadId();
-    A2FO_Initialize();
+    const bool initialized = A2FO_Initialize();
     g_initialize_thread_id = 0;
     InterlockedExchange(&g_deferred_initialization_finished, 1);
+    if (initialized) run_shell_display_monitor();
     return 0;
 }
 

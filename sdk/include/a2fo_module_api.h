@@ -16,7 +16,7 @@
 #endif
 
 #define A2FO_MODULE_API_VERSION 4u
-#define A2FO_MODULE_API_REVISION 1u
+#define A2FO_MODULE_API_REVISION 2u
 
 // The major version remains 4 so DLLs compiled against the original v4 ABI
 // continue to load. Revisions append fields to A2FO_ModuleApi; never insert or
@@ -24,6 +24,7 @@
 enum A2FO_ModuleCapability : std::uint64_t {
     A2FO_CAP_NONE = 0,
     A2FO_CAP_OBJECT_DESTROYED_DISPATCH = 1ull << 0,
+    A2FO_CAP_UPGRADE_POD_POLICY = 1ull << 1,
 };
 
 enum A2FO_ObjectReplacementFlags : std::uint32_t {
@@ -152,6 +153,10 @@ struct A2FO_ModuleApi {
         std::uint32_t required_odf_field_count,
         A2FO_ObjectDestroyedHandler handler,
         void* user_data);
+
+    // Revision 2 addition. Returns the Lua-configured maximum upgrade-pod
+    // tier. The value is dynamic because native modules load before scripts.
+    std::uint32_t (A2FO_CALL* upgrade_pod_maximum_tier)();
 };
 
 #define A2FO_MODULE_API_V4_BASE_SIZE \

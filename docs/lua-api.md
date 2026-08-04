@@ -9,18 +9,36 @@ case-insensitive filename order.
 
 ```lua
 a2fo.api_version       -- major Lua API version (1)
-a2fo.api_revision      -- compatible appended revision (1)
+a2fo.api_revision      -- compatible appended revision (2)
 a2fo.lua_version       -- embedded Lua version string
 a2fo.extension_roots   -- low-to-high-precedence root list
 a2fo.log(message)      -- writes a prefixed line to A2FOExtensions.log
-a2fo.require_api(1, 1) -- stop this script if the host is too old
+a2fo.require_api(1, 2) -- stop this script if the host is too old
 a2fo.has_capability("declared_destroyed_odf_fields")
+a2fo.has_capability("configurable_upgrade_pods")
 ```
 
 Scripts should call `a2fo.require_api` before registering callbacks that depend
 on a revision. A script's registrations are transactional: if its startup chunk
 errors, all callbacks and ownership claims made by that script are rolled back
 before the next script runs.
+
+## Upgrade-pod policy
+
+```lua
+a2fo.require_api(1, 2)
+a2fo.configure_upgrade_pods({ maximum_tier = 6 })
+```
+
+One selected startup script may own this policy. `maximum_tier` must be an
+integer from 3 through the native hard ceiling of 16. With no policy the
+vanilla maximum remains 3. A failed script relinquishes the ownership claim
+and restores the previous value transactionally. Because the policy affects
+simulation state, every multiplayer peer must use the same script.
+
+The function exposes configuration only; checked native hooks in
+`A2FOFeaturePack.dll` implement the engine behaviour. See
+[`upgrade-pods.md`](upgrade-pods.md).
 
 ## Classlabel callback
 

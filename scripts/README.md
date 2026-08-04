@@ -9,6 +9,10 @@ by token Lua files.
 deterministic chance roll, and asks the native bridge to construct the chosen
 neutral wreckage at the old transform.
 
+`UpgradePods.lua` owns the startup-only upgrade-pod policy and currently sets
+the maximum to tier 6. A mod can replace it by shipping a script with the same
+basename in its own `scripts` folder.
+
 Modders may add or replace scripts when they need conditional logic through
 the callback API:
 
@@ -21,7 +25,8 @@ a2fo.on_evolver_cocoon(function(odf)
     return sod_name_or_nil
 end)
 
-a2fo.require_api(1, 1)
+a2fo.require_api(1, 2)
+a2fo.configure_upgrade_pods({ maximum_tier = 6 })
 a2fo.on_object_destroyed({"fieldName"}, function(event)
     return replacement_table_or_nil
 end)

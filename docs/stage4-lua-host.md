@@ -40,7 +40,8 @@ Higher-precedence mods replace a policy by overriding the same script basename.
 
 The callback surface was proven with wingman and cocoon, but those one-line
 policies did not justify production Lua scripts. Both built-in behaviours now
-live in `A2FOFeaturePack.dll`; the production `scripts` folder is empty. The Lua
+live in `A2FOFeaturePack.dll`. The production scripts now include bounded
+upgrade-pod policy and wreckage gameplay logic. The Lua
 host remains for mod-specific logic that combines ODF reads, conditions, and
 semantic actions. `scripts\examples\ModSpecificRules.lua` demonstrates new
 per-ODF compatibility and computed-cocoon commands without loading by default.

@@ -62,6 +62,22 @@ other game versions.
 | Fleet Ops | `0x1229b8`, `0x122a10` | checked push/build-command push |
 | Fleet Ops | `0x122c8c`, `0x122ef4` | delete/clear queue callbacks |
 
+## Upgrade-pod feature pack
+
+| Image | RVA | Use |
+| --- | ---: | --- |
+| Armada | `0x0b95f0`, `0x0b95a0` | ResearchPod attach/detach tracking |
+| Armada | `0x0b99b0`, `0x0b9b50` | per-station tier-list lifetime |
+| Armada | `0x096340` | Team upgrade-manager lookup |
+| Armada | `0x0987d0` | bounded tier-3 multiplier projection |
+| Armada | `0x0cd370` | tier build-item class lookup |
+| Armada | `0x135350` | tier build-item ParameterDB reads through the core dispatcher |
+| Fleet Ops | `0x10c5e4`, `0x10c618` | ResearchPodClass load/lifetime sidecar |
+| Fleet Ops | `0x11c988` | ProducerClass 57-slot build-list allocation at class `+0x450` |
+| Fleet Ops | `0x1e3e00` | ResearchStationClass secondary-list and `providedBuildItem` parsing |
+| Fleet Ops | `0x1e3ea0` | ResearchStationClass build permission for sidecar higher-tier pod classes |
+| Fleet Ops | `0x1fcffc` | extended ResearchPod same-type comparison |
+
 Address provenance is the Armada II 1.1 symbol map/PDB and the Fleet Ops public
 map for the identified binaries, followed by instruction-level disassembly and
 runtime-byte preflight. Fleet Ops' map code offsets require the `.text` section

@@ -21,6 +21,7 @@ EXTENSION_ROOTS_TEST := $(BUILD_DIR)/extension_roots_test
 EXTENSION_ROOT_SMOKE := $(BUILD_DIR)/extension_root_discovery_smoke.exe
 LUA_HOST_SMOKE := $(BUILD_DIR)/lua_host_smoke.exe
 MODULE_API_TEST := $(BUILD_DIR)/module_api_test
+HYBRID_PRODUCTION_TEST := $(BUILD_DIR)/hybrid_production_test
 
 LUA_SOURCES := \
 	$(LUA_DIR)/lapi.c \
@@ -95,8 +96,16 @@ $(MODULE_DIR)/ExampleModule.dll: \
 
 $(MODULE_DIR)/A2FOFeaturePack.dll: \
 		modules/A2FOFeaturePack/odf_recursive.cpp \
+		modules/A2FOFeaturePack/bink_video.cpp \
+		modules/A2FOFeaturePack/bink_video.hpp \
+		modules/A2FOFeaturePack/hybrid_production.cpp \
+		modules/A2FOFeaturePack/hybrid_production.hpp \
+		modules/A2FOFeaturePack/hybrid_production_runtime.cpp \
+		modules/A2FOFeaturePack/hybrid_production_runtime.hpp \
 		modules/A2FOFeaturePack/queue_enhancement.cpp \
 		modules/A2FOFeaturePack/queue_enhancement.hpp \
+		modules/A2FOFeaturePack/upgrade_pods.cpp \
+		modules/A2FOFeaturePack/upgrade_pods.hpp \
 		modules/A2FOFeaturePack/delphi_bridge.S \
 		core/fpq_paths.cpp core/fpq_paths.hpp \
 		core/odf_paths.cpp core/odf_paths.hpp \
@@ -104,9 +113,14 @@ $(MODULE_DIR)/A2FOFeaturePack.dll: \
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
 		-o $@ \
 		modules/A2FOFeaturePack/odf_recursive.cpp \
+		modules/A2FOFeaturePack/bink_video.cpp \
+		modules/A2FOFeaturePack/hybrid_production.cpp \
+		modules/A2FOFeaturePack/hybrid_production_runtime.cpp \
 		modules/A2FOFeaturePack/queue_enhancement.cpp \
+		modules/A2FOFeaturePack/upgrade_pods.cpp \
 		modules/A2FOFeaturePack/delphi_bridge.S \
-		core/fpq_paths.cpp core/odf_paths.cpp
+		core/fpq_paths.cpp core/odf_paths.cpp \
+		-lgdi32
 
 $(SMOKE_TEST): tests/dll_load_smoke.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -static -static-libgcc -static-libstdc++ \
@@ -149,6 +163,14 @@ $(MODULE_API_TEST): tests/module_api_test.cpp \
 	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
 		-Isdk/include -o $@ $<
 
+$(HYBRID_PRODUCTION_TEST): tests/hybrid_production_test.cpp \
+		modules/A2FOFeaturePack/hybrid_production.cpp \
+		modules/A2FOFeaturePack/hybrid_production.hpp | $(BUILD_DIR)
+	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+		-Imodules/A2FOFeaturePack -o $@ \
+		tests/hybrid_production_test.cpp \
+		modules/A2FOFeaturePack/hybrid_production.cpp
+
 verify: release
 	@echo "A2FOExtensions exports:"
 	@$(OBJDUMP) -p $(BUILD_DIR)/A2FOExtensions.dll | \
@@ -181,11 +203,12 @@ verify-sdk: sdk-examples
 		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|DLL Name" || true
 
 test: $(FPQ_PATHS_TEST) $(ODF_PATHS_TEST) $(EXTENSION_ROOTS_TEST) \
-	$(MODULE_API_TEST)
+	$(MODULE_API_TEST) $(HYBRID_PRODUCTION_TEST)
 	$(FPQ_PATHS_TEST)
 	$(ODF_PATHS_TEST)
 	$(EXTENSION_ROOTS_TEST)
 	$(MODULE_API_TEST)
+	$(HYBRID_PRODUCTION_TEST)
 
 smoke: release $(SMOKE_TEST)
 	cd $(BUILD_DIR) && wine dll_load_smoke.exe

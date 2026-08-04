@@ -131,3 +131,103 @@ _a2fo_call_thiscall_2:
 	call *8(%ebp)
 	leave
 	ret
+
+	.globl _a2fo_call_thiscall_3
+_a2fo_call_thiscall_3:
+	pushl %ebp
+	movl %esp, %ebp
+	pushl 24(%ebp)
+	pushl 20(%ebp)
+	pushl 16(%ebp)
+	movl 12(%ebp), %ecx
+	call *8(%ebp)
+	leave
+	ret
+
+	.globl _a2fo_call_thiscall_4
+_a2fo_call_thiscall_4:
+	pushl %ebp
+	movl %esp, %ebp
+	pushl 28(%ebp)
+	pushl 24(%ebp)
+	pushl 20(%ebp)
+	pushl 16(%ebp)
+	movl 12(%ebp), %ecx
+	call *8(%ebp)
+	leave
+	ret
+
+	# Fleet Ops sprite helpers use Delphi's EAX/EDX/ECX convention. These
+	# adapters let the hybrid hover preview use the same database lookup,
+	# colour, and scaled-draw path as SelectionDisplay.
+	.globl _a2fo_fo_database_find_element
+_a2fo_fo_database_find_element:
+	pushl %ebp
+	movl %esp, %ebp
+	movl 12(%ebp), %eax
+	movl 16(%ebp), %edx
+	xorl %ecx, %ecx
+	call *8(%ebp)
+	leave
+	ret
+
+	.globl _a2fo_fo_sprite_set_colour
+_a2fo_fo_sprite_set_colour:
+	pushl %ebp
+	movl %esp, %ebp
+	movl 12(%ebp), %eax
+	movl 16(%ebp), %edx
+	call *8(%ebp)
+	leave
+	ret
+
+	.globl _a2fo_fo_sprite_draw_scaled_2d
+_a2fo_fo_sprite_draw_scaled_2d:
+	pushl %ebp
+	movl %esp, %ebp
+	pushl 24(%ebp)
+	pushl 20(%ebp)
+	movl 12(%ebp), %eax
+	movl 16(%ebp), %edx
+	call *8(%ebp)
+	leave
+	ret
+
+	# Keep hybrid ResearchStations on Fleet Ops' stable single-object path.
+	# These shims call the original callback first, then run the queue post-pass
+	# with the callback's result registers preserved. The display callback has
+	# no stack argument; the simulate callback receives one argument and returns
+	# with `ret 4`, so its shim duplicates that argument for the inner call and
+	# performs the original cleanup when returning to Armada.
+	.extern _a2fo_hybrid_queue_post_dispatch
+	.extern _a2fo_fo_single_object_display_target
+	.extern _a2fo_fo_single_object_simulate_target
+
+	.globl _a2fo_ship_display_single_object_display_dispatch
+_a2fo_ship_display_single_object_display_dispatch:
+	pushl %ecx
+	call *_a2fo_fo_single_object_display_target
+	pushal
+	movl 32(%esp), %eax
+	pushl $1
+	pushl %eax
+	call _a2fo_hybrid_queue_post_dispatch
+	addl $8, %esp
+	popal
+	addl $4, %esp
+	ret
+
+	.globl _a2fo_ship_display_single_object_simulate_dispatch
+_a2fo_ship_display_single_object_simulate_dispatch:
+	pushl %ecx
+	pushl 8(%esp)
+	call *_a2fo_fo_single_object_simulate_target
+	pushal
+	movl 32(%esp), %eax
+	pushl $0
+	pushl %eax
+	call _a2fo_hybrid_queue_post_dispatch
+	addl $8, %esp
+	popal
+	addl $4, %esp
+	ret $4
