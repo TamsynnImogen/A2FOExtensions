@@ -16,7 +16,7 @@
 #endif
 
 #define A2FO_MODULE_API_VERSION 4u
-#define A2FO_MODULE_API_REVISION 2u
+#define A2FO_MODULE_API_REVISION 4u
 
 // The major version remains 4 so DLLs compiled against the original v4 ABI
 // continue to load. Revisions append fields to A2FO_ModuleApi; never insert or
@@ -25,6 +25,8 @@ enum A2FO_ModuleCapability : std::uint64_t {
     A2FO_CAP_NONE = 0,
     A2FO_CAP_OBJECT_DESTROYED_DISPATCH = 1ull << 0,
     A2FO_CAP_UPGRADE_POD_POLICY = 1ull << 1,
+    A2FO_CAP_ORIGINAL_CLASSLABEL = 1ull << 2,
+    A2FO_CAP_COCOON_CLASS_ASSOCIATION = 1ull << 3,
 };
 
 enum A2FO_ObjectReplacementFlags : std::uint32_t {
@@ -157,6 +159,23 @@ struct A2FO_ModuleApi {
     // Revision 2 addition. Returns the Lua-configured maximum upgrade-pod
     // tier. The value is dynamic because native modules load before scripts.
     std::uint32_t (A2FO_CALL* upgrade_pod_maximum_tier)();
+
+    // Revision 3 addition. Classlabel aliases replace ParameterDB's public
+    // value before Armada selects a native class. This query preserves the
+    // normalized source label requested by the ODF so an aliased feature can
+    // retain its own identity while deliberately using a native base class.
+    bool (A2FO_CALL* get_original_classlabel)(
+        void* parameter_db,
+        char* output,
+        std::uint32_t output_size);
+
+    // Revision 4 addition. Associates an aliased/native class object with the
+    // same registered cocoon policy used by EvolverClass::BuildClass. This
+    // lets a deliberately aliased host retain per-ODF cocoon selection while
+    // continuing to use its safe native base class.
+    bool (A2FO_CALL* associate_evolver_cocoon_class)(
+        void* class_object,
+        void* parameter_db);
 };
 
 #define A2FO_MODULE_API_V4_BASE_SIZE \

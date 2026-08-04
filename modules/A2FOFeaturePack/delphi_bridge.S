@@ -157,6 +157,27 @@ _a2fo_call_thiscall_4:
 	leave
 	ret
 
+	# Armada's synchronized build-command receiver reads
+	# ConstructionRig::mBuildPositionInterface directly from ESI+0x2a4. A
+	# hybrid ResearchStation owns pod data at that address, so resolve the
+	# interface through the feature sidecar and resume immediately after the
+	# replaced six-byte load. The original instruction preserves EAX/EDX; this
+	# bridge does the same while returning the selected interface in ECX.
+	.extern _a2fo_hybrid_build_position_for_command
+	.extern _a2fo_hybrid_build_position_load_continue
+	.globl _a2fo_hybrid_build_position_load_dispatch
+_a2fo_hybrid_build_position_load_dispatch:
+	pushl %eax
+	pushl %edx
+	pushl %edi
+	pushl %esi
+	call _a2fo_hybrid_build_position_for_command
+	addl $8, %esp
+	movl %eax, %ecx
+	popl %edx
+	popl %eax
+	jmp *_a2fo_hybrid_build_position_load_continue
+
 	# Fleet Ops sprite helpers use Delphi's EAX/EDX/ECX convention. These
 	# adapters let the hybrid hover preview use the same database lookup,
 	# colour, and scaled-draw path as SelectionDisplay.

@@ -1049,10 +1049,14 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     g_state_lock_ready = true;
     const bool wingman_enabled = api->register_classlabel_alias(
         kModuleName, "wingman", "craft");
+    const bool hybridbuild_enabled = api->register_classlabel_alias(
+        kModuleName, "hybridbuild", "research");
     const bool cocoon_enabled = api->register_evolver_cocoon_command(
         kModuleName, "cocoon");
     log_line(std::string("Wingman classlabel alias: ") +
              (wingman_enabled ? "enabled" : "not registered"));
+    log_line(std::string("HybridBuild classlabel alias to ResearchStation: ") +
+             (hybridbuild_enabled ? "enabled" : "not registered"));
     log_line(std::string("Evolver cocoon ODF command: ") +
              (cocoon_enabled ? "enabled" : "not registered"));
     if (!api->register_fofs_item_lookup_handler(

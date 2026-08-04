@@ -35,6 +35,8 @@ constexpr std::uint32_t kFleetOpsImageSize = 0x00322000;
 constexpr std::uintptr_t kEvolverClassBuildClassRva = 0x0a85e0;
 constexpr std::uintptr_t kEvolverClassDtorRva = 0x0a85d0;
 constexpr std::uintptr_t kCocoonSelectorRva = 0x0b0534;
+constexpr std::uintptr_t kCocoonUpdateSelectorRva = 0x400d10;
+constexpr std::uintptr_t kCocoonUpdateResumeRva = 0x0b0c1b;
 constexpr std::uintptr_t kParameterDbGetStringRva = 0x135350;
 constexpr std::uintptr_t kAiMissionGetCurrentRva = 0x00001370;
 constexpr std::uintptr_t kCraftExplodeRva = 0x0c6ab0;
@@ -48,6 +50,8 @@ constexpr std::uintptr_t kLoadSodRva = 0x22cf10;
 constexpr std::uintptr_t kSodDatabaseRva = 0x3ad508;
 constexpr std::uintptr_t kDefaultCocoonRva = 0x33fccc;
 constexpr std::uintptr_t kAlternativeCocoonRva = 0x33fd3c;
+constexpr char kDefaultCocoonName[] = "8472_cocoon.sod";
+constexpr char kAlternativeCocoonName[] = "8472_cocoon2.sod";
 
 // FleetOpsHook.dll RVAs.
 constexpr std::uintptr_t kFofsItemGetHashLookupCallRva = 0x105fec;
@@ -63,6 +67,9 @@ constexpr std::uintptr_t kGameConfigurationLoadProfileRva = 0x13ea8c;
 constexpr std::uintptr_t kDelphiLStrAsgRva = 0x00570c;
 
 constexpr std::size_t kMaximumPathLength = 32767;
+// Temporarily leave Fleet Ops/Armada in control of shell and menu sizing.
+// The monitor remains available for later repair without affecting gameplay.
+constexpr bool kShellDisplayMonitorEnabled = false;
 
 // A timestamp alone is not enough protection for an injected hook. Each patch
 // also verifies the exact instructions it is about to replace, and fails
@@ -70,6 +77,8 @@ constexpr std::size_t kMaximumPathLength = 32767;
 const std::uint8_t kExpectedBuildClass[] = {0x55, 0x8b, 0xec, 0x6a, 0xff};
 const std::uint8_t kExpectedDtor[] = {0xc7, 0x01, 0x44, 0x1b, 0x6b, 0x00};
 const std::uint8_t kExpectedCocoonJump[] = {0xe9, 0xa7, 0x07, 0x35, 0x00};
+const std::uint8_t kExpectedCocoonUpdateSelector[] = {
+    0x8b, 0x83, 0xe8, 0x01, 0x00, 0x00};
 const std::uint8_t kExpectedParameterDbGetString[] = {
     0x55,
     0x8b, 0xec,
@@ -137,6 +146,7 @@ extern "C" void* a2fo_call_delphi_one_register(
 extern "C" void* a2fo_call_delphi_two_registers(
     void* function, void* eax_argument, void* edx_argument);
 extern "C" void a2fo_cocoon_selector_hook();
+extern "C" void a2fo_cocoon_update_selector_hook();
 
 HMODULE g_armada = nullptr;
 HMODULE g_fleet_ops = nullptr;
@@ -201,6 +211,7 @@ struct NativeObjectDestroyedRegistration {
 };
 
 std::unordered_map<std::string, ClasslabelAliasPolicy> g_classlabel_aliases;
+std::unordered_map<void*, std::string> g_original_classlabels;
 std::unordered_map<std::string, a2fo::LuaOdfSnapshot> g_odf_snapshots;
 
 struct DestroyedOdfLoadContext {
@@ -582,6 +593,18 @@ struct ArmadaMonitorSearch {
     HMONITOR monitor = nullptr;
 };
 
+bool is_armada_main_window(HWND window, DWORD process_id) {
+    if (!window || !IsWindowVisible(window)) return false;
+
+    DWORD window_process_id = 0;
+    GetWindowThreadProcessId(window, &window_process_id);
+    if (window_process_id != process_id) return false;
+
+    char class_name[64]{};
+    return GetClassNameA(window, class_name, sizeof(class_name)) > 0 &&
+           _stricmp(class_name, "TMainWindowForm") == 0;
+}
+
 bool same_shell_display_settings(const ShellDisplaySettings& left,
                                  const ShellDisplaySettings& right) {
     return left.display == right.display &&
@@ -610,11 +633,9 @@ bool read_shell_display_settings(ShellDisplaySettings& settings) {
 
 BOOL CALLBACK find_armada_window(HWND window, LPARAM parameter) {
     auto* search = reinterpret_cast<ArmadaWindowSearch*>(parameter);
-    if (!search || !IsWindowVisible(window)) return TRUE;
-
-    DWORD process_id = 0;
-    GetWindowThreadProcessId(window, &process_id);
-    if (process_id != search->process_id) return TRUE;
+    if (!search || !is_armada_main_window(window, search->process_id)) {
+        return TRUE;
+    }
 
     RECT rect{};
     if (!GetWindowRect(window, &rect)) return TRUE;
@@ -634,15 +655,12 @@ BOOL CALLBACK find_armada_window(HWND window, LPARAM parameter) {
 }
 
 HWND get_armada_window() {
+    const DWORD process_id = GetCurrentProcessId();
     const HWND foreground = GetForegroundWindow();
-    if (foreground && IsWindowVisible(foreground)) {
-        DWORD process_id = 0;
-        GetWindowThreadProcessId(foreground, &process_id);
-        if (process_id == GetCurrentProcessId()) return foreground;
-    }
+    if (is_armada_main_window(foreground, process_id)) return foreground;
 
     ArmadaWindowSearch search;
-    search.process_id = GetCurrentProcessId();
+    search.process_id = process_id;
     EnumWindows(find_armada_window, reinterpret_cast<LPARAM>(&search));
     return search.window;
 }
@@ -1298,6 +1316,7 @@ bool __attribute__((fastcall)) parameter_db_get_string_hook(
         std::string replacement;
         {
             StateLockGuard lock;
+            g_original_classlabels[self] = source;
             if (!a2fo::transform_classlabel(
                     g_lua_host, self, source, replacement)) {
                 const auto alias = g_classlabel_aliases.find(source);
@@ -1699,6 +1718,10 @@ bool install_object_destroyed_hook() {
     return true;
 }
 
+bool associate_evolver_cocoon_class(void* class_object,
+                                    void* parameter_db,
+                                    const char* class_kind);
+
 void* __attribute__((fastcall)) evolver_class_build_class_hook(
     void* self, void*, void* parameter_db) {
     // Let Armada construct the complete class first, then associate the final
@@ -1706,6 +1729,15 @@ void* __attribute__((fastcall)) evolver_class_build_class_hook(
     void* result = a2fo_call_evolver_build_class(g_build_class_hook.gateway,
                                                   self, parameter_db);
     wait_for_deferred_initialization();
+    associate_evolver_cocoon_class(result, parameter_db, "EvolverClass");
+    return result;
+}
+
+bool associate_evolver_cocoon_class(void* class_object,
+                                    void* parameter_db,
+                                    const char* class_kind) {
+    if (!class_object || !parameter_db || !g_state_lock_ready) return false;
+
     char basename[MAX_PATH]{};
     std::string value;
     std::string command;
@@ -1731,18 +1763,22 @@ void* __attribute__((fastcall)) evolver_class_build_class_hook(
                                      sizeof(basename), "<unnamed>");
     }
     const std::string cocoon = normalize_cocoon_name(value.c_str());
-    EnterCriticalSection(&g_state_lock);
-    if (result) {
+    try {
+        StateLockGuard lock;
         if (cocoon.empty()) {
-            g_class_cocoons.erase(result);
+            g_class_cocoons.erase(class_object);
         } else {
-            g_class_cocoons[result] = cocoon;
+            g_class_cocoons[class_object] = cocoon;
         }
+    } catch (...) {
+        log_line("Cocoon class association could not retain its policy; "
+                 "using Fleet Ops default");
+        return false;
     }
-    LeaveCriticalSection(&g_state_lock);
-    log_line("EvolverClass " + std::string(basename) + " cocoon: " +
+    log_line(std::string(class_kind ? class_kind : "EvolverClass") + " " +
+             std::string(basename) + " cocoon: " +
              (cocoon.empty() ? "<Fleet Ops default>" : cocoon));
-    return result;
+    return true;
 }
 
 void* __attribute__((fastcall)) evolver_class_dtor_hook(void* self, void*) {
@@ -1794,7 +1830,10 @@ bool install_evolver_hooks() {
         std::memcmp(at(g_armada, kEvolverClassDtorRva), kExpectedDtor,
                     sizeof(kExpectedDtor)) != 0 ||
         std::memcmp(at(g_armada, kCocoonSelectorRva), kExpectedCocoonJump,
-                    sizeof(kExpectedCocoonJump)) != 0) {
+                    sizeof(kExpectedCocoonJump)) != 0 ||
+        std::memcmp(at(g_armada, kCocoonUpdateSelectorRva),
+                    kExpectedCocoonUpdateSelector,
+                    sizeof(kExpectedCocoonUpdateSelector)) != 0) {
         log_line("Evolver hook signature mismatch; no evolver hooks installed");
         return false;
     }
@@ -1816,6 +1855,14 @@ bool install_evolver_hooks() {
                           reinterpret_cast<void*>(&a2fo_cocoon_selector_hook),
                           kExpectedCocoonJump, sizeof(kExpectedCocoonJump))) {
         log_line("Cocoon selector hook signature mismatch");
+        return false;
+    }
+    if (!a2fo::patch_jump(
+            at(g_armada, kCocoonUpdateSelectorRva),
+            reinterpret_cast<void*>(&a2fo_cocoon_update_selector_hook),
+            kExpectedCocoonUpdateSelector,
+            sizeof(kExpectedCocoonUpdateSelector))) {
+        log_line("Cocoon update selector hook signature mismatch");
         return false;
     }
     log_line("Evolver policy hooks enabled");
@@ -2150,6 +2197,41 @@ std::uint32_t A2FO_CALL api_upgrade_pod_maximum_tier() {
     return g_lua_host.upgrade_pod_maximum_tier;
 }
 
+bool A2FO_CALL api_get_original_classlabel(
+    void* parameter_db, char* output, std::uint32_t output_size) {
+    if (!parameter_db || !output || output_size == 0 ||
+        !g_state_lock_ready) {
+        return false;
+    }
+    output[0] = '\0';
+    try {
+        StateLockGuard lock;
+        const auto found = g_original_classlabels.find(parameter_db);
+        if (found == g_original_classlabels.end() ||
+            found->second.size() + 1 > output_size) {
+            return false;
+        }
+        std::memcpy(output, found->second.c_str(), found->second.size() + 1);
+        return true;
+    } catch (...) {
+        output[0] = '\0';
+        return false;
+    }
+}
+
+bool A2FO_CALL api_associate_evolver_cocoon_class(
+    void* class_object, void* parameter_db) {
+    if (!g_evolver_hooks_ready) return false;
+    try {
+        return associate_evolver_cocoon_class(
+            class_object, parameter_db, "Hybrid class");
+    } catch (...) {
+        log_line("Hybrid cocoon class association failed; using Fleet Ops "
+                 "default");
+        return false;
+    }
+}
+
 A2FO_ModuleApi make_module_api() {
     A2FO_ModuleApi api{};
     api.struct_size = sizeof(api);
@@ -2170,10 +2252,17 @@ A2FO_ModuleApi make_module_api() {
         &api_register_evolver_cocoon_command;
     api.api_revision = A2FO_MODULE_API_REVISION;
     api.capabilities = A2FO_CAP_OBJECT_DESTROYED_DISPATCH |
-        A2FO_CAP_UPGRADE_POD_POLICY;
+        A2FO_CAP_UPGRADE_POD_POLICY |
+        A2FO_CAP_ORIGINAL_CLASSLABEL;
+    if (g_evolver_hooks_ready) {
+        api.capabilities |= A2FO_CAP_COCOON_CLASS_ASSOCIATION;
+    }
     api.register_object_destroyed_handler =
         &api_register_object_destroyed_handler;
     api.upgrade_pod_maximum_tier = &api_upgrade_pod_maximum_tier;
+    api.get_original_classlabel = &api_get_original_classlabel;
+    api.associate_evolver_cocoon_class =
+        &api_associate_evolver_cocoon_class;
     return api;
 }
 
@@ -2333,6 +2422,7 @@ DWORD WINAPI initialize(void*) {
 
 extern "C" {
 void* a2fo_cocoon_resume = nullptr;
+void* a2fo_cocoon_update_resume = nullptr;
 }
 
 extern "C" void* a2fo_select_cocoon(void* evolver) {
@@ -2393,7 +2483,30 @@ extern "C" void* a2fo_select_cocoon(void* evolver) {
         *reinterpret_cast<const std::uint32_t*>(bytes + 0x1e8) == 0;
     const std::uintptr_t pointer_rva = alternative ? kAlternativeCocoonRva
                                                    : kDefaultCocoonRva;
-    return *at<void*>(g_armada, pointer_rva);
+    void** fallback_slot = at<void*>(g_armada, pointer_rva);
+    if (*fallback_slot) {
+        return *fallback_slot;
+    }
+
+    // Evolver's constructor normally initializes these two process globals.
+    // A ResearchStation-hosted hybrid can start evolution before any native
+    // Evolver exists, so reproduce that lazy load here instead of returning a
+    // null geometry to the start/update effect paths.
+    const char* fallback_name = alternative ? kAlternativeCocoonName
+                                            : kDefaultCocoonName;
+    void* database = *at<void*>(g_armada, kSodDatabaseRva);
+    void* geometry = database ? a2fo_load_sod(at(g_armada, kLoadSodRva),
+                                              database, fallback_name)
+                              : nullptr;
+    if (geometry) {
+        *fallback_slot = geometry;
+        log_line("Initialized Fleet Ops default cocoon on demand: " +
+                 std::string(fallback_name));
+    } else {
+        log_line("Could not initialize Fleet Ops default cocoon: " +
+                 std::string(fallback_name));
+    }
+    return geometry;
 }
 
 extern "C" __declspec(dllexport)
@@ -2426,6 +2539,7 @@ bool A2FO_CALL A2FO_Initialize() {
     }
 
     a2fo_cocoon_resume = at(g_armada, kCocoonSelectorRva + 5);
+    a2fo_cocoon_update_resume = at(g_armada, kCocoonUpdateResumeRva);
     if (!g_state_lock_ready) {
         InitializeCriticalSection(&g_state_lock);
         g_state_lock_ready = true;
@@ -2441,7 +2555,13 @@ DWORD WINAPI initialize_worker(void*) {
     const bool initialized = A2FO_Initialize();
     g_initialize_thread_id = 0;
     InterlockedExchange(&g_deferred_initialization_finished, 1);
-    if (initialized) run_shell_display_monitor();
+    if (initialized) {
+        if (kShellDisplayMonitorEnabled) {
+            run_shell_display_monitor();
+        } else {
+            log_line("Shell display: graphics-settings monitor disabled");
+        }
+    }
     return 0;
 }
 
@@ -2459,6 +2579,8 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
         g_fleet_ops = GetModuleHandleA("FleetOpsHook.dll");
         if (g_armada) {
             a2fo_cocoon_resume = at(g_armada, kCocoonSelectorRva + 5);
+            a2fo_cocoon_update_resume = at(
+                g_armada, kCocoonUpdateResumeRva);
         }
         InitializeCriticalSection(&g_state_lock);
         g_state_lock_ready = true;

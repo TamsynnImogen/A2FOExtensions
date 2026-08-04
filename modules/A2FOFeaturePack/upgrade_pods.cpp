@@ -822,6 +822,8 @@ std::uintptr_t __attribute__((fastcall)) station_constructor_hook(
 
 std::uintptr_t __attribute__((fastcall)) station_destructor_hook(
     void* station, void*) noexcept {
+    cleanup_hybrid_construction(station);
+    cleanup_hybrid_cocoon(station);
     const std::uintptr_t result = a2fo_call_thiscall_0(
         g_station_destructor_hook.gateway, station);
     forget_station_progression(station);

@@ -167,6 +167,7 @@ void stop_continuous(void* producer) {
 
 std::uint32_t fill_queue_checked(void* producer, void* target_class) {
     if (!producer || !target_class) return 0;
+    if (hybrid_production_has_evolution_barrier(producer)) return 0;
     if (hybrid_production_has_queued_research_conflict(
             producer, target_class)) {
         return 0;
@@ -175,8 +176,11 @@ std::uint32_t fill_queue_checked(void* producer, void* target_class) {
     const std::uint32_t initial = *reinterpret_cast<std::uint32_t*>(
         producer_bytes + kQueueCountOffset);
     std::uint32_t count = initial;
+    const bool evolve = hybrid_production_is_evolve_target(
+        producer, target_class);
+    const std::uint32_t attempt_limit = evolve ? 1 : kQueueCapacity;
     for (std::uint32_t attempt = 0;
-         attempt < kQueueCapacity && count < kQueueCapacity; ++attempt) {
+         attempt < attempt_limit && count < kQueueCapacity; ++attempt) {
         a2fo_call_thiscall_1(
             at(g_fleet_ops, kFoProducerPushCheckedRva), producer,
             reinterpret_cast<std::uintptr_t>(target_class));
@@ -214,7 +218,8 @@ void __attribute__((fastcall)) game_object_dequeue_class_command_hook(
                   static_cast<unsigned long>(added));
     log_message(fill_message);
 
-    if (!continuous) {
+    if (!continuous || hybrid_production_is_evolve_target(
+            game_object, target_class)) {
         stop_continuous(game_object);
         return;
     }
@@ -249,6 +254,10 @@ void try_refill(void* producer) {
     }
     if (!target_class) return;
 
+    if (hybrid_production_has_evolution_barrier(producer)) {
+        stop_continuous(producer);
+        return;
+    }
     if (hybrid_production_has_queued_research_conflict(
             producer, target_class)) {
         return;
@@ -276,6 +285,11 @@ void try_refill(void* producer) {
 void __attribute__((fastcall)) game_object_queue_class_command_hook(
     void* game_object, void*, std::uint32_t command,
     void* target_class) {
+    if (command == kBuildCommand && target_class &&
+        hybrid_production_should_defer_construct_order(
+            game_object, target_class)) {
+        return;
+    }
     if (command == kBuildCommand && target_class) {
         retain_hybrid_research_menu_after_order(
             game_object, target_class);
@@ -307,9 +321,25 @@ void __attribute__((fastcall)) game_object_queue_class_command_hook(
 
 void __attribute__((fastcall)) producer_command_push_hook(
     void* producer, void*, void* target_class) {
+    if (producer && target_class &&
+        hybrid_production_should_defer_construct_order(
+            producer, target_class)) {
+        return;
+    }
     if (!g_repeat_ready || !producer || !target_class) {
+        const std::uint32_t before = producer
+            ? *reinterpret_cast<const std::uint32_t*>(
+                  bytes(producer) + kQueueCountOffset)
+            : 0;
         a2fo_call_thiscall_1(g_fo_command_push_hook.gateway, producer,
                             reinterpret_cast<std::uintptr_t>(target_class));
+        if (producer && target_class) {
+            const std::uint32_t after =
+                *reinterpret_cast<const std::uint32_t*>(
+                    bytes(producer) + kQueueCountOffset);
+            finalize_hybrid_construct_order(
+                producer, target_class, after > before);
+        }
         return;
     }
 
@@ -321,7 +351,11 @@ void __attribute__((fastcall)) producer_command_push_hook(
     const bool research_conflict =
         hybrid_production_has_queued_research_conflict(
             producer, target_class);
-    bool suppress = research_conflict;
+    const bool evolution_barrier =
+        hybrid_production_has_evolution_barrier(producer);
+    const bool evolve_target = hybrid_production_is_evolve_target(
+        producer, target_class);
+    bool suppress = research_conflict || evolution_barrier;
     const std::uint32_t handle = object_handle(producer);
     try {
         EnterCriticalSection(&g_queue_lock);
@@ -330,7 +364,8 @@ void __attribute__((fastcall)) producer_command_push_hook(
             g_logged_synchronized_build_path = true;
             log_message("First synchronized Producer build command reached");
         }
-        if (state.active && state.target_class == target_class) {
+        if (state.active && state.target_class == target_class &&
+            !evolve_target) {
             state.active = false;
             state.target_class = nullptr;
             state.target_project_id = 0;
@@ -345,7 +380,7 @@ void __attribute__((fastcall)) producer_command_push_hook(
         LeaveCriticalSection(&g_queue_lock);
     } catch (...) {
         LeaveCriticalSection(&g_queue_lock);
-        suppress = research_conflict;
+        suppress = research_conflict || evolution_barrier;
     }
 
     const std::uint32_t before = *reinterpret_cast<const std::uint32_t*>(
@@ -354,11 +389,13 @@ void __attribute__((fastcall)) producer_command_push_hook(
         a2fo_call_thiscall_1(g_fo_command_push_hook.gateway, producer,
                             reinterpret_cast<std::uintptr_t>(target_class));
     }
+    const std::uint32_t after =
+        *reinterpret_cast<const std::uint32_t*>(
+            bytes(producer) + kQueueCountOffset);
+    finalize_hybrid_construct_order(
+        producer, target_class, !suppress && after > before);
     if (g_synchronized_push_log_count < kSynchronizedPushLogLimit) {
         ++g_synchronized_push_log_count;
-        const std::uint32_t after =
-            *reinterpret_cast<const std::uint32_t*>(
-                bytes(producer) + kQueueCountOffset);
         char message[160];
         std::snprintf(
             message, sizeof(message),
@@ -368,6 +405,8 @@ void __attribute__((fastcall)) producer_command_push_hook(
             static_cast<unsigned long>(before),
             static_cast<unsigned long>(after),
             research_conflict ? "research conflict rejected"
+                              : evolution_barrier
+                                  ? "evolution barrier rejected"
                               : suppress ? "repeat marker suppressed"
                                          : "forwarded");
         log_message(message);
@@ -392,11 +431,13 @@ void __attribute__((fastcall)) producer_act_delete_hook(
     void* producer, void*, std::uint32_t queue_id) {
     stop_continuous(producer);
     a2fo_call_thiscall_1(g_fo_act_delete_hook.gateway, producer, queue_id);
+    discard_hybrid_construct_placement(producer, queue_id);
 }
 
 void __attribute__((fastcall)) producer_clear_hook(void* producer, void*) {
     stop_continuous(producer);
     a2fo_call_thiscall_0(g_fo_clear_hook.gateway, producer);
+    clear_hybrid_construct_placements(producer);
 }
 
 void __attribute__((fastcall)) producer_simulate_hook(
