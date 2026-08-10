@@ -12,6 +12,9 @@ hooks, reusable dispatch, optional native features, and mod-authored Lua logic.
   individually configurable amounts of Dilithium, Tritanium, Metal, Supplies,
   and Crew (10,000 each by default), and restores the missing `m`, `dis`,
   `crash`, and true team-elimination `elim` cheats.
+- Optional ODF-driven captain names and ship registries, row-aligned with the
+  native `possibleCraftNames` choice and displayed only for the selected craft
+  through `infoSingleCaptainTextArea` and `infoSingleRegistryTextArea`.
 - Experimental indexed hull-mounted turrets through matching `turretX` and
   `turretHardpointX` ODF commands, with independent weapons, hitpoints, yaw,
   pitch, slew rates, ownership changes, and save/load reconnection.
@@ -147,6 +150,54 @@ pitch, slew rates, and rest angles. See
 [`modules/A2FOTurrets/README.md`](modules/A2FOTurrets/README.md) for the full
 contract and current first-version limitations.
 
+Give any ordinary weapon an optional owner-local three-dimensional firing
+volume:
+
+```text
+fireArcMode = "box"
+fireArcYaw = 0
+fireArcPitch = 0
+fireArcYawAngle = 90
+fireArcPitchAngle = 60
+```
+
+`box` uses independent total yaw and pitch coverage; `cone` uses
+`fireArcAngle` for a true circular cone. The shorter `fireArcCenter` and
+`fireArcWidth` commands define a horizontal box with unrestricted pitch.
+Weapons without the new commands retain native Fleet Operations firing-arc
+behavior. See
+[`modules/A2FOFireArcs/README.md`](modules/A2FOFireArcs/README.md) for the
+complete orientation, precedence, validation, and fallback rules.
+
+Ordinary cannon, phaser, pulse, and torpedo weapon ODFs can also use the
+active Fleet Operations technology tree. Add the weapon ODF to the usual
+`.tt` file just like any other project:
+
+```text
+fbphas.odf 1 fresearch.odf
+```
+
+An unlisted normal weapon is treated as `0` and remains available. Listed
+weapons use Fleet Operations' native prerequisite evaluation; special weapons
+retain their existing native path. See
+[`modules/A2FONormalWeaponTech/README.md`](modules/A2FONormalWeaponTech/README.md).
+
+Give a Craft-derived object candidate captain names and registries:
+
+```text
+possibleCraftNames = "USS Enterprise" "USS Excelsior"
+possibleCaptainNames = "Captain A" "Captain B"
+possibleCraftRegistry = "NCC-1701" "NX-2000"
+```
+
+Entry `N` in both companion lists follows Fleet Operations' native ship-name
+entry `N`. Enable their selected-panel positions with
+`infoSingleCaptainTextArea` and `infoSingleRegistryTextArea` in the active GUI
+configuration, and optionally set `captainNameColor` and `shipRegistryColor`.
+See
+[`modules/A2FOCraftIdentity/README.md`](modules/A2FOCraftIdentity/README.md)
+for placement, fallback, determinism, and save/load details.
+
 Select a custom cocoon model for an Evolver (`.sod` is optional):
 
 ```text
@@ -250,6 +301,12 @@ The two optional Fleet Ops mod-information fields are documented in
 [`docs/fleetops-info-defaults.md`](docs/fleetops-info-defaults.md).
 Legacy texture-folder activation and precedence are documented in
 [`modules/A2FORGBTextures/README.md`](modules/A2FORGBTextures/README.md).
+Captain/registry ODF lists and GUI fields are documented in
+[`modules/A2FOCraftIdentity/README.md`](modules/A2FOCraftIdentity/README.md).
+Three-dimensional weapon firing volumes are documented in
+[`modules/A2FOFireArcs/README.md`](modules/A2FOFireArcs/README.md).
+Normal-weapon technology-tree enforcement is documented in
+[`modules/A2FONormalWeaponTech/README.md`](modules/A2FONormalWeaponTech/README.md).
 Indexed hull-turret ODF commands and validation status are documented in
 [`modules/A2FOTurrets/README.md`](modules/A2FOTurrets/README.md).
 Armada 1 parent-mod scope and installation are documented in
@@ -265,9 +322,12 @@ Armada II/
 ├── Win2kDisableTaskSwitch.dll
 ├── Win2kDisableTaskSwitch.original.dll
 ├── modules/
+│   ├── A2FOCraftIdentity.dll
+│   ├── A2FOFireArcs.dll
 │   ├── A2FOFeaturePack.dll
 │   ├── A2FOHybridBuild.dll
 │   ├── A2FOInfoIni.dll
+│   ├── A2FONormalWeaponTech.dll
 │   ├── A2FORGBTextures.dll
 │   └── A2FOTurrets.dll
 ├── scripts/
@@ -313,6 +373,9 @@ build/Win2kDisableTaskSwitch.dll
 build/modules/A2FOFeaturePack.dll
 build/modules/A2FOHybridBuild.dll
 build/modules/A2FOInfoIni.dll
+build/modules/A2FOCraftIdentity.dll
+build/modules/A2FOFireArcs.dll
+build/modules/A2FONormalWeaponTech.dll
 build/modules/A2FORGBTextures.dll
 build/modules/A2FOTurrets.dll
 build/sta1-classic/modules/A1Compat.dll

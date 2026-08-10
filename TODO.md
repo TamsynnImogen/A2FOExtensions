@@ -299,6 +299,57 @@ angles. See `modules/A2FOTurrets/README.md`.
 * [LATER] Add optional two-piece yaw-base/pitch-barrel articulation if rigid
   whole-SOD rotation proves insufficient for authored turret models.
 
+### Command Palette Layout Modes
+
+[BLOCKED: COMMUNITY APPROVAL REQUIRED]
+
+Do not implement or repurpose `paletteMode` until the Armada/Fleet Operations
+community has had an opportunity to object. Although Fleet Operations does not
+expose the setting in its interface, Armada's three native runtime paths remain
+functional and an unknown mod or user profile may still depend on them.
+
+Proposed moddable `gui_interface.cfg` contract:
+
+```ini
+paletteMode = 0  // repaired automatic popup palette
+paletteMode = 1  // Armada II / Fleet Operations static Palette A
+paletteMode = 2  // Armada I-style static Palette B
+```
+
+Mode `1` must remain the default when the command is absent so existing mods
+retain their current Armada II/Fleet Operations interface without data edits.
+Modes `0` and `2` require explicit opt-in.
+
+Current evidence:
+
+* [x] Confirm native mode `0` selects the floating `paletteWidth` by
+  `paletteHeight` popup path.
+* [x] Confirm native mode `1` selects `staticPaletteWidthA`,
+  `staticPaletteHeightA`, and `popupPaletteXA`/`popupPaletteYA`.
+* [x] Confirm native mode `2` selects `staticPaletteWidthB`,
+  `staticPaletteHeightB`, and `popupPaletteXB`/`popupPaletteYB`.
+* [x] Live-test modes `0`, `1`, and `2` through the active per-mod profile.
+  Mode `2` works; mode `0` currently appears only after a command hotkey and
+  is not useful as an automatic popup interface.
+
+Work after community approval:
+
+* [ ] Read an optional `paletteMode` from `gui_interface.cfg` and define its
+  precedence over the existing per-user `Settings.xml` value.
+* [ ] Preserve mode `1` as the fail-safe value for missing, malformed, or
+  out-of-range configuration.
+* [ ] Repair mode `0` so selecting an object with available commands can show
+  its popup palette without first invoking a command hotkey.
+* [ ] Retain hotkey toggle/back-navigation behaviour without making the popup
+  dependent upon that hotkey.
+* [ ] Keep mode `1` on the static A geometry and mode `2` on the static B
+  geometry rather than introducing hardcoded layouts.
+* [ ] Test selection changes, empty selections, submenu navigation, multiple
+  selection, construction placement, cinematics, save/load, every supported
+  aspect ratio, and mods which omit `paletteMode`.
+* [ ] Document the compatibility decision and community response before
+  enabling the feature in a release build.
+
 ### Single-Player Mission Selector Redesign
 
 [DESIGN] Replace the fixed native Single Player mission selector with a
