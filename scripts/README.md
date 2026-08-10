@@ -1,8 +1,9 @@
 # Lua scripts
 
-The built-in recursive ODF, wingman alias, and Evolver cocoon features live in
-`A2FOFeaturePack.dll`. They are native engine extensions and are not represented
-by token Lua files.
+The built-in recursive ODF and queue features live in
+`A2FOFeaturePack.dll`. The Armada 1-specific `wingman -> craft` alias lives in
+`A1Compat.dll`, while HybridBuild owns its Evolver cocoon policy. These are
+native engine extensions and are not represented by token Lua files.
 
 `Wreckage.lua` is a production example with actual gameplay logic. It reads
 `wreckage` and `wreckageChance` from a destroyed craft's ODF, makes a

@@ -13,6 +13,17 @@ DLLFLAGS := -shared -static -static-libgcc -static-libstdc++ \
 
 BUILD_DIR := build
 MODULE_DIR := $(BUILD_DIR)/modules
+STA1_CLASSIC_DIR := $(BUILD_DIR)/sta1-classic
+STA1_CLASSIC_MODULE_DIR := $(STA1_CLASSIC_DIR)/modules
+STA1_COMPAT_MODULE := $(MODULE_DIR)/A1Compat.dll
+CHEATS_MODULE := $(MODULE_DIR)/A2FOCheats.dll
+TURRETS_MODULE := $(MODULE_DIR)/A2FOTurrets.dll
+STA1_CLASSIC_GUI_CFG := \
+	mods/STA1Classic/misc/gui_fed.cfg \
+	mods/STA1Classic/misc/gui_bor.cfg \
+	mods/STA1Classic/misc/gui_kli.cfg \
+	mods/STA1Classic/misc/gui_rom.cfg
+STA1_CLASSIC_SPRITE_REGISTRY := mods/STA1Classic/Sprites/sprites.spr
 SMOKE_TEST := $(BUILD_DIR)/dll_load_smoke.exe
 FPQ_PATHS_TEST := $(BUILD_DIR)/fpq_paths_test
 ODF_PATHS_TEST := $(BUILD_DIR)/odf_paths_test
@@ -22,6 +33,7 @@ EXTENSION_ROOT_SMOKE := $(BUILD_DIR)/extension_root_discovery_smoke.exe
 LUA_HOST_SMOKE := $(BUILD_DIR)/lua_host_smoke.exe
 MODULE_API_TEST := $(BUILD_DIR)/module_api_test
 HYBRID_PRODUCTION_TEST := $(BUILD_DIR)/hybrid_production_test
+TURRET_MATH_TEST := $(BUILD_DIR)/turret_math_test
 
 LUA_SOURCES := \
 	$(LUA_DIR)/lapi.c \
@@ -60,8 +72,9 @@ CORE_SOURCES := \
 	core/delphi_bridge.S \
 	$(LUA_SOURCES)
 
-.PHONY: all release sdk-examples clean verify verify-sdk test smoke \
-	odf-module-smoke extension-root-smoke lua-host-smoke
+.PHONY: all release sta1-classic verify-sta1-classic sdk-examples clean \
+	verify verify-sdk test smoke odf-module-smoke extension-root-smoke \
+	lua-host-smoke
 
 all: release
 
@@ -70,7 +83,27 @@ release: \
 	$(BUILD_DIR)/Win2kDisableTaskSwitch.dll \
 	$(MODULE_DIR)/A2FOFeaturePack.dll \
 	$(MODULE_DIR)/A2FOHybridBuild.dll \
-	$(MODULE_DIR)/A2FOInfoIni.dll
+	$(MODULE_DIR)/A2FOInfoIni.dll \
+	$(CHEATS_MODULE) \
+	$(TURRETS_MODULE) \
+	$(MODULE_DIR)/A2FORGBTextures.dll
+
+sta1-classic: release $(STA1_CLASSIC_MODULE_DIR) $(STA1_COMPAT_MODULE) $(STA1_CLASSIC_GUI_CFG) \
+		$(STA1_CLASSIC_SPRITE_REGISTRY)
+	mkdir -p $(STA1_CLASSIC_DIR)/AI $(STA1_CLASSIC_DIR)/bzn \
+		$(STA1_CLASSIC_DIR)/misc $(STA1_CLASSIC_DIR)/odf \
+		$(STA1_CLASSIC_DIR)/sod $(STA1_CLASSIC_DIR)/sounds \
+		$(STA1_CLASSIC_DIR)/sprites $(STA1_CLASSIC_DIR)/techtree \
+		$(STA1_CLASSIC_DIR)/textures
+	cp mods/STA1Classic/info.ini $(STA1_CLASSIC_DIR)/info.ini
+	cp mods/STA1Classic/a1compat.ini $(STA1_CLASSIC_DIR)/a1compat.ini
+	cp mods/STA1Classic/README.md $(STA1_CLASSIC_DIR)/README.md
+	cp $(STA1_CLASSIC_GUI_CFG) $(STA1_CLASSIC_DIR)/misc/
+	cp $(STA1_CLASSIC_SPRITE_REGISTRY) $(STA1_CLASSIC_DIR)/sprites/
+	cp $(STA1_COMPAT_MODULE) \
+		$(STA1_CLASSIC_MODULE_DIR)/A1Compat.dll
+	cp $(MODULE_DIR)/A2FORGBTextures.dll \
+		$(STA1_CLASSIC_MODULE_DIR)/A2FORGBTextures.dll
 
 sdk-examples: $(MODULE_DIR)/ExampleModule.dll
 
@@ -78,6 +111,9 @@ $(BUILD_DIR):
 	mkdir -p $@
 
 $(MODULE_DIR):
+	mkdir -p $@
+
+$(STA1_CLASSIC_MODULE_DIR):
 	mkdir -p $@
 
 $(BUILD_DIR)/A2FOExtensions.dll: $(CORE_SOURCES) | $(BUILD_DIR)
@@ -145,6 +181,41 @@ $(MODULE_DIR)/A2FOInfoIni.dll: \
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
 		-o $@ modules/A2FOInfoIni/module.cpp core/extension_roots.cpp
 
+$(CHEATS_MODULE): \
+		modules/A2FOCheats/module.cpp \
+		modules/A2FOCheats/thiscall_bridge.S \
+		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
+		-o $@ modules/A2FOCheats/module.cpp \
+		modules/A2FOCheats/thiscall_bridge.S
+
+$(TURRETS_MODULE): \
+		modules/A2FOTurrets/module.cpp \
+		modules/A2FOTurrets/turret_math.cpp \
+		modules/A2FOTurrets/turret_math.hpp \
+		modules/A2FOTurrets/thiscall_bridge.S \
+		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
+		-o $@ modules/A2FOTurrets/module.cpp \
+		modules/A2FOTurrets/turret_math.cpp \
+		modules/A2FOTurrets/thiscall_bridge.S
+
+$(MODULE_DIR)/A2FORGBTextures.dll: \
+		modules/A2FORGBTextures/module.cpp \
+		modules/A2FORGBTextures/thiscall_bridge.S \
+		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
+		-o $@ modules/A2FORGBTextures/module.cpp \
+		modules/A2FORGBTextures/thiscall_bridge.S
+
+$(STA1_COMPAT_MODULE): \
+		modules/A1Compat/module.cpp \
+		modules/A1Compat/thiscall_bridge.S \
+		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
+		-o $@ modules/A1Compat/module.cpp \
+		modules/A1Compat/thiscall_bridge.S
+
 $(SMOKE_TEST): tests/dll_load_smoke.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -static -static-libgcc -static-libstdc++ \
 		-o $@ $<
@@ -194,6 +265,14 @@ $(HYBRID_PRODUCTION_TEST): tests/hybrid_production_test.cpp \
 		tests/hybrid_production_test.cpp \
 		modules/A2FOHybridBuild/hybrid_production.cpp
 
+$(TURRET_MATH_TEST): tests/turret_math_test.cpp \
+		modules/A2FOTurrets/turret_math.cpp \
+		modules/A2FOTurrets/turret_math.hpp | $(BUILD_DIR)
+	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+		-Imodules/A2FOTurrets -o $@ \
+		tests/turret_math_test.cpp \
+		modules/A2FOTurrets/turret_math.cpp
+
 verify: release
 	@echo "A2FOExtensions exports:"
 	@$(OBJDUMP) -p $(BUILD_DIR)/A2FOExtensions.dll | \
@@ -215,13 +294,28 @@ verify: release
 	@$(OBJDUMP) -p $(MODULE_DIR)/A2FOInfoIni.dll | \
 		grep -E "A2FO_ModuleInit|DLL Name" || true
 	@echo
+	@echo "A2FOCheats module exports:"
+	@$(OBJDUMP) -p $(CHEATS_MODULE) | \
+		grep -E "A2FO_ModuleInit|DLL Name" || true
+	@echo
+	@echo "A2FOTurrets module exports:"
+	@$(OBJDUMP) -p $(TURRETS_MODULE) | \
+		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|DLL Name" || true
+	@echo
+	@echo "A2FORGBTextures module exports:"
+	@$(OBJDUMP) -p $(MODULE_DIR)/A2FORGBTextures.dll | \
+		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|DLL Name" || true
+	@echo
 	@echo "Checking for non-system MinGW runtime dependencies:"
 	@for dll in \
 		$(BUILD_DIR)/A2FOExtensions.dll \
 		$(BUILD_DIR)/Win2kDisableTaskSwitch.dll \
 		$(MODULE_DIR)/A2FOFeaturePack.dll \
 		$(MODULE_DIR)/A2FOHybridBuild.dll \
-		$(MODULE_DIR)/A2FOInfoIni.dll; do \
+		$(MODULE_DIR)/A2FOInfoIni.dll \
+		$(CHEATS_MODULE) \
+		$(TURRETS_MODULE) \
+		$(MODULE_DIR)/A2FORGBTextures.dll; do \
 		if $(OBJDUMP) -p "$$dll" | \
 			grep -Eiq 'DLL Name: (libgcc|libstdc\+\+|libwinpthread)'; then \
 			echo "Unexpected MinGW runtime dependency in $$dll" >&2; \
@@ -231,22 +325,38 @@ verify: release
 	done
 	@echo "No external MinGW runtime DLLs required."
 
+verify-sta1-classic: sta1-classic
+	@for cfg in gui_fed.cfg gui_bor.cfg gui_kli.cfg gui_rom.cfg; do \
+		test -f "$(STA1_CLASSIC_DIR)/misc/$$cfg" || exit 1; \
+	done
+	@echo "A1Compat module exports:"
+	@$(OBJDUMP) -p $(STA1_COMPAT_MODULE) | \
+		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|DLL Name" || true
+	@if $(OBJDUMP) -p $(STA1_COMPAT_MODULE) | \
+		grep -Eiq 'DLL Name: (libgcc|libstdc\+\+|libwinpthread)'; then \
+		echo "Unexpected MinGW runtime dependency in $(STA1_COMPAT_MODULE)" >&2; \
+		$(OBJDUMP) -p $(STA1_COMPAT_MODULE) | grep -Ei 'DLL Name:' >&2; \
+		exit 1; \
+	fi
+	@echo "STA1 Classic module package is self-contained."
+
 verify-sdk: sdk-examples
 	@$(OBJDUMP) -p $(MODULE_DIR)/ExampleModule.dll | \
 		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|DLL Name" || true
 
 test: $(FPQ_PATHS_TEST) $(ODF_PATHS_TEST) $(EXTENSION_ROOTS_TEST) \
-	$(MODULE_API_TEST) $(HYBRID_PRODUCTION_TEST)
+	$(MODULE_API_TEST) $(HYBRID_PRODUCTION_TEST) $(TURRET_MATH_TEST)
 	$(FPQ_PATHS_TEST)
 	$(ODF_PATHS_TEST)
 	$(EXTENSION_ROOTS_TEST)
 	$(MODULE_API_TEST)
 	$(HYBRID_PRODUCTION_TEST)
+	$(TURRET_MATH_TEST)
 
 smoke: release $(SMOKE_TEST)
 	cd $(BUILD_DIR) && wine dll_load_smoke.exe
 
-odf-module-smoke: release $(ODF_MODULE_SMOKE)
+odf-module-smoke: release $(STA1_COMPAT_MODULE) $(ODF_MODULE_SMOKE)
 	@test -f $(BUILD_DIR)/FleetOpsHook.fixture.dll || \
 		(echo "Copy the supported FleetOpsHook.dll to build/FleetOpsHook.fixture.dll" >&2; exit 1)
 	cd $(BUILD_DIR) && wine odf_module_init_smoke.exe

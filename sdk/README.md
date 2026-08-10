@@ -1,4 +1,4 @@
-# Native module SDK v4 revision 5
+# Native module SDK v4 revision 10
 
 A module must be a 32-bit Windows DLL exporting:
 
@@ -103,3 +103,44 @@ settings hooks before module loading, waits for deferred registration at the
 first settings call, and copies the handler's results. The module owns parsing
 and path policy; returning an empty settings path and clearing the speed flag
 preserves Fleet Ops' native behavior.
+
+Revision 6 appends the transactional ODF-overlay registry and
+`A2FO_CAP_ODF_OVERLAY_DIRECTORIES`. Policy modules register safe relative
+directories during startup; the filesystem-owner module may query the copied
+registry later while building its lazy index. Higher overlay precedence wins
+only between files belonging to the same mod root, so normal child/parent mod
+priority remains authoritative.
+
+Revision 7 appends `register_producer_event_handler`,
+`dispatch_producer_event`, and `A2FO_CAP_PRODUCER_EVENTS`. FeaturePack remains
+the sole owner of the checked Fleet Ops Producer hooks and dispatches three
+semantic events: admission before a queue insertion, completion after the
+native finish callback, and destruction before the native Producer destructor.
+Every admission handler must return true; notification return values are
+ignored. This lets optional modules impose class-specific production policy
+without installing a second hook at the same executable address.
+
+Revision 8 adds the claimable `A2FO_PRODUCER_EVENT_FINISHING` event without
+changing the API structure. FeaturePack dispatches it immediately before its
+native completion gateway. If any registered handler returns false, that
+handler has consumed an in-place completion and FeaturePack suppresses the
+native gateway, then still emits `FINISHED`. Existing handlers which return
+true for unknown event kinds retain the revision-7 path unchanged. The event
+is intended for legacy non-object build classes whose `Build()` cannot return
+the `GameObject` required by A2/FO's ordinary completion path.
+
+Revision 9 adds the claimable `A2FO_PRODUCER_EVENT_STARTING_EFFECT` event,
+also without changing the API structure. The shared owner of Armada's
+`Producer::mStartConstructionEffect` hook dispatches it after
+`currentBuildClass` has been assigned but before Armada creates the cosmetic
+Craft construction instance. Returning false suppresses only that effect; the
+timed synchronized build continues. This prevents a non-Craft legacy policy
+class from being passed to the Craft renderer while preserving ordinary ship,
+station, research, and evolution effects.
+
+Revision 10 appends `register_classlabel_odf_defaults` and
+`A2FO_CAP_CLASSLABEL_ODF_DEFAULTS`. A module registers copied command/value
+pairs against a source classlabel during startup. The core consults them from
+its shared string, integer, float, and boolean ParameterDB hooks only after the
+native lookup reports the command missing, so explicit and inherited ODF
+values retain precedence.

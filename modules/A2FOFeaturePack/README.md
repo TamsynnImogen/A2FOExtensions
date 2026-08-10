@@ -4,7 +4,6 @@ The output DLL is `A2FOFeaturePack.dll`. It groups the built-in optional native
 features behind the core's versioned semantic dispatchers:
 
 - recursive loose-folder and FPQ ODF discovery;
-- the `wingman -> craft` classlabel compatibility alias;
 - Ctrl-click ten-slot queue fill;
 - Ctrl+Alt continuous production, using synchronized build orders and a
   save/load marker.
@@ -17,17 +16,14 @@ also needed by the optional HybridBuild runtime, so FeaturePack exports a small
 callback bridge which `A2FOHybridBuild.dll` registers after FeaturePack loads.
 With HybridBuild absent, every bridge callback is a safe no-op and the general
 features continue normally.
-For these hybrid stations only, the module also restores Fleet Ops' ten
-`infoBuildQueue_*` controls by intercepting Armada's Fleet Ops-patched
-single-object dispatcher calls. It runs the untouched compatible callbacks
-first, then preserves their result registers while applying a queue post-pass
-to the ten native `BuildWireframe` objects at `ShipDisplay + 0x120`. Fleet Ops
-extends those objects with the `infoBuildQueueSlot_0` through `_9` frames. The
-post-pass reads the inherited Producer FIFO directly and prepends
-ResearchStation's active pod when it has moved outside that linked queue.
-Active and queued yard/research entries therefore display as one deduplicated
-ten-slot view. It does not force ResearchStation through Fleet Ops'
-incompatible builder callback.
+
+`A2FOHybridBuild.dll` also owns the hybrid-only ShipDisplay dispatcher hooks
+and queue post-pass. It runs Fleet Ops' compatible single-object callbacks
+first, then binds the ten native `BuildWireframe` objects at
+`ShipDisplay + 0x120` to the inherited Producer FIFO and any active research
+pod outside that linked queue. FeaturePack supplies the shared Producer queue
+callbacks and bookkeeping through the bridge; it does not install those
+hybrid-only display hooks itself.
 HybridBuild's implementation and validation notes now live with
 [`../A2FOHybridBuild/README.md`](../A2FOHybridBuild/README.md).
 
@@ -45,12 +41,19 @@ The module contains:
 - hash winner calculation
 - the API v2 lookup-handler implementation
 
+The Armada 1-specific `wingman -> craft` alias is owned by the optional
+`A1Compat.dll` packaged with `STA1 Classic`; it is deliberately not global
+FeaturePack policy.
+
 Winner selection is calculated from explicit active/parent mod priority,
-primary-root precedence, and loose-before-packed precedence. Fleet Operations'
-per-entry `overridden` flag is retained as a diagnostic but is not authoritative
-for recursive entries: with a child mod active, it can incorrectly mark a
-parent's recursive loose file as overridden by the packed copy from that same
-parent. A genuine child-mod entry still wins through its higher mod priority.
+registered within-root overlay priority, primary-root precedence, and
+loose-before-packed precedence. `A1Compat.dll` uses the API v4 revision 6
+registry to declare `Addon` as an override-priority ODF directory; FeaturePack
+queries that policy when its index is built lazily. Fleet Operations' per-entry
+`overridden` flag is retained as a diagnostic but is not authoritative for
+recursive entries: with a child mod active, it can incorrectly mark a parent's
+recursive loose file as overridden by the packed copy from that same parent. A
+genuine child-mod entry still wins through its higher mod priority.
 
 If the module is absent or rejects an unsupported Fleet Ops build, the core
 preserves Fleet Operations' original filesystem, classlabel, queue, and
@@ -67,6 +70,21 @@ Basic fill, automatic refill, and delete-to-cancel behaviour are confirmed in
 game. The save/load and multiplayer matrix in
 [`../../docs/queue-enhancements.md`](../../docs/queue-enhancements.md) must still
 pass before it should be considered release-proven.
+
+FeaturePack is also the one native owner of the Fleet Ops Producer admission,
+finish, and destructor sites. Through native API revision 8 it dispatches
+class-policy events registered by optional modules, including a claimable
+pre-native completion event. This remains useful for consumers whose caller
+accepts a non-object completion. A1 officer quarters require an earlier
+Starbase-specific boundary because A2's outer `Starbase::FinishBuild` performs
+object/output-queue work after the shared Producer callback. `A1Compat.dll`
+therefore owns that A1-scoped Armada hook and does not compete at FeaturePack's
+Fleet Ops RVAs.
+
+Native API revision 9 also lets HybridBuild's already-owned Armada Producer
+construction-effect hook dispatch a claimable pre-effect event. This keeps
+non-Craft legacy policy classes out of the cosmetic Craft renderer without
+moving or duplicating the shared native hook.
 
 The upgrade-pod hooks retain extended tier identity in sidecar state while
 feeding tier 3 to Armada's fixed Team arrays. The highest attached tier for a

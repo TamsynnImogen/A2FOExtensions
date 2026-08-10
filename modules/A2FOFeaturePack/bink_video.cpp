@@ -1,3 +1,9 @@
+/*
+ * File: modules/A2FOFeaturePack/bink_video.cpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: Bink scaling hooks for viewport and movie rendering paths (D3D texture and GDI) to avoid stretched UI artifacts.
+ */
+
 #include "bink_video.hpp"
 
 #include <d3d9.h>
@@ -65,7 +71,6 @@ using ArmadaBinkTextureRenderFunction =
 
 const A2FO_ModuleApi* g_api = nullptr;
 HMODULE g_armada = nullptr;
-HMODULE g_fleet_ops = nullptr;
 BinkRenderFunction g_bink_render = nullptr;
 ArmadaBinkTextureRenderFunction g_armada_bink_texture_render = nullptr;
 volatile LONG g_viewport_log_count = 0;
@@ -273,15 +278,18 @@ void __cdecl armada_bink_texture_render_scaled(
 }  // namespace
 
 bool initialize_bink_video_scaling(const A2FO_ModuleApi* api,
-                                   HMODULE armada,
-                                   HMODULE fleet_ops) noexcept {
-    if (!api || !armada || !fleet_ops || !api->patch_call || !api->log) {
+                                   HMODULE armada) noexcept {
+    if (!api || !armada || !api->patch_call || !api->log) {
         if (api && api->log) {
             api->log(kModuleName,
                      "Bink viewport scaling unavailable in this core");
         }
         return false;
     }
+    HMODULE fleet_ops =
+        api->fleetops_module ? static_cast<HMODULE>(api->fleetops_module())
+                             : nullptr;
+    if (!fleet_ops) return false;
 
     void* render = at(fleet_ops, kBinkRenderRva);
     void* call_site = at(fleet_ops, kBinkRenderCallRva);
@@ -314,7 +322,6 @@ bool initialize_bink_video_scaling(const A2FO_ModuleApi* api,
 
     g_api = api;
     g_armada = armada;
-    g_fleet_ops = fleet_ops;
     g_bink_render = reinterpret_cast<BinkRenderFunction>(render);
     g_armada_bink_texture_render =
         reinterpret_cast<ArmadaBinkTextureRenderFunction>(

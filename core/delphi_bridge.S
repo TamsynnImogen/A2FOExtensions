@@ -116,6 +116,22 @@ _a2fo_parameter_db_get_string:
 	leave
 	ret
 
+	# ParameterDB's int, float, and bool getters share the same thiscall
+	# shape: key, output pointer, and a four-byte default value. Keep the last
+	# argument bit-exact so this bridge also carries IEEE-754 float defaults.
+	.globl _a2fo_parameter_db_get_scalar
+_a2fo_parameter_db_get_scalar:
+	pushl %ebp
+	movl %esp, %ebp
+	pushl 24(%ebp)
+	pushl 20(%ebp)
+	pushl 16(%ebp)
+	movl 12(%ebp), %ecx
+	call *8(%ebp)
+	movzbl %al, %eax
+	leave
+	ret
+
 	.globl _a2fo_load_sod
 _a2fo_load_sod:
 	pushl %ebp

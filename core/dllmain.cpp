@@ -1,3 +1,9 @@
+/*
+ * File: core/dllmain.cpp
+ * Module: A2FOHookExtensions (main-hook)
+ * Purpose: Core extension entry point for API setup, binary validation, root ordering, hook registration, and optional module loading.
+ */
+
 #include "extension_roots.hpp"
 #include "hook.hpp"
 #include "lua_host.hpp"
@@ -11,6 +17,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <set>
 #include <string>
@@ -36,6 +43,12 @@ constexpr std::uintptr_t kCocoonSelectorRva = 0x0b0534;
 constexpr std::uintptr_t kCocoonUpdateSelectorRva = 0x400d10;
 constexpr std::uintptr_t kCocoonUpdateResumeRva = 0x0b0c1b;
 constexpr std::uintptr_t kParameterDbGetStringRva = 0x135350;
+constexpr std::uintptr_t kParameterDbGetIntRva = 0x134bf0;
+constexpr std::uintptr_t kParameterDbGetIntAlternativeRva = 0x134cf0;
+constexpr std::uintptr_t kParameterDbGetFloatRva = 0x134df0;
+constexpr std::uintptr_t kParameterDbGetBoolRva = 0x134f50;
+constexpr std::uintptr_t kParameterDbGetOwnedStringRva = 0x1354a0;
+constexpr std::uintptr_t kParameterDbGetStringVectorRva = 0x135e80;
 constexpr std::uintptr_t kAiMissionGetCurrentRva = 0x00001370;
 constexpr std::uintptr_t kCraftExplodeRva = 0x0c6ab0;
 constexpr std::uintptr_t kGameObjectClassFindProjectIdRva = 0x0cd1f0;
@@ -78,6 +91,11 @@ const std::uint8_t kExpectedCocoonJump[] = {0xe9, 0xa7, 0x07, 0x35, 0x00};
 const std::uint8_t kExpectedCocoonUpdateSelector[] = {
     0x8b, 0x83, 0xe8, 0x01, 0x00, 0x00};
 const std::uint8_t kExpectedParameterDbGetString[] = {
+    0x55,
+    0x8b, 0xec,
+    0x81, 0xec, 0x00, 0x01, 0x00, 0x00
+};
+const std::uint8_t kExpectedParameterDbGetScalar[] = {
     0x55,
     0x8b, 0xec,
     0x81, 0xec, 0x00, 0x01, 0x00, 0x00
@@ -130,6 +148,9 @@ extern "C" bool a2fo_parameter_db_get_string(void* function, void* parameter_db,
                                                const char* key, char* output,
                                                std::uint32_t output_size,
                                                const char* default_value);
+extern "C" bool a2fo_parameter_db_get_scalar(
+    void* function, void* parameter_db, const char* key, void* output,
+    std::uint32_t default_value_bits);
 extern "C" void* a2fo_load_sod(void* function, void* database,
                                 const char* name);
 extern "C" void a2fo_call_craft_explode(void* function, void* self);
@@ -162,6 +183,12 @@ bool g_object_destroyed_hook_ready = false;
 a2fo::InlineHook g_build_class_hook;
 a2fo::InlineHook g_dtor_hook;
 a2fo::InlineHook g_parameter_db_get_string_hook;
+a2fo::InlineHook g_parameter_db_get_int_hook;
+a2fo::InlineHook g_parameter_db_get_int_alternative_hook;
+a2fo::InlineHook g_parameter_db_get_float_hook;
+a2fo::InlineHook g_parameter_db_get_bool_hook;
+a2fo::InlineHook g_parameter_db_get_owned_string_hook;
+a2fo::InlineHook g_parameter_db_get_string_vector_hook;
 a2fo::InlineHook g_craft_explode_hook;
 a2fo::InlineHook g_game_object_class_find_project_id_hook;
 a2fo::InlineHook g_mod_user_directory_hook;
@@ -201,6 +228,17 @@ struct ClasslabelAliasPolicy {
     std::string owner;
 };
 
+struct ClasslabelOdfDefaultsPolicy {
+    std::unordered_map<std::string, std::string> defaults;
+    std::string owner;
+};
+
+struct OdfOverlayDirectoryPolicy {
+    std::string directory;
+    std::string owner;
+    std::uint32_t precedence = A2FO_ODF_OVERLAY_NORMAL;
+};
+
 struct NativeObjectDestroyedRegistration {
     std::string owner;
     std::vector<std::string> required_odf_fields;
@@ -209,7 +247,16 @@ struct NativeObjectDestroyedRegistration {
     bool enabled = true;
 };
 
+struct NativeProducerEventRegistration {
+    std::string owner;
+    A2FO_ProducerEventHandler handler = nullptr;
+    void* user_data = nullptr;
+};
+
 std::unordered_map<std::string, ClasslabelAliasPolicy> g_classlabel_aliases;
+std::unordered_map<std::string, ClasslabelOdfDefaultsPolicy>
+    g_classlabel_odf_defaults;
+std::vector<OdfOverlayDirectoryPolicy> g_odf_overlay_directories;
 std::unordered_map<void*, std::string> g_original_classlabels;
 std::unordered_map<std::string, a2fo::LuaOdfSnapshot> g_odf_snapshots;
 
@@ -223,6 +270,7 @@ std::string g_evolver_cocoon_command;
 std::string g_evolver_cocoon_owner;
 std::vector<NativeObjectDestroyedRegistration>
     g_object_destroyed_handlers;
+std::vector<NativeProducerEventRegistration> g_producer_event_handlers;
 std::set<std::string> g_destroyed_odf_fields{"basename"};
 bool g_policy_registration_open = true;
 
@@ -236,10 +284,14 @@ struct RegistrationTransaction {
     void* info_ini_defaults_user_data = nullptr;
     std::string info_ini_defaults_owner;
     std::unordered_map<std::string, ClasslabelAliasPolicy> classlabel_aliases;
+    std::unordered_map<std::string, ClasslabelOdfDefaultsPolicy>
+        classlabel_odf_defaults;
+    std::vector<OdfOverlayDirectoryPolicy> odf_overlay_directories;
     std::string cocoon_command;
     std::string cocoon_owner;
     std::vector<NativeObjectDestroyedRegistration>
         object_destroyed_handlers;
+    std::vector<NativeProducerEventRegistration> producer_event_handlers;
     std::set<std::string> destroyed_odf_fields;
 };
 
@@ -967,6 +1019,56 @@ bool valid_odf_field_name(const char* value) {
     return true;
 }
 
+bool valid_odf_default_value(const char* value) {
+    if (!value || !*value) return false;
+    std::size_t length = 0;
+    for (const unsigned char* cursor =
+             reinterpret_cast<const unsigned char*>(value);
+         *cursor; ++cursor) {
+        if (++length > 255 || *cursor < 0x20 || *cursor == 0x7f) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool normalize_relative_directory(const char* value, std::string& output) {
+    output.clear();
+    if (!value || !*value) return false;
+    std::string component;
+    for (const unsigned char* cursor =
+             reinterpret_cast<const unsigned char*>(value);
+         *cursor; ++cursor) {
+        if (output.size() + component.size() >= 255 || *cursor < 0x20 ||
+            *cursor == ':' || *cursor == '*' || *cursor == '?' ||
+            *cursor == '"' || *cursor == '<' || *cursor == '>' ||
+            *cursor == '|') {
+            output.clear();
+            return false;
+        }
+        if (*cursor == '/' || *cursor == '\\') {
+            if (component.empty() || component == "." || component == ".." ||
+                component.back() == '.' || component.back() == ' ') {
+                output.clear();
+                return false;
+            }
+            if (!output.empty()) output.push_back('\\');
+            output += component;
+            component.clear();
+        } else {
+            component.push_back(static_cast<char>(*cursor));
+        }
+    }
+    if (component.empty() || component == "." || component == ".." ||
+        component.back() == '.' || component.back() == ' ') {
+        output.clear();
+        return false;
+    }
+    if (!output.empty()) output.push_back('\\');
+    output += component;
+    return !output.empty() && output.size() <= 255;
+}
+
 bool valid_replacement_odf_name(const char* value, std::size_t length) {
     if (!value || length == 0 || length > 255) return false;
     for (std::size_t index = 0; index < length; ++index) {
@@ -1026,6 +1128,76 @@ bool register_classlabel_alias_policy(const char* owner_value,
     return registered;
 }
 
+bool register_classlabel_odf_defaults_policy(
+    const char* owner_value, const char* classlabel_value,
+    const A2FO_ClasslabelOdfDefault* defaults,
+    std::uint32_t default_count) {
+    const std::string owner = policy_owner(owner_value);
+    if (!valid_policy_identifier(classlabel_value) || !defaults ||
+        default_count == 0 || default_count > 64) {
+        log_line("Classlabel ODF defaults rejected for " + owner +
+                 "; invalid classlabel or default list");
+        return false;
+    }
+
+    ClasslabelOdfDefaultsPolicy policy;
+    policy.owner = owner;
+    try {
+        for (std::uint32_t index = 0; index < default_count; ++index) {
+            const A2FO_ClasslabelOdfDefault& item = defaults[index];
+            if (!valid_odf_field_name(item.command) ||
+                !valid_odf_default_value(item.value)) {
+                log_line("Classlabel ODF defaults rejected for " + owner +
+                         "; commands and values must be bounded text");
+                return false;
+            }
+            const std::string command = lower_ascii(item.command);
+            if (!policy.defaults.emplace(command, item.value).second) {
+                log_line("Classlabel ODF defaults rejected for " + owner +
+                         "; duplicate command " + command);
+                return false;
+            }
+        }
+    } catch (...) {
+        log_line("Classlabel ODF defaults rejected for " + owner +
+                 "; could not copy registration data");
+        return false;
+    }
+
+    const std::string classlabel = lower_ascii(classlabel_value);
+    bool registered = false;
+    bool registration_open = false;
+    std::string existing_owner;
+    {
+        StateLockGuard lock;
+        registration_open = g_policy_registration_open &&
+                            g_registration_transaction.active;
+        if (registration_open) {
+            const auto existing = g_classlabel_odf_defaults.find(classlabel);
+            if (existing == g_classlabel_odf_defaults.end()) {
+                g_classlabel_odf_defaults.emplace(
+                    classlabel, std::move(policy));
+                registered = true;
+            } else {
+                existing_owner = existing->second.owner;
+            }
+        }
+    }
+
+    if (registered) {
+        log_line("Classlabel ODF defaults registered by " + owner + ": " +
+                 classlabel + " (" + std::to_string(default_count) +
+                 " commands)");
+    } else if (!registration_open) {
+        log_line("Classlabel ODF defaults rejected for " + owner +
+                 "; startup registration is closed");
+    } else {
+        log_line("Classlabel ODF defaults rejected for " + owner + "; " +
+                 classlabel + " is already owned by " + existing_owner);
+    }
+    return registered;
+}
+
 bool register_evolver_cocoon_policy(const char* owner_value,
                                     const char* command_value) {
     const std::string owner = policy_owner(owner_value);
@@ -1065,6 +1237,61 @@ bool register_evolver_cocoon_policy(const char* owner_value,
     return registered;
 }
 
+bool register_odf_overlay_directory_policy(
+    const char* owner_value, const char* directory_value,
+    std::uint32_t precedence) {
+    const std::string owner = policy_owner(owner_value);
+    std::string directory;
+    if (!normalize_relative_directory(directory_value, directory) ||
+        precedence > A2FO_ODF_OVERLAY_OVERRIDE) {
+        log_line("ODF overlay directory rejected for " + owner +
+                 "; expected a safe relative path and known precedence");
+        return false;
+    }
+
+    bool registered = false;
+    bool registration_open = false;
+    std::string existing_owner;
+    {
+        StateLockGuard lock;
+        registration_open = g_policy_registration_open &&
+                            g_registration_transaction.active;
+        if (registration_open) {
+            const std::string key = lower_ascii(directory);
+            const auto existing = std::find_if(
+                g_odf_overlay_directories.begin(),
+                g_odf_overlay_directories.end(),
+                [&](const OdfOverlayDirectoryPolicy& policy) {
+                    return lower_ascii(policy.directory) == key;
+                });
+            if (existing == g_odf_overlay_directories.end() &&
+                g_odf_overlay_directories.size() < 64) {
+                g_odf_overlay_directories.push_back(
+                    OdfOverlayDirectoryPolicy{directory, owner, precedence});
+                registered = true;
+            } else if (existing != g_odf_overlay_directories.end()) {
+                existing_owner = existing->owner;
+            }
+        }
+    }
+
+    if (registered) {
+        log_line("ODF overlay directory registered by " + owner + ": " +
+                 directory + " (precedence=" +
+                 std::to_string(precedence) + ")");
+    } else if (!registration_open) {
+        log_line("ODF overlay directory rejected for " + owner +
+                 "; startup registration is closed");
+    } else if (!existing_owner.empty()) {
+        log_line("ODF overlay directory rejected for " + owner + "; " +
+                 directory + " is already owned by " + existing_owner);
+    } else {
+        log_line("ODF overlay directory rejected for " + owner +
+                 "; the directory limit was reached");
+    }
+    return registered;
+}
+
 void begin_module_registration(const std::string& path) {
     try {
         StateLockGuard lock;
@@ -1079,9 +1306,12 @@ void begin_module_registration(const std::string& path) {
             g_info_ini_defaults_user_data;
         snapshot.info_ini_defaults_owner = g_info_ini_defaults_owner;
         snapshot.classlabel_aliases = g_classlabel_aliases;
+        snapshot.classlabel_odf_defaults = g_classlabel_odf_defaults;
+        snapshot.odf_overlay_directories = g_odf_overlay_directories;
         snapshot.cocoon_command = g_evolver_cocoon_command;
         snapshot.cocoon_owner = g_evolver_cocoon_owner;
         snapshot.object_destroyed_handlers = g_object_destroyed_handlers;
+        snapshot.producer_event_handlers = g_producer_event_handlers;
         snapshot.destroyed_odf_fields = g_destroyed_odf_fields;
         g_registration_transaction = std::move(snapshot);
     } catch (...) {
@@ -1115,12 +1345,18 @@ void finish_module_registration(const std::string& path, bool initialized) {
                 g_registration_transaction.info_ini_defaults_owner);
             g_classlabel_aliases =
                 std::move(g_registration_transaction.classlabel_aliases);
+            g_classlabel_odf_defaults = std::move(
+                g_registration_transaction.classlabel_odf_defaults);
+            g_odf_overlay_directories = std::move(
+                g_registration_transaction.odf_overlay_directories);
             g_evolver_cocoon_command =
                 std::move(g_registration_transaction.cocoon_command);
             g_evolver_cocoon_owner =
                 std::move(g_registration_transaction.cocoon_owner);
             g_object_destroyed_handlers = std::move(
                 g_registration_transaction.object_destroyed_handlers);
+            g_producer_event_handlers = std::move(
+                g_registration_transaction.producer_event_handlers);
             g_destroyed_odf_fields = std::move(
                 g_registration_transaction.destroyed_odf_fields);
             rolled_back = true;
@@ -1186,6 +1422,235 @@ void* original_parameter_db_get_string() {
     }
 
     return at(g_armada, kParameterDbGetStringRva);
+}
+
+bool classlabel_odf_default(void* parameter_db, const char* key,
+                            std::string& value,
+                            std::string& classlabel) {
+    if (!parameter_db || !key || !*key) return false;
+    StateLockGuard lock;
+    const auto source = g_original_classlabels.find(parameter_db);
+    if (source == g_original_classlabels.end()) return false;
+    const auto policy = g_classlabel_odf_defaults.find(source->second);
+    if (policy == g_classlabel_odf_defaults.end()) return false;
+    const auto item = policy->second.defaults.find(lower_ascii(key));
+    if (item == policy->second.defaults.end()) return false;
+    classlabel = source->second;
+    value = item->second;
+    return true;
+}
+
+void log_classlabel_odf_default(const std::string& classlabel,
+                                const char* key,
+                                const std::string& value) {
+    log_line("Classlabel ODF default applied: " + classlabel + "." +
+             (key ? key : "<null>") + " = " + value);
+}
+
+bool apply_integer_classlabel_default(void* parameter_db, const char* key,
+                                      int* output) {
+    if (!output) return false;
+    std::string value;
+    std::string classlabel;
+    if (!classlabel_odf_default(
+            parameter_db, key, value, classlabel)) return false;
+    *output = std::atoi(value.c_str());
+    log_classlabel_odf_default(classlabel, key, value);
+    return true;
+}
+
+bool apply_float_classlabel_default(void* parameter_db, const char* key,
+                                    float* output) {
+    if (!output) return false;
+    std::string value;
+    std::string classlabel;
+    if (!classlabel_odf_default(
+            parameter_db, key, value, classlabel)) return false;
+    *output = std::strtof(value.c_str(), nullptr);
+    log_classlabel_odf_default(classlabel, key, value);
+    return true;
+}
+
+bool apply_bool_classlabel_default(void* parameter_db, const char* key,
+                                   std::uint8_t* output) {
+    if (!output) return false;
+    std::string value;
+    std::string classlabel;
+    if (!classlabel_odf_default(
+            parameter_db, key, value, classlabel)) return false;
+    const std::string normalized = lower_ascii(value);
+    *output = static_cast<std::uint8_t>(
+        normalized == "true" || normalized == "yes" ||
+        normalized == "on" || std::atoi(normalized.c_str()) != 0);
+    log_classlabel_odf_default(classlabel, key, value);
+    return true;
+}
+
+bool apply_string_classlabel_default(void* parameter_db, const char* key,
+                                     char* output,
+                                     std::uint32_t output_size) {
+    if (!output || output_size == 0) return false;
+    std::string value;
+    std::string classlabel;
+    if (!classlabel_odf_default(
+            parameter_db, key, value, classlabel) ||
+        value.size() + 1 > output_size) {
+        return false;
+    }
+    std::memcpy(output, value.c_str(), value.size() + 1);
+    log_classlabel_odf_default(classlabel, key, value);
+    return true;
+}
+
+bool __attribute__((fastcall)) parameter_db_get_int_hook(
+    void* self, void*, const char* key, int* output, int default_value) {
+    const bool found = a2fo_parameter_db_get_scalar(
+        g_parameter_db_get_int_hook.gateway, self, key, output,
+        static_cast<std::uint32_t>(default_value));
+    if (found) return true;
+    try {
+        return apply_integer_classlabel_default(self, key, output);
+    } catch (...) {
+        log_line("ParameterDB integer default skipped after an unexpected "
+                 "C++ exception");
+        return false;
+    }
+}
+
+bool __attribute__((fastcall)) parameter_db_get_int_alternative_hook(
+    void* self, void*, const char* key, int* output, int default_value) {
+    const bool found = a2fo_parameter_db_get_scalar(
+        g_parameter_db_get_int_alternative_hook.gateway, self, key, output,
+        static_cast<std::uint32_t>(default_value));
+    if (found) return true;
+    try {
+        return apply_integer_classlabel_default(self, key, output);
+    } catch (...) {
+        log_line("ParameterDB alternative integer default skipped after an "
+                 "unexpected C++ exception");
+        return false;
+    }
+}
+
+bool __attribute__((fastcall)) parameter_db_get_float_hook(
+    void* self, void*, const char* key, float* output, float default_value) {
+    std::uint32_t default_value_bits = 0;
+    static_assert(sizeof(default_value_bits) == sizeof(default_value),
+                  "ParameterDB float default must occupy four bytes");
+    std::memcpy(&default_value_bits, &default_value,
+                sizeof(default_value_bits));
+    const bool found = a2fo_parameter_db_get_scalar(
+        g_parameter_db_get_float_hook.gateway, self, key, output,
+        default_value_bits);
+    if (found) return true;
+    try {
+        return apply_float_classlabel_default(self, key, output);
+    } catch (...) {
+        log_line("ParameterDB float default skipped after an unexpected "
+                 "C++ exception");
+        return false;
+    }
+}
+
+bool __attribute__((fastcall)) parameter_db_get_bool_hook(
+    void* self, void*, const char* key, std::uint8_t* output,
+    std::uint32_t default_value) {
+    const bool found = a2fo_parameter_db_get_scalar(
+        g_parameter_db_get_bool_hook.gateway, self, key, output,
+        default_value);
+    if (found) return true;
+    try {
+        return apply_bool_classlabel_default(self, key, output);
+    } catch (...) {
+        log_line("ParameterDB boolean default skipped after an unexpected "
+                 "C++ exception");
+        return false;
+    }
+}
+
+std::uint32_t parameter_db_pointer_bits(const void* value) {
+    static_assert(sizeof(void*) == sizeof(std::uint32_t),
+                  "Armada ParameterDB pointers must occupy four bytes");
+    return static_cast<std::uint32_t>(
+        reinterpret_cast<std::uintptr_t>(value));
+}
+
+bool __attribute__((fastcall)) parameter_db_get_owned_string_hook(
+    void* self, void*, const char* key, char** output,
+    const char* default_value) {
+    // This overload allocates the returned text. Probe with a null native
+    // default first so a missing entry does not allocate the caller's fallback
+    // before a more-specific classlabel policy gets a chance to supply one.
+    const bool found = a2fo_parameter_db_get_scalar(
+        g_parameter_db_get_owned_string_hook.gateway, self, key, output, 0);
+    if (found) return true;
+
+    try {
+        std::string value;
+        std::string classlabel;
+        if (classlabel_odf_default(
+                self, key, value, classlabel)) {
+            a2fo_parameter_db_get_scalar(
+                g_parameter_db_get_owned_string_hook.gateway, self, key,
+                output, parameter_db_pointer_bits(value.c_str()));
+            log_classlabel_odf_default(classlabel, key, value);
+            return true;
+        }
+    } catch (...) {
+        log_line("ParameterDB owned-string default skipped after an "
+                 "unexpected C++ exception");
+    }
+
+    return a2fo_parameter_db_get_scalar(
+        g_parameter_db_get_owned_string_hook.gateway, self, key, output,
+        parameter_db_pointer_bits(default_value));
+}
+
+// MSVC 6's std::vector<char*> stores a one-byte allocator base followed by
+// three aligned pointers. ParameterDB's vector overload only reads begin/end
+// from a default vector and copies each string into its own engine allocation.
+struct ParameterDbStringVectorAbi {
+    std::uint32_t allocator = 0;
+    char** begin = nullptr;
+    char** end = nullptr;
+    char** capacity = nullptr;
+};
+static_assert(sizeof(ParameterDbStringVectorAbi) == 16,
+              "Armada string-vector ABI must occupy sixteen bytes");
+
+bool __attribute__((fastcall)) parameter_db_get_string_vector_hook(
+    void* self, void*, const char* key, void* output,
+    const void* default_value) {
+    // As with the owned-string overload, defer the caller's native default
+    // until after the registered classlabel policy has been considered.
+    const bool found = a2fo_parameter_db_get_scalar(
+        g_parameter_db_get_string_vector_hook.gateway, self, key, output, 0);
+    if (found) return true;
+
+    try {
+        std::string value;
+        std::string classlabel;
+        if (classlabel_odf_default(
+                self, key, value, classlabel)) {
+            char* item = const_cast<char*>(value.c_str());
+            ParameterDbStringVectorAbi policy_default;
+            policy_default.begin = &item;
+            policy_default.end = &item + 1;
+            policy_default.capacity = policy_default.end;
+            a2fo_parameter_db_get_scalar(
+                g_parameter_db_get_string_vector_hook.gateway, self, key,
+                output, parameter_db_pointer_bits(&policy_default));
+            log_classlabel_odf_default(classlabel, key, value);
+            return true;
+        }
+    } catch (...) {
+        log_line("ParameterDB string-vector default skipped after an "
+                 "unexpected C++ exception");
+    }
+
+    return a2fo_parameter_db_get_scalar(
+        g_parameter_db_get_string_vector_hook.gateway, self, key, output,
+        parameter_db_pointer_bits(default_value));
 }
 
 bool lua_parameter_db_get_string(void* parameter_db,
@@ -1272,7 +1737,12 @@ bool __attribute__((fastcall)) parameter_db_get_string_hook(
 
     wait_for_deferred_initialization();
     try {
-        if (_stricmp(key, "classlabel") != 0) return found;
+        if (_stricmp(key, "classlabel") != 0) {
+            return !found && apply_string_classlabel_default(
+                                 self, key, output, output_size)
+                ? true
+                : found;
+        }
         capture_destroyed_object_odf_fields(self);
         const char* output_end = static_cast<const char*>(
             std::memchr(output, '\0', output_size));
@@ -1760,19 +2230,78 @@ void* __attribute__((fastcall)) evolver_class_dtor_hook(void* self, void*) {
 
 bool install_classlabel_alias_hook() {
     if (!g_armada) {
-        log_line("ArmadaL.exe is unavailable; ParameterDB string policies "
+        log_line("ArmadaL.exe is unavailable; ParameterDB policies "
                  "disabled");
         return false;
     }
 
-    if (std::memcmp(
-            at(g_armada, kParameterDbGetStringRva),
-            kExpectedParameterDbGetString,
-            sizeof(kExpectedParameterDbGetString)) != 0) {
+    if (std::memcmp(at(g_armada, kParameterDbGetIntRva),
+                    kExpectedParameterDbGetScalar,
+                    sizeof(kExpectedParameterDbGetScalar)) != 0 ||
+        std::memcmp(at(g_armada, kParameterDbGetIntAlternativeRva),
+                    kExpectedParameterDbGetScalar,
+                    sizeof(kExpectedParameterDbGetScalar)) != 0 ||
+        std::memcmp(at(g_armada, kParameterDbGetFloatRva),
+                    kExpectedParameterDbGetScalar,
+                    sizeof(kExpectedParameterDbGetScalar)) != 0 ||
+        std::memcmp(at(g_armada, kParameterDbGetBoolRva),
+                    kExpectedParameterDbGetScalar,
+                    sizeof(kExpectedParameterDbGetScalar)) != 0 ||
+        std::memcmp(at(g_armada, kParameterDbGetOwnedStringRva),
+                    kExpectedParameterDbGetScalar,
+                    sizeof(kExpectedParameterDbGetScalar)) != 0 ||
+        std::memcmp(at(g_armada, kParameterDbGetStringVectorRva),
+                    kExpectedParameterDbGetScalar,
+                    sizeof(kExpectedParameterDbGetScalar)) != 0 ||
+        std::memcmp(at(g_armada, kParameterDbGetStringRva),
+                    kExpectedParameterDbGetString,
+                    sizeof(kExpectedParameterDbGetString)) != 0) {
 
         log_line(
-            "ParameterDB GetString signature mismatch; "
-            "string policies disabled");
+            "ParameterDB getter signature mismatch; policies disabled");
+        return false;
+    }
+
+    // Install the pass-through typed hooks first. No module can register a
+    // default policy until the complete suite is ready, so a partial install
+    // remains behaviorally native if a later detour unexpectedly fails.
+    if (!a2fo::install_inline_hook(
+            at(g_armada, kParameterDbGetIntRva),
+            reinterpret_cast<void*>(&parameter_db_get_int_hook),
+            sizeof(kExpectedParameterDbGetScalar),
+            kExpectedParameterDbGetScalar,
+            g_parameter_db_get_int_hook) ||
+        !a2fo::install_inline_hook(
+            at(g_armada, kParameterDbGetIntAlternativeRva),
+            reinterpret_cast<void*>(&parameter_db_get_int_alternative_hook),
+            sizeof(kExpectedParameterDbGetScalar),
+            kExpectedParameterDbGetScalar,
+            g_parameter_db_get_int_alternative_hook) ||
+        !a2fo::install_inline_hook(
+            at(g_armada, kParameterDbGetFloatRva),
+            reinterpret_cast<void*>(&parameter_db_get_float_hook),
+            sizeof(kExpectedParameterDbGetScalar),
+            kExpectedParameterDbGetScalar,
+            g_parameter_db_get_float_hook) ||
+        !a2fo::install_inline_hook(
+            at(g_armada, kParameterDbGetBoolRva),
+            reinterpret_cast<void*>(&parameter_db_get_bool_hook),
+            sizeof(kExpectedParameterDbGetScalar),
+            kExpectedParameterDbGetScalar,
+            g_parameter_db_get_bool_hook) ||
+        !a2fo::install_inline_hook(
+            at(g_armada, kParameterDbGetOwnedStringRva),
+            reinterpret_cast<void*>(&parameter_db_get_owned_string_hook),
+            sizeof(kExpectedParameterDbGetScalar),
+            kExpectedParameterDbGetScalar,
+            g_parameter_db_get_owned_string_hook) ||
+        !a2fo::install_inline_hook(
+            at(g_armada, kParameterDbGetStringVectorRva),
+            reinterpret_cast<void*>(&parameter_db_get_string_vector_hook),
+            sizeof(kExpectedParameterDbGetScalar),
+            kExpectedParameterDbGetScalar,
+            g_parameter_db_get_string_vector_hook)) {
+        log_line("Could not install ParameterDB typed-default hooks");
         return false;
     }
 
@@ -1787,7 +2316,7 @@ bool install_classlabel_alias_hook() {
         return false;
     }
 
-    log_line("ParameterDB string policy hook enabled");
+    log_line("ParameterDB classlabel and typed-default hooks enabled");
     return true;
 }
 
@@ -2107,6 +2636,25 @@ bool A2FO_CALL api_register_classlabel_alias(
     }
 }
 
+bool A2FO_CALL api_register_classlabel_odf_defaults(
+    const char* module_name, const char* classlabel,
+    const A2FO_ClasslabelOdfDefault* defaults,
+    std::uint32_t default_count) {
+    if (!g_classlabel_alias_hook_ready) {
+        log_line("Classlabel ODF defaults rejected; typed ParameterDB hooks "
+                 "are unavailable");
+        return false;
+    }
+    try {
+        return register_classlabel_odf_defaults_policy(
+            module_name, classlabel, defaults, default_count);
+    } catch (...) {
+        log_line("Classlabel ODF defaults registration failed after an "
+                 "unexpected C++ exception");
+        return false;
+    }
+}
+
 bool A2FO_CALL api_register_evolver_cocoon_command(
     const char* module_name, const char* command) {
     try {
@@ -2116,6 +2664,44 @@ bool A2FO_CALL api_register_evolver_cocoon_command(
                  "unexpected C++ exception");
         return false;
     }
+}
+
+bool A2FO_CALL api_register_odf_overlay_directory(
+    const char* module_name, const char* relative_directory,
+    std::uint32_t precedence) {
+    try {
+        return register_odf_overlay_directory_policy(
+            module_name, relative_directory, precedence);
+    } catch (...) {
+        log_line("ODF overlay directory registration failed after an "
+                 "unexpected C++ exception");
+        return false;
+    }
+}
+
+std::uint32_t A2FO_CALL api_odf_overlay_directory_count() {
+    if (!g_state_lock_ready) return 0;
+    StateLockGuard lock;
+    return static_cast<std::uint32_t>(g_odf_overlay_directories.size());
+}
+
+bool A2FO_CALL api_get_odf_overlay_directory(
+    std::uint32_t index, char* relative_directory,
+    std::uint32_t relative_directory_size, std::uint32_t* precedence) {
+    if (!relative_directory || relative_directory_size == 0 || !precedence ||
+        !g_state_lock_ready) {
+        return false;
+    }
+    relative_directory[0] = '\0';
+    StateLockGuard lock;
+    if (index >= g_odf_overlay_directories.size()) return false;
+    const OdfOverlayDirectoryPolicy& policy =
+        g_odf_overlay_directories[index];
+    if (policy.directory.size() + 1 > relative_directory_size) return false;
+    std::memcpy(relative_directory, policy.directory.c_str(),
+                policy.directory.size() + 1);
+    *precedence = policy.precedence;
+    return true;
 }
 
 bool A2FO_CALL api_register_object_destroyed_handler(
@@ -2177,6 +2763,69 @@ bool A2FO_CALL api_register_object_destroyed_handler(
                  "; registration is closed or the handler limit was reached");
     }
     return registered;
+}
+
+bool A2FO_CALL api_register_producer_event_handler(
+    const char* module_name, A2FO_ProducerEventHandler handler,
+    void* user_data) {
+    const std::string owner = policy_owner(module_name);
+    if (!handler || !g_state_lock_ready) return false;
+
+    bool registered = false;
+    {
+        StateLockGuard lock;
+        if (g_policy_registration_open &&
+            g_registration_transaction.active &&
+            g_producer_event_handlers.size() < 64) {
+            g_producer_event_handlers.push_back(
+                NativeProducerEventRegistration{owner, handler, user_data});
+            registered = true;
+        }
+    }
+    if (registered) {
+        log_line("Producer event handler registered by " + owner);
+    } else {
+        log_line("Producer event handler rejected for " + owner +
+                 "; registration is closed or the handler limit was reached");
+    }
+    return registered;
+}
+
+bool A2FO_CALL api_dispatch_producer_event(
+    const A2FO_ProducerEvent* event) {
+    if (!event ||
+        event->struct_size < sizeof(A2FO_ProducerEvent) ||
+        !event->producer ||
+        event->kind > A2FO_PRODUCER_EVENT_STARTING_EFFECT ||
+        (event->kind != A2FO_PRODUCER_EVENT_DESTROYING &&
+         !event->target_class) ||
+        !g_state_lock_ready) {
+        return false;
+    }
+
+    std::vector<NativeProducerEventRegistration> handlers;
+    try {
+        StateLockGuard lock;
+        handlers = g_producer_event_handlers;
+    } catch (...) {
+        log_line("Producer event dispatch could not copy registrations");
+        return event->kind != A2FO_PRODUCER_EVENT_ADMIT &&
+            event->kind != A2FO_PRODUCER_EVENT_FINISHING &&
+            event->kind != A2FO_PRODUCER_EVENT_STARTING_EFFECT;
+    }
+
+    for (const NativeProducerEventRegistration& registration : handlers) {
+        if (!registration.handler) continue;
+        const bool accepted = registration.handler(
+            event, registration.user_data);
+        if ((event->kind == A2FO_PRODUCER_EVENT_ADMIT ||
+             event->kind == A2FO_PRODUCER_EVENT_FINISHING ||
+             event->kind == A2FO_PRODUCER_EVENT_STARTING_EFFECT) &&
+            !accepted) {
+            return false;
+        }
+    }
+    return true;
 }
 
 std::uint32_t A2FO_CALL api_extension_root_count() {
@@ -2253,6 +2902,11 @@ A2FO_ModuleApi make_module_api() {
         api.capabilities |= A2FO_CAP_COCOON_CLASS_ASSOCIATION;
     }
     api.capabilities |= A2FO_CAP_INFO_INI_DEFAULTS;
+    api.capabilities |= A2FO_CAP_ODF_OVERLAY_DIRECTORIES;
+    api.capabilities |= A2FO_CAP_PRODUCER_EVENTS;
+    if (g_classlabel_alias_hook_ready) {
+        api.capabilities |= A2FO_CAP_CLASSLABEL_ODF_DEFAULTS;
+    }
     api.register_object_destroyed_handler =
         &api_register_object_destroyed_handler;
     api.upgrade_pod_maximum_tier = &api_upgrade_pod_maximum_tier;
@@ -2261,6 +2915,17 @@ A2FO_ModuleApi make_module_api() {
         &api_associate_evolver_cocoon_class;
     api.register_info_ini_defaults_handler =
         &api_register_info_ini_defaults_handler;
+    api.register_odf_overlay_directory =
+        &api_register_odf_overlay_directory;
+    api.odf_overlay_directory_count =
+        &api_odf_overlay_directory_count;
+    api.get_odf_overlay_directory =
+        &api_get_odf_overlay_directory;
+    api.register_producer_event_handler =
+        &api_register_producer_event_handler;
+    api.dispatch_producer_event = &api_dispatch_producer_event;
+    api.register_classlabel_odf_defaults =
+        &api_register_classlabel_odf_defaults;
     return api;
 }
 
@@ -2387,16 +3052,21 @@ DWORD WINAPI initialize(void*) {
       }
 
       std::size_t alias_count = 0;
+      std::size_t classlabel_default_count = 0;
       std::string cocoon_command;
       {
           StateLockGuard lock;
           g_policy_registration_open = false;
           alias_count = g_classlabel_aliases.size();
+          classlabel_default_count = g_classlabel_odf_defaults.size();
           cocoon_command = g_evolver_cocoon_command;
       }
       log_line("Policy registration closed: " +
                std::to_string(alias_count) + " classlabel alias" +
                (alias_count == 1 ? "" : "es") +
+               ", " + std::to_string(classlabel_default_count) +
+               " classlabel ODF default set" +
+               (classlabel_default_count == 1 ? "" : "s") +
                ", Evolver cocoon command: " +
                (cocoon_command.empty() ? "<none>" : cocoon_command));
       log_line("Lua callbacks ready: " +

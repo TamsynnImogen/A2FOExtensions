@@ -16,20 +16,50 @@ The core permanently owns shared or lifetime-sensitive engine sites:
 - Craft destruction snapshot, replacement construction, and publication;
 - extension-root overlay and native/Lua loading order.
 
-The three built-in native modules separate optional policy:
+The six built-in native modules separate optional policy:
 
-- `A2FOFeaturePack.dll`: recursive ODF indexing, `wingman -> craft`, queue
-  conveniences, upgrade pods, and Bink scaling;
+- `A2FOFeaturePack.dll`: recursive ODF indexing, queue conveniences, upgrade
+  pods, and Bink scaling;
 - `A2FOHybridBuild.dll`: `hybridbuild -> research`, the `cocoon` command, four
   production palettes, execution sidecars, queued placements, and previews;
 - `A2FOInfoIni.dll`: `SettingsDirectory` and `DefaultGameSpeed` parsing and
-  resolution.
+  resolution;
+- `A2FOCheats.dll`: signature-checked Fleet Operations cheat-handler
+  extensions, including per-resource `RTS_CFG.h`-configured
+  `showmethemoney` grants (10,000 defaults) and restored `m`, `dis`, `crash`,
+  and team-elimination `elim` commands;
+- `A2FORGBTextures.dll`: presence-based redirection of Armada's legacy
+  `Textures\RGB`, `Textures\Index8`, and `Textures\Compressed` assets across
+  Data, parent mods, and the active mod through Armada's TGA FileExists/OpenRead
+  boundary, with null-source guards for failed minimap textures.
+- `A2FOTurrets.dll`: the global semantic `turret -> sensor` classlabel,
+  indexed parent-mount parsing, linked child-object lifecycle, target-driven
+  yaw/pitch transforms, ownership propagation, and save/load reconnection. Its
+  class-construction and simulation hooks explicitly chain Fleet Operations'
+  pre-existing checked detours.
+
+`A1Compat.dll` is an optional parent-mod module rather than a globally installed
+built-in. It is packaged under `STA1 Classic/modules` and owns A1-only policy,
+beginning with `wingman -> craft`, missing-only `a2craft.odf`, `a2const.odf`,
+and `a2freight.odf` defaults, Armada 1 `Addon` ODF precedence, the
+starbase officer-quarter system, and the signature-checked legacy nebula
+sprite-node guard. The extension-root module
+overlay therefore activates it only when `STA1 Classic` or one of its children
+is selected.
 
 FeaturePack owns the general Producer queue and ResearchStation class hooks.
 HybridBuild registers a private callback table with FeaturePack so those shared
 native sites are installed exactly once. The core uses the same pattern for
 InfoIni: timing-sensitive hooks remain installed before settings load, while
 revision-5 module registration supplies all optional `info.ini` semantics.
+API revision 9 exposes shared Producer admission, claimable construction-
+effect start, claimable pre-completion, post-completion, and destruction
+events through the core registry. `A1Compat` consumes those events for
+UpgradeClass admission, effect suppression, and destruction without patching
+the existing FeaturePack or HybridBuild hook addresses. A1's removed officer
+completion branch must run earlier than the general Producer callback, so
+`A1Compat` separately owns the A1-scoped checked `Starbase::FinishBuild` hook
+at Armada RVA `0x000bbd90`; every non-officer completion chains its gateway.
 
 The queue feature chains feature-specific Armada and Fleet Ops Producer sites
 after exact signature checks. If the supported build or any required signature
@@ -80,9 +110,18 @@ lifecycle event without competing for the Craft destruction hook.
 
 ## ABI compatibility
 
-The native ABI remains major version 4. Revisions 1 through 5 only append
+The native ABI remains major version 4. Revisions 1 through 7 only append
 fields; revision 1 introduced the revision/capability metadata and member-size
-macro, while revision 5 adds the optional `info.ini` defaults provider.
+macro, revision 5 adds the optional `info.ini` defaults provider, and revision
+6 adds the transactional ODF-overlay directory registry. Revision 7 adds the
+transactional Producer-event registry and runtime dispatcher.
+Revision 8 adds a claimable pre-native Producer completion event without
+changing the API structure.
+Revision 9 adds a claimable pre-native construction-effect event, likewise
+without changing the API structure.
+Revision 10 appends the transactional classlabel ODF-default registry. The core
+owns the shared typed ParameterDB hooks; a module supplies copied command/value
+pairs which are consulted only after the normal ODF/include lookup fails.
 Existing v4 modules continue to receive their original struct prefix. Lua has
 an independent major/revision pair and `a2fo.require_api`.
 

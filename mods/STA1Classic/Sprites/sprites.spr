@@ -1,0 +1,21 @@
+sprite_table
+
+# Fleet Operations registries required by inherited FO maps and systems.
+@include animation.spr
+@include tex_anim.spr
+@include cursor.spr
+@include lights.spr
+@include fleetops.spr
+@include fleetops_comp.spr
+
+# Armada 1 registries required by the classic assets.
+@include explosion.spr
+@include nebula.spr
+@include planets.spr
+@include asteroid.spr
+@include damage.spr
+@include weapon.spr
+@include starfield.spr
+@include emitter.spr
+@include gui_map.spr
+@include testsprite.spr

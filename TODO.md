@@ -14,6 +14,7 @@
 * [x] Document hook ownership and add a core-owned native destruction dispatcher. See `docs/architecture.md`.
 * [x] Add compatible API revision/capability checks for Lua scripts and native modules.
 * [x] Make native-module and Lua-script registration transactional so failed initializers cannot leave dangling callbacks.
+* [x] Add the optional shared `A2FORGBTextures.dll` module.
 * [RESEARCH] Investigate safely unloading and reloading Lua scripts during development.
 
 ## Build and Repository Cleanup
@@ -50,6 +51,41 @@
 * [PERFORMANCE] Ensure profiling and verbose logging can be disabled in release builds.
 
 ## ODF Semantics and Compatibility
+
+### Recursive ODF Precedence Across Mod Roots
+
+[BUG]
+
+An active child mod must override matching ODF basenames from shared `Data` and
+all parent mods regardless of whether either file is in a built-in ODF folder
+or a dynamically registered recursive folder.
+
+Observed failure with the Noxter addon:
+
+```text
+active child: Noxter/odf/other/races.odf
+parent:       Fleet Ops 4.0/odf/system_system/races.odf
+result:       the parent's recursive races.odf was selected
+```
+
+Renaming the parent's directory to the built-in `odf/system` layout avoids the
+recursive alias path, but is only a workaround. The recursive lookup must not
+give a parent file priority merely because its directory was registered by the
+extension.
+
+* [ ] Reproduce the failure with a minimal Data -> parent -> active-child test
+  fixture containing one shared ODF basename.
+* [ ] Audit native hash entries and recursive winner selection when the parent
+  copy is recursive and the child copy is in a built-in directory, and in the
+  inverse arrangement.
+* [ ] Apply mod-root priority before directory type: active child, then nearest
+  parent through the full parent chain, then shared Data.
+* [ ] Preserve primary-root and loose-before-packed precedence only as
+  tie-breakers within the same mod root.
+* [ ] Add regression coverage for built-in/built-in, recursive/recursive,
+  built-in/recursive, recursive/built-in, and loose/FPQ combinations.
+* [ ] Extend diagnostic lookup logging to include the winning physical root,
+  mod priority, directory, and loose/packed status.
 
 [API] Retain Jan_B's legacy magic-value behaviour for compatibility, while
 adding explicit module-owned commands. When both forms are present, the
@@ -239,6 +275,56 @@ Follow-up work:
   the existing texture matrix and resource lifetimes are understood.
 
 ## Features to Investigate
+
+### Indexed Hull-Mounted Turrets
+
+[IMPLEMENTED, REQUIRES MANUAL VALIDATION] `A2FOTurrets.dll` accepts sparse
+`turret0..64`/`turretHardpoint0..64` pairs on Craft-derived parent ODFs. A
+linked `classLabel = "turret"` object owns its native weapons and hitpoints
+while following the mount with configurable yaw, pitch, slew rates, and rest
+angles. See `modules/A2FOTurrets/README.md`.
+
+* [ ] Validate creation, hardpoint placement, target tracking, fire arcs,
+  damage, and individual turret destruction on a purpose-built test ship.
+* [ ] Validate parent movement, warp, capture/team changes, parent destruction,
+  and multiple sparse turret indices.
+* [ ] Validate save/load with live turrets and confirm that no duplicates are
+  spawned regardless of object load order.
+* [ ] Serialize destroyed-mount state so a turret destroyed before saving does
+  not return after loading that save.
+* [ ] Profile ships with representative and deliberately excessive turret
+  counts; every mount is currently a full engine object.
+* [ ] Validate multiplayer synchronization before treating the feature as
+  multiplayer-safe.
+* [LATER] Add optional two-piece yaw-base/pitch-barrel articulation if rigid
+  whole-SOD rotation proves insufficient for authored turret models.
+
+### Single-Player Mission Selector Redesign
+
+[DESIGN] Replace the fixed native Single Player mission selector with a
+dedicated A2FO module while retaining Armada's existing mission-launch and
+campaign-progression paths.
+
+Planned scope:
+
+* [ ] Show the supported predefined campaigns in a scrollable campaign list
+  with campaign icons, a banner, and overview text.
+* [ ] Show each campaign's missions in a scrollable list with native
+  unlock/progression state.
+* [ ] Show the selected mission's thumbnail, description, and objectives.
+* [ ] Provide Back and Start Mission controls which reuse the native shell and
+  mission setup paths.
+* [ ] Scale or adapt the layout safely across Fleet Operations' supported
+  resolutions and aspect ratios.
+* [ ] Keep campaign and mission display metadata/assets moddable without
+  turning the selector into an in-game campaign editor.
+
+Explicitly out of scope:
+
+* in-game campaign creation;
+* arbitrary custom-campaign creation or importing;
+* mission star ratings and scoring persistence;
+* a per-mission difficulty selector.
 
 ### Expanded Construction Queues
 
@@ -612,22 +698,125 @@ Proposed behaviour:
 
 [IDEA]
 
-* Replace conventional shipyards with Breeder organisms.
-* Produce or unlock Seeds, each containing the genetic blueprint for a particular Noxter species.
-* A Breeder consumes a Seed and undergoes metamorphosis.
-* After metamorphosis, that Breeder becomes permanently specialised in producing the selected organism.
-* The transformation is irreversible; a specialised Breeder cannot consume a different Seed.
-* A specialised Breeder continually produces organisms rather than accepting ordinary one-off construction orders.
-* Production consumes resources continuously because the Breeder must be fed.
-* Allow production to be halted temporarily, but not indefinitely without consequences.
-* A Breeder that remains unfed should eventually weaken or die.
+Replace conventional Noxter shipyards with physical Seed units and Breeder
+organisms. Expose them through the semantic classlabels `seed` and `breeder`,
+backed by safe native Craft- and Producer-derived hosts plus extension-owned
+sidecar state rather than attempting to add incompatible native C++ classes.
 
-Technical questions:
+##### Seed Behaviour and ODF Contract
 
-* Whether continuous production should use the existing construction queue or a separate spawning timer.
-* How starvation state should be stored and restored in save games.
-* Whether Breeder specialisation must be synchronised explicitly in multiplayer.
-* Whether Seeds should be physical units, research items, abilities, or ODF-defined transformations.
+Each Seed carries the complete heritable production profile for one organism:
+
+```text
+classLabel = "seed"
+offspring = "noxter_unit"
+
+dilithiumMetabolismCost = 20
+tritaniumMetabolismCost = 10
+biomatterMetabolismCost = 5
+
+seedRange = 50
+metamorphosisTime = 2.0
+```
+
+Prefer the explicit `offspring` command to an unindexed `buildItem`, avoiding
+confusion with the engine's normal indexed `buildItem<N>` construction lists.
+The offspring ODF remains authoritative for its ordinary build time, costs,
+caps, model, and other production data. The Seed supplies only genetic and
+metabolic properties which are copied permanently into the Breeder when it is
+consumed.
+
+The intended interaction is contextual right-click on a friendly, living,
+unseeded Breeder. The Seed moves into range, validates the target again, commits
+the specialisation, and is then consumed through a native destruction/removal
+path. A dedicated `Implant Seed` target command is an acceptable first version
+before exact contextual right-click handling is complete.
+
+Specialisation is irreversible. If two synchronized Seed orders reach the same
+Breeder, the first valid order wins and later Seeds remain unconsumed. Invalid,
+hostile, dead, already-seeded, or disallowed targets must not consume the Seed.
+
+##### Breeder Production State
+
+Use a hidden one-slot native Producer job rather than bypassing production
+outright. The player sees no editable construction queue, but native production
+continues to provide build time, resource deduction, caps, spawn handling,
+effects, save/load support, and deterministic multiplayer behaviour.
+
+```text
+Unseeded      -> accepts one Seed; no production or metabolism
+Metamorphosis -> temporarily inactive while specialisation completes
+Constructing  -> continuously produces the inherited offspring
+Metabolising  -> unable to build; living on reserves until its next meal
+Paused        -> metabolism clock frozen while special energy drains
+Starving      -> missed a metabolic meal; hull damage and no hull repair
+```
+
+After an offspring completes, wait only the configured short `broodDelay`, then
+start the next hidden job. Beginning a valid offspring counts as feeding the
+Breeder and resets its metabolism clock.
+
+##### Periodic Metabolism and Starvation
+
+Metabolism is paid as a periodic atomic meal rather than a per-second trickle.
+By default the interval is the inherited offspring's build time; an optional
+Seed `metabolismTime` command may override it. The clock advances only while the
+Breeder is unpaused and not constructing.
+
+When an interval expires, deduct all configured metabolism resources together.
+If any required resource is unavailable, deduct none and enter starvation.
+While starving, apply the Breeder ODF's `starve` value as deterministic hull
+damage per simulation second and reject all positive hull repair and passive
+hull regeneration. Shield recharge remains unaffected unless a separate option
+is deliberately introduced.
+
+The Breeder should retry frequently while starving. Starting an offspring or
+successfully paying one metabolic meal ends starvation immediately and allows
+hull repair again. Unit-cap blockage, obstructed spawn points, technology
+gating, invalid ODFs, and genuine resource shortage must be distinguished so
+the design can explicitly decide which conditions advance metabolism rather
+than treating every failed queue insertion as insufficient food.
+
+##### Pause Behaviour
+
+After specialisation, expose one production toggle instead of ordinary queue
+commands. Pausing freezes the existing metabolism countdown and production,
+drains special energy at `pauseDrain` per second, and automatically resumes at
+zero energy; manual early resume is allowed. Pausing must not reset the hunger
+clock, otherwise repeated toggling grants free metabolic intervals.
+
+Pause is preventative rather than a cure for an already missed meal. An
+already-starving Breeder cannot clear starvation or regain repair merely by
+pausing; it must begin production or pay metabolism. Define during implementation
+whether the pause command is disabled while starving or merely freezes other
+activity without clearing starvation damage.
+
+##### Additional Design and Correctness Requirements
+
+* [ ] Decide whether `broodDelay`, metabolism costs, and `metabolismTime` all
+  belong to the Seed phenotype, while `starve`, pause reserve, and physical
+  durability remain properties of the Breeder ODF.
+* [ ] Validate offspring against a permitted mobile-unit whitelist so a Seed
+  cannot encode stations, map objects, or otherwise unsafe classes.
+* [ ] Define whether later technology loss is ignored after the genetic
+  blueprint has been implanted; current preference is to validate technology
+  once at seeding while retaining normal unit caps during production.
+* [ ] Decide whether being unit-cap blocked continues the metabolism clock;
+  current design says yes, requiring the player to make room or pause.
+* [ ] Consider an irreversible `Reabsorb Breeder` command which returns a
+  configurable fraction of biomass/resources and matches the Apocrypha lore.
+* [ ] Add metamorphosis and starvation animation, sound, effect, and UI states
+  without making simulation depend on presentation.
+* [ ] Persist the offspring project/ODF identity, inherited metabolism vector,
+  seeded state, production state, hunger clock, starvation accumulator, pause
+  state, and special-energy reserve through save/load.
+* [ ] Synchronize Seed targeting, winner selection, consumption, production,
+  metabolic payments, pausing, and starvation deterministically in multiplayer.
+* [ ] Apply starvation through native health/damage handling and block every
+  hull-increase path while starved rather than writing raw hull memory.
+* [ ] Document and signature-check every new Fleet Ops/Armada address used for
+  resource tests/deduction, special energy, target actions/orders, health,
+  repair suppression, Producer simulation, and save/load.
 
 #### Mother Influence Network
 

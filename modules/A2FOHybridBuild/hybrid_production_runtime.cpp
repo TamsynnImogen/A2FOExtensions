@@ -1,3 +1,9 @@
+/*
+ * File: modules/A2FOHybridBuild/hybrid_production_runtime.cpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: Runtime state for queued station construction placements, previews, and post-construction cleanup.
+ */
+
 #include "hybrid_production_runtime.hpp"
 
 #include <algorithm>
@@ -518,6 +524,22 @@ T* at(HMODULE module, std::uintptr_t rva) {
 
 void log_message(const std::string& message) noexcept {
     if (g_api && g_api->log) g_api->log(kModuleName, message.c_str());
+}
+
+bool dispatch_producer_event(std::uint32_t kind, void* producer,
+                             void* target_class) noexcept {
+    if (!g_api ||
+        !A2FO_MODULE_API_HAS(g_api, dispatch_producer_event) ||
+        (g_api->capabilities & A2FO_CAP_PRODUCER_EVENTS) == 0 ||
+        !g_api->dispatch_producer_event) {
+        return true;
+    }
+    A2FO_ProducerEvent event{};
+    event.struct_size = sizeof(event);
+    event.kind = kind;
+    event.producer = producer;
+    event.target_class = target_class;
+    return g_api->dispatch_producer_event(&event);
 }
 
 std::uint8_t* bytes(void* value) noexcept {
@@ -2562,6 +2584,17 @@ std::uintptr_t __attribute__((fastcall)) producer_get_action_hook(
 
 std::uintptr_t __attribute__((fastcall)) producer_start_effect_hook(
     void* station, void*) noexcept {
+    void* target_class = station && readable_range(
+            bytes(station) + kCurrentBuildClassOffset, sizeof(void*))
+        ? *reinterpret_cast<void**>(
+              bytes(station) + kCurrentBuildClassOffset)
+        : nullptr;
+    if (station && target_class &&
+        !dispatch_producer_event(
+            A2FO_PRODUCER_EVENT_STARTING_EFFECT,
+            station, target_class)) {
+        return 1;
+    }
     if (!active_evolve_job(station)) {
         return a2fo_call_thiscall_0(
             g_producer_start_effect_hook.gateway, station);
