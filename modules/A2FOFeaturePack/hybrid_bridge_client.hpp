@@ -1,3 +1,9 @@
+/*
+ * File: modules/A2FOFeaturePack/hybrid_bridge_client.hpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: Bridge API declarations that let FeaturePack talk to HybridBuild runtime policies through callbacks.
+ */
+
 #pragma once
 
 #include <cstddef>

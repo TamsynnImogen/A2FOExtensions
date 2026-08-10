@@ -1,3 +1,6 @@
+	# ABI bridge for legacy texture calls into Armada's MSVC thiscall methods.
+	# File-routing and conversion policy remains in module.cpp.
+
 	.text
 
 	# Armada's texture methods use MSVC thiscall: self is in ECX and the

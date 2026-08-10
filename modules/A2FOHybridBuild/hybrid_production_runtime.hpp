@@ -1,3 +1,9 @@
+/*
+ * File: modules/A2FOHybridBuild/hybrid_production_runtime.hpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: Runtime glue for HybridBuild queue and station construction preview/placement metadata structures.
+ */
+
 #pragma once
 
 #include "hybrid_production.hpp"

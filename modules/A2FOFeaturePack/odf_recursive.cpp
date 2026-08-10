@@ -1,7 +1,7 @@
 /*
  * File: modules/A2FOFeaturePack/odf_recursive.cpp
  * Module: A2FOHookExtensions (source-module)
- * Purpose: Recursive ODF discovery, virtual path overlay registration, and ODF basename winner resolution with logging and project-id tracking.
+ * Purpose: Recursive ODF discovery, overlay publication, and winner lookup.
  */
 
 #include "../../sdk/include/a2fo_module_api.h"

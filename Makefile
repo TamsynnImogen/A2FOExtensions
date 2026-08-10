@@ -18,6 +18,7 @@ STA1_CLASSIC_MODULE_DIR := $(STA1_CLASSIC_DIR)/modules
 STA1_COMPAT_MODULE := $(MODULE_DIR)/A1Compat.dll
 CHEATS_MODULE := $(MODULE_DIR)/A2FOCheats.dll
 CRAFT_IDENTITY_MODULE := $(MODULE_DIR)/A2FOCraftIdentity.dll
+EDIT_MENU_MODULE := $(MODULE_DIR)/A2FOEditMenu.dll
 FIRE_ARCS_MODULE := $(MODULE_DIR)/A2FOFireArcs.dll
 NORMAL_WEAPON_TECH_MODULE := $(MODULE_DIR)/A2FONormalWeaponTech.dll
 TURRETS_MODULE := $(MODULE_DIR)/A2FOTurrets.dll
@@ -38,6 +39,7 @@ MODULE_API_TEST := $(BUILD_DIR)/module_api_test
 HYBRID_PRODUCTION_TEST := $(BUILD_DIR)/hybrid_production_test
 TURRET_MATH_TEST := $(BUILD_DIR)/turret_math_test
 CRAFT_IDENTITY_TEST := $(BUILD_DIR)/craft_identity_test
+EDIT_MENU_TEST := $(BUILD_DIR)/edit_menu_test
 FIRE_ARC_TEST := $(BUILD_DIR)/fire_arc_test
 
 LUA_SOURCES := \
@@ -91,6 +93,7 @@ release: \
 	$(MODULE_DIR)/A2FOInfoIni.dll \
 	$(CHEATS_MODULE) \
 	$(CRAFT_IDENTITY_MODULE) \
+	$(EDIT_MENU_MODULE) \
 	$(FIRE_ARCS_MODULE) \
 	$(NORMAL_WEAPON_TECH_MODULE) \
 	$(TURRETS_MODULE) \
@@ -208,6 +211,17 @@ $(CRAFT_IDENTITY_MODULE): \
 		modules/A2FOCraftIdentity/identity_selection.cpp \
 		modules/A2FOCraftIdentity/thiscall_bridge.S
 
+$(EDIT_MENU_MODULE): \
+		modules/A2FOEditMenu/module.cpp \
+		modules/A2FOEditMenu/edit_menu_odf.cpp \
+		modules/A2FOEditMenu/edit_menu_odf.hpp \
+		modules/A2FOEditMenu/thiscall_bridge.S \
+		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
+		-o $@ modules/A2FOEditMenu/module.cpp \
+		modules/A2FOEditMenu/edit_menu_odf.cpp \
+		modules/A2FOEditMenu/thiscall_bridge.S
+
 $(FIRE_ARCS_MODULE): \
 		modules/A2FOFireArcs/module.cpp \
 		modules/A2FOFireArcs/fire_arc.cpp \
@@ -319,6 +333,13 @@ $(CRAFT_IDENTITY_TEST): tests/craft_identity_test.cpp \
 		tests/craft_identity_test.cpp \
 		modules/A2FOCraftIdentity/identity_selection.cpp
 
+$(EDIT_MENU_TEST): tests/edit_menu_test.cpp \
+		modules/A2FOEditMenu/edit_menu_odf.cpp \
+		modules/A2FOEditMenu/edit_menu_odf.hpp | $(BUILD_DIR)
+	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+		-Imodules/A2FOEditMenu -o $@ \
+		tests/edit_menu_test.cpp modules/A2FOEditMenu/edit_menu_odf.cpp
+
 $(FIRE_ARC_TEST): tests/fire_arc_test.cpp \
 		modules/A2FOFireArcs/fire_arc.cpp \
 		modules/A2FOFireArcs/fire_arc.hpp | $(BUILD_DIR)
@@ -355,6 +376,10 @@ verify: release
 	@$(OBJDUMP) -p $(CRAFT_IDENTITY_MODULE) | \
 		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|DLL Name" || true
 	@echo
+	@echo "A2FOEditMenu module exports:"
+	@$(OBJDUMP) -p $(EDIT_MENU_MODULE) | \
+		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|DLL Name" || true
+	@echo
 	@echo "A2FOFireArcs module exports:"
 	@$(OBJDUMP) -p $(FIRE_ARCS_MODULE) | \
 		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|A2FOFireArcs_AllowWeaponTrigger|DLL Name" || true
@@ -380,6 +405,7 @@ verify: release
 		$(MODULE_DIR)/A2FOInfoIni.dll \
 		$(CHEATS_MODULE) \
 		$(CRAFT_IDENTITY_MODULE) \
+		$(EDIT_MENU_MODULE) \
 		$(FIRE_ARCS_MODULE) \
 		$(NORMAL_WEAPON_TECH_MODULE) \
 		$(TURRETS_MODULE) \
@@ -414,7 +440,7 @@ verify-sdk: sdk-examples
 
 test: $(FPQ_PATHS_TEST) $(ODF_PATHS_TEST) $(EXTENSION_ROOTS_TEST) \
 	$(MODULE_API_TEST) $(HYBRID_PRODUCTION_TEST) $(TURRET_MATH_TEST) \
-	$(CRAFT_IDENTITY_TEST) $(FIRE_ARC_TEST)
+	$(CRAFT_IDENTITY_TEST) $(EDIT_MENU_TEST) $(FIRE_ARC_TEST)
 	$(FPQ_PATHS_TEST)
 	$(ODF_PATHS_TEST)
 	$(EXTENSION_ROOTS_TEST)
@@ -422,6 +448,7 @@ test: $(FPQ_PATHS_TEST) $(ODF_PATHS_TEST) $(EXTENSION_ROOTS_TEST) \
 	$(HYBRID_PRODUCTION_TEST)
 	$(TURRET_MATH_TEST)
 	$(CRAFT_IDENTITY_TEST)
+	$(EDIT_MENU_TEST)
 	$(FIRE_ARC_TEST)
 
 smoke: release $(SMOKE_TEST)

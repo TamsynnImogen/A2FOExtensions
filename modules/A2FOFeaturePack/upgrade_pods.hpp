@@ -1,3 +1,9 @@
+/*
+ * File: modules/A2FOFeaturePack/upgrade_pods.hpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: Configurable upgrade-pod feature API declaration for tier-controlled research pod progression.
+ */
+
 #pragma once
 
 #include "../../sdk/include/a2fo_module_api.h"

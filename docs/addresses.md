@@ -182,18 +182,19 @@ anchors both extension fields without reapplying the panel origin.
 | Image | RVA | Kind | Bytes | Expected bytes | Handler and purpose |
 | --- | ---: | --- | ---: | --- | --- |
 | Armada | `0x00264e30` | inline/JMP chain | 5/6 | stock `55 8b ec 6a ff`, or Fleet Ops' live `68 <handler> c3` resolving exactly to RVA `0x0010ef74` whose handler begins `55 8b ec 83 c4 dc 53` | `weapon_class_constructor_hook`; chain Fleet Operations' WeaponClass enhancement, parse the completed ODF's optional box/cone policy, and retain it by class pointer without mutating the stock WeaponClass arc fields |
-| Armada | `0x0026f8c0` | inline/JMP chain | 6 | stock `55 8b ec 83 ec 1c`, or Fleet Ops' live `68 <handler> c3` resolving exactly to RVA `0x001358ac` whose handler begins `55 8b ec 83 c4 f4 53` | `weapon_can_fire_at_hook`; chain Fleet Operations' target filter, preserve native authorization, then apply only the configured horizontal envelope so Armada's two-dimensional attack AI can turn into yaw coverage safely |
+| Armada | `0x0026f8c0` | inline/JMP chain | 6 | stock `55 8b ec 83 ec 1c`, or Fleet Ops' live `68 <handler> c3` resolving exactly to RVA `0x001358ac` whose handler begins `55 8b ec 83 c4 f4 53` | `weapon_can_fire_at_hook`; chain Fleet Operations' target filter, preserve native target/range/obstruction authorization, replace the stock directional gate, and apply the complete configured 3D volume |
 
 Both hooks accept only Fleet Operations' exact checked handlers or the
 untouched stock prologues. The firing hook is installed first, but remains a
 pass-through until both sites are ready. A weapon ODF without any new arc
 commands never enters module policy: its existing `restrictFireArc` byte and
-native `fireArc` path remain unchanged. A valid custom policy's horizontal
-envelope is applied only after the native range, obstruction, and optional
-stock-arc checks succeed. `A2FOFireArcs_AllowWeaponTrigger` exports the full
-box/cone decision for A2FOTurrets' existing late weapon-trigger hook; this
-suppresses shots outside pitch coverage without entering Armada's unsafe
-vertical attack-movement path.
+native `fireArc` path remain unchanged. For a valid custom policy, the hook
+temporarily clears `WeaponClass+0x1b7` only while chaining native `CanFireAt`,
+then restores it. This preserves target validity, range, and obstruction while
+letting the custom box/cone own the directional decision, including pitch.
+`A2FOFireArcs_AllowWeaponTrigger` exports the same full decision for
+A2FOTurrets' existing late weapon-trigger hook, closing any gap between target
+authorization and the actual shot.
 
 The module reads numeric ODF angles through `ParameterDB::GetFloat` at Armada
 RVA `0x00134df0`, with the active `ParameterDB::GetString` entry at
@@ -202,6 +203,8 @@ the live owner through `Weapon::GetOwner` at `0x00271050`, reads its matrix
 through `Entity::GetTransform` at `0x000cfd50`, and reads the target position
 from the same validated `GameObject+0xac` coordinates used by native target
 authorization. A Weapon instance's WeaponClass pointer is at `+0x04`; Armada
+stores `restrictFireArc` at WeaponClass `+0x1b7` and the stock `fireArc` float
+at `+0x1b8`. The custom path does not modify either field persistently. Armada
 Matrix34 uses right/up/forward/translation vectors at
 `+0x00`/`+0x0c`/`+0x18`/`+0x24`.
 
@@ -218,6 +221,28 @@ RVA `0x00120680` (expected prefix
 fail-open/default-`0` path. `WeaponClass+0x1b4` identifies special weapons,
 which bypass this added filter because Fleet Operations already owns their
 technology behaviour.
+
+`A2FOEditMenu.dll` owns recursive `buildItemX` navigation in Armada's map
+editor:
+
+| Image | RVA | Kind | Bytes | Expected bytes | Handler and purpose |
+| --- | ---: | --- | ---: | --- | --- |
+| Armada | `0x0011c610` | inline | 9 | `55 8b ec 81 ec c4 00 00 00` | `edit_menu_update_hook`; chain the native edit-menu update, inspect completed level transitions, replace the active native category slot when a selected `buildItemX` target itself contains `buildItemX`, and pop the plugin breadcrumb on native Back |
+
+Armada's editor-menu table begins at RVA `0x00365038`. It contains 12 root
+slots of `0x518` bytes; each slot contains its source/title pointers followed
+by 12 native `0x6c`-byte build-menu records. The apparent `itemX` string array
+at record offset `+0x0c` actually contains numeric `cPrjID` values produced by
+`ParameterDB::GetProjectId`; companion class pointers begin at `+0x3c`. The
+module resolves each configured leaf name through Armada RVA `0x000cd370`,
+reads its canonical project ID through `GameObjectClass+0x1cc`, and publishes
+both values. Armada's allocation routines at RVAs `0x00252710` and
+`0x002527d0` own the temporary source/title strings. The module restores the
+original root slot after the final Back operation. Only the overwritten update
+entry requires its exact stock signature; the public resolver and allocator
+entries need to remain readable because Fleet Operations may already detour
+them to its active object database or memory manager. Parser and runtime details are in
+[`modules/A2FOEditMenu/README.md`](../modules/A2FOEditMenu/README.md).
 
 `A2FOTurrets.dll` owns the global indexed linked-turret runtime:
 
@@ -810,27 +835,30 @@ policy and immutable model-node lookup respectively.
 6. `A2FOCraftIdentity.dll` chains Fleet Operations' CraftClass constructor and
    installs the two-field selected-object panel draw, aligned to the native
    ship-name row. It has no simulation, RNG, or save mutation.
-7. `A2FOFireArcs.dll` chains Fleet Operations' WeaponClass constructor and
+7. `A2FOEditMenu.dll` installs its checked editor update hook and only replaces
+   the active native category buffer while the user is inside a recursively
+   linked submenu. The stock renderer and placement path remain authoritative.
+8. `A2FOFireArcs.dll` chains Fleet Operations' WeaponClass constructor and
    installs the checked native firing-arc gate. It changes a WeaponClass only
    when its completed ODF contains a valid new arc policy.
-8. `A2FONormalWeaponTech.dll` validates its read-only weapon/team technology
+9. `A2FONormalWeaponTech.dll` validates its read-only weapon/team technology
    bridge and exports the optional normal-weapon trigger decision before
    A2FOTurrets claims the shared trigger hook.
-9. Deterministic filename ordering loads `A2FOFeaturePack.dll` before
+10. Deterministic filename ordering loads `A2FOFeaturePack.dll` before
    `A2FOHybridBuild.dll`. FeaturePack owns shared Producer and upgrade-station
    sites; HybridBuild composes with them through its private callback bridge.
-10. `A2FOInfoIni.dll` owns policy only. It registers a provider and installs no
+11. `A2FOInfoIni.dll` owns policy only. It registers a provider and installs no
    binary patch itself; the timing-sensitive settings hooks remain core-owned.
-11. `A2FORGBTextures.dll` loads after FeaturePack in filename order and owns an
+12. `A2FORGBTextures.dll` loads after FeaturePack in filename order and owns an
    independent, conditional Armada `fopen` IAT bridge, the TGA
    FileExists/OpenRead routes, and the validated texture-lock/minimap guards.
    FeaturePack remains the sole semantic handler registered with the core FOFS
    dispatcher.
-12. `A2FOTurrets.dll` then registers the global semantic `turret` policy and
+13. `A2FOTurrets.dll` then registers the global semantic `turret` policy and
    preflights all six of its Armada runtime sites before installing any of
    them. Child creation is deferred until the configured parent first
    simulates, after class and ODF loading has completed.
-13. The destroyed-object hooks are installed after native/Lua registration and
+14. The destroyed-object hooks are installed after native/Lua registration and
    only when at least one handler needs them.
 
 Low-level hooks are process-lifetime changes. Each feature validates all of

@@ -2,9 +2,10 @@
  * Optional ODF-driven three-dimensional weapon firing arcs.
  *
  * Weapon ODFs which use none of the new commands retain Armada/Fleet Ops'
- * native restrictFireArc/fireArc path. A configured weapon is evaluated as a
- * final filter after Armada's native range, obstruction, and optional stock
- * arc checks, using the weapon owner's local right/up/forward axes.
+ * native restrictFireArc/fireArc path. A configured weapon replaces the
+ * stock directional gate while retaining Armada's native range, obstruction,
+ * and target-validity checks, using the weapon owner's local
+ * right/up/forward axes.
  */
 
 #include "../../sdk/include/a2fo_module_api.h"
@@ -60,6 +61,7 @@ constexpr std::uintptr_t kFoWeaponClassConstructorHandlerRva = 0x0010ef74;
 constexpr std::uintptr_t kFoWeaponCanFireAtHandlerRva = 0x001358ac;
 
 constexpr std::size_t kWeaponClassOnWeaponOffset = 0x04;
+constexpr std::size_t kRestrictFireArcOnWeaponClassOffset = 0x1b7;
 constexpr std::size_t kPositionOnGameObjectOffset = 0xac;
 
 constexpr std::uint8_t kExpectedWeaponClassConstructor[] = {
@@ -88,9 +90,12 @@ void* g_weapon_can_fire_at_original = nullptr;
 A2FO_InlineHook g_weapon_class_constructor_hook{};
 A2FO_InlineHook g_weapon_can_fire_at_hook{};
 std::unordered_map<void*, ArcConfig> g_class_arcs;
+
+// These one-shot messages prove that both engine stages reached the module
+// without turning the per-frame target loop into an unbounded log stream.
 volatile LONG g_logged_first_custom_check = 0;
-volatile LONG g_logged_first_horizontal_allowed_target = 0;
-volatile LONG g_logged_first_horizontal_rejected_target = 0;
+volatile LONG g_logged_first_direction_allowed_target = 0;
+volatile LONG g_logged_first_direction_rejected_target = 0;
 volatile LONG g_logged_first_trigger_allowed_target = 0;
 volatile LONG g_logged_first_trigger_rejected_target = 0;
 
@@ -113,6 +118,26 @@ bool readable_range(const void* address, std::size_t size) noexcept {
         (information.Protect & (PAGE_NOACCESS | PAGE_GUARD)) != 0) {
         return false;
     }
+    const auto start = reinterpret_cast<std::uintptr_t>(address);
+    const auto base = reinterpret_cast<std::uintptr_t>(
+        information.BaseAddress);
+    return start >= base && size <= information.RegionSize - (start - base);
+}
+
+bool writable_range(void* address, std::size_t size) noexcept {
+    if (!address || size == 0) return false;
+    MEMORY_BASIC_INFORMATION information{};
+    if (VirtualQuery(address, &information, sizeof(information)) == 0 ||
+        information.State != MEM_COMMIT ||
+        (information.Protect & (PAGE_NOACCESS | PAGE_GUARD)) != 0) {
+        return false;
+    }
+    const DWORD protection = information.Protect & 0xffu;
+    const bool writable = protection == PAGE_READWRITE ||
+        protection == PAGE_WRITECOPY ||
+        protection == PAGE_EXECUTE_READWRITE ||
+        protection == PAGE_EXECUTE_WRITECOPY;
+    if (!writable) return false;
     const auto start = reinterpret_cast<std::uintptr_t>(address);
     const auto base = reinterpret_cast<std::uintptr_t>(
         information.BaseAddress);
@@ -400,18 +425,56 @@ bool call_native_can_fire_at(void* weapon, void* firing_context,
             0xffu) != 0;
 }
 
-bool evaluate_custom_arc(void* weapon, const void* target,
-                         bool horizontal_only,
-                         bool* configured) noexcept {
-    if (configured) *configured = false;
-    if (!g_runtime_ready || !weapon) return true;
-
+const ArcConfig* configured_arc(void* weapon,
+                                void** weapon_class_output) noexcept {
+    if (weapon_class_output) *weapon_class_output = nullptr;
+    if (!g_runtime_ready || !weapon) return nullptr;
     void* weapon_class = read_at<void*>(
         weapon, kWeaponClassOnWeaponOffset, nullptr);
+    if (weapon_class_output) *weapon_class_output = weapon_class;
     const auto policy = g_class_arcs.find(weapon_class);
-    if (policy == g_class_arcs.end()) return true;
-    if (configured) *configured = true;
+    return policy == g_class_arcs.end() ? nullptr : &policy->second;
+}
 
+class ScopedNativeArcBypass {
+public:
+    explicit ScopedNativeArcBypass(void* weapon_class) noexcept {
+        address_ = weapon_class
+            ? static_cast<std::uint8_t*>(weapon_class) +
+                  kRestrictFireArcOnWeaponClassOffset
+            : nullptr;
+        if (!writable_range(address_, sizeof(*address_))) {
+            address_ = nullptr;
+            return;
+        }
+        original_ = *address_;
+        if (original_ == 0) {
+            // Most custom weapons already leave the native restriction off.
+            // Avoid writing shared class memory when no bypass is required.
+            address_ = nullptr;
+            return;
+        }
+        *address_ = 0;
+    }
+
+    ~ScopedNativeArcBypass() noexcept {
+        if (address_) *address_ = original_;
+    }
+
+    ScopedNativeArcBypass(const ScopedNativeArcBypass&) = delete;
+    ScopedNativeArcBypass& operator=(const ScopedNativeArcBypass&) = delete;
+
+private:
+    std::uint8_t* address_ = nullptr;
+    std::uint8_t original_ = 0;
+};
+
+bool evaluate_arc_policy(void* weapon, const void* target,
+                         const ArcConfig& policy) noexcept {
+    // Geometry failure is deliberately fail-open. Native CanFireAt has already
+    // validated the target; refusing every shot because one reverse-engineered
+    // pointer is unavailable would be a much more damaging failure mode.
+    if (!weapon) return true;
     void* owner = reinterpret_cast<void*>(
         a2fo_fire_arc_call_thiscall_0(
             at(g_armada, kWeaponGetOwnerRva), weapon));
@@ -429,51 +492,69 @@ bool evaluate_custom_arc(void* weapon, const void* target,
         return true;
     }
 
+    // Copy both values before doing any floating-point work. Engine-owned
+    // pointers are not retained beyond this synchronous callback.
     Matrix34 owner_copy{};
     float target_position[3]{};
     std::memcpy(&owner_copy, owner_transform, sizeof(owner_copy));
     std::memcpy(target_position, target_position_address,
                 sizeof(target_position));
-
-    ArcConfig effective = policy->second;
-    if (horizontal_only) {
-        if (effective.mode == ArcMode::cone) {
-            effective.mode = ArcMode::box;
-            effective.yaw_angle_degrees =
-                effective.cone_angle_degrees;
-        }
-        effective.pitch_degrees = 0.0f;
-        effective.pitch_angle_degrees = 180.0f;
-    }
     return a2fo::fire_arcs::allows_target(
-        effective, owner_copy, target_position);
+        policy, owner_copy, target_position);
+}
+
+bool evaluate_custom_arc(void* weapon, const void* target,
+                         bool* configured) noexcept {
+    if (configured) *configured = false;
+    if (!g_runtime_ready || !weapon) return true;
+
+    const ArcConfig* policy = configured_arc(weapon, nullptr);
+    if (!policy) return true;
+    if (configured) *configured = true;
+    return evaluate_arc_policy(weapon, target, *policy);
 }
 
 bool __attribute__((fastcall)) weapon_can_fire_at_hook(
     void* weapon, void*, void* firing_context, void* target,
     void* distance_output) noexcept {
-    const bool native_allowed = call_native_can_fire_at(
-        weapon, firing_context, target, distance_output);
-    if (!native_allowed || !g_runtime_ready || !weapon) {
-        return native_allowed;
+    void* weapon_class = nullptr;
+    const ArcConfig* policy = configured_arc(weapon, &weapon_class);
+    if (!policy) {
+        return call_native_can_fire_at(
+            weapon, firing_context, target, distance_output);
     }
-    bool configured = false;
-    const bool horizontal_allowed = evaluate_custom_arc(
-        weapon, target, true, &configured);
-    if (!configured) return true;
+
+    // A custom arc owns only the directional decision. Temporarily disable
+    // Armada's stock restrictFireArc gate while its CanFireAt path performs
+    // the range, obstruction, and target-validity checks. There is no separate
+    // native entry for those non-directional checks. Fleet Ops serializes this
+    // simulation path; the scoped write is restored before control returns to
+    // any other weapon. Weapons without a custom policy never enter this path.
+    bool native_allowed = false;
+    {
+        ScopedNativeArcBypass bypass(weapon_class);
+        native_allowed = call_native_can_fire_at(
+            weapon, firing_context, target, distance_output);
+    }
+    if (!native_allowed) return false;
+
+    // Use the policy found before the native call. WeaponClass policies are
+    // immutable once startup class construction has completed.
+    const bool direction_allowed = evaluate_arc_policy(
+        weapon, target, *policy);
     if (InterlockedCompareExchange(
             &g_logged_first_custom_check, 1, 0) == 0) {
         log_line("First configured weapon target check reached");
     }
-    volatile LONG* logged_result = horizontal_allowed
-        ? &g_logged_first_horizontal_allowed_target
-        : &g_logged_first_horizontal_rejected_target;
+    volatile LONG* logged_result = direction_allowed
+        ? &g_logged_first_direction_allowed_target
+        : &g_logged_first_direction_rejected_target;
     if (InterlockedCompareExchange(logged_result, 1, 0) == 0) {
-        log_line(horizontal_allowed
-            ? "Custom horizontal arc accepted its first target"
-            : "Custom horizontal arc rejected its first target");
+        log_line(direction_allowed
+            ? "Custom 3D arc accepted its first target authorization"
+            : "Custom 3D arc rejected its first target authorization");
     }
-    return horizontal_allowed;
+    return direction_allowed;
 }
 
 template <std::size_t Size>
@@ -549,7 +630,8 @@ bool weapon_class_constructor_supported() noexcept {
     char message[360]{};
     std::snprintf(
         message, sizeof(message),
-        "WeaponClass constructor has neither the stock prologue nor Fleet Ops' supported detour (destination=%p, expected=%p)",
+        "WeaponClass constructor has neither the stock prologue nor Fleet "
+        "Ops' supported detour (destination=%p, expected=%p)",
         existing_detour_destination(
             at(g_armada, kWeaponClassConstructorRva), nullptr),
         at(g_fleet_ops, kFoWeaponClassConstructorHandlerRva));
@@ -572,7 +654,8 @@ bool weapon_can_fire_at_supported() noexcept {
     char message[360]{};
     std::snprintf(
         message, sizeof(message),
-        "Weapon target authorization has neither the stock prologue nor Fleet Ops' supported detour (destination=%p, expected=%p)",
+        "Weapon target authorization has neither the stock prologue nor "
+        "Fleet Ops' supported detour (destination=%p, expected=%p)",
         existing_detour_destination(
             at(g_armada, kWeaponCanFireAtRva), nullptr),
         at(g_fleet_ops, kFoWeaponCanFireAtHandlerRva));
@@ -719,7 +802,9 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     if (g_runtime_ready) {
         if (g_chained_fo_weapon_class_constructor &&
             g_chained_fo_weapon_can_fire_at) {
-            log_line("3D fire-arc runtime initialized and chained through Fleet Operations WeaponClass construction and target authorization");
+            log_line(
+                "3D fire-arc runtime initialized and chained through Fleet "
+                "Operations WeaponClass construction and target authorization");
         } else if (g_chained_fo_weapon_class_constructor) {
             log_line("3D fire-arc runtime initialized and chained through Fleet Operations WeaponClass construction");
         } else if (g_chained_fo_weapon_can_fire_at) {
@@ -740,7 +825,7 @@ bool A2FO_CALL A2FOFireArcs_AllowWeaponTrigger(
     void* weapon, const void* target) {
     bool configured = false;
     const bool allowed = evaluate_custom_arc(
-        weapon, target, false, &configured);
+        weapon, target, &configured);
     if (!configured) return true;
 
     volatile LONG* logged_result = allowed

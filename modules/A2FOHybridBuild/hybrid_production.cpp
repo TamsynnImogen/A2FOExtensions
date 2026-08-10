@@ -1,3 +1,9 @@
+/*
+ * File: modules/A2FOHybridBuild/hybrid_production.cpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: Core HybridBuild production policy: construction execution, command filtering, and queue sidecar lifecycle.
+ */
+
 #include "hybrid_production.hpp"
 
 #include <algorithm>

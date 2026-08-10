@@ -1,3 +1,6 @@
+	# ABI bridge for A2FOFireArcs calls into Armada's MSVC thiscall weapon,
+	# entity, and ParameterDB methods.
+
 	.text
 
 	.globl _a2fo_fire_arc_call_thiscall_0

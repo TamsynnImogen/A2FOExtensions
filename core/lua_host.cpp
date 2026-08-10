@@ -1,3 +1,9 @@
+/*
+ * File: core/lua_host.cpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: Lua host bootstrap and API binding layer for module scripts and optional runtime state exposed to Lua.
+ */
+
 #include "lua_host.hpp"
 
 #include <windows.h>

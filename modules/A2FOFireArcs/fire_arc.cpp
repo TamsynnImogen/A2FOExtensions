@@ -1,3 +1,8 @@
+/*
+ * Pure owner-local fire-volume mathematics. This translation unit contains no
+ * engine calls so every angle convention and boundary can be unit tested.
+ */
+
 #include "fire_arc.hpp"
 
 #include <cmath>
@@ -85,6 +90,9 @@ bool allows_target(
             360.0f - kBoundaryEpsilonDegrees) {
             return true;
         }
+        // Build a unit vector for the configured centre, then compare its dot
+        // product with the target direction against cos(half-angle). This is
+        // a true circular spherical cap, not independent yaw/pitch limits.
         const float inverse_length = 1.0f / std::sqrt(length_squared);
         const float yaw = config.yaw_degrees * kDegreesToRadians;
         const float pitch = config.pitch_degrees * kDegreesToRadians;
@@ -100,10 +108,18 @@ bool allows_target(
         return target_dot_centre + kBoundaryEpsilonDot >= minimum_dot;
     }
 
+    // Box mode converts the owner-local direction back into yaw and pitch so
+    // the two total widths can be tested independently. Yaw is undefined at
+    // the vertical poles. Trigonometric rounding can leave a tiny horizontal
+    // component there, so deliberately use the configured centre yaw instead
+    // of allowing that noise to select an arbitrary (often opposite) yaw.
     const float horizontal = std::sqrt(
         local_right * local_right + local_forward * local_forward);
-    const float target_yaw = std::atan2(
-        local_right, local_forward) * kRadiansToDegrees;
+    const float direction_length = std::sqrt(length_squared);
+    const float target_yaw = horizontal <=
+            direction_length * kDirectionEpsilon
+        ? config.yaw_degrees
+        : std::atan2(local_right, local_forward) * kRadiansToDegrees;
     const float target_pitch = std::atan2(
         local_up, horizontal) * kRadiansToDegrees;
     const float yaw_difference = std::fabs(normalize_degrees(
@@ -114,8 +130,11 @@ bool allows_target(
             360.0f - kBoundaryEpsilonDegrees ||
         yaw_difference <= config.yaw_angle_degrees * 0.5f +
             kBoundaryEpsilonDegrees;
-    const bool pitch_allowed = config.pitch_angle_degrees >=
-            180.0f - kBoundaryEpsilonDegrees ||
+    // Pitch itself occupies only -90..90 degrees. A 180-degree width centred
+    // at zero therefore covers that complete domain naturally, while the same
+    // width centred at +90 or -90 covers only the upper or lower hemisphere.
+    // Treating every 180-degree width as unconditional discarded its centre.
+    const bool pitch_allowed =
         pitch_difference <= config.pitch_angle_degrees * 0.5f +
             kBoundaryEpsilonDegrees;
     return yaw_allowed && pitch_allowed;

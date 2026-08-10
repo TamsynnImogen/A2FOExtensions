@@ -1,3 +1,9 @@
+/*
+ * File: modules/A2FOHybridBuild/module.cpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: Bootstrap HybridBuild aliases, cocoon policy, and runtime hooks.
+ */
+
 #include "../A2FOFeaturePack/hybrid_bridge_api.hpp"
 #include "hybrid_production_runtime.hpp"
 #include "../../sdk/include/a2fo_module_api.h"

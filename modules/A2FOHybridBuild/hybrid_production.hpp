@@ -1,3 +1,9 @@
+/*
+ * File: modules/A2FOHybridBuild/hybrid_production.hpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: HybridBuild public interfaces for queue-state callbacks and constructor placement policy integration.
+ */
+
 #pragma once
 
 #include <cstddef>

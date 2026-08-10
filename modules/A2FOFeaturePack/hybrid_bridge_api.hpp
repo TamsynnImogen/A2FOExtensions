@@ -1,3 +1,9 @@
+/*
+ * File: modules/A2FOFeaturePack/hybrid_bridge_api.hpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: Callback contract shared by FeaturePack and HybridBuild.
+ */
+
 #pragma once
 
 #include <cstddef>
@@ -36,4 +42,3 @@ struct A2FO_HybridBridge {
 
 using A2FO_RegisterHybridBridgeFn = bool (__cdecl*)(
     const A2FO_HybridBridge* bridge);
-

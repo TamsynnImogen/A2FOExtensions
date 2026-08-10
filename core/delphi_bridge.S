@@ -1,3 +1,7 @@
+	# ABI bridge for the core DLL's calls into 32-bit Armada and FleetOpsHook.
+	# No gameplay policy belongs here; each wrapper only translates registers,
+	# stack arguments, and callee-cleanup rules that MinGW C++ cannot express.
+
 	.text
 
 	# ABI translation helpers for 32-bit code only.

@@ -1,7 +1,7 @@
 /*
  * File: modules/A2FOFeaturePack/queue_enhancement.cpp
  * Module: A2FOHookExtensions (source-module)
- * Purpose: Producer queue convenience and continuous production behaviors with synchronized marker handling and persistence hooks.
+ * Purpose: Producer queue filling, continuous production, and save markers.
  */
 
 #include "queue_enhancement.hpp"

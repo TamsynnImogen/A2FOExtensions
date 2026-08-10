@@ -1,3 +1,9 @@
+/*
+ * File: core/module_loader.hpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: Native DLL discovery and transactional loading API.
+ */
+
 #pragma once
 
 #include <windows.h>

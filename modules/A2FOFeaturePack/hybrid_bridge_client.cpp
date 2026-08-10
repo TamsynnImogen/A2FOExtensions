@@ -1,3 +1,9 @@
+/*
+ * File: modules/A2FOFeaturePack/hybrid_bridge_client.cpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: HybridBuild callback resolution and fail-open dispatch wrappers.
+ */
+
 #include "hybrid_bridge_client.hpp"
 
 #include "hybrid_bridge_api.hpp"
@@ -128,4 +134,3 @@ void cleanup_hybrid_construction(void* station) noexcept {
 }
 
 }  // namespace a2fo
-

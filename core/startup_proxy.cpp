@@ -1,3 +1,9 @@
+/*
+ * File: core/startup_proxy.cpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: Preserve the stock startup chain while loading the core extension.
+ */
+
 #include <windows.h>
 
 #include <cstddef>

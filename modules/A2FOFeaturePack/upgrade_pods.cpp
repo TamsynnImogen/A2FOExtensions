@@ -1,3 +1,9 @@
+/*
+ * File: modules/A2FOFeaturePack/upgrade_pods.cpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: Upgradeable ship-system pod parser and runtime progression engine with safe extended-tier sidecars.
+ */
+
 #include "upgrade_pods.hpp"
 
 #include "hybrid_bridge_client.hpp"

@@ -1,3 +1,10 @@
+/*
+ * Pure, host-testable row-selection helper for A2FOCraftIdentity.
+ *
+ * The runtime deliberately shares Fleet Operations' possibleCraftNames index
+ * instead of selecting captain and registry strings independently.
+ */
+
 #include "identity_selection.hpp"
 
 namespace a2fo::craft_identity {

@@ -1,3 +1,6 @@
+	# ABI bridge for A2FOTurrets calls into Armada's MSVC thiscall object,
+	# weapon, and transform methods.
+
 	.text
 
 	.globl _a2fo_turret_call_thiscall_0

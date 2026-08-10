@@ -1,3 +1,6 @@
+	# ABI bridge for FeaturePack calls into FleetOpsHook's Delphi-register
+	# routines. C++ policy and signature checks remain in the owning sources.
+
 	.text
 
 	# A2FOFeaturePack.dll ABI translations. C++ uses cdecl; FleetOpsHook.dll uses

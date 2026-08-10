@@ -1,7 +1,8 @@
 /*
  * File: core/dllmain.cpp
  * Module: A2FOHookExtensions (main-hook)
- * Purpose: Core extension entry point for API setup, binary validation, root ordering, hook registration, and optional module loading.
+ * Purpose: Core API setup, binary validation, root ordering, shared hook
+ * ownership, and optional module loading.
  */
 
 #include "extension_roots.hpp"

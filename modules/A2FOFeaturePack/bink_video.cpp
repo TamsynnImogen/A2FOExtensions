@@ -1,7 +1,7 @@
 /*
  * File: modules/A2FOFeaturePack/bink_video.cpp
  * Module: A2FOHookExtensions (source-module)
- * Purpose: Bink scaling hooks for viewport and movie rendering paths (D3D texture and GDI) to avoid stretched UI artifacts.
+ * Purpose: Scale Fleet Ops/Armada Bink rendering to the active viewport.
  */
 
 #include "bink_video.hpp"

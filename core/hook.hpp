@@ -1,3 +1,9 @@
+/*
+ * File: core/hook.hpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: Low-level patch primitives for inline hooks, patched jumps/calls, and opcode-safe byte replacement.
+ */
+
 #pragma once
 
 #include <cstddef>

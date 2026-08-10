@@ -1,3 +1,9 @@
+/*
+ * File: core/module_loader.cpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: Native DLL discovery, transactional initialization, and shutdown.
+ */
+
 #include "module_loader.hpp"
 
 #include <algorithm>
