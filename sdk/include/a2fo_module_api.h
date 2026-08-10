@@ -16,7 +16,7 @@
 #endif
 
 #define A2FO_MODULE_API_VERSION 4u
-#define A2FO_MODULE_API_REVISION 4u
+#define A2FO_MODULE_API_REVISION 10u
 
 // The major version remains 4 so DLLs compiled against the original v4 ABI
 // continue to load. Revisions append fields to A2FO_ModuleApi; never insert or
@@ -27,6 +27,42 @@ enum A2FO_ModuleCapability : std::uint64_t {
     A2FO_CAP_UPGRADE_POD_POLICY = 1ull << 1,
     A2FO_CAP_ORIGINAL_CLASSLABEL = 1ull << 2,
     A2FO_CAP_COCOON_CLASS_ASSOCIATION = 1ull << 3,
+    A2FO_CAP_INFO_INI_DEFAULTS = 1ull << 4,
+    A2FO_CAP_ODF_OVERLAY_DIRECTORIES = 1ull << 5,
+    A2FO_CAP_PRODUCER_EVENTS = 1ull << 6,
+    A2FO_CAP_CLASSLABEL_ODF_DEFAULTS = 1ull << 7,
+};
+
+enum A2FO_ProducerEventKind : std::uint32_t {
+    // Sent before a class is admitted to a Producer queue. Returning false
+    // rejects this one admission without changing any existing queue items.
+    A2FO_PRODUCER_EVENT_ADMIT = 0,
+
+    // Sent after the native Producer completion callback has consumed the
+    // head item. target_class is captured before the native callback runs.
+    A2FO_PRODUCER_EVENT_FINISHED = 1,
+
+    // Sent before the native Producer destructor runs. target_class is null.
+    A2FO_PRODUCER_EVENT_DESTROYING = 2,
+
+    // Sent immediately before the native Producer completion callback.
+    // Returning false claims an in-place completion and suppresses that
+    // callback; FeaturePack still sends FINISHED afterward. This is intended
+    // for legacy non-object build classes whose Build() cannot return the
+    // GameObject required by A2/FO's ordinary completion path.
+    A2FO_PRODUCER_EVENT_FINISHING = 3,
+
+    // Sent immediately before Producer::mStartConstructionEffect creates a
+    // cosmetic construction instance for target_class. Returning false
+    // suppresses only that effect; the synchronized build remains admitted
+    // and continues normally. This is required by legacy non-object build
+    // classes which cannot safely back a Craft construction renderer.
+    A2FO_PRODUCER_EVENT_STARTING_EFFECT = 4,
+};
+
+enum A2FO_OdfOverlayPrecedence : std::uint32_t {
+    A2FO_ODF_OVERLAY_NORMAL = 0,
+    A2FO_ODF_OVERLAY_OVERRIDE = 1,
 };
 
 enum A2FO_ObjectReplacementFlags : std::uint32_t {
@@ -47,6 +83,15 @@ struct A2FO_StringView {
 struct A2FO_OdfFieldView {
     A2FO_StringView name;
     A2FO_StringView value;
+};
+
+// Startup-only declarative fallback for one aliased classlabel. The core
+// copies both strings during registration. A fallback is visible only when
+// ParameterDB's ordinary lookup (including ODF includes) reports the command
+// missing, so an object or inherited parent value always wins.
+struct A2FO_ClasslabelOdfDefault {
+    const char* command;
+    const char* value;
 };
 
 struct A2FO_ObjectDestroyedEvent {
@@ -83,6 +128,33 @@ using A2FO_FofsItemLookupHandler = bool (A2FO_CALL*)(
     void* delphi_name,
     std::uint32_t flags,
     void** result,
+    void* user_data);
+
+// Supplies optional Fleet Ops info.ini defaults without placing mod policy in
+// the core hook DLL. `normal_settings_directory` is the native Fleet Ops path
+// when a resolved override is requested and may be null for speed-only calls.
+// Write an empty string to keep the native directory. The callback owns no
+// returned storage; the core copies every value before returning.
+using A2FO_InfoIniDefaultsHandler = bool (A2FO_CALL*)(
+    const char* normal_settings_directory,
+    char* resolved_settings_directory,
+    std::uint32_t resolved_settings_directory_size,
+    std::uint32_t* has_default_game_speed,
+    std::int32_t* default_game_speed,
+    void* user_data);
+
+struct A2FO_ProducerEvent {
+    std::uint32_t struct_size;
+    std::uint32_t kind;
+    void* producer;
+    void* target_class;
+};
+
+// ADMIT, FINISHING, and STARTING_EFFECT continue only when every registered
+// handler returns true. FINISHED and DESTROYING are notification-only. Event
+// pointers expire when the callback returns.
+using A2FO_ProducerEventHandler = bool (A2FO_CALL*)(
+    const A2FO_ProducerEvent* event,
     void* user_data);
 
 struct A2FO_InlineHook {
@@ -176,6 +248,49 @@ struct A2FO_ModuleApi {
     bool (A2FO_CALL* associate_evolver_cocoon_class)(
         void* class_object,
         void* parameter_db);
+
+    // Revision 5 addition. The core retains the timing-critical native hooks;
+    // one module owns parsing and resolving the SettingsDirectory and
+    // DefaultGameSpeed values supplied by Fleet Ops info.ini files.
+    bool (A2FO_CALL* register_info_ini_defaults_handler)(
+        const char* module_name,
+        A2FO_InfoIniDefaultsHandler handler,
+        void* user_data);
+
+    // Revision 6 additions. Modules may declare extra relative directories
+    // containing ODFs during startup. Higher precedence wins only within the
+    // same Fleet Operations mod root; normal child/parent mod priority remains
+    // authoritative. Query functions remain available after registration
+    // closes so the filesystem owner can build its index lazily.
+    bool (A2FO_CALL* register_odf_overlay_directory)(
+        const char* module_name,
+        const char* relative_directory,
+        std::uint32_t precedence);
+    std::uint32_t (A2FO_CALL* odf_overlay_directory_count)();
+    bool (A2FO_CALL* get_odf_overlay_directory)(
+        std::uint32_t index,
+        char* relative_directory,
+        std::uint32_t relative_directory_size,
+        std::uint32_t* precedence);
+
+    // Revision 7 additions. Policy modules register during deferred startup;
+    // the module which owns Fleet Operations' Producer hooks dispatches the
+    // events at runtime. Keeping one hook owner prevents independent modules
+    // from patching the same executable addresses.
+    bool (A2FO_CALL* register_producer_event_handler)(
+        const char* module_name,
+        A2FO_ProducerEventHandler handler,
+        void* user_data);
+    bool (A2FO_CALL* dispatch_producer_event)(
+        const A2FO_ProducerEvent* event);
+
+    // Revision 10 addition. The core owns all shared ParameterDB getter hooks;
+    // compatibility modules supply only copied classlabel-specific policy.
+    bool (A2FO_CALL* register_classlabel_odf_defaults)(
+        const char* module_name,
+        const char* classlabel,
+        const A2FO_ClasslabelOdfDefault* defaults,
+        std::uint32_t default_count);
 };
 
 #define A2FO_MODULE_API_V4_BASE_SIZE \

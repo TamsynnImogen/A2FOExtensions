@@ -8,7 +8,20 @@ hooks, reusable dispatch, optional native features, and mod-authored Lua logic.
 - Recursive ODF discovery from arbitrary subdirectories.
 - Recursive ODF indexing inside active loose roots and `odf.fpq` archives.
 - Correct Data → `ParentMod` → active-mod file precedence.
-- `wingman` classlabel compatibility alias mapped to `craft`.
+- Optional `A2FOCheats.dll` enhancement makes `showmethemoney` grant
+  individually configurable amounts of Dilithium, Tritanium, Metal, Supplies,
+  and Crew (10,000 each by default), and restores the missing `m`, `dis`,
+  `crash`, and true team-elimination `elim` cheats.
+- Experimental indexed hull-mounted turrets through matching `turretX` and
+  `turretHardpointX` ODF commands, with independent weapons, hitpoints, yaw,
+  pitch, slew rates, ownership changes, and save/load reconnection.
+- Optional `A1Compat.dll` support for the Armada 1 `wingman` classlabel,
+  mapped safely to `craft` only through the `STA1 Classic` mod chain.
+- Armada 1 `Addon` ODF overlay support through `A1Compat.dll`, preserving A1's
+  within-root rule that `Addon` wins over a same-basename structured ODF.
+- Armada 1 starbase officer-quarter compatibility: A1 ODF limits and gains,
+  sequential `oqN` model reveal, native FO officer-cap changes, ownership
+  reversal, queue admission limits, and compatibility save state.
 - `hybridbuild` opt-in classlabel mapped to `research` for the staged
   HybridBuild implementation, including separate construct/yard/research/evolve
   menus, one shared ten-slot queue, queued station placement previews, and
@@ -42,11 +55,14 @@ hooks, reusable dispatch, optional native features, and mod-authored Lua logic.
 - Versioned native module API with backward-compatible capability revisions.
 - Automatic deterministic loading of `modules\*.dll`.
 - Data, `ParentMod`, and active-mod module/script overlay.
+- Optional direct Armada 1/2 legacy texture bridge for `Textures\RGB`,
+  `Textures\Index8`, and `Textures\Compressed` across the same mod roots.
 - Embedded Lua 5.4.8 runtime.
 - Restricted Lua environment with memory, file-size, and instruction limits.
 - Lua classlabel, Evolver-cocoon, and object-destroyed callbacks.
 - Bounded temporary ODF views exposed safely to Lua.
 - Native destroyed-object event dispatcher.
+- Native Producer admission/completion/destruction event dispatcher.
 - Transactional module and Lua registration with rollback after failed
   initialization.
 - SDK header and example native module.
@@ -81,6 +97,22 @@ existing saved profile still takes precedence.
 See [`docs/fleetops-info-defaults.md`](docs/fleetops-info-defaults.md) for the
 full resolution rules.
 
+### `RTS_CFG.h` cheat amounts
+
+Override any of the five `showmethemoney` grants with literal values from 0
+through 100,000,000:
+
+```cpp
+int SHOWMETHEMONEY_DILITHIUM = 10000;
+int SHOWMETHEMONEY_TRITANIUM = 10000;
+int SHOWMETHEMONEY_METAL = 10000;
+int SHOWMETHEMONEY_SUPPLIES = 10000;
+int SHOWMETHEMONEY_CREW = 10000;
+```
+
+Values inherit per field through Data, parent mods, and the active mod. Missing
+or invalid fields keep the inherited value, falling back to 10,000.
+
 ### Object ODF commands
 
 Treat a compatibility object as an ordinary craft:
@@ -88,6 +120,32 @@ Treat a compatibility object as an ordinary craft:
 ```text
 classLabel = "wingman"
 ```
+
+This alias is supplied by `A1Compat.dll` in the `STA1 Classic` parent mod; it
+is not enabled globally for unrelated FO4 or STA2 mods. If a wingman ODF and
+its include chain omit one of the stock craft identity flags or subsystem
+damage percentages, A1Compat supplies the corresponding value from STA1
+Classic's `a2craft.odf`. Any value declared by the object or inherited from a
+parent ODF remains authoritative.
+
+The same missing-only behavior applies `a2const.odf`'s six common constructor
+commands to objects whose original classlabel is `constructionrig`.
+
+Objects with the original `freighter` classlabel similarly receive the seven
+mining/resource defaults from `a2freight.odf` when those commands are absent.
+
+Mount linked turret objects on a Craft-derived parent with indexed pairs:
+
+```text
+turret0 = "bsg_dual_turret"
+turretHardpoint0 = "hp_turret00"
+```
+
+Indices 0 through 64 may be sparse. The referenced ODF uses
+`classLabel = "turret"`, owns its weapons and hitpoints, and can configure yaw,
+pitch, slew rates, and rest angles. See
+[`modules/A2FOTurrets/README.md`](modules/A2FOTurrets/README.md) for the full
+contract and current first-version limitations.
 
 Select a custom cocoon model for an Evolver (`.sod` is optional):
 
@@ -184,11 +242,18 @@ semantic APIs when conditions and composition make scripting worthwhile. See
 [`docs/architecture.md`](docs/architecture.md).
 
 Queue controls and their current validation status are documented in
-[`docs/queue-enhancements.md`](docs/queue-enhancements.md). Supported binary
-identities and checked addresses are recorded in
-[`docs/addresses.md`](docs/addresses.md).
+[`docs/queue-enhancements.md`](docs/queue-enhancements.md). The complete hook
+ledger—including supported binary identities, every direct patch and byte
+signature, helper/global RVAs, startup-loader provenance, and object-layout
+offsets—is in [`docs/addresses.md`](docs/addresses.md).
 The two optional Fleet Ops mod-information fields are documented in
 [`docs/fleetops-info-defaults.md`](docs/fleetops-info-defaults.md).
+Legacy texture-folder activation and precedence are documented in
+[`modules/A2FORGBTextures/README.md`](modules/A2FORGBTextures/README.md).
+Indexed hull-turret ODF commands and validation status are documented in
+[`modules/A2FOTurrets/README.md`](modules/A2FOTurrets/README.md).
+Armada 1 parent-mod scope and installation are documented in
+[`docs/a1-compatibility.md`](docs/a1-compatibility.md).
 Upgrade-pod configuration and ODF commands are documented in
 [`docs/upgrade-pods.md`](docs/upgrade-pods.md).
 
@@ -200,7 +265,11 @@ Armada II/
 ├── Win2kDisableTaskSwitch.dll
 ├── Win2kDisableTaskSwitch.original.dll
 ├── modules/
-│   └── A2FOFeaturePack.dll
+│   ├── A2FOFeaturePack.dll
+│   ├── A2FOHybridBuild.dll
+│   ├── A2FOInfoIni.dll
+│   ├── A2FORGBTextures.dll
+│   └── A2FOTurrets.dll
 ├── scripts/
 │   └── UpgradePods.lua      (bounded tier policy; mod-overridable)
 └── A2FOExtensions.log
@@ -242,7 +311,16 @@ Outputs:
 build/A2FOExtensions.dll
 build/Win2kDisableTaskSwitch.dll
 build/modules/A2FOFeaturePack.dll
+build/modules/A2FOHybridBuild.dll
+build/modules/A2FOInfoIni.dll
+build/modules/A2FORGBTextures.dll
+build/modules/A2FOTurrets.dll
+build/sta1-classic/modules/A1Compat.dll
 ```
+
+Build the optional parent-mod package with `make sta1-classic` and inspect it
+with `make verify-sta1-classic`. The staged files appear under
+`build/sta1-classic/`; install that content as `Data/Mods/STA1 Classic`.
 
 The SDK example is deliberately excluded from releases. Build and inspect it
 separately with `make sdk-examples verify-sdk`.

@@ -74,7 +74,7 @@ identity while implementation state moves into sidecars and, eventually, a
 standalone factory without rewriting ODFs again.
 
 The platform-independent queue and build-list model is implemented in
-`modules/A2FOFeaturePack/hybrid_production.*`. Host tests cover:
+the sources compiled into `A2FOHybridBuild.dll`. Host tests cover:
 
 - all five command spellings, including legacy `buildItem<N>`;
 - explicit-command precedence over the legacy fallback;

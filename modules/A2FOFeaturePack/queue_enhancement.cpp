@@ -1,6 +1,12 @@
+/*
+ * File: modules/A2FOFeaturePack/queue_enhancement.cpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: Producer queue convenience and continuous production behaviors with synchronized marker handling and persistence hooks.
+ */
+
 #include "queue_enhancement.hpp"
 
-#include "hybrid_production_runtime.hpp"
+#include "hybrid_bridge_client.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -157,6 +163,29 @@ std::uint32_t project_id(void* object_class) {
     return id ? *id : 0;
 }
 
+bool dispatch_producer_event(std::uint32_t kind, void* producer,
+                             void* target_class) {
+    if (!g_api ||
+        !A2FO_MODULE_API_HAS(g_api, dispatch_producer_event) ||
+        (g_api->capabilities & A2FO_CAP_PRODUCER_EVENTS) == 0 ||
+        !g_api->dispatch_producer_event) {
+        return true;
+    }
+    A2FO_ProducerEvent event{};
+    event.struct_size = sizeof(event);
+    event.kind = kind;
+    event.producer = producer;
+    event.target_class = target_class;
+    return g_api->dispatch_producer_event(&event);
+}
+
+void* queue_head_target_class(void* producer) {
+    if (!producer) return nullptr;
+    void* item = *reinterpret_cast<void**>(
+        bytes(producer) + kQueueHeadOffset);
+    return item ? *reinterpret_cast<void**>(item) : nullptr;
+}
+
 void stop_continuous(void* producer) {
     const std::uint32_t handle = object_handle(producer);
     if (!handle || !g_queue_lock_ready) return;
@@ -181,6 +210,10 @@ std::uint32_t fill_queue_checked(void* producer, void* target_class) {
     const std::uint32_t attempt_limit = evolve ? 1 : kQueueCapacity;
     for (std::uint32_t attempt = 0;
          attempt < attempt_limit && count < kQueueCapacity; ++attempt) {
+        if (!dispatch_producer_event(
+                A2FO_PRODUCER_EVENT_ADMIT, producer, target_class)) {
+            break;
+        }
         a2fo_call_thiscall_1(
             at(g_fleet_ops, kFoProducerPushCheckedRva), producer,
             reinterpret_cast<std::uintptr_t>(target_class));
@@ -267,6 +300,10 @@ void try_refill(void* producer) {
     const std::uint32_t before = *reinterpret_cast<std::uint32_t*>(
         producer_bytes + kQueueCountOffset);
     if (before >= kQueueCapacity) return;
+    if (!dispatch_producer_event(
+            A2FO_PRODUCER_EVENT_ADMIT, producer, target_class)) {
+        return;
+    }
     a2fo_call_thiscall_1(
         at(g_fleet_ops, kFoProducerPushCheckedRva), producer,
         reinterpret_cast<std::uintptr_t>(target_class));
@@ -321,6 +358,11 @@ void __attribute__((fastcall)) game_object_queue_class_command_hook(
 
 void __attribute__((fastcall)) producer_command_push_hook(
     void* producer, void*, void* target_class) {
+    if (producer && target_class &&
+        !dispatch_producer_event(
+            A2FO_PRODUCER_EVENT_ADMIT, producer, target_class)) {
+        return;
+    }
     if (producer && target_class &&
         hybrid_production_should_defer_construct_order(
             producer, target_class)) {
@@ -415,8 +457,17 @@ void __attribute__((fastcall)) producer_command_push_hook(
 
 std::uintptr_t __attribute__((fastcall)) producer_finish_hook(
     void* producer, void*) {
-    const std::uintptr_t result =
-        a2fo_call_thiscall_0(g_fo_finish_hook.gateway, producer);
+    void* target_class = queue_head_target_class(producer);
+    const bool use_native_completion = !producer || !target_class ||
+        dispatch_producer_event(
+            A2FO_PRODUCER_EVENT_FINISHING, producer, target_class);
+    const std::uintptr_t result = use_native_completion
+        ? a2fo_call_thiscall_0(g_fo_finish_hook.gateway, producer)
+        : 0;
+    if (producer && target_class) {
+        dispatch_producer_event(
+            A2FO_PRODUCER_EVENT_FINISHED, producer, target_class);
+    }
     try_refill(producer);
     return result;
 }
@@ -468,6 +519,10 @@ void __attribute__((fastcall)) producer_simulate_hook(
 
 std::uintptr_t __attribute__((fastcall)) producer_dtor_hook(
     void* producer, void*) {
+    if (producer) {
+        dispatch_producer_event(
+            A2FO_PRODUCER_EVENT_DESTROYING, producer, nullptr);
+    }
     stop_continuous(producer);
     return a2fo_call_thiscall_0(g_producer_dtor_hook.gateway, producer);
 }

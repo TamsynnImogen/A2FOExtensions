@@ -1,8 +1,13 @@
+/*
+ * File: modules/A2FOFeaturePack/odf_recursive.cpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: Recursive ODF discovery, virtual path overlay registration, and ODF basename winner resolution with logging and project-id tracking.
+ */
+
 #include "../../sdk/include/a2fo_module_api.h"
 #include "../../core/fpq_paths.hpp"
 #include "../../core/odf_paths.hpp"
 #include "bink_video.hpp"
-#include "hybrid_production_runtime.hpp"
 #include "queue_enhancement.hpp"
 #include "upgrade_pods.hpp"
 
@@ -71,6 +76,16 @@ struct ArchiveInfo {
     void* mod_info = nullptr;
     std::string runtime_path;
     std::string absolute_path;
+};
+
+struct OdfDirectoryCandidate {
+    std::string path;
+    std::uint32_t precedence = A2FO_ODF_OVERLAY_NORMAL;
+};
+
+struct CustomEntryInfo {
+    std::string directory_path;
+    std::uint32_t overlay_precedence = A2FO_ODF_OVERLAY_NORMAL;
 };
 
 constexpr std::size_t kFileEntryNextOffset = 0x08;
@@ -267,7 +282,8 @@ bool has_odf_extension(const std::string& name) {
 
 void scan_loose_odfs(const std::string& absolute_directory,
                      const std::string& relative_directory,
-                     std::map<std::string, std::string>& directories,
+                     std::uint32_t precedence,
+                     std::map<std::string, OdfDirectoryCandidate>& directories,
                      unsigned depth = 0) {
     if (depth > 64) return;
     WIN32_FIND_DATAA data{};
@@ -282,7 +298,7 @@ void scan_loose_odfs(const std::string& absolute_directory,
             if ((data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0) {
                 scan_loose_odfs(join_path(absolute_directory, name),
                                 join_path(relative_directory, name),
-                                directories, depth + 1);
+                                precedence, directories, depth + 1);
             }
         } else if (has_odf_extension(name)) {
             contains_odf = true;
@@ -292,8 +308,44 @@ void scan_loose_odfs(const std::string& absolute_directory,
     if (contains_odf) {
         std::string normalized = relative_directory;
         replace_slashes(normalized);
-        directories.emplace(lower_ascii(normalized), normalized);
+        const std::string key = lower_ascii(normalized);
+        const auto existing = directories.find(key);
+        if (existing == directories.end() ||
+            precedence > existing->second.precedence) {
+            directories[key] = OdfDirectoryCandidate{
+                normalized, precedence};
+        }
     }
+}
+
+std::vector<OdfDirectoryCandidate> registered_odf_overlays() {
+    std::vector<OdfDirectoryCandidate> result;
+    if (!g_api ||
+        !A2FO_MODULE_API_HAS(g_api, get_odf_overlay_directory) ||
+        (g_api->capabilities & A2FO_CAP_ODF_OVERLAY_DIRECTORIES) == 0 ||
+        !g_api->odf_overlay_directory_count ||
+        !g_api->get_odf_overlay_directory) {
+        return result;
+    }
+    const std::uint32_t count = g_api->odf_overlay_directory_count();
+    if (count > 64) {
+        log_line("ODF overlay registry exceeded its supported limit");
+        return result;
+    }
+    result.reserve(count);
+    for (std::uint32_t index = 0; index < count; ++index) {
+        char path[256]{};
+        std::uint32_t precedence = A2FO_ODF_OVERLAY_NORMAL;
+        if (!g_api->get_odf_overlay_directory(
+                index, path, sizeof(path), &precedence) || !*path ||
+            precedence > A2FO_ODF_OVERLAY_OVERRIDE) {
+            log_line("Ignored invalid ODF overlay registry entry " +
+                     std::to_string(index));
+            continue;
+        }
+        result.push_back(OdfDirectoryCandidate{path, precedence});
+    }
+    return result;
 }
 
 bool read_fpq_metadata(const std::string& path,
@@ -393,7 +445,7 @@ std::vector<RootInfo> collect_roots(void* file_system,
 
 std::vector<ArchiveInfo> collect_archives(
     const std::vector<RootInfo>& roots,
-    std::map<std::string, std::string>& directories) {
+    std::map<std::string, OdfDirectoryCandidate>& directories) {
     std::set<std::string> seen;
     std::vector<ArchiveInfo> result;
     for (const RootInfo& root : roots) {
@@ -420,7 +472,9 @@ std::vector<ArchiveInfo> collect_archives(
             continue;
         }
         for (const std::string& path : parsed.odf_directories) {
-            directories.emplace(lower_ascii(path), path);
+            directories.emplace(
+                lower_ascii(path),
+                OdfDirectoryCandidate{path, A2FO_ODF_OVERLAY_NORMAL});
         }
         result.push_back(std::move(archive));
     }
@@ -566,7 +620,17 @@ bool ensure_fleetops_project_id(void* file_system, void* entry,
     return true;
 }
 
-bool file_entry_precedes(void* left, void* right) {
+std::uint32_t overlay_precedence(
+    void* entry, const std::map<void*, CustomEntryInfo>& custom_entries) {
+    const auto found = custom_entries.find(entry);
+    return found == custom_entries.end()
+        ? A2FO_ODF_OVERLAY_NORMAL
+        : found->second.overlay_precedence;
+}
+
+bool file_entry_precedes(
+    void* left, void* right,
+    const std::map<void*, CustomEntryInfo>& custom_entries) {
     void* left_mod = field<void*>(left, kFileEntryModInfoOffset);
     void* right_mod = field<void*>(right, kFileEntryModInfoOffset);
     if (left_mod != right_mod) {
@@ -578,6 +642,12 @@ bool file_entry_precedes(void* left, void* right) {
             field<std::int32_t>(right_mod, kModInfoPriorityOffset);
         return left_priority < right_priority;
     }
+
+    const std::uint32_t left_overlay =
+        overlay_precedence(left, custom_entries);
+    const std::uint32_t right_overlay =
+        overlay_precedence(right, custom_entries);
+    if (left_overlay != right_overlay) return left_overlay > right_overlay;
 
     const std::uint8_t left_primary =
         field<std::uint8_t>(left, kFileEntryPrimaryRootOffset);
@@ -665,7 +735,8 @@ std::size_t add_custom_entries_to_hash(
 }
 
 std::size_t build_recursive_odf_winners(
-    void* file_system, const std::vector<void*>& custom_directories) {
+    void* file_system, const std::vector<void*>& custom_directories,
+    const std::map<void*, std::uint32_t>& directory_precedence) {
     const std::uint32_t bucket_count =
         field<std::uint32_t>(file_system, 0x08);
     void** buckets = field<void**>(file_system, 0x0c);
@@ -676,17 +747,23 @@ std::size_t build_recursive_odf_winners(
         return 0;
     }
 
-    std::map<void*, std::string> custom_entries;
+    std::map<void*, CustomEntryInfo> custom_entries;
     std::map<std::string, std::vector<void*>> custom_groups;
     std::size_t logged_entries = 0;
     for (void* directory : custom_directories) {
         auto* entries = field<DelphiList*>(directory, 0x0c);
+        const auto precedence = directory_precedence.find(directory);
+        const std::uint32_t overlay =
+            precedence == directory_precedence.end()
+                ? A2FO_ODF_OVERLAY_NORMAL
+                : precedence->second;
         for (void* entry : list_items(entries)) {
             const std::string basename = lower_ascii(
                 delphi_string(entry, kFileEntryBasenameOffset));
             if (!has_odf_extension(basename)) continue;
             const std::string directory_path = delphi_string(directory, 4);
-            custom_entries.emplace(entry, directory_path);
+            custom_entries.emplace(
+                entry, CustomEntryInfo{directory_path, overlay});
             custom_groups[basename].push_back(entry);
             if (logged_entries < kDetailedIndexLogLimit) {
                 log_line("Entry: " + basename + " from " + directory_path +
@@ -752,11 +829,12 @@ std::size_t build_recursive_odf_winners(
             // mods add more filesystem roots. Calculate the winner from the
             // explicit mod priority, primary-root, and loose-before-packed
             // rules below. A real active-mod entry still wins by mod priority.
-            if (!winner || file_entry_precedes(candidate, winner)) {
+            if (!winner ||
+                file_entry_precedes(candidate, winner, custom_entries)) {
                 winner = candidate;
                 continue;
             }
-            if (!file_entry_precedes(winner, candidate) &&
+            if (!file_entry_precedes(winner, candidate, custom_entries) &&
                 custom_entries.find(candidate) != custom_entries.end() &&
                 custom_entries.find(winner) == custom_entries.end()) {
                 winner = candidate;
@@ -768,7 +846,8 @@ std::size_t build_recursive_odf_winners(
             const std::string basename =
                 delphi_string(winner, kFileEntryBasenameOffset);
             if (!basename.empty()) {
-                const std::string target = join_path(selected->second, basename);
+                const std::string target = join_path(
+                    selected->second.directory_path, basename);
                 aliases[group.first] = target;
                 winners[group.first] = winner;
                 const bool corrected_override =
@@ -835,25 +914,53 @@ bool register_recursive_odfs(void* file_system) {
     const std::vector<RootInfo> roots =
         collect_roots(file_system, data_dir);
     log_line("Active filesystem roots: " + std::to_string(roots.size()));
-    for (const RootInfo& root : roots) log_line("  root: " + root.runtime_path);
+    for (const RootInfo& root : roots) {
+        log_line("  root: " + root.runtime_path + " -> " +
+                 root.absolute_path);
+    }
 
-    std::map<std::string, std::string> candidates;
+    std::map<std::string, OdfDirectoryCandidate> candidates;
+    const std::vector<OdfDirectoryCandidate> overlays =
+        registered_odf_overlays();
+    for (const OdfDirectoryCandidate& overlay : overlays) {
+        log_line("Active ODF overlay: " + overlay.path +
+                 " (precedence=" +
+                 std::to_string(overlay.precedence) + ")");
+    }
     for (const RootInfo& root : roots) {
         scan_loose_odfs(join_path(root.absolute_path, "odf"),
-                        "odf", candidates);
+                        "odf", A2FO_ODF_OVERLAY_NORMAL, candidates);
+        for (const OdfDirectoryCandidate& overlay : overlays) {
+            scan_loose_odfs(join_path(root.absolute_path, overlay.path),
+                            overlay.path, overlay.precedence, candidates);
+        }
     }
+    log_line("Discovered ODF directories: " +
+             std::to_string(candidates.size()));
     std::vector<ArchiveInfo> archives = collect_archives(roots, candidates);
     log_line("Active ODF archives: " + std::to_string(archives.size()));
     for (const ArchiveInfo& archive : archives) {
         log_line("  archive: " + archive.runtime_path);
     }
 
-    std::set<std::string> existing;
+    std::map<std::string, void*> existing;
     for (void* directory : list_items(directory_list)) {
-        existing.insert(lower_ascii(delphi_string(directory, 4)));
+        existing.emplace(
+            lower_ascii(delphi_string(directory, 4)), directory);
     }
+    std::vector<void*> indexed_directories;
+    std::map<void*, std::uint32_t> directory_precedence;
     for (auto iterator = candidates.begin(); iterator != candidates.end();) {
-        if (existing.find(iterator->first) != existing.end()) {
+        const auto native = existing.find(iterator->first);
+        if (native != existing.end()) {
+            if (iterator->second.precedence > A2FO_ODF_OVERLAY_NORMAL) {
+                indexed_directories.push_back(native->second);
+                directory_precedence.emplace(
+                    native->second, iterator->second.precedence);
+                log_line("Using existing overlay directory: " +
+                         iterator->second.path + " (precedence=" +
+                         std::to_string(iterator->second.precedence) + ")");
+            }
             iterator = candidates.erase(iterator);
         } else {
             ++iterator;
@@ -869,34 +976,40 @@ bool register_recursive_odfs(void* file_system) {
                  " directories");
     }
 
-    std::vector<void*> custom_directories;
-    custom_directories.reserve(std::min(candidates.size(), available));
+    std::vector<void*> created_directories;
+    created_directories.reserve(std::min(candidates.size(), available));
     std::size_t added = 0;
     for (const auto& candidate : candidates) {
         if (added >= available) break;
         void* directory = create_virtual_directory(
-            candidate.second,
+            candidate.second.path,
             static_cast<std::uint32_t>(directory_list->count));
         if (!directory) {
-            log_line("Failed to create virtual directory: " + candidate.second);
+            log_line("Failed to create virtual directory: " +
+                     candidate.second.path);
             continue;
         }
         a2fo_odf_tlist_add(at(g_fleet_ops, kTListAddRva),
                            directory_list, directory);
-        custom_directories.push_back(directory);
+        created_directories.push_back(directory);
+        indexed_directories.push_back(directory);
+        directory_precedence.emplace(
+            directory, candidate.second.precedence);
         ++added;
-        log_line("Registered directory: " + candidate.second);
+        log_line("Registered directory: " + candidate.second.path +
+                 " (precedence=" +
+                 std::to_string(candidate.second.precedence) + ")");
     }
 
-    if (custom_directories.empty()) {
-        log_line("Index: no custom directories found");
+    if (indexed_directories.empty()) {
+        log_line("Index: no recursive or overlay directories found");
         return true;
     }
 
     auto* item_count = reinterpret_cast<std::uint32_t*>(
         static_cast<std::uint8_t*>(file_system) + 0x20);
-    {
-        TemporaryDirectoryList temporary(directory_list, custom_directories);
+    if (!created_directories.empty()) {
+        TemporaryDirectoryList temporary(directory_list, created_directories);
         for (const RootInfo& root : roots) {
             a2fo_odf_add_items_from_disk(
                 at(g_fleet_ops, kAddItemsFromDiskRva),
@@ -914,14 +1027,17 @@ bool register_recursive_odfs(void* file_system) {
             a2fo_odf_lstr_clear(at(g_fleet_ops, kLStrClearRva), &delphi_path);
         }
     }
-    for (void* directory : custom_directories) {
+    for (void* directory : created_directories) {
         a2fo_odf_renew_overrides(at(g_fleet_ops, kRenewOverridesRva), directory);
     }
-    add_custom_entries_to_hash(file_system, custom_directories);
+    add_custom_entries_to_hash(file_system, indexed_directories);
     const std::size_t indexed_entries =
-        build_recursive_odf_winners(file_system, custom_directories);
-    log_line("Index ready: " + std::to_string(custom_directories.size()) +
-             " custom directories, " +
+        build_recursive_odf_winners(
+            file_system, indexed_directories, directory_precedence);
+    log_line("Index ready: " + std::to_string(created_directories.size()) +
+             " created, " +
+             std::to_string(indexed_directories.size()) +
+             " indexed directories, " +
              std::to_string(indexed_entries) + " ODF entries in " +
              std::to_string(GetTickCount() - started_at) + " ms");
     return true;
@@ -1031,9 +1147,7 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
         api->api_version != A2FO_MODULE_API_VERSION || !api->log ||
         !api->armada_module ||
         !api->fleetops_module ||
-        !api->register_fofs_item_lookup_handler ||
-        !api->register_classlabel_alias ||
-        !api->register_evolver_cocoon_command) {
+        !api->register_fofs_item_lookup_handler) {
         return false;
     }
     g_api = api;
@@ -1047,18 +1161,6 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     }
     InitializeCriticalSection(&g_state_lock);
     g_state_lock_ready = true;
-    const bool wingman_enabled = api->register_classlabel_alias(
-        kModuleName, "wingman", "craft");
-    const bool hybridbuild_enabled = api->register_classlabel_alias(
-        kModuleName, "hybridbuild", "research");
-    const bool cocoon_enabled = api->register_evolver_cocoon_command(
-        kModuleName, "cocoon");
-    log_line(std::string("Wingman classlabel alias: ") +
-             (wingman_enabled ? "enabled" : "not registered"));
-    log_line(std::string("HybridBuild classlabel alias to ResearchStation: ") +
-             (hybridbuild_enabled ? "enabled" : "not registered"));
-    log_line(std::string("Evolver cocoon ODF command: ") +
-             (cocoon_enabled ? "enabled" : "not registered"));
     if (!api->register_fofs_item_lookup_handler(
             kModuleName, &lookup_handler, nullptr)) {
         DeleteCriticalSection(&g_state_lock);
@@ -1069,15 +1171,8 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
         return false;
     }
     log_line("Native feature pack initialized");
-    // Install this optional low-level hook last: no initialization failure may
-    // unload the DLL after the core has patched a call into it.
-    a2fo::initialize_hybrid_production_registry(
-        api, g_armada, g_fleet_ops);
-    // Hybrid production validates the original Producer finish/cancel bytes,
-    // then calls these entry points at runtime. Install the queue wrappers
-    // afterwards so hybrid jobs retain repeat/refill bookkeeping too.
     a2fo::initialize_queue_enhancements(api, g_armada, g_fleet_ops);
     a2fo::initialize_upgrade_pods(api, g_armada, g_fleet_ops);
-    a2fo::initialize_bink_video_scaling(api, g_armada, g_fleet_ops);
+    a2fo::initialize_bink_video_scaling(api, g_armada);
     return true;
 }

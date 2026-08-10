@@ -1,9 +1,10 @@
 # Fleet Ops `info.ini` defaults
 
-A2FOExtensions adds two optional fields to the active mod's `[mod]` section.
-They are implemented at Fleet Ops' native user-directory and new-profile
-initialization points, so ordinary Fleet Ops code continues to load and save
-the settings.
+`A2FOInfoIni.dll` adds two optional fields to the active mod's `[mod]` section.
+It owns parsing and path resolution; the core DLL retains only the early,
+signature-checked user-directory and new-profile dispatch hooks. Ordinary Fleet
+Ops code therefore continues to load and save the settings, while removing the
+module restores native defaults without removing the core.
 
 ```ini
 [mod]
