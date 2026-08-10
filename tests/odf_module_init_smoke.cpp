@@ -64,6 +64,12 @@ bool turret_odf_defaults_registered = false;
 unsigned turret_hook_count = 0;
 bool turret_craft_simulate_chained = false;
 bool turret_class_constructor_chained = false;
+bool turret_fire_arc_trigger_filter_linked = false;
+bool turret_normal_weapon_tech_trigger_filter_linked = false;
+bool normal_weapon_tech_initialized = false;
+unsigned fire_arc_hook_count = 0;
+bool fire_arc_class_constructor_chained = false;
+bool fire_arc_target_check_chained = false;
 char extension_root_path[MAX_PATH] = ".";
 char parent_extension_root_path[MAX_PATH] = ".";
 
@@ -330,6 +336,12 @@ void prepare_armada_signatures() {
         {0x55, 0x8b, 0xec, 0x53, 0x8b, 0x5d, 0x08};
     const std::uint8_t turret_weapon_set_target[] =
         {0x55, 0x8b, 0xec, 0x8b, 0x45, 0x08};
+    const std::uint8_t fire_arc_weapon_class_constructor[] =
+        {0x55, 0x8b, 0xec, 0x6a, 0xff};
+    const std::uint8_t fire_arc_can_fire_at[] =
+        {0x55, 0x8b, 0xec, 0x83, 0xec, 0x1c};
+    const std::uint8_t normal_weapon_tech_get_owner[] =
+        {0x8b, 0x49, 0x18, 0x51, 0xe8};
     set_signature(0x0d4280, queue_class_command);
     set_signature(0x0d45f0, dequeue_class_command);
     set_signature(0x0b77d0, dtor);
@@ -427,6 +439,9 @@ void prepare_armada_signatures() {
     set_signature(0x000c6530, turret_craft_simulate);
     set_signature(0x00271290, turret_weapon_set_target);
     set_signature(0x00271340, turret_weapon_set_target);
+    set_signature(0x00264e30, fire_arc_weapon_class_constructor);
+    set_signature(0x0026f8c0, fire_arc_can_fire_at);
+    set_signature(0x00271050, normal_weapon_tech_get_owner);
     constexpr char rgb_literal[] = "Textures\\RGB\\";
     std::memcpy(static_cast<std::uint8_t*>(fake_armada) + 0x32d178,
                 rgb_literal, sizeof(rgb_literal));
@@ -450,8 +465,29 @@ void A2FO_CALL log_line(const char* module, const char* message) {
             "Metal=7777, Supplies=4444, Crew=8888 (RTS_CFG.h)") == 0) {
         cheats_rts_config_loaded = true;
     }
+    if (module && message && std::strcmp(module, "A2FOTurrets") == 0 &&
+        std::strcmp(
+            message,
+            "Full 3D weapon-trigger filtering linked through A2FOFireArcs") == 0) {
+        turret_fire_arc_trigger_filter_linked = true;
+    }
+    if (module && message && std::strcmp(module, "A2FOTurrets") == 0 &&
+        std::strcmp(
+            message,
+            "Normal-weapon trigger filtering linked through A2FONormalWeaponTech") == 0) {
+        turret_normal_weapon_tech_trigger_filter_linked = true;
+    }
+    if (module && message &&
+        std::strcmp(module, "A2FONormalWeaponTech") == 0 &&
+        std::strcmp(
+            message,
+            "Normal-weapon technology-tree filter initialized; unlisted weapons default to 0 (available)") == 0) {
+        normal_weapon_tech_initialized = true;
+    }
     if (message && (std::strstr(message, "signature") ||
-                    std::strstr(message, "disabled"))) {
+                    std::strstr(message, "disabled") ||
+                    (module && std::strcmp(
+                         module, "A2FOFireArcs") == 0))) {
         std::fprintf(stderr, "[%s] %s\n", module ? module : "module",
                      message);
     }
@@ -739,6 +775,10 @@ bool A2FO_CALL install_hook(void* target, void* replacement,
          target == static_cast<std::uint8_t*>(fake_armada) + 0x00271340)) {
         ++turret_hook_count;
     }
+    if (fake_armada && target ==
+            static_cast<std::uint8_t*>(fake_armada) + 0x0026f8c0) {
+        ++fire_arc_hook_count;
+    }
     if (fake_armada &&
         (target == static_cast<std::uint8_t*>(fake_armada) + 0x000ab710 ||
          target == static_cast<std::uint8_t*>(fake_armada) + 0x000bad90 ||
@@ -804,6 +844,16 @@ bool A2FO_CALL patch_jump(void* target, void* replacement,
             static_cast<std::uint8_t*>(fake_armada) + 0x000cc480) {
         turret_class_constructor_chained = true;
         ++turret_hook_count;
+    }
+    if (fake_armada && target ==
+            static_cast<std::uint8_t*>(fake_armada) + 0x00264e30) {
+        fire_arc_class_constructor_chained = true;
+        ++fire_arc_hook_count;
+    }
+    if (fake_armada && target ==
+            static_cast<std::uint8_t*>(fake_armada) + 0x0026f8c0) {
+        fire_arc_target_check_chained = true;
+        ++fire_arc_hook_count;
     }
     return true;
 }
@@ -981,13 +1031,53 @@ int main() {
         static_cast<std::uint8_t*>(fake_armada) + 0x000c6530,
         static_cast<const std::uint8_t*>(static_cast<void*>(fleet_ops)) +
             0x001dcebc);
+    install_fo_absolute_detour(
+        static_cast<std::uint8_t*>(fake_armada) + 0x00264e30,
+        static_cast<const std::uint8_t*>(static_cast<void*>(fleet_ops)) +
+            0x0010ef74);
+    install_fo_absolute_detour(
+        static_cast<std::uint8_t*>(fake_armada) + 0x0026f8c0,
+        static_cast<const std::uint8_t*>(static_cast<void*>(fleet_ops)) +
+            0x001358ac);
+
+    HMODULE fire_arcs = initialize_module(
+        "modules\\A2FOFireArcs.dll");
+    if (!fire_arcs || fire_arc_hook_count != 2 ||
+        !fire_arc_class_constructor_chained ||
+        !fire_arc_target_check_chained ||
+        !GetProcAddress(
+            fire_arcs, "A2FOFireArcs_AllowWeaponTrigger")) {
+        std::fprintf(
+            stderr,
+            "A2FOFireArcs smoke state: module=%p hooks=%u constructorChained=%d targetCheckChained=%d\n",
+            static_cast<void*>(fire_arcs), fire_arc_hook_count,
+            fire_arc_class_constructor_chained ? 1 : 0,
+            fire_arc_target_check_chained ? 1 : 0);
+        return 107;
+    }
+
+    HMODULE normal_weapon_tech = initialize_module(
+        "modules\\A2FONormalWeaponTech.dll");
+    if (!normal_weapon_tech || !normal_weapon_tech_initialized ||
+        !GetProcAddress(
+            normal_weapon_tech,
+            "A2FONormalWeaponTech_AllowWeaponTrigger")) {
+        std::fprintf(
+            stderr,
+            "A2FONormalWeaponTech smoke state: module=%p initialized=%d\n",
+            static_cast<void*>(normal_weapon_tech),
+            normal_weapon_tech_initialized ? 1 : 0);
+        return 108;
+    }
 
     HMODULE turrets = initialize_module(
         "modules\\A2FOTurrets.dll");
     if (!turrets || !turret_alias_registered ||
         !turret_odf_defaults_registered || turret_hook_count != 6 ||
         !turret_craft_simulate_chained ||
-        !turret_class_constructor_chained) {
+        !turret_class_constructor_chained ||
+        !turret_fire_arc_trigger_filter_linked ||
+        !turret_normal_weapon_tech_trigger_filter_linked) {
         std::fprintf(
             stderr,
             "A2FOTurrets smoke state: module=%p alias=%d defaults=%d "
@@ -1305,6 +1395,8 @@ int main() {
     FreeLibrary(info);
     FreeLibrary(hybrid);
     FreeLibrary(turrets);
+    FreeLibrary(normal_weapon_tech);
+    FreeLibrary(fire_arcs);
     FreeLibrary(cheats);
     shutdown_module(a1_compat);
     FreeLibrary(a1_compat);

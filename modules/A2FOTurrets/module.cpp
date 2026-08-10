@@ -45,9 +45,19 @@ using a2fo::turrets::AimAngles;
 using a2fo::turrets::AimLimits;
 using a2fo::turrets::Matrix34;
 
+using WeaponTriggerFilter = bool (A2FO_CALL *)(
+    void* weapon, const void* target);
+
 constexpr const char* kModuleName = "A2FOTurrets";
 constexpr std::size_t kMaximumTurrets = 64;
 constexpr char kLinkedLabelPrefix[] = "A2FOT:";
+constexpr char kFireArcModuleName[] = "A2FOFireArcs.dll";
+constexpr char kFireArcTriggerFilterExport[] =
+    "A2FOFireArcs_AllowWeaponTrigger";
+constexpr char kNormalWeaponTechModuleName[] =
+    "A2FONormalWeaponTech.dll";
+constexpr char kNormalWeaponTechTriggerFilterExport[] =
+    "A2FONormalWeaponTech_AllowWeaponTrigger";
 
 // ArmadaL.exe 1.1 / Fleet Operations Roots RVAs. These are checked before a
 // single hook is installed so an unsupported executable cannot leave a
@@ -159,6 +169,8 @@ struct ChildRuntime {
 const A2FO_ModuleApi* g_api = nullptr;
 HMODULE g_armada = nullptr;
 HMODULE g_fleet_ops = nullptr;
+WeaponTriggerFilter g_fire_arc_trigger_filter = nullptr;
+WeaponTriggerFilter g_normal_weapon_tech_trigger_filter = nullptr;
 bool g_runtime_ready = false;
 bool g_chained_fo_class_constructor = false;
 bool g_chained_fo_craft_simulate = false;
@@ -179,6 +191,38 @@ std::unordered_map<std::uint32_t, std::uint32_t> g_targets;
 
 void log_line(const std::string& message) noexcept {
     if (g_api && g_api->log) g_api->log(kModuleName, message.c_str());
+}
+
+void resolve_fire_arc_trigger_filter() noexcept {
+    HMODULE fire_arcs = GetModuleHandleA(kFireArcModuleName);
+    FARPROC exported = fire_arcs
+        ? GetProcAddress(fire_arcs, kFireArcTriggerFilterExport)
+        : nullptr;
+    static_assert(sizeof(exported) == sizeof(g_fire_arc_trigger_filter),
+                  "unexpected function-pointer size");
+    std::memcpy(&g_fire_arc_trigger_filter, &exported,
+                sizeof(g_fire_arc_trigger_filter));
+    if (g_fire_arc_trigger_filter) {
+        log_line("Full 3D weapon-trigger filtering linked through A2FOFireArcs");
+    }
+}
+
+void resolve_normal_weapon_tech_trigger_filter() noexcept {
+    HMODULE normal_weapon_tech = GetModuleHandleA(
+        kNormalWeaponTechModuleName);
+    FARPROC exported = normal_weapon_tech
+        ? GetProcAddress(
+              normal_weapon_tech,
+              kNormalWeaponTechTriggerFilterExport)
+        : nullptr;
+    static_assert(
+        sizeof(exported) == sizeof(g_normal_weapon_tech_trigger_filter),
+        "unexpected function-pointer size");
+    std::memcpy(&g_normal_weapon_tech_trigger_filter, &exported,
+                sizeof(g_normal_weapon_tech_trigger_filter));
+    if (g_normal_weapon_tech_trigger_filter) {
+        log_line("Normal-weapon trigger filtering linked through A2FONormalWeaponTech");
+    }
 }
 
 void* at(HMODULE module, std::uintptr_t rva) noexcept {
@@ -962,10 +1006,18 @@ void track_weapon_target(void* weapon, const void* target) noexcept {
 
 void __attribute__((fastcall)) weapon_trigger_object_hook(
     void* weapon, void*, const void* target) noexcept {
+    track_weapon_target(weapon, target);
+    if (g_fire_arc_trigger_filter &&
+        !g_fire_arc_trigger_filter(weapon, target)) {
+        return;
+    }
+    if (g_normal_weapon_tech_trigger_filter &&
+        !g_normal_weapon_tech_trigger_filter(weapon, target)) {
+        return;
+    }
     a2fo_turret_call_thiscall_1(
         g_weapon_trigger_object_hook.gateway, weapon,
         reinterpret_cast<std::uintptr_t>(target));
-    track_weapon_target(weapon, target);
 }
 
 void __attribute__((fastcall)) weapon_set_target_hook(
@@ -1252,6 +1304,8 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     g_armada = static_cast<HMODULE>(api->armada_module());
     g_fleet_ops = static_cast<HMODULE>(api->fleetops_module());
     if (!g_armada || !g_fleet_ops) return false;
+    resolve_fire_arc_trigger_filter();
+    resolve_normal_weapon_tech_trigger_filter();
 
     const bool alias_registered = api->register_classlabel_alias(
         kModuleName, "turret", "sensor");

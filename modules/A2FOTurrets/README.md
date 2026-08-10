@@ -77,9 +77,17 @@ and disable its footprint/avoidance bookkeeping. Explicit values in the
 turret ODF or its include chain remain authoritative.
 
 The turret's weapon ODF can use Armada's existing `restrictFireArc` and
-`fireArc` commands as an additional firing restriction. That is useful for
-preventing a gun from firing through the parent hull while it is still slewing
-or when a target lies outside a deliberately narrow mount arc.
+`fireArc` commands as an additional firing restriction. With
+`A2FOFireArcs.dll`, it can instead use an owner-local box or cone which follows
+the turret's live orientation. See
+[`../A2FOFireArcs/README.md`](../A2FOFireArcs/README.md).
+
+The turret module's existing `Weapon::Trigger(GameObject)` hook also hosts
+A2FOFireArcs' final full-3D trigger filter and A2FONormalWeaponTech's ordinary
+weapon technology filter. This keeps vertical rejection out of Armada's
+two-dimensional attack-movement path and gives both features one safe final
+trigger gate. Each link is optional and discovered at module load; ordinary
+turret behavior is unchanged when either filter module is absent.
 
 ## Runtime behaviour
 

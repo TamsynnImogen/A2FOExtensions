@@ -16,7 +16,7 @@ The core permanently owns shared or lifetime-sensitive engine sites:
 - Craft destruction snapshot, replacement construction, and publication;
 - extension-root overlay and native/Lua loading order.
 
-The six built-in native modules separate optional policy:
+The nine built-in native modules separate optional policy:
 
 - `A2FOFeaturePack.dll`: recursive ODF indexing, queue conveniences, upgrade
   pods, and Bink scaling;
@@ -28,6 +28,14 @@ The six built-in native modules separate optional policy:
   extensions, including per-resource `RTS_CFG.h`-configured
   `showmethemoney` grants (10,000 defaults) and restored `m`, `dis`, `crash`,
   and team-elimination `elim` commands;
+- `A2FOCraftIdentity.dll`: captain and registry ODF rows aligned to Fleet
+  Operations' native craft-name index, plus selected-object panel text fields;
+- `A2FOFireArcs.dll`: optional owner-local box and cone weapon firing volumes,
+  with a checked Fleet Operations WeaponClass-constructor chain and complete
+  native fallback for weapon ODFs without the new commands;
+- `A2FONormalWeaponTech.dll`: ordinary-weapon technology-tree enforcement,
+  using each WeaponClass' own project ID and Fleet Operations' native recursive
+  team-tree evaluator while treating unlisted weapons as requirement `0`;
 - `A2FORGBTextures.dll`: presence-based redirection of Armada's legacy
   `Textures\RGB`, `Textures\Index8`, and `Textures\Compressed` assets across
   Data, parent mods, and the active mod through Armada's TGA FileExists/OpenRead

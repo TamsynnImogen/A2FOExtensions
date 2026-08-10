@@ -149,6 +149,76 @@ through explicit MSVC-thiscall bridges. `m` reproduces the original local
 4. `crash` is deliberately process-terminating and performs no native object
 mutation.
 
+`A2FOCraftIdentity.dll` owns the ODF captain/registry and selected-object panel
+extension:
+
+| Image | RVA | Kind | Bytes | Expected bytes | Handler and purpose |
+| --- | ---: | --- | ---: | --- | --- |
+| Armada | `0x000bf090` | inline/JMP chain | 5/6 | stock `55 8b ec 6a ff`, or Fleet Ops' live `68 <handler> c3` resolving exactly to RVA `0x0010d6e4` whose handler begins `55 8b ec 83 c4 f8 53` | `craft_class_constructor_hook`; chain Fleet Operations' CraftClass enhancement, then copy the final `possibleCraftNames`, `possibleCaptainNames`, and `possibleCraftRegistry` string vectors from the completed ParameterDB |
+| Armada | `0x000f3770` | inline | 6 | `55 8b ec 83 ec 08` | `selected_info_render_hook`; retain the complete stock state-1 single-object panel renderer, read its selected craft, and draw the aligned captain/registry rows in the same local rectangle space and live display/scissor state as the native captain component |
+
+The class hook accepts only Fleet Operations' exact checked CraftClass handler
+or the untouched stock prologue. The companion fields read Craft's native
+`possibleCraftNames` index at object offset `+0x218`, so they follow Armada's
+existing random selection and save/load state without advancing the
+synchronized RNG or changing the native save stream.
+
+Supporting calls are signature-preflighted at Armada RVAs `0x001358f0`
+(`ParameterDB::Get(DBRectangle)`), `0x00135ba0`
+(`ParameterDB::Get(DBColor)`), `0x0011b160`
+(`DisplayInterface::DrawText(rectangle)`), `0x000ce370`
+(`GameObjectClass::GetOdfName`). The engine deallocator at `0x002527d0` is
+required to remain readable; Fleet Operations may already route that public
+entry through its active memory manager.
+The module deliberately calls the core-owned/detoured string-vector getter at
+`0x00135e80`, reads the GUI ParameterDB pointer at `0x0036502c`, reads Craft
+object handle/class/name-index fields at offsets `+0x28`/`+0x40`/`+0x218`, and
+reads `InfoDisplay`'s selected craft and native captain text component at
+`+0x1e8` and `+0xbc`. The captain component's live LTRB rectangle at `+0x58`
+anchors both extension fields without reapplying the panel origin.
+
+`A2FOFireArcs.dll` owns the optional three-dimensional weapon-arc runtime:
+
+| Image | RVA | Kind | Bytes | Expected bytes | Handler and purpose |
+| --- | ---: | --- | ---: | --- | --- |
+| Armada | `0x00264e30` | inline/JMP chain | 5/6 | stock `55 8b ec 6a ff`, or Fleet Ops' live `68 <handler> c3` resolving exactly to RVA `0x0010ef74` whose handler begins `55 8b ec 83 c4 dc 53` | `weapon_class_constructor_hook`; chain Fleet Operations' WeaponClass enhancement, parse the completed ODF's optional box/cone policy, and retain it by class pointer without mutating the stock WeaponClass arc fields |
+| Armada | `0x0026f8c0` | inline/JMP chain | 6 | stock `55 8b ec 83 ec 1c`, or Fleet Ops' live `68 <handler> c3` resolving exactly to RVA `0x001358ac` whose handler begins `55 8b ec 83 c4 f4 53` | `weapon_can_fire_at_hook`; chain Fleet Operations' target filter, preserve native authorization, then apply only the configured horizontal envelope so Armada's two-dimensional attack AI can turn into yaw coverage safely |
+
+Both hooks accept only Fleet Operations' exact checked handlers or the
+untouched stock prologues. The firing hook is installed first, but remains a
+pass-through until both sites are ready. A weapon ODF without any new arc
+commands never enters module policy: its existing `restrictFireArc` byte and
+native `fireArc` path remain unchanged. A valid custom policy's horizontal
+envelope is applied only after the native range, obstruction, and optional
+stock-arc checks succeed. `A2FOFireArcs_AllowWeaponTrigger` exports the full
+box/cone decision for A2FOTurrets' existing late weapon-trigger hook; this
+suppresses shots outside pitch coverage without entering Armada's unsafe
+vertical attack-movement path.
+
+The module reads numeric ODF angles through `ParameterDB::GetFloat` at Armada
+RVA `0x00134df0`, with the active `ParameterDB::GetString` entry at
+`0x00135350` used for mode names and quoted-number compatibility. It obtains
+the live owner through `Weapon::GetOwner` at `0x00271050`, reads its matrix
+through `Entity::GetTransform` at `0x000cfd50`, and reads the target position
+from the same validated `GameObject+0xac` coordinates used by native target
+authorization. A Weapon instance's WeaponClass pointer is at `+0x04`; Armada
+Matrix34 uses right/up/forward/translation vectors at
+`+0x00`/`+0x0c`/`+0x18`/`+0x24`.
+
+`A2FONormalWeaponTech.dll` installs no independent engine hook. A normal
+WeaponClass stores its own four-byte project-ID object pointer at `+0x208`,
+copied from `ParameterDB+0x34` by Armada's constructor in the same pattern as
+`GameObjectClass+0x1cc`. The exported trigger filter obtains the owner through
+Armada `Weapon::GetOwner` RVA `0x00271050` (expected prefix
+`8b 49 18 51 e8`), reads `GameObject+0xec` for its team, and resolves that
+team through the FleetOpsHook pointer at RVA `0x00212f08`. A non-null
+technology item is evaluated by Fleet Operations' native recursive routine at
+RVA `0x00120680` (expected prefix
+`53 51 89 14 24 33 d2 8b 40 0c 8b 0c 24 8b 5c 88`). A null item is the
+fail-open/default-`0` path. `WeaponClass+0x1b4` identifies special weapons,
+which bypass this added filter because Fleet Operations already owns their
+technology behaviour.
+
 `A2FOTurrets.dll` owns the global indexed linked-turret runtime:
 
 | Image | RVA | Kind | Bytes | Expected bytes | Handler and purpose |
@@ -157,7 +227,7 @@ mutation.
 | Armada | `0x000c1fd0` | inline | 9 | `56 8b f1 8b 8e 34 02 00 00` | `craft_cleanup_hook`; unlink a destroyed turret and expire every child when its parent is cleaned up |
 | Armada | `0x000c2870` | inline | 5 | `53 56 57 8b f1` | `craft_post_load_hook`; parse deterministic `A2FOT:<parent>:<index>` labels and stage child-parent reconnection without depending on object load order |
 | Armada | `0x000c6530` | inline/JMP chain | 7/6 | stock `55 8b ec 53 8b 5d 08`, or Fleet Ops' live `68 <handler> c3` resolving exactly to RVA `0x001dcebc` whose handler begins `55 8b ec 51 53 89 4d` | `craft_simulate_hook`; chain Fleet Operations' existing simulation enhancement, then create pending child objects, reconnect loaded children, propagate ownership, slew them toward their current weapon target, and apply the mount-relative transform |
-| Armada | `0x00271290` | inline | 6 | `55 8b ec 8b 45 08` | `weapon_trigger_object_hook`; retain the target passed through native automatic `Weapon::Trigger(GameObject const*)` firing for visual yaw/pitch tracking |
+| Armada | `0x00271290` | inline | 6 | `55 8b ec 8b 45 08` | `weapon_trigger_object_hook`; retain the target passed through native automatic `Weapon::Trigger(GameObject const*)` firing for visual yaw/pitch tracking, then apply the optional A2FOFireArcs full-3D and A2FONormalWeaponTech team-tech filters before entering the native trigger |
 | Armada | `0x00271340` | inline | 6 | `55 8b ec 8b 45 08` | `weapon_set_target_hook`; retain each semantic turret object's native weapon target handle for visual yaw/pitch tracking |
 
 The module preflights all six sites before its first hook installation.
@@ -714,7 +784,7 @@ research buttons, `64` Fleet Ops popup buttons, and `10` native queue slots.
 | --- | ---: |
 | Armada Matrix34 right / up / forward / translation vectors | `+0x00` / `+0x0c` / `+0x18` / `+0x24`; total `0x30` bytes |
 | `AiMission` add-object virtual slot | vtable `+0x18` |
-| supported indexed parent pairs | `1..64`, sparse |
+| supported indexed parent pairs | `0..64`, sparse |
 
 The turret runtime stores only engine handles across simulation frames. Raw
 class and hierarchy-node pointers are retained only for process-lifetime class
@@ -737,21 +807,30 @@ policy and immutable model-node lookup respectively.
 5. `A2FOCheats.dll` installs its resource handler and either updates the live
    cheat registry immediately or chains `ChatHookInit` and performs command
    registration after Fleet Operations initializes it.
-6. Deterministic filename ordering loads `A2FOFeaturePack.dll` before
+6. `A2FOCraftIdentity.dll` chains Fleet Operations' CraftClass constructor and
+   installs the two-field selected-object panel draw, aligned to the native
+   ship-name row. It has no simulation, RNG, or save mutation.
+7. `A2FOFireArcs.dll` chains Fleet Operations' WeaponClass constructor and
+   installs the checked native firing-arc gate. It changes a WeaponClass only
+   when its completed ODF contains a valid new arc policy.
+8. `A2FONormalWeaponTech.dll` validates its read-only weapon/team technology
+   bridge and exports the optional normal-weapon trigger decision before
+   A2FOTurrets claims the shared trigger hook.
+9. Deterministic filename ordering loads `A2FOFeaturePack.dll` before
    `A2FOHybridBuild.dll`. FeaturePack owns shared Producer and upgrade-station
    sites; HybridBuild composes with them through its private callback bridge.
-7. `A2FOInfoIni.dll` owns policy only. It registers a provider and installs no
+10. `A2FOInfoIni.dll` owns policy only. It registers a provider and installs no
    binary patch itself; the timing-sensitive settings hooks remain core-owned.
-8. `A2FORGBTextures.dll` loads after FeaturePack in filename order and owns an
+11. `A2FORGBTextures.dll` loads after FeaturePack in filename order and owns an
    independent, conditional Armada `fopen` IAT bridge, the TGA
    FileExists/OpenRead routes, and the validated texture-lock/minimap guards.
    FeaturePack remains the sole semantic handler registered with the core FOFS
    dispatcher.
-9. `A2FOTurrets.dll` then registers the global semantic `turret` policy and
+12. `A2FOTurrets.dll` then registers the global semantic `turret` policy and
    preflights all six of its Armada runtime sites before installing any of
    them. Child creation is deferred until the configured parent first
    simulates, after class and ODF loading has completed.
-10. The destroyed-object hooks are installed after native/Lua registration and
+13. The destroyed-object hooks are installed after native/Lua registration and
    only when at least one handler needs them.
 
 Low-level hooks are process-lifetime changes. Each feature validates all of
