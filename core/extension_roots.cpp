@@ -1,3 +1,9 @@
+/*
+ * File: core/extension_roots.cpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: Data/parent/active-mod root ordering and overlay discovery.
+ */
+
 #include "extension_roots.hpp"
 
 #include <algorithm>

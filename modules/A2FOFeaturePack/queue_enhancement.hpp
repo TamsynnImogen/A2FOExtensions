@@ -1,3 +1,9 @@
+/*
+ * File: modules/A2FOFeaturePack/queue_enhancement.hpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: Queue enhancements API (ctrl-click fill and continuous production) initialization interface.
+ */
+
 #pragma once
 
 #include <windows.h>

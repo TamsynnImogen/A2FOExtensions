@@ -1,3 +1,9 @@
+/*
+ * File: core/odf_paths.cpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: Normalized recursive ODF path and basename-alias helpers.
+ */
+
 #include "odf_paths.hpp"
 
 #include <algorithm>

@@ -1,3 +1,9 @@
+/*
+ * File: core/fpq_paths.hpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: FPQ archive metadata and traversal helpers used to discover mod assets inside packed extension containers.
+ */
+
 #pragma once
 
 #include <cstdint>

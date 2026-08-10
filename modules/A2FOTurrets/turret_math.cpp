@@ -1,3 +1,8 @@
+/*
+ * Pure hull-turret aiming and transform composition mathematics. Keeping this
+ * separate from engine hooks makes orientation and slew behaviour testable.
+ */
+
 #include "turret_math.hpp"
 
 #include <cmath>

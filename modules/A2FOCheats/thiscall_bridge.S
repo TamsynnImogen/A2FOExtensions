@@ -1,3 +1,7 @@
+	# ABI bridge for A2FOCheats calls into Armada's MSVC thiscall methods.
+	# C++ supplies ordinary cdecl arguments; these wrappers place self in ECX
+	# and preserve the native callee-cleanup convention.
+
 	.text
 
 	# Armada's Team::AddCrewCapacity uses MSVC thiscall: Team is in ECX and

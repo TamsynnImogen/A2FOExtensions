@@ -1,3 +1,7 @@
+/*
+ * Public row-alignment helper used by A2FOCraftIdentity and its host test.
+ */
+
 #pragma once
 
 #include <cstddef>

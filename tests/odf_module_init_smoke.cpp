@@ -59,6 +59,7 @@ bool rgb_open_read_hooked = false;
 bool cheats_show_me_the_money_hooked = false;
 bool cheats_chat_init_hooked = false;
 bool cheats_rts_config_loaded = false;
+bool edit_menu_update_hooked = false;
 bool turret_alias_registered = false;
 bool turret_odf_defaults_registered = false;
 unsigned turret_hook_count = 0;
@@ -342,6 +343,8 @@ void prepare_armada_signatures() {
         {0x55, 0x8b, 0xec, 0x83, 0xec, 0x1c};
     const std::uint8_t normal_weapon_tech_get_owner[] =
         {0x8b, 0x49, 0x18, 0x51, 0xe8};
+    const std::uint8_t edit_menu_update[] =
+        {0x55, 0x8b, 0xec, 0x81, 0xec, 0xc4, 0x00, 0x00, 0x00};
     set_signature(0x0d4280, queue_class_command);
     set_signature(0x0d45f0, dequeue_class_command);
     set_signature(0x0b77d0, dtor);
@@ -359,6 +362,7 @@ void prepare_armada_signatures() {
     set_signature(0x135200, parameter_project_id);
     set_signature(0x135350, parameter_string_dispatcher);
     set_signature(0x0cd1f0, find_lazy_by_project_id);
+    set_signature(0x11c610, edit_menu_update);
     set_signature(0x0b80f0, producer_get_action);
     set_signature(0x0afa30, construction_rig_get_action);
     set_signature(0x0afbc0, construction_rig_start);
@@ -747,6 +751,10 @@ bool A2FO_CALL install_hook(void* target, void* replacement,
         cheats_chat_init_hooked = true;
     }
     if (fake_armada && target == static_cast<std::uint8_t*>(fake_armada) +
+            0x11c610) {
+        edit_menu_update_hooked = true;
+    }
+    if (fake_armada && target == static_cast<std::uint8_t*>(fake_armada) +
             0x242780) {
         rgb_lock_surface_hooked = true;
     }
@@ -1011,6 +1019,9 @@ int main() {
             cheat_registry_fixture.registrations[3].handler) {
         return 104;
     }
+    HMODULE edit_menu = initialize_module(
+        "modules\\A2FOEditMenu.dll");
+    if (!edit_menu || !edit_menu_update_hooked) return 109;
     // Fleet Operations installs its own GameObjectClass-constructor and
     // Craft::Simulate detours before A2FO's native modules load. Reproduce
     // that live absolute push/ret state so the turret smoke proves both
@@ -1397,6 +1408,7 @@ int main() {
     FreeLibrary(turrets);
     FreeLibrary(normal_weapon_tech);
     FreeLibrary(fire_arcs);
+    FreeLibrary(edit_menu);
     FreeLibrary(cheats);
     shutdown_module(a1_compat);
     FreeLibrary(a1_compat);

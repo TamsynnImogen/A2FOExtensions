@@ -1,7 +1,7 @@
 /*
  * File: modules/A1Compat/module.cpp
  * Module: A2FOHookExtensions (source-module)
- * Purpose: Armada 1 compatibility module: A1-specific class labels, builder/officer behavior, and visual/queue interop shims.
+ * Purpose: Armada 1 classlabels, officer progression, and compatibility shims.
  */
 
 #include "../../sdk/include/a2fo_module_api.h"
@@ -48,7 +48,6 @@ void __cdecl a2fo_a1_prepare_starbase_officer_quarters(void* starbase);
 namespace {
 
 constexpr const char* kModuleName = "A1Compat";
-constexpr const char* kA1CompatRevision = "A1Compat-rebuild-20260809-05";
 constexpr std::size_t kMaximumIniTextSize = 1024 * 1024;
 constexpr char kA1CompatIniFileName[] = "a1compat.ini";
 constexpr char kA1CompatSafeModeKey[] = "safemode";
@@ -449,18 +448,6 @@ bool write_int32_at(void* object, std::size_t offset,
     }
     std::memcpy(static_cast<std::uint8_t*>(object) + offset,
                 &value, sizeof(value));
-    return true;
-}
-
-bool write_pointer_at(void* object, std::size_t offset, void* value) noexcept {
-    if (!object || !writable_range(
-            static_cast<std::uint8_t*>(object) + offset,
-            sizeof(void*))) {
-        return false;
-    }
-    std::memcpy(
-        static_cast<std::uint8_t*>(object) + offset,
-        &value, sizeof(value));
     return true;
 }
 
@@ -2806,7 +2793,7 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     char message[640]{};
     std::snprintf(
         message, sizeof(message),
-        "Armada 1 compatibility initialized (%s): wingman -> craft; Addon ODF "
+        "Armada 1 compatibility initialized: wingman -> craft; Addon ODF "
         "overlay; nebula sprite-node guard %s; serialized RtimeClass "
         "diagnostic %s; StandardText sprite diagnostic %s; Craft_mLevelUp "
         "race diagnostic %s; oqN visibility %s; "
@@ -2814,7 +2801,6 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
         "completion bridge %s; "
         "Producer palette visibility diagnostic %s; invalid GetProjectId "
         "detour removed",
-        kA1CompatRevision,
         nebula_guard_enabled ? "enabled" : "unavailable",
         rtime_diagnostic_enabled ? "enabled" : "unavailable",
         standard_text_sprite_diagnostic_enabled ? "enabled" : "unavailable",

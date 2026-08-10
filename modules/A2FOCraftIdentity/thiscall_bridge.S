@@ -1,3 +1,6 @@
+	# ABI bridge for A2FOCraftIdentity calls into Armada's MSVC thiscall UI and
+	# class methods. Each wrapper is intentionally policy-free.
+
 	.text
 
 	.globl _a2fo_identity_call_thiscall_0

@@ -93,6 +93,34 @@ int main() {
         return 4;
     }
 
+    ArcConfig upper_hemisphere{};
+    upper_hemisphere.yaw_angle_degrees = 270.0f;
+    upper_hemisphere.pitch_degrees = 90.0f;
+    upper_hemisphere.pitch_angle_degrees = 180.0f;
+    if (!expect_allowed("upper hemisphere", upper_hemisphere, identity,
+                        0.0f, 45.0f, true) ||
+        !expect_allowed("upper hemisphere zenith", upper_hemisphere,
+                        identity, 0.0f, 90.0f, true) ||
+        !expect_allowed("upper hemisphere horizon", upper_hemisphere,
+                        identity, 0.0f, 0.0f, true) ||
+        !expect_allowed("upper hemisphere rejects below",
+                        upper_hemisphere, identity, 0.0f, -1.0f, false) ||
+        !expect_allowed("upper hemisphere retains yaw limit",
+                        upper_hemisphere, identity, 180.0f, 45.0f, false)) {
+        return 5;
+    }
+
+    ArcConfig lower_hemisphere = upper_hemisphere;
+    lower_hemisphere.pitch_degrees = -90.0f;
+    if (!expect_allowed("lower hemisphere", lower_hemisphere, identity,
+                        0.0f, -45.0f, true) ||
+        !expect_allowed("lower hemisphere nadir", lower_hemisphere, identity,
+                        0.0f, -90.0f, true) ||
+        !expect_allowed("lower hemisphere rejects above",
+                        lower_hemisphere, identity, 0.0f, 1.0f, false)) {
+        return 6;
+    }
+
     ArcConfig cone{};
     cone.mode = ArcMode::cone;
     cone.cone_angle_degrees = 90.0f;
@@ -100,7 +128,7 @@ int main() {
         !expect_allowed("cone outside", cone, identity, 46.0f, 0.0f, false) ||
         !expect_allowed("cone rejects box corner", cone, identity,
                         40.0f, 40.0f, false)) {
-        return 5;
+        return 7;
     }
 
     Matrix34 yawed = identity;
@@ -118,13 +146,32 @@ int main() {
     if (!a2fo::fire_arcs::allows_target(box, yawed, world_starboard) ||
         a2fo::fire_arcs::allows_target(box, yawed, world_forward)) {
         std::fprintf(stderr, "owner-local rotation was not respected\n");
-        return 6;
+        return 8;
     }
 
     const float same_position[3]{10.0f, 20.0f, 30.0f};
     if (a2fo::fire_arcs::allows_target(box, identity, same_position)) {
         std::fprintf(stderr, "zero-length direction was allowed\n");
-        return 7;
+        return 9;
+    }
+
+    // Yaw wraps around a compass, while pitch deliberately clamps at the two
+    // poles. These are easy conventions for ODF authors to confuse and are
+    // therefore kept as explicit regression checks.
+    ArcConfig normalized{};
+    normalized.yaw_degrees = 270.0f;
+    normalized.pitch_degrees = 270.0f;
+    a2fo::fire_arcs::normalize_config(&normalized);
+    if (normalized.yaw_degrees != -90.0f ||
+        normalized.pitch_degrees != 90.0f) {
+        std::fprintf(stderr, "positive angle normalization failed\n");
+        return 10;
+    }
+    normalized.pitch_degrees = -270.0f;
+    a2fo::fire_arcs::normalize_config(&normalized);
+    if (normalized.pitch_degrees != -90.0f) {
+        std::fprintf(stderr, "negative pitch clamping failed\n");
+        return 11;
     }
 
     std::puts("fire arc tests passed");

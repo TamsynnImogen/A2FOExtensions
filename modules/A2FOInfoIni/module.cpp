@@ -1,3 +1,9 @@
+/*
+ * File: modules/A2FOInfoIni/module.cpp
+ * Module: A2FOHookExtensions (source-module)
+ * Purpose: Supply SettingsDirectory and DefaultGameSpeed info.ini policy.
+ */
+
 #include "../../core/extension_roots.hpp"
 #include "../../sdk/include/a2fo_module_api.h"
 
@@ -176,4 +182,3 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     log_line("info.ini defaults module initialized");
     return true;
 }
-

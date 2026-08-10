@@ -16,7 +16,7 @@ The core permanently owns shared or lifetime-sensitive engine sites:
 - Craft destruction snapshot, replacement construction, and publication;
 - extension-root overlay and native/Lua loading order.
 
-The nine built-in native modules separate optional policy:
+The ten built-in native modules separate optional policy:
 
 - `A2FOFeaturePack.dll`: recursive ODF indexing, queue conveniences, upgrade
   pods, and Bink scaling;
@@ -30,6 +30,8 @@ The nine built-in native modules separate optional policy:
   and team-elimination `elim` commands;
 - `A2FOCraftIdentity.dll`: captain and registry ODF rows aligned to Fleet
   Operations' native craft-name index, plus selected-object panel text fields;
+- `A2FOEditMenu.dll`: recursive `buildItemX` editor-menu navigation using the
+  native visible menu buffer, renderer, object placement, and Back command;
 - `A2FOFireArcs.dll`: optional owner-local box and cone weapon firing volumes,
   with a checked Fleet Operations WeaponClass-constructor chain and complete
   native fallback for weapon ODFs without the new commands;
@@ -73,6 +75,47 @@ The queue feature chains feature-specific Armada and Fleet Ops Producer sites
 after exact signature checks. If the supported build or any required signature
 does not match, the affected feature is disabled rather than patching an
 unknown binary.
+
+## Reading and maintaining the source
+
+The source is divided by ownership rather than by the game feature which first
+needed a helper:
+
+- `core/dllmain.cpp` owns process-lifetime shared hooks, dispatch registries,
+  and the `A2FO_ModuleApi` implementation.
+- `core/hook.*` is the only general-purpose machine-code patch writer.
+- `core/extension_roots.*`, `fpq_paths.*`, and `odf_paths.*` contain the
+  host-testable path and precedence rules used by the core and FeaturePack.
+- `core/lua_host.*` owns the bounded Lua state and converts engine events into
+  pointer-free script values.
+- `core/module_loader.*` owns DLL overlay, deterministic ordering, registration
+  transactions, and shutdown ordering.
+- `modules/<name>/module.cpp` owns that module's engine-facing state and hooks.
+  Pure parsing or mathematics is split into a neighbouring source/header pair
+  whenever it can be tested without loading the game.
+- Assembly files are ABI adapters only. They move cdecl arguments into MSVC
+  thiscall or Delphi registers and must not acquire gameplay policy.
+
+Comments next to RVAs, offsets, signatures, hook lengths, and assembly
+continuations are part of the compatibility contract. They explain why a
+value is safe for the supported binaries and should be updated with any code
+which changes that assumption. Obvious local expressions are intentionally
+left uncommented so the engine invariants remain visible rather than buried in
+line-by-line narration.
+
+All engine callbacks obey the same maintenance rules:
+
+1. Treat engine pointers as callback-scoped unless a stable handle or class
+   identity is explicitly documented.
+2. Validate the complete supported signature set before installing the first
+   hook whenever partial activation would be unsafe.
+3. Chain a known Fleet Operations detour instead of silently replacing it.
+4. Keep installed inline hooks process-lifetime; never unload code still
+   reachable from a patched executable address.
+5. Fail open for optional policy when reverse-engineered runtime state is
+   unavailable, but fail closed before writing to an unknown binary layout.
+6. Keep synchronized-game decisions deterministic and require identical DLL
+   and ODF policy on every multiplayer participant.
 
 ## Deterministic extension overlay
 

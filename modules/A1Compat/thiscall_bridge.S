@@ -1,3 +1,7 @@
+	# ABI and mid-function continuation stubs owned by A1Compat. These wrappers
+	# preserve the supported executable's exact 32-bit register/stack contract;
+	# semantic compatibility policy remains in module.cpp.
+
 	.text
 
 	# ST3D_Node virtual methods use MSVC thiscall: self is supplied in ECX.

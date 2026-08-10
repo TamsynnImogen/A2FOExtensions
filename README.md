@@ -15,6 +15,8 @@ hooks, reusable dispatch, optional native features, and mod-authored Lua logic.
 - Optional ODF-driven captain names and ship registries, row-aligned with the
   native `possibleCraftNames` choice and displayed only for the selected craft
   through `infoSingleCaptainTextArea` and `infoSingleRegistryTextArea`.
+- Optional recursive map-editor menus: a `buildItemX` target containing its own
+  `buildItemX` rows opens as another submenu, with native Back navigation.
 - Experimental indexed hull-mounted turrets through matching `turretX` and
   `turretHardpointX` ODF commands, with independent weapons, hitpoints, yaw,
   pitch, slew rates, ownership changes, and save/load reconnection.
@@ -100,6 +102,25 @@ existing saved profile still takes precedence.
 See [`docs/fleetops-info-defaults.md`](docs/fleetops-info-defaults.md) for the
 full resolution rules.
 
+### Edit-menu ODF commands
+
+The stock `editmenu.odf` and first category level remain unchanged. A category
+`buildItemX` may point either to an ordinary `itemX` placement list or to a
+file containing another set of `buildItemX` commands:
+
+```text
+// ef_ships.odf
+menuTitle = "Federation Ships"
+buildItem1 = "ef_combat.odf"
+buildItem2 = "ef_support.odf"
+```
+
+Any target containing at least one `buildItemX` is a submenu; a target without
+one remains a native object-list leaf. Each visible page retains the native
+12-entry limit, recursive depth is capped at 32, cycles are rejected, and Back
+returns one level at a time. See
+[`modules/A2FOEditMenu/README.md`](modules/A2FOEditMenu/README.md).
+
 ### `RTS_CFG.h` cheat amounts
 
 Override any of the five `showmethemoney` grants with literal values from 0
@@ -115,6 +136,42 @@ int SHOWMETHEMONEY_CREW = 10000;
 
 Values inherit per field through Data, parent mods, and the active mod. Missing
 or invalid fields keep the inherited value, falling back to 10,000.
+
+### Weapon fire arcs — read this first
+
+Fire-arc commands belong in the general **weapon ODF**, not its ordnance ODF.
+They describe an owner-local permission volume: a weapon may fire when the
+target is inside it, even if the ship is stationary or its engines are
+disabled. They do not order the ship to rotate or move.
+
+The simplest useful form is a box with independent horizontal and vertical
+coverage:
+
+```cpp
+fireArcMode = "box"
+fireArcYaw = 0
+fireArcPitch = 0
+fireArcYawAngle = 90
+fireArcPitchAngle = 60
+```
+
+The centre angles select a direction; the angle fields are total widths. In
+this example the weapon reaches 45 degrees left/right and 30 degrees up/down.
+
+```text
+Yaw:     0 forward, 90 right, 180 rear, 270 left
+Pitch: +90 up,       0 level,            -90 down
+```
+
+Yaw wraps around the ship. Pitch does not wrap and is clamped to `-90..+90`.
+Use `box` for most arrays and hemispheres. Use `cone` with `fireArcAngle` only
+when a circular fixed-cannon or barrel-shaped volume is wanted. Native range,
+target-validity, and obstruction checks remain active.
+
+The detailed guide includes orientation diagrams, upper/lower hemisphere
+examples, box-versus-cone corner behaviour, aliases, validation rules, runtime
+ordering, and technology-tree troubleshooting:
+[`modules/A2FOFireArcs/README.md`](modules/A2FOFireArcs/README.md).
 
 ### Object ODF commands
 
@@ -149,25 +206,6 @@ Indices 0 through 64 may be sparse. The referenced ODF uses
 pitch, slew rates, and rest angles. See
 [`modules/A2FOTurrets/README.md`](modules/A2FOTurrets/README.md) for the full
 contract and current first-version limitations.
-
-Give any ordinary weapon an optional owner-local three-dimensional firing
-volume:
-
-```text
-fireArcMode = "box"
-fireArcYaw = 0
-fireArcPitch = 0
-fireArcYawAngle = 90
-fireArcPitchAngle = 60
-```
-
-`box` uses independent total yaw and pitch coverage; `cone` uses
-`fireArcAngle` for a true circular cone. The shorter `fireArcCenter` and
-`fireArcWidth` commands define a horizontal box with unrestricted pitch.
-Weapons without the new commands retain native Fleet Operations firing-arc
-behavior. See
-[`modules/A2FOFireArcs/README.md`](modules/A2FOFireArcs/README.md) for the
-complete orientation, precedence, validation, and fallback rules.
 
 Ordinary cannon, phaser, pulse, and torpedo weapon ODFs can also use the
 active Fleet Operations technology tree. Add the weapon ODF to the usual
@@ -290,7 +328,8 @@ registration rollback. Native modules handle features that need deeper
 engine/filesystem access, such as recursive ODF discovery, cocoon SOD selection,
 and Producer integration. Lua scripts supply optional logic through narrow
 semantic APIs when conditions and composition make scripting worthwhile. See
-[`docs/architecture.md`](docs/architecture.md).
+[`docs/architecture.md`](docs/architecture.md) for the ownership map and
+hook-maintenance rules.
 
 Queue controls and their current validation status are documented in
 [`docs/queue-enhancements.md`](docs/queue-enhancements.md). The complete hook
@@ -303,6 +342,8 @@ Legacy texture-folder activation and precedence are documented in
 [`modules/A2FORGBTextures/README.md`](modules/A2FORGBTextures/README.md).
 Captain/registry ODF lists and GUI fields are documented in
 [`modules/A2FOCraftIdentity/README.md`](modules/A2FOCraftIdentity/README.md).
+Recursive editor-menu ODF nesting is documented in
+[`modules/A2FOEditMenu/README.md`](modules/A2FOEditMenu/README.md).
 Three-dimensional weapon firing volumes are documented in
 [`modules/A2FOFireArcs/README.md`](modules/A2FOFireArcs/README.md).
 Normal-weapon technology-tree enforcement is documented in
@@ -323,6 +364,7 @@ Armada II/
 ├── Win2kDisableTaskSwitch.original.dll
 ├── modules/
 │   ├── A2FOCraftIdentity.dll
+│   ├── A2FOEditMenu.dll
 │   ├── A2FOFireArcs.dll
 │   ├── A2FOFeaturePack.dll
 │   ├── A2FOHybridBuild.dll
@@ -374,6 +416,7 @@ build/modules/A2FOFeaturePack.dll
 build/modules/A2FOHybridBuild.dll
 build/modules/A2FOInfoIni.dll
 build/modules/A2FOCraftIdentity.dll
+build/modules/A2FOEditMenu.dll
 build/modules/A2FOFireArcs.dll
 build/modules/A2FONormalWeaponTech.dll
 build/modules/A2FORGBTextures.dll

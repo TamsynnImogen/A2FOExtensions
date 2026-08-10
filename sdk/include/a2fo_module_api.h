@@ -1,3 +1,10 @@
+/*
+ * Stable C-compatible ABI shared by A2FOExtensions and optional native DLLs.
+ *
+ * The API is append-only. Modules must check both the major version and the
+ * member boundary before using fields introduced by later revisions.
+ */
+
 #pragma once
 
 #include <cstddef>

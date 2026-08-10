@@ -22,7 +22,6 @@
 namespace {
 
 constexpr const char* kModuleName = "A2FOCheats";
-constexpr const char* kRevision = "A2FOCheats-rebuild-20260809-05";
 constexpr const char* kRtsConfigFileName = "RTS_CFG.h";
 constexpr std::streamoff kMaximumRtsConfigSize = 2 * 1024 * 1024;
 constexpr float kDefaultGrantAmount = 10000.0f;
@@ -758,8 +757,7 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
                  "cheat commands could not be registered");
     }
 
-    log_line(std::string(kRevision) +
-             " initialized: restored m, dis, crash, and elim; "
+    log_line("Cheat extensions initialized: restored m, dis, crash, and elim; "
              "showmethemoney uses RTS_CFG.h grant values");
     return true;
 }

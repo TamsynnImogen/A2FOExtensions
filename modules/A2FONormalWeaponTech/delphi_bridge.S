@@ -1,3 +1,6 @@
+	# ABI bridge for the normal-weapon technology filter. It adapts C++ calls to
+	# Armada's thiscall owner lookup and FleetOpsHook's Delphi tree evaluator.
+
 	.text
 
 	# Generic wrapper for Weapon::GetOwner(), an MSVC thiscall function with

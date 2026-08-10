@@ -1,3 +1,6 @@
+	# ABI bridge for A2FOHybridBuild calls into Armada and FleetOpsHook. Generic
+	# wrappers adapt cdecl C++ callers to MSVC thiscall or Delphi registers.
+
 	.text
 
 	# A2FOHybridBuild.dll ABI translations. Generic wrappers adapt C++ cdecl
