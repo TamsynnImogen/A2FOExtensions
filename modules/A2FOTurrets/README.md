@@ -89,12 +89,29 @@ two-dimensional attack-movement path and gives both features one safe final
 trigger gate. Each link is optional and discovered at module load; ordinary
 turret behavior is unchanged when either filter module is absent.
 
+The same single-owner rule applies to `A2FOAlwaysShowShields.dll`.
+A2FOCraftIdentity forwards completed CraftClass construction for ships and
+stations. A2FOTurrets additionally forwards its GameObjectClass construction
+path, each post-native Craft simulation, and pre-native Craft cleanup. The
+shield module retains all ODF policy and rendering decisions; the owning
+modules merely prevent another DLL from detouring the same engine functions.
+
 ## Runtime behaviour
 
 - The whole turret SOD rotates as one rigid object. Separate yaw-base and
   pitch-barrel articulation is not part of this first version.
 - Automatic firing and explicit retargeting both feed the linked object's
   visual yaw/pitch tracking.
+- Before each child simulation, the host's alert status and special-weapon
+  autonomy are copied into the turret's native CraftProcess.
+  Green/yellow/red alert and autonomy changes therefore apply to every
+  mounted weapon on the same simulation tick.
+- A current host `Attack` command is mirrored into every linked turret and its
+  object becomes their ordered target. This includes deliberately ordered
+  friendly fire, while repair, guard, and other object commands remain
+  distinct. Other native targets are rejected until the Attack command ends
+  or changes; native range checks and the optional fire-arc and technology
+  filters still apply.
 - The turret uses native weapon and damage behaviour. Destroying it removes
   that mount for the rest of the current session.
 - Team and race changes are copied from the parent, including capture.

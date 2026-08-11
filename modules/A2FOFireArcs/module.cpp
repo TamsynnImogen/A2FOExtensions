@@ -13,6 +13,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cctype>
@@ -42,6 +43,8 @@ std::uintptr_t __cdecl a2fo_fire_arc_call_thiscall_4(
 namespace {
 
 using a2fo::fire_arcs::ArcConfig;
+using a2fo::fire_arcs::ArcLine;
+using a2fo::fire_arcs::ArcLineStyle;
 using a2fo::fire_arcs::ArcMode;
 using a2fo::fire_arcs::Matrix34;
 
@@ -53,16 +56,29 @@ constexpr std::uintptr_t kWeaponCanFireAtRva = 0x0026f8c0;
 constexpr std::uintptr_t kParameterDbGetFloatRva = 0x00134df0;
 constexpr std::uintptr_t kParameterDbGetStringRva = 0x00135350;
 constexpr std::uintptr_t kEntityGetTransformRva = 0x000cfd50;
+constexpr std::uintptr_t kEntityGetWorldTransformRva = 0x000cff90;
 constexpr std::uintptr_t kWeaponGetOwnerRva = 0x00271050;
+constexpr std::uintptr_t kWeaponGetTargetRva = 0x00271300;
+constexpr std::uintptr_t kDisplayInterfaceDrawLineRva = 0x0011b130;
+constexpr std::uintptr_t kStandardComponentIsMouseOverRva = 0x0010c140;
 
 // Fleet Operations detours both entries before extension modules load. The
 // new module chains only these exact supported handlers.
 constexpr std::uintptr_t kFoWeaponClassConstructorHandlerRva = 0x0010ef74;
 constexpr std::uintptr_t kFoWeaponCanFireAtHandlerRva = 0x001358ac;
+constexpr std::uintptr_t kFoShipSystemIconRenderRva = 0x001ed458;
 
 constexpr std::size_t kWeaponClassOnWeaponOffset = 0x04;
+constexpr std::size_t kHardpointListOnWeaponOffset = 0x10;
 constexpr std::size_t kRestrictFireArcOnWeaponClassOffset = 0x1b7;
+constexpr std::size_t kRangeOnWeaponClassOffset = 0x1c0;
 constexpr std::size_t kPositionOnGameObjectOffset = 0xac;
+constexpr std::size_t kWeaponSystemOnCraftOffset = 0x128;
+constexpr std::size_t kWeaponVectorBeginOffset = 0x0c;
+constexpr std::size_t kWeaponVectorEndOffset = 0x10;
+constexpr std::size_t kCraftOnShipSystemIconOffset = 0x28;
+constexpr std::size_t kWeaponIndexOnShipSystemIconOffset = 0x30;
+constexpr std::size_t kHardpointOnWeaponListNodeOffset = 0x08;
 
 constexpr std::uint8_t kExpectedWeaponClassConstructor[] = {
     0x55, 0x8b, 0xec, 0x6a, 0xff};
@@ -72,6 +88,16 @@ constexpr std::uint8_t kExpectedFoWeaponCanFireAtHandler[] = {
     0x55, 0x8b, 0xec, 0x83, 0xc4, 0xf4, 0x53};
 constexpr std::uint8_t kExpectedWeaponCanFireAt[] = {
     0x55, 0x8b, 0xec, 0x83, 0xec, 0x1c};
+constexpr std::uint8_t kExpectedEntityGetWorldTransform[] = {
+    0x55, 0x8b, 0xec, 0x8b, 0x45, 0x0c, 0x8b, 0x49, 0x04};
+constexpr std::uint8_t kExpectedDisplayInterfaceDrawLine[] = {
+    0x55, 0x8b, 0xec, 0xa1, 0x08, 0xd5, 0x7a, 0x00};
+constexpr std::uint8_t kExpectedStandardComponentIsMouseOver[] = {
+    0x8a, 0x41, 0x18, 0x84, 0xc0, 0x74, 0x12};
+constexpr std::uint8_t kExpectedWeaponGetTarget[] = {
+    0x8b, 0x49, 0x38, 0x51, 0xe8};
+constexpr std::uint8_t kExpectedFoShipSystemIconRender[] = {
+    0x55, 0x8b, 0xec, 0x83, 0xc4, 0xbc, 0x53};
 
 struct OptionalFloat {
     bool present = false;
@@ -87,8 +113,10 @@ bool g_chained_fo_weapon_class_constructor = false;
 bool g_chained_fo_weapon_can_fire_at = false;
 void* g_weapon_class_constructor_original = nullptr;
 void* g_weapon_can_fire_at_original = nullptr;
+void* g_ship_system_icon_render_original = nullptr;
 A2FO_InlineHook g_weapon_class_constructor_hook{};
 A2FO_InlineHook g_weapon_can_fire_at_hook{};
+A2FO_InlineHook g_ship_system_icon_render_hook{};
 std::unordered_map<void*, ArcConfig> g_class_arcs;
 
 // These one-shot messages prove that both engine stages reached the module
@@ -98,6 +126,7 @@ volatile LONG g_logged_first_direction_allowed_target = 0;
 volatile LONG g_logged_first_direction_rejected_target = 0;
 volatile LONG g_logged_first_trigger_allowed_target = 0;
 volatile LONG g_logged_first_trigger_rejected_target = 0;
+volatile LONG g_logged_first_hover_visualization = 0;
 
 void log_line(const std::string& message) noexcept {
     if (g_api && g_api->log) g_api->log(kModuleName, message.c_str());
@@ -436,6 +465,182 @@ const ArcConfig* configured_arc(void* weapon,
     return policy == g_class_arcs.end() ? nullptr : &policy->second;
 }
 
+void draw_world_line(const ArcLine& line,
+                     bool target_inside_arc) noexcept {
+    if (!g_armada) return;
+    // DisplayInterface::DrawLine accepts two world-space Vector3 values and
+    // an RGB float triplet. The active camera performs projection/clipping.
+    using DrawLineFn = void (__cdecl*)(const float*, const float*,
+                                      const float*);
+    const auto draw_line = reinterpret_cast<DrawLineFn>(
+        at(g_armada, kDisplayInterfaceDrawLineRva));
+    static const float boundary_color[3]{0.10f, 0.90f, 1.00f};
+    static const float centre_color[3]{1.00f, 0.82f, 0.12f};
+    static const float target_inside_color[3]{0.15f, 1.00f, 0.20f};
+    const float* color = target_inside_arc
+        ? target_inside_color
+        : (line.style == ArcLineStyle::centre
+              ? centre_color : boundary_color);
+    draw_line(line.start.values, line.end.values, color);
+}
+
+float visualization_radius(void* weapon_class) noexcept {
+    const float weapon_range = read_at<float>(
+        weapon_class, kRangeOnWeaponClassOffset, 300.0f);
+    if (!std::isfinite(weapon_range) || weapon_range <= 0.0f) {
+        return 120.0f;
+    }
+    // The overlay explains angle, not range. A fraction of the real range
+    // keeps its boundary on screen for long-range weapons while still scaling
+    // sensibly between fighters, ships, and stations.
+    return std::max(80.0f, std::min(500.0f, weapon_range * 0.35f));
+}
+
+void draw_arc_at_origin(const ArcConfig& policy,
+                        const Matrix34& owner_transform,
+                        const float origin[3], float radius,
+                        bool target_inside_arc) noexcept {
+    std::array<ArcLine, 128> lines{};
+    const std::size_t line_count =
+        a2fo::fire_arcs::build_visualization_lines(
+            policy, owner_transform, origin, radius,
+            lines.data(), lines.size());
+    for (std::size_t index = 0; index < line_count; ++index) {
+        draw_world_line(lines[index], target_inside_arc);
+    }
+}
+
+void draw_hovered_weapon_arcs(void* weapon) noexcept {
+    void* weapon_class = nullptr;
+    const ArcConfig* policy = configured_arc(weapon, &weapon_class);
+    if (!policy || !weapon_class) return;
+
+    void* owner = reinterpret_cast<void*>(
+        a2fo_fire_arc_call_thiscall_0(
+            at(g_armada, kWeaponGetOwnerRva), weapon));
+    const auto* live_owner_transform = owner
+        ? reinterpret_cast<const Matrix34*>(
+              a2fo_fire_arc_call_thiscall_0(
+                  at(g_armada, kEntityGetTransformRva), owner))
+        : nullptr;
+    if (!readable_range(live_owner_transform, sizeof(Matrix34))) return;
+    Matrix34 owner_transform{};
+    std::memcpy(&owner_transform, live_owner_transform,
+                sizeof(owner_transform));
+
+    // Weapon::GetTarget resolves the native target handle and rejects stale
+    // objects. Testing that live target against the same pure geometry used by
+    // firing authorization keeps UI rendering read-only and non-reentrant.
+    void* target = reinterpret_cast<void*>(
+        a2fo_fire_arc_call_thiscall_0(
+            at(g_armada, kWeaponGetTargetRva), weapon));
+    const auto* target_position_address = target
+        ? static_cast<const std::uint8_t*>(target) +
+              kPositionOnGameObjectOffset
+        : nullptr;
+    bool target_inside_arc = false;
+    if (readable_range(target_position_address, sizeof(float) * 3)) {
+        float target_position[3]{};
+        std::memcpy(target_position, target_position_address,
+                    sizeof(target_position));
+        target_inside_arc = a2fo::fire_arcs::allows_target(
+            *policy, owner_transform, target_position);
+    }
+
+    const float radius = visualization_radius(weapon_class);
+    void* sentinel = read_at<void*>(
+        weapon, kHardpointListOnWeaponOffset, nullptr);
+    void* node = read_at<void*>(sentinel, 0, nullptr);
+    std::size_t hardpoint_count = 0;
+    std::size_t nodes_visited = 0;
+    while (sentinel && node && node != sentinel && nodes_visited < 64) {
+        ++nodes_visited;
+        void* hardpoint = read_at<void*>(
+            node, kHardpointOnWeaponListNodeOffset, nullptr);
+        Matrix34 hardpoint_transform{};
+        if (hardpoint) {
+            const std::uintptr_t result =
+                a2fo_fire_arc_call_thiscall_2(
+                    at(g_armada, kEntityGetWorldTransformRva), owner,
+                    reinterpret_cast<std::uintptr_t>(&hardpoint_transform),
+                    reinterpret_cast<std::uintptr_t>(hardpoint));
+            if (result == reinterpret_cast<std::uintptr_t>(
+                              &hardpoint_transform)) {
+                draw_arc_at_origin(
+                    *policy, owner_transform,
+                    &hardpoint_transform.values[9], radius,
+                    target_inside_arc);
+                ++hardpoint_count;
+            }
+        }
+        void* next = read_at<void*>(node, 0, nullptr);
+        if (!next || next == node) break;
+        node = next;
+    }
+
+    // A malformed or empty native hardpoint list must not make the hover
+    // silently useless. Fall back to the weapon owner's centre in that case.
+    if (hardpoint_count == 0) {
+        draw_arc_at_origin(
+            *policy, owner_transform, &owner_transform.values[9], radius,
+            target_inside_arc);
+    }
+    if (InterlockedCompareExchange(
+            &g_logged_first_hover_visualization, 1, 0) == 0) {
+        char message[180]{};
+        std::snprintf(
+            message, sizeof(message),
+            "Rendered first weapon-icon fire-arc hover (%u hardpoint%s)",
+            static_cast<unsigned>(hardpoint_count),
+            hardpoint_count == 1 ? "" : "s");
+        log_line(message);
+    }
+}
+
+void* weapon_for_ship_system_icon(void* icon) noexcept {
+    if (!icon || !g_armada) return nullptr;
+    const bool hovered = (a2fo_fire_arc_call_thiscall_0(
+        at(g_armada, kStandardComponentIsMouseOverRva), icon) & 0xffu) != 0;
+    if (!hovered) return nullptr;
+
+    const std::int32_t weapon_index = read_at<std::int32_t>(
+        icon, kWeaponIndexOnShipSystemIconOffset, -1);
+    void* craft = read_at<void*>(
+        icon, kCraftOnShipSystemIconOffset, nullptr);
+    void* weapon_system = read_at<void*>(
+        craft, kWeaponSystemOnCraftOffset, nullptr);
+    void** begin = read_at<void**>(
+        weapon_system, kWeaponVectorBeginOffset, nullptr);
+    void** end = read_at<void**>(
+        weapon_system, kWeaponVectorEndOffset, nullptr);
+    const std::uintptr_t begin_address =
+        reinterpret_cast<std::uintptr_t>(begin);
+    const std::uintptr_t end_address =
+        reinterpret_cast<std::uintptr_t>(end);
+    const std::uintptr_t byte_count = end_address >= begin_address
+        ? end_address - begin_address : 0;
+    const std::size_t weapon_count = static_cast<std::size_t>(
+        byte_count / sizeof(void*));
+    if (weapon_index < 0 || !begin || !end ||
+        end_address < begin_address || byte_count % sizeof(void*) != 0 ||
+        weapon_count == 0 || weapon_count > 256 ||
+        !readable_range(begin, weapon_count * sizeof(void*)) ||
+        static_cast<std::size_t>(weapon_index) >= weapon_count) {
+        return nullptr;
+    }
+    return read_at<void*>(begin, static_cast<std::size_t>(weapon_index) *
+        sizeof(void*), nullptr);
+}
+
+void __attribute__((fastcall)) ship_system_icon_render_hook(
+    void* icon, void*) noexcept {
+    a2fo_fire_arc_call_thiscall_0(
+        g_ship_system_icon_render_original, icon);
+    if (!g_runtime_ready) return;
+    void* weapon = weapon_for_ship_system_icon(icon);
+    if (weapon) draw_hovered_weapon_arcs(weapon);
+}
+
 class ScopedNativeArcBypass {
 public:
     explicit ScopedNativeArcBypass(void* weapon_class) noexcept {
@@ -682,7 +887,52 @@ bool preflight_signatures() noexcept {
         log_line("Weapon::GetOwner entry is unreadable");
         supported = false;
     }
+    if (!signature_matches(
+            g_armada, kWeaponGetTargetRva,
+            kExpectedWeaponGetTarget)) {
+        log_line("Weapon::GetTarget signature is unsupported");
+        supported = false;
+    }
+    if (!signature_matches(
+            g_armada, kEntityGetWorldTransformRva,
+            kExpectedEntityGetWorldTransform)) {
+        log_line("Entity::GetWorldTransform signature is unsupported");
+        supported = false;
+    }
+    if (!signature_matches(
+            g_armada, kDisplayInterfaceDrawLineRva,
+            kExpectedDisplayInterfaceDrawLine)) {
+        log_line("DisplayInterface::DrawLine signature is unsupported");
+        supported = false;
+    }
+    if (!signature_matches(
+            g_armada, kStandardComponentIsMouseOverRva,
+            kExpectedStandardComponentIsMouseOver)) {
+        log_line("StandardComponent mouse-over signature is unsupported");
+        supported = false;
+    }
+    if (!signature_matches(
+            g_fleet_ops, kFoShipSystemIconRenderRva,
+            kExpectedFoShipSystemIconRender)) {
+        log_line("Fleet Operations ShipSystemIcon render signature is unsupported");
+        supported = false;
+    }
     return supported;
+}
+
+bool install_ship_system_icon_render_hook(
+    const A2FO_ModuleApi* api) noexcept {
+    if (!api->install_inline_hook(
+            at(g_fleet_ops, kFoShipSystemIconRenderRva),
+            reinterpret_cast<void*>(&ship_system_icon_render_hook),
+            sizeof(kExpectedFoShipSystemIconRender),
+            kExpectedFoShipSystemIconRender,
+            &g_ship_system_icon_render_hook)) {
+        return false;
+    }
+    g_ship_system_icon_render_original =
+        g_ship_system_icon_render_hook.gateway;
+    return g_ship_system_icon_render_original != nullptr;
 }
 
 bool install_weapon_class_constructor_hook(
@@ -774,7 +1024,11 @@ bool install_runtime_hooks(const A2FO_ModuleApi* api) noexcept {
         return false;
     }
 
-    bool installed = install_weapon_can_fire_at_hook(api);
+    // Install the UI hook first. If either simulation hook then fails,
+    // runtime_ready remains false and this process-lifetime detour is a pure
+    // pass-through rather than exposing a partial visual/runtime feature.
+    bool installed = install_ship_system_icon_render_hook(api);
+    installed = install_weapon_can_fire_at_hook(api) && installed;
     installed = install_weapon_class_constructor_hook(api) && installed;
     if (!installed) {
         log_line(
@@ -804,7 +1058,8 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
             g_chained_fo_weapon_can_fire_at) {
             log_line(
                 "3D fire-arc runtime initialized and chained through Fleet "
-                "Operations WeaponClass construction and target authorization");
+                "Operations WeaponClass construction and target authorization; "
+                "weapon-icon hover visualization active");
         } else if (g_chained_fo_weapon_class_constructor) {
             log_line("3D fire-arc runtime initialized and chained through Fleet Operations WeaponClass construction");
         } else if (g_chained_fo_weapon_can_fire_at) {

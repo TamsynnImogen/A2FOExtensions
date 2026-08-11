@@ -224,6 +224,42 @@ A box must declare at least one width command: `fireArcWidth`,
 A cone always requires `fireArcAngle`. Malformed or incomplete custom settings
 are logged and leave that WeaponClass on its native arc path.
 
+## In-game weapon-icon preview
+
+When a selected craft exposes a weapon through `weaponXiconpos`, move the mouse
+over that existing system icon to preview the weapon's configured A2FO arc in
+the tactical view. The preview disappears as soon as the pointer leaves the
+icon; clicking is not required and the icon's normal tooltip/click behaviour is
+unchanged.
+
+The DLL reads the hovered icon's real zero-based weapon slot, then walks that
+live Weapon instance's linked hardpoint list. It draws one wireframe volume from
+every associated hardpoint:
+
+- cyan lines show the boundary and its corner/edge rays;
+- the gold line shows the configured centre direction;
+- the complete wireframe turns green while the Weapon's live target is inside
+  the configured volume;
+- an unrestricted volume is shown as a wireframe sphere;
+- the drawing uses a bounded fraction of weapon range, so it communicates arc
+  direction and width rather than claiming to be a range circle.
+
+Directions use the weapon owner's live right/up/forward axes—the same axes used
+by firing authorization—while each wireframe begins at its real hardpoint world
+position. A mounted turret therefore previews its rotated live direction when
+its own weapon icon is available. If Armada supplies no usable hardpoint list,
+the DLL falls back to the owner centre.
+
+Only weapons containing a valid custom A2FO box/cone policy receive this
+preview. Weapons using only native `restrictFireArc`/`fireArc` retain native
+firing and do not show an extension wireframe, because those stock values do
+not describe the complete three-dimensional volume.
+
+The green state means the weapon's current live target is geometrically inside
+the custom arc. It deliberately does not call combat authorization from the UI
+renderer, so range, obstruction, technology, reload, and autonomy may still
+prevent an immediate shot.
+
 ## Runtime behaviour
 
 For a configured ordinary weapon, firing proceeds in this order:

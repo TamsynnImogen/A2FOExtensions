@@ -1,0 +1,34 @@
+[package]
+name = "a2fo_arclab"
+version = "0.1.0"
+edition = "2021"
+description = "Visual fire-arc authoring and diagnostics for A2FOExtensions"
+
+[dependencies]
+anyhow = "1.0"
+bevy = { version = "0.13.2", default-features = false, features = [
+    "bevy_asset",
+    "bevy_winit",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_pbr",
+    "bevy_gizmos",
+    "multi-threaded",
+    "png",
+    "jpeg",
+    "tga",
+    "dds",
+    "x11",
+] }
+bevy_egui = "0.27.1"
+image = { version = "0.24", default-features = false, features = ["png", "jpeg", "tga"] }
+rfd = "0.14"
+walkdir = "2.5"
+
+[build-dependencies]
+cc = "1.0"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

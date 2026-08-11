@@ -16,6 +16,7 @@ MODULE_DIR := $(BUILD_DIR)/modules
 STA1_CLASSIC_DIR := $(BUILD_DIR)/sta1-classic
 STA1_CLASSIC_MODULE_DIR := $(STA1_CLASSIC_DIR)/modules
 STA1_COMPAT_MODULE := $(MODULE_DIR)/A1Compat.dll
+ALWAYS_SHOW_SHIELDS_MODULE := $(MODULE_DIR)/A2FOAlwaysShowShields.dll
 CHEATS_MODULE := $(MODULE_DIR)/A2FOCheats.dll
 CRAFT_IDENTITY_MODULE := $(MODULE_DIR)/A2FOCraftIdentity.dll
 EDIT_MENU_MODULE := $(MODULE_DIR)/A2FOEditMenu.dll
@@ -41,6 +42,8 @@ TURRET_MATH_TEST := $(BUILD_DIR)/turret_math_test
 CRAFT_IDENTITY_TEST := $(BUILD_DIR)/craft_identity_test
 EDIT_MENU_TEST := $(BUILD_DIR)/edit_menu_test
 FIRE_ARC_TEST := $(BUILD_DIR)/fire_arc_test
+SHIELD_VISIBILITY_TEST := $(BUILD_DIR)/shield_visibility_test
+ARCLAB_DIR := tools/A2FOArcLab
 
 LUA_SOURCES := \
 	$(LUA_DIR)/lapi.c \
@@ -81,13 +84,20 @@ CORE_SOURCES := \
 
 .PHONY: all release sta1-classic verify-sta1-classic sdk-examples clean \
 	verify verify-sdk test smoke odf-module-smoke extension-root-smoke \
-	lua-host-smoke
+	lua-host-smoke arclab arclab-test
 
 all: release
+
+arclab:
+	cargo build --release --locked --manifest-path $(ARCLAB_DIR)/Cargo.toml
+
+arclab-test:
+	cargo test --locked --manifest-path $(ARCLAB_DIR)/Cargo.toml
 
 release: \
 	$(BUILD_DIR)/A2FOExtensions.dll \
 	$(BUILD_DIR)/Win2kDisableTaskSwitch.dll \
+	$(ALWAYS_SHOW_SHIELDS_MODULE) \
 	$(MODULE_DIR)/A2FOFeaturePack.dll \
 	$(MODULE_DIR)/A2FOHybridBuild.dll \
 	$(MODULE_DIR)/A2FOInfoIni.dll \
@@ -135,6 +145,17 @@ $(BUILD_DIR)/Win2kDisableTaskSwitch.dll: \
 		core/startup_proxy.cpp core/startup_proxy.def | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
 		-o $@ core/startup_proxy.cpp core/startup_proxy.def
+
+$(ALWAYS_SHOW_SHIELDS_MODULE): \
+		modules/A2FOAlwaysShowShields/module.cpp \
+		modules/A2FOAlwaysShowShields/shield_visibility.cpp \
+		modules/A2FOAlwaysShowShields/shield_visibility.hpp \
+		modules/A2FOAlwaysShowShields/thiscall_bridge.S \
+		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
+		-o $@ modules/A2FOAlwaysShowShields/module.cpp \
+		modules/A2FOAlwaysShowShields/shield_visibility.cpp \
+		modules/A2FOAlwaysShowShields/thiscall_bridge.S
 
 $(MODULE_DIR)/ExampleModule.dll: \
 		sdk/examples/ExampleModule/example_module.cpp \
@@ -243,12 +264,15 @@ $(NORMAL_WEAPON_TECH_MODULE): \
 
 $(TURRETS_MODULE): \
 		modules/A2FOTurrets/module.cpp \
+		modules/A2FOTurrets/turret_combat.cpp \
+		modules/A2FOTurrets/turret_combat.hpp \
 		modules/A2FOTurrets/turret_math.cpp \
 		modules/A2FOTurrets/turret_math.hpp \
 		modules/A2FOTurrets/thiscall_bridge.S \
 		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
 		-o $@ modules/A2FOTurrets/module.cpp \
+		modules/A2FOTurrets/turret_combat.cpp \
 		modules/A2FOTurrets/turret_math.cpp \
 		modules/A2FOTurrets/thiscall_bridge.S
 
@@ -318,11 +342,14 @@ $(HYBRID_PRODUCTION_TEST): tests/hybrid_production_test.cpp \
 		modules/A2FOHybridBuild/hybrid_production.cpp
 
 $(TURRET_MATH_TEST): tests/turret_math_test.cpp \
+		modules/A2FOTurrets/turret_combat.cpp \
+		modules/A2FOTurrets/turret_combat.hpp \
 		modules/A2FOTurrets/turret_math.cpp \
 		modules/A2FOTurrets/turret_math.hpp | $(BUILD_DIR)
 	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
 		-Imodules/A2FOTurrets -o $@ \
 		tests/turret_math_test.cpp \
+		modules/A2FOTurrets/turret_combat.cpp \
 		modules/A2FOTurrets/turret_math.cpp
 
 $(CRAFT_IDENTITY_TEST): tests/craft_identity_test.cpp \
@@ -347,6 +374,14 @@ $(FIRE_ARC_TEST): tests/fire_arc_test.cpp \
 		-Imodules/A2FOFireArcs -o $@ \
 		tests/fire_arc_test.cpp modules/A2FOFireArcs/fire_arc.cpp
 
+$(SHIELD_VISIBILITY_TEST): tests/shield_visibility_test.cpp \
+		modules/A2FOAlwaysShowShields/shield_visibility.cpp \
+		modules/A2FOAlwaysShowShields/shield_visibility.hpp | $(BUILD_DIR)
+	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+		-Imodules/A2FOAlwaysShowShields -o $@ \
+		tests/shield_visibility_test.cpp \
+		modules/A2FOAlwaysShowShields/shield_visibility.cpp
+
 verify: release
 	@echo "A2FOExtensions exports:"
 	@$(OBJDUMP) -p $(BUILD_DIR)/A2FOExtensions.dll | \
@@ -355,6 +390,10 @@ verify: release
 	@echo "Proxy exports:"
 	@$(OBJDUMP) -p $(BUILD_DIR)/Win2kDisableTaskSwitch.dll | \
 		grep -E "LowLevelKeyboardProc|SetHookID|DLL Name" || true
+	@echo
+	@echo "A2FOAlwaysShowShields module exports:"
+	@$(OBJDUMP) -p $(ALWAYS_SHOW_SHIELDS_MODULE) | \
+		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|A2FOAlwaysShowShields_RegisterClass|A2FOAlwaysShowShields_UpdateCraft|A2FOAlwaysShowShields_CleanupCraft|DLL Name" || true
 	@echo
 	@echo "A2FOFeaturePack module exports:"
 	@$(OBJDUMP) -p $(MODULE_DIR)/A2FOFeaturePack.dll | \
@@ -400,6 +439,7 @@ verify: release
 	@for dll in \
 		$(BUILD_DIR)/A2FOExtensions.dll \
 		$(BUILD_DIR)/Win2kDisableTaskSwitch.dll \
+		$(ALWAYS_SHOW_SHIELDS_MODULE) \
 		$(MODULE_DIR)/A2FOFeaturePack.dll \
 		$(MODULE_DIR)/A2FOHybridBuild.dll \
 		$(MODULE_DIR)/A2FOInfoIni.dll \
@@ -440,7 +480,8 @@ verify-sdk: sdk-examples
 
 test: $(FPQ_PATHS_TEST) $(ODF_PATHS_TEST) $(EXTENSION_ROOTS_TEST) \
 	$(MODULE_API_TEST) $(HYBRID_PRODUCTION_TEST) $(TURRET_MATH_TEST) \
-	$(CRAFT_IDENTITY_TEST) $(EDIT_MENU_TEST) $(FIRE_ARC_TEST)
+	$(CRAFT_IDENTITY_TEST) $(EDIT_MENU_TEST) $(FIRE_ARC_TEST) \
+	$(SHIELD_VISIBILITY_TEST)
 	$(FPQ_PATHS_TEST)
 	$(ODF_PATHS_TEST)
 	$(EXTENSION_ROOTS_TEST)
@@ -450,6 +491,7 @@ test: $(FPQ_PATHS_TEST) $(ODF_PATHS_TEST) $(EXTENSION_ROOTS_TEST) \
 	$(CRAFT_IDENTITY_TEST)
 	$(EDIT_MENU_TEST)
 	$(FIRE_ARC_TEST)
+	$(SHIELD_VISIBILITY_TEST)
 
 smoke: release $(SMOKE_TEST)
 	cd $(BUILD_DIR) && wine dll_load_smoke.exe

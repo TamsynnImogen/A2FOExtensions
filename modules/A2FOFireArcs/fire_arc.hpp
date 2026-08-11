@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <cstddef>
+
 namespace a2fo::fire_arcs {
 
 enum class ArcMode {
@@ -18,6 +20,21 @@ enum class ArcMode {
 // followed by translation. Each vector occupies three consecutive floats.
 struct Matrix34 {
     float values[12]{};
+};
+
+struct Vector3 {
+    float values[3]{};
+};
+
+enum class ArcLineStyle {
+    boundary,
+    centre,
+};
+
+struct ArcLine {
+    Vector3 start{};
+    Vector3 end{};
+    ArcLineStyle style = ArcLineStyle::boundary;
 };
 
 struct ArcConfig {
@@ -50,5 +67,17 @@ bool allows_target(
     const ArcConfig& config,
     const Matrix34& owner_transform,
     const float target_position[3]) noexcept;
+
+// Builds a bounded wireframe representation of the same owner-local volume
+// used by allows_target. The origin may be a weapon hardpoint rather than the
+// owner's translation; directions still follow the owner's live axes so the
+// picture exactly matches runtime firing authorization.
+std::size_t build_visualization_lines(
+    const ArcConfig& config,
+    const Matrix34& owner_transform,
+    const float origin[3],
+    float radius,
+    ArcLine* output,
+    std::size_t capacity) noexcept;
 
 }  // namespace a2fo::fire_arcs

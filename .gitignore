@@ -1,4 +1,6 @@
 /build/
+/dist/
+/tools/A2FOArcLab/target/
 *.dll
 *.exe
 *.log

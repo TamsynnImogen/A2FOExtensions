@@ -1,0 +1,55 @@
+name: A2FO Arc Lab builds
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/arclab.yml"
+      - "modules/A2FOFireArcs/fire_arc.cpp"
+      - "modules/A2FOFireArcs/fire_arc.hpp"
+      - "tools/A2FOArcLab/**"
+  pull_request:
+    paths:
+      - ".github/workflows/arclab.yml"
+      - "modules/A2FOFireArcs/fire_arc.cpp"
+      - "modules/A2FOFireArcs/fire_arc.hpp"
+      - "tools/A2FOArcLab/**"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: A2FOArcLab-linux-x86_64
+            package: dist/A2FOArcLab-linux-x86_64.tar.gz
+          - os: windows-latest
+            artifact: A2FOArcLab-windows-x86_64
+            package: dist/A2FOArcLab-windows-x86_64.zip
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: tools/A2FOArcLab
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y g++ pkg-config
+      - name: Test exact arc bridge and ODF resolver
+        run: cargo test --locked
+      - name: Package Linux build
+        if: runner.os == 'Linux'
+        run: ./scripts/package-linux.sh
+      - name: Package Windows build
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/package-windows.ps1
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.package }}
+          if-no-files-found: error

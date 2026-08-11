@@ -1,3 +1,4 @@
+#include "turret_combat.hpp"
 #include "turret_math.hpp"
 
 #include <cmath>
@@ -110,6 +111,38 @@ int main() {
         return 6;
     }
 
-    std::puts("turret math tests passed");
+    using a2fo::turrets::attack_order_target_handle;
+    if (attack_order_target_handle(6, 2, 0x1234, true) != 0x1234 ||
+        attack_order_target_handle(5, 2, 0x1234, true) != 0 ||
+        attack_order_target_handle(6, 1, 0x1234, true) != 0 ||
+        attack_order_target_handle(6, 2, 0x1234, false) != 0 ||
+        attack_order_target_handle(6, 2, 0, true) != 0) {
+        std::fprintf(stderr, "explicit Attack-command filtering failed\n");
+        return 7;
+    }
+
+    auto target_state = a2fo::turrets::update_order_target(
+        0, 0x1234, 0x5678);
+    if (target_state.ordered_target_handle != 0x1234 ||
+        target_state.visual_target_handle != 0x1234) {
+        std::fprintf(stderr, "starting an inherited order failed\n");
+        return 8;
+    }
+    target_state = a2fo::turrets::update_order_target(
+        0x1234, 0, 0x1234);
+    if (target_state.ordered_target_handle != 0 ||
+        target_state.visual_target_handle != 0) {
+        std::fprintf(stderr, "ending an inherited order failed\n");
+        return 9;
+    }
+    target_state = a2fo::turrets::update_order_target(
+        0x1234, 0, 0x5678);
+    if (target_state.ordered_target_handle != 0 ||
+        target_state.visual_target_handle != 0x5678) {
+        std::fprintf(stderr, "native target preservation failed\n");
+        return 10;
+    }
+
+    std::puts("turret math and combat-policy tests passed");
     return 0;
 }
