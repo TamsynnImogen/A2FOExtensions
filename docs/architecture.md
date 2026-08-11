@@ -16,8 +16,12 @@ The core permanently owns shared or lifetime-sensitive engine sites:
 - Craft destruction snapshot, replacement construction, and publication;
 - extension-root overlay and native/Lua loading order.
 
-The ten built-in native modules separate optional policy:
+The eleven built-in native modules separate optional policy:
 
+- `A2FOAlwaysShowShields.dll`: opt-in persistent native shield visibility,
+  a separately tracked continuous full-shield effect, checked lifecycle calls,
+  central mission-publication, Starbase, and Fleet Ops common-render coverage, and
+  the per-class ODF policy cache;
 - `A2FOFeaturePack.dll`: recursive ODF indexing, queue conveniences, upgrade
   pods, and Bink scaling;
 - `A2FOHybridBuild.dll`: `hybridbuild -> research`, the `cocoon` command, four
@@ -33,8 +37,9 @@ The ten built-in native modules separate optional policy:
 - `A2FOEditMenu.dll`: recursive `buildItemX` editor-menu navigation using the
   native visible menu buffer, renderer, object placement, and Back command;
 - `A2FOFireArcs.dll`: optional owner-local box and cone weapon firing volumes,
-  with a checked Fleet Operations WeaponClass-constructor chain and complete
-  native fallback for weapon ODFs without the new commands;
+  with checked Fleet Operations WeaponClass-constructor and system-icon-render
+  chains, per-hardpoint hover previews, and complete native fallback for weapon
+  ODFs without the new commands;
 - `A2FONormalWeaponTech.dll`: ordinary-weapon technology-tree enforcement,
   using each WeaponClass' own project ID and Fleet Operations' native recursive
   team-tree evaluator while treating unlisted weapons as requirement `0`;
@@ -45,8 +50,11 @@ The ten built-in native modules separate optional policy:
 - `A2FOTurrets.dll`: the global semantic `turret -> sensor` classlabel,
   indexed parent-mount parsing, linked child-object lifecycle, target-driven
   yaw/pitch transforms, ownership propagation, and save/load reconnection. Its
-  class-construction and simulation hooks explicitly chain Fleet Operations'
-  pre-existing checked detours.
+  class-construction, simulation, and cleanup hooks explicitly chain Fleet
+  Operations' pre-existing checked detours. Its simulation and cleanup hooks
+  provide the single-owner object bridge used by
+  `A2FOAlwaysShowShields.dll`; A2FOCraftIdentity supplies that module's common
+  ship/station CraftClass registration bridge.
 
 `A1Compat.dll` is an optional parent-mod module rather than a globally installed
 built-in. It is packaged under `STA1 Classic/modules` and owns A1-only policy,

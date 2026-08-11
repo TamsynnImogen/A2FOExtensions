@@ -42,10 +42,17 @@ std::uintptr_t __cdecl a2fo_identity_call_thiscall_7(
 
 namespace {
 
+using ShieldClassObserver = void (A2FO_CALL *)(
+    void* object_class, void* parameter_db);
+
 constexpr char kModuleName[] = "A2FOCraftIdentity";
 constexpr char kCraftNameCommand[] = "possibleCraftNames";
 constexpr char kCaptainCommand[] = "possibleCaptainNames";
 constexpr char kRegistryCommand[] = "possibleCraftRegistry";
+constexpr char kAlwaysShowShieldsModuleName[] =
+    "A2FOAlwaysShowShields.dll";
+constexpr char kShieldClassObserverExport[] =
+    "A2FOAlwaysShowShields_RegisterClass";
 constexpr std::size_t kMaximumIdentityEntries = 4096;
 constexpr std::size_t kMaximumIdentityLength = 512;
 
@@ -150,6 +157,7 @@ struct UiConfiguration {
 const A2FO_ModuleApi* g_api = nullptr;
 HMODULE g_armada = nullptr;
 HMODULE g_fleet_ops = nullptr;
+ShieldClassObserver g_shield_class_observer = nullptr;
 bool g_runtime_ready = false;
 bool g_chained_fo_craft_class_constructor = false;
 void* g_craft_class_constructor_original = nullptr;
@@ -163,6 +171,22 @@ LONG g_draw_report_count = 0;
 
 void log_line(const std::string& message) noexcept {
     if (g_api && g_api->log) g_api->log(kModuleName, message.c_str());
+}
+
+void resolve_shield_class_observer() noexcept {
+    HMODULE shields = GetModuleHandleA(kAlwaysShowShieldsModuleName);
+    FARPROC exported = shields
+        ? GetProcAddress(shields, kShieldClassObserverExport)
+        : nullptr;
+    static_assert(sizeof(exported) == sizeof(g_shield_class_observer),
+                  "unexpected function-pointer size");
+    std::memcpy(&g_shield_class_observer, &exported,
+                sizeof(g_shield_class_observer));
+    if (g_shield_class_observer) {
+        log_line(
+            "Shield class registration linked through "
+            "A2FOAlwaysShowShields");
+    }
 }
 
 void* at(HMODULE module, std::uintptr_t rva) noexcept {
@@ -355,6 +379,13 @@ std::uintptr_t __attribute__((fastcall)) craft_class_constructor_hook(
         reinterpret_cast<std::uintptr_t>(parent_class),
         reinterpret_cast<std::uintptr_t>(parameter_db));
     register_class_policy(self, parameter_db);
+    // CraftClass is the common completed-ODF boundary for both ships and
+    // stations. Forward it to the optional shield module because the more
+    // general GameObjectClass constructor is not entered by every derived
+    // Fleet Operations class path.
+    if (g_shield_class_observer) {
+        g_shield_class_observer(self, parameter_db);
+    }
     return result;
 }
 
@@ -823,6 +854,7 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     g_fleet_ops = static_cast<HMODULE>(api->fleetops_module());
     if (!g_armada || !g_fleet_ops) return false;
 
+    resolve_shield_class_observer();
     g_runtime_ready = install_runtime_hooks(api);
     if (g_runtime_ready) {
         log_line(g_chained_fo_craft_class_constructor

@@ -26,6 +26,10 @@ namespace a2fo {
 namespace {
 
 constexpr const char* kModuleName = "A2FOHybridBuild";
+constexpr char kAlwaysShowShieldsModuleName[] =
+    "A2FOAlwaysShowShields.dll";
+constexpr char kShieldCraftObserverExport[] =
+    "A2FOAlwaysShowShields_UpdateCraft";
 
 // ArmadaL.exe RVAs from the supported Armada 1.1 PDB plus the .text RVA.
 constexpr std::uintptr_t kParameterDbGetProjectIdRva = 0x135200;
@@ -350,6 +354,8 @@ extern "C" void a2fo_fo_sprite_draw_scaled_2d(
 const A2FO_ModuleApi* g_api = nullptr;
 HMODULE g_armada = nullptr;
 HMODULE g_fleet_ops = nullptr;
+using ShieldCraftObserver = void (A2FO_CALL *)(void* craft);
+ShieldCraftObserver g_shield_craft_observer = nullptr;
 CRITICAL_SECTION g_registry_lock;
 bool g_registry_lock_ready = false;
 A2FO_InlineHook g_research_start_hook{};
@@ -524,6 +530,22 @@ T* at(HMODULE module, std::uintptr_t rva) {
 
 void log_message(const std::string& message) noexcept {
     if (g_api && g_api->log) g_api->log(kModuleName, message.c_str());
+}
+
+void resolve_shield_craft_observer() noexcept {
+    HMODULE shields = GetModuleHandleA(kAlwaysShowShieldsModuleName);
+    FARPROC exported = shields
+        ? GetProcAddress(shields, kShieldCraftObserverExport)
+        : nullptr;
+    static_assert(sizeof(exported) == sizeof(g_shield_craft_observer),
+                  "unexpected function-pointer size");
+    std::memcpy(&g_shield_craft_observer, &exported,
+                sizeof(g_shield_craft_observer));
+    if (g_shield_craft_observer) {
+        log_message(
+            "Shield visibility observer linked through the Fleet Ops "
+            "Craft render boundary");
+    }
 }
 
 bool dispatch_producer_event(std::uint32_t kind, void* producer,
@@ -2779,6 +2801,14 @@ void render_queued_construction_ghosts(void* station) noexcept {
 
 std::uintptr_t __attribute__((fastcall)) craft_render_internal_hook(
     void* craft, void*, void* render_context) noexcept {
+    // Fleet Operations-derived station objects can bypass both Armada's
+    // Craft::Simulate and Starbase::Simulate entries. This checked callback is
+    // the common visual boundary for every visible Craft, making it the safe
+    // owner for a visual-only shield policy.
+    if (g_craft_render_internal_depth == 0 && craft &&
+        g_shield_craft_observer) {
+        g_shield_craft_observer(craft);
+    }
     const bool render_cocoon = hybrid_cocoon_has_instance(craft);
     // Popup refreshes maintain this stable object pointer until selection
     // changes. Do not retain or inspect their craft-array argument here: Fleet
@@ -3471,6 +3501,7 @@ bool initialize_hybrid_production_registry(const A2FO_ModuleApi* api,
     g_api = api;
     g_armada = armada;
     g_fleet_ops = fleet_ops;
+    resolve_shield_craft_observer();
     // Queued ghosts are presentation-only. Validate their native renderer
     // independently so a preview incompatibility can never disable the
     // hybridbuild classlabel or its production menus.

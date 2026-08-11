@@ -6,6 +6,8 @@
 namespace {
 
 using a2fo::fire_arcs::ArcConfig;
+using a2fo::fire_arcs::ArcLine;
+using a2fo::fire_arcs::ArcLineStyle;
 using a2fo::fire_arcs::ArcMode;
 using a2fo::fire_arcs::Matrix34;
 
@@ -172,6 +174,56 @@ int main() {
     if (normalized.pitch_degrees != -90.0f) {
         std::fprintf(stderr, "negative pitch clamping failed\n");
         return 11;
+    }
+
+    ArcLine lines[128]{};
+    const float origin[3]{10.0f, 20.0f, 30.0f};
+    const std::size_t box_line_count =
+        a2fo::fire_arcs::build_visualization_lines(
+            box, identity, origin, 100.0f,
+            lines, sizeof(lines) / sizeof(lines[0]));
+    if (box_line_count < 50 || box_line_count > 128 ||
+        lines[box_line_count - 1].style != ArcLineStyle::centre) {
+        std::fprintf(stderr, "box visualization was incomplete\n");
+        return 12;
+    }
+    for (std::size_t index = 0; index < box_line_count; ++index) {
+        if (!a2fo::fire_arcs::allows_target(
+                box, identity, lines[index].end.values)) {
+            std::fprintf(stderr,
+                         "box visualization left its policy at line %zu\n",
+                         index);
+            return 13;
+        }
+    }
+
+    const std::size_t cone_line_count =
+        a2fo::fire_arcs::build_visualization_lines(
+            cone, identity, origin, 100.0f,
+            lines, sizeof(lines) / sizeof(lines[0]));
+    if (cone_line_count < 32 || cone_line_count > 128 ||
+        lines[cone_line_count - 1].style != ArcLineStyle::centre) {
+        std::fprintf(stderr, "cone visualization was incomplete\n");
+        return 14;
+    }
+    for (std::size_t index = 0; index < cone_line_count; ++index) {
+        if (!a2fo::fire_arcs::allows_target(
+                cone, identity, lines[index].end.values)) {
+            std::fprintf(stderr,
+                         "cone visualization left its policy at line %zu\n",
+                         index);
+            return 15;
+        }
+    }
+
+    ArcConfig unrestricted{};
+    const std::size_t sphere_line_count =
+        a2fo::fire_arcs::build_visualization_lines(
+            unrestricted, yawed, origin, 50.0f,
+            lines, sizeof(lines) / sizeof(lines[0]));
+    if (sphere_line_count < 90 || sphere_line_count > 128) {
+        std::fprintf(stderr, "unrestricted arc did not render as a sphere\n");
+        return 16;
     }
 
     std::puts("fire arc tests passed");

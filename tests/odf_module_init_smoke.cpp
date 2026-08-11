@@ -27,6 +27,7 @@ bool hybrid_producer_cancel_effect_hooked = false;
 bool hybrid_producer_update_effect_hooked = false;
 bool hybrid_producer_stop_effect_hooked = false;
 bool hybrid_craft_render_internal_hooked = false;
+bool hybrid_shield_render_observer_linked = false;
 bool hybrid_control_button_press_hooked = false;
 bool hybrid_mode_info_button_name_hooked = false;
 bool hybrid_race_icon_render_hooked = false;
@@ -60,17 +61,22 @@ bool cheats_show_me_the_money_hooked = false;
 bool cheats_chat_init_hooked = false;
 bool cheats_rts_config_loaded = false;
 bool edit_menu_update_hooked = false;
+bool always_show_shields_starbase_hooked = false;
+bool always_show_shields_publish_hooked = false;
+bool always_show_shields_render_list_hooked = false;
 bool turret_alias_registered = false;
 bool turret_odf_defaults_registered = false;
 unsigned turret_hook_count = 0;
 bool turret_craft_simulate_chained = false;
 bool turret_class_constructor_chained = false;
+bool turret_shield_visibility_linked = false;
 bool turret_fire_arc_trigger_filter_linked = false;
 bool turret_normal_weapon_tech_trigger_filter_linked = false;
 bool normal_weapon_tech_initialized = false;
 unsigned fire_arc_hook_count = 0;
 bool fire_arc_class_constructor_chained = false;
 bool fire_arc_target_check_chained = false;
+bool fire_arc_icon_hover_hooked = false;
 char extension_root_path[MAX_PATH] = ".";
 char parent_extension_root_path[MAX_PATH] = ".";
 
@@ -335,16 +341,47 @@ void prepare_armada_signatures() {
         {0x53, 0x56, 0x57, 0x8b, 0xf1};
     const std::uint8_t turret_craft_simulate[] =
         {0x55, 0x8b, 0xec, 0x53, 0x8b, 0x5d, 0x08};
+    const std::uint8_t always_show_starbase_simulate[] =
+        {0x55, 0x8b, 0xec, 0x53, 0x8b, 0x5d, 0x08};
+    const std::uint8_t always_show_publish[] =
+        {0x55, 0x8b, 0xec, 0x56, 0x8b,
+         0x75, 0x0c, 0x8b, 0x46, 0x40};
+    const std::uint8_t always_show_render_list[] =
+        {0x55, 0x8b, 0xec, 0x83, 0xec, 0x0c,
+         0xa1, 0x10, 0xb6, 0x76, 0x00};
     const std::uint8_t turret_weapon_set_target[] =
         {0x55, 0x8b, 0xec, 0x8b, 0x45, 0x08};
+    const std::uint8_t turret_craft_get_policy[] =
+        {0x8b, 0x41, 0x44, 0x6a, 0x00};
+    const std::uint8_t turret_craft_set_policy[] =
+        {0x55, 0x8b, 0xec, 0x8b, 0x41, 0x44};
+    const std::uint8_t turret_get_current_command[] =
+        {0x8d, 0x41, 0x4c, 0xc3};
+    const std::uint8_t turret_set_targetless_command[] =
+        {0x55, 0x8b, 0xec, 0x64, 0xa1, 0x00};
+    const std::uint8_t turret_set_object_command[] =
+        {0x55, 0x8b, 0xec, 0x8b, 0x45, 0x14};
     const std::uint8_t fire_arc_weapon_class_constructor[] =
         {0x55, 0x8b, 0xec, 0x6a, 0xff};
     const std::uint8_t fire_arc_can_fire_at[] =
         {0x55, 0x8b, 0xec, 0x83, 0xec, 0x1c};
+    const std::uint8_t fire_arc_world_transform[] =
+        {0x55, 0x8b, 0xec, 0x8b, 0x45, 0x0c, 0x8b, 0x49, 0x04};
+    const std::uint8_t fire_arc_draw_line[] =
+        {0x55, 0x8b, 0xec, 0xa1, 0x08, 0xd5, 0x7a, 0x00};
+    const std::uint8_t fire_arc_mouse_over[] =
+        {0x8a, 0x41, 0x18, 0x84, 0xc0, 0x74, 0x12};
+    const std::uint8_t fire_arc_get_target[] =
+        {0x8b, 0x49, 0x38, 0x51, 0xe8};
     const std::uint8_t normal_weapon_tech_get_owner[] =
         {0x8b, 0x49, 0x18, 0x51, 0xe8};
     const std::uint8_t edit_menu_update[] =
         {0x55, 0x8b, 0xec, 0x81, 0xec, 0xc4, 0x00, 0x00, 0x00};
+    const std::uint8_t create_shield_hit[] =
+        {0x55, 0x8b, 0xec, 0x6a, 0xff,
+         0x68, 0x87, 0xb5, 0x69, 0x00};
+    const std::uint8_t stop_shield_effect[] =
+        {0x55, 0x8b, 0xec, 0x83, 0xec, 0x08, 0x8d, 0x45};
     set_signature(0x0d4280, queue_class_command);
     set_signature(0x0d45f0, dequeue_class_command);
     set_signature(0x0b77d0, dtor);
@@ -363,6 +400,8 @@ void prepare_armada_signatures() {
     set_signature(0x135350, parameter_string_dispatcher);
     set_signature(0x0cd1f0, find_lazy_by_project_id);
     set_signature(0x11c610, edit_menu_update);
+    set_signature(0x0743b0, create_shield_hit);
+    set_signature(0x074770, stop_shield_effect);
     set_signature(0x0b80f0, producer_get_action);
     set_signature(0x0afa30, construction_rig_get_action);
     set_signature(0x0afbc0, construction_rig_start);
@@ -441,10 +480,24 @@ void prepare_armada_signatures() {
     set_signature(0x000c1fd0, turret_craft_cleanup);
     set_signature(0x000c2870, turret_craft_post_load);
     set_signature(0x000c6530, turret_craft_simulate);
+    set_signature(0x000c9a20, turret_craft_get_policy);
+    set_signature(0x000c9a50, turret_craft_set_policy);
+    set_signature(0x000c9ae0, turret_craft_get_policy);
+    set_signature(0x000c9b10, turret_craft_set_policy);
+    set_signature(0x000d19c0, turret_get_current_command);
+    set_signature(0x000d1a40, turret_set_targetless_command);
+    set_signature(0x000d1af0, turret_set_object_command);
+    set_signature(0x000bdb10, always_show_starbase_simulate);
+    set_signature(0x0002b910, always_show_publish);
+    set_signature(0x00072b60, always_show_render_list);
     set_signature(0x00271290, turret_weapon_set_target);
     set_signature(0x00271340, turret_weapon_set_target);
     set_signature(0x00264e30, fire_arc_weapon_class_constructor);
     set_signature(0x0026f8c0, fire_arc_can_fire_at);
+    set_signature(0x000cff90, fire_arc_world_transform);
+    set_signature(0x0011b130, fire_arc_draw_line);
+    set_signature(0x0010c140, fire_arc_mouse_over);
+    set_signature(0x00271300, fire_arc_get_target);
     set_signature(0x00271050, normal_weapon_tech_get_owner);
     constexpr char rgb_literal[] = "Textures\\RGB\\";
     std::memcpy(static_cast<std::uint8_t*>(fake_armada) + 0x32d178,
@@ -468,6 +521,20 @@ void A2FO_CALL log_line(const char* module, const char* message) {
             "showmethemoney grants: Dilithium=1111, Tritanium=2222, "
             "Metal=7777, Supplies=4444, Crew=8888 (RTS_CFG.h)") == 0) {
         cheats_rts_config_loaded = true;
+    }
+    if (module && message && std::strcmp(module, "A2FOTurrets") == 0 &&
+        std::strcmp(
+            message,
+            "Shield visibility callbacks linked through "
+            "A2FOAlwaysShowShields") == 0) {
+        turret_shield_visibility_linked = true;
+    }
+    if (module && message && std::strcmp(module, "A2FOHybridBuild") == 0 &&
+        std::strcmp(
+            message,
+            "Shield visibility observer linked through the Fleet Ops "
+            "Craft render boundary") == 0) {
+        hybrid_shield_render_observer_linked = true;
     }
     if (module && message && std::strcmp(module, "A2FOTurrets") == 0 &&
         std::strcmp(
@@ -774,6 +841,18 @@ bool A2FO_CALL install_hook(void* target, void* replacement,
             0x240150) {
         rgb_open_read_hooked = true;
     }
+    if (fake_armada && target == static_cast<std::uint8_t*>(fake_armada) +
+            0x000bdb10) {
+        always_show_shields_starbase_hooked = true;
+    }
+    if (fake_armada && target == static_cast<std::uint8_t*>(fake_armada) +
+            0x0002b910) {
+        always_show_shields_publish_hooked = true;
+    }
+    if (fake_armada && target == static_cast<std::uint8_t*>(fake_armada) +
+            0x00072b60) {
+        always_show_shields_render_list_hooked = true;
+    }
     if (fake_armada &&
         (target == static_cast<std::uint8_t*>(fake_armada) + 0x000cc480 ||
          target == static_cast<std::uint8_t*>(fake_armada) + 0x000c1fd0 ||
@@ -785,6 +864,12 @@ bool A2FO_CALL install_hook(void* target, void* replacement,
     }
     if (fake_armada && target ==
             static_cast<std::uint8_t*>(fake_armada) + 0x0026f8c0) {
+        ++fire_arc_hook_count;
+    }
+    if (fleet_ops && target ==
+            static_cast<std::uint8_t*>(static_cast<void*>(fleet_ops)) +
+                0x001ed458) {
+        fire_arc_icon_hover_hooked = true;
         ++fire_arc_hook_count;
     }
     if (fake_armada &&
@@ -1022,6 +1107,22 @@ int main() {
     HMODULE edit_menu = initialize_module(
         "modules\\A2FOEditMenu.dll");
     if (!edit_menu || !edit_menu_update_hooked) return 109;
+    HMODULE always_show_shields = initialize_module(
+        "modules\\A2FOAlwaysShowShields.dll");
+    if (!always_show_shields || !always_show_shields_starbase_hooked ||
+        !always_show_shields_publish_hooked ||
+        !always_show_shields_render_list_hooked ||
+        !GetProcAddress(
+            always_show_shields,
+            "A2FOAlwaysShowShields_RegisterClass") ||
+        !GetProcAddress(
+            always_show_shields,
+            "A2FOAlwaysShowShields_UpdateCraft") ||
+        !GetProcAddress(
+            always_show_shields,
+            "A2FOAlwaysShowShields_CleanupCraft")) {
+        return 110;
+    }
     // Fleet Operations installs its own GameObjectClass-constructor and
     // Craft::Simulate detours before A2FO's native modules load. Reproduce
     // that live absolute push/ret state so the turret smoke proves both
@@ -1053,17 +1154,19 @@ int main() {
 
     HMODULE fire_arcs = initialize_module(
         "modules\\A2FOFireArcs.dll");
-    if (!fire_arcs || fire_arc_hook_count != 2 ||
+    if (!fire_arcs || fire_arc_hook_count != 3 ||
         !fire_arc_class_constructor_chained ||
         !fire_arc_target_check_chained ||
+        !fire_arc_icon_hover_hooked ||
         !GetProcAddress(
             fire_arcs, "A2FOFireArcs_AllowWeaponTrigger")) {
         std::fprintf(
             stderr,
-            "A2FOFireArcs smoke state: module=%p hooks=%u constructorChained=%d targetCheckChained=%d\n",
+            "A2FOFireArcs smoke state: module=%p hooks=%u constructorChained=%d targetCheckChained=%d iconHover=%d\n",
             static_cast<void*>(fire_arcs), fire_arc_hook_count,
             fire_arc_class_constructor_chained ? 1 : 0,
-            fire_arc_target_check_chained ? 1 : 0);
+            fire_arc_target_check_chained ? 1 : 0,
+            fire_arc_icon_hover_hooked ? 1 : 0);
         return 107;
     }
 
@@ -1087,6 +1190,7 @@ int main() {
         !turret_odf_defaults_registered || turret_hook_count != 6 ||
         !turret_craft_simulate_chained ||
         !turret_class_constructor_chained ||
+        !turret_shield_visibility_linked ||
         !turret_fire_arc_trigger_filter_linked ||
         !turret_normal_weapon_tech_trigger_filter_linked) {
         std::fprintf(
@@ -1350,6 +1454,7 @@ int main() {
         !hybrid_producer_update_effect_hooked ||
         !hybrid_producer_stop_effect_hooked ||
         !hybrid_craft_render_internal_hooked ||
+        !hybrid_shield_render_observer_linked ||
         !hybrid_control_button_press_hooked ||
         !hybrid_mode_info_button_name_hooked ||
         !hybrid_race_icon_render_hooked ||
@@ -1406,6 +1511,7 @@ int main() {
     FreeLibrary(info);
     FreeLibrary(hybrid);
     FreeLibrary(turrets);
+    FreeLibrary(always_show_shields);
     FreeLibrary(normal_weapon_tech);
     FreeLibrary(fire_arcs);
     FreeLibrary(edit_menu);

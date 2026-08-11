@@ -15,6 +15,8 @@ hooks, reusable dispatch, optional native features, and mod-authored Lua logic.
 - Optional ODF-driven captain names and ship registries, row-aligned with the
   native `possibleCraftNames` choice and displayed only for the selected craft
   through `infoSingleCaptainTextArea` and `infoSingleRegistryTextArea`.
+- Optional always-visible native shield geometry while a configured object's
+  current shield strength remains above zero.
 - Optional recursive map-editor menus: a `buildItemX` target containing its own
   `buildItemX` rows opens as another submenu, with native Back navigation.
 - Experimental indexed hull-mounted turrets through matching `turretX` and
@@ -137,6 +139,22 @@ int SHOWMETHEMONEY_CREW = 10000;
 Values inherit per field through Data, parent mods, and the active mod. Missing
 or invalid fields keep the inherited value, falling back to 10,000.
 
+### Persistent shield visibility
+
+Add this to a ship or station ODF:
+
+    alwaysShowShields = 1
+
+The default is 0 and preserves Fleet Operations' normal hit-driven shield
+display. When enabled, the native shield effect remains visible while current
+shield strength is greater than zero, disappears when shields reach zero, and
+returns automatically as shields recover. Shield strength, damage, and
+regeneration are not changed.
+
+See
+[modules/A2FOAlwaysShowShields/README.md](modules/A2FOAlwaysShowShields/README.md)
+for runtime ownership and inheritance details.
+
 ### Weapon fire arcs — read this first
 
 Fire-arc commands belong in the general **weapon ODF**, not its ordnance ODF.
@@ -168,10 +186,23 @@ Use `box` for most arrays and hemispheres. Use `cone` with `fireArcAngle` only
 when a circular fixed-cannon or barrel-shaped volume is wanted. Native range,
 target-validity, and obstruction checks remain active.
 
+For a configured weapon with an existing `weaponXiconpos` system icon,
+hovering that icon projects the live arc from every linked hardpoint into the
+tactical view. Cyan lines show the boundary and a gold line shows its centre;
+the complete wireframe turns green when the weapon's live target enters the
+arc. The hover preview does not alter the icon's normal input or tooltip.
+
 The detailed guide includes orientation diagrams, upper/lower hemisphere
 examples, box-versus-cone corner behaviour, aliases, validation rules, runtime
 ordering, and technology-tree troubleshooting:
 [`modules/A2FOFireArcs/README.md`](modules/A2FOFireArcs/README.md).
+
+For visual authoring, the cross-platform
+[`A2FO Arc Lab`](tools/A2FOArcLab/README.md) debug tool loads the ship ODF and
+SOD, discovers each weapon's linked hardpoints, draws live box/cone coverage,
+and tests a movable target probe through the exact same C++ geometry used by
+the DLL. It can cycle individual hardpoints or display every linked hardpoint
+at once, then copy or save the finished weapon-ODF block.
 
 ### Object ODF commands
 
@@ -342,6 +373,8 @@ Legacy texture-folder activation and precedence are documented in
 [`modules/A2FORGBTextures/README.md`](modules/A2FORGBTextures/README.md).
 Captain/registry ODF lists and GUI fields are documented in
 [`modules/A2FOCraftIdentity/README.md`](modules/A2FOCraftIdentity/README.md).
+Persistent shield visibility is documented in
+[modules/A2FOAlwaysShowShields/README.md](modules/A2FOAlwaysShowShields/README.md).
 Recursive editor-menu ODF nesting is documented in
 [`modules/A2FOEditMenu/README.md`](modules/A2FOEditMenu/README.md).
 Three-dimensional weapon firing volumes are documented in
@@ -363,6 +396,8 @@ Armada II/
 ├── Win2kDisableTaskSwitch.dll
 ├── Win2kDisableTaskSwitch.original.dll
 ├── modules/
+│   ├── A2FOAlwaysShowShields.dll
+│   ├── A2FOCheats.dll
 │   ├── A2FOCraftIdentity.dll
 │   ├── A2FOEditMenu.dll
 │   ├── A2FOFireArcs.dll
@@ -412,6 +447,8 @@ Outputs:
 ```text
 build/A2FOExtensions.dll
 build/Win2kDisableTaskSwitch.dll
+build/modules/A2FOAlwaysShowShields.dll
+build/modules/A2FOCheats.dll
 build/modules/A2FOFeaturePack.dll
 build/modules/A2FOHybridBuild.dll
 build/modules/A2FOInfoIni.dll
