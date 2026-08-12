@@ -20,13 +20,16 @@ pub struct SodNodeMarker {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct LoadedSod {
     pub root: Entity,
     pub center: Vec3,
     pub radius: f32,
     pub node_count: usize,
     pub hardpoint_count: usize,
+    pub referenced_texture_count: usize,
+    pub loaded_textures: Vec<PathBuf>,
+    pub texture_issues: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -34,6 +37,7 @@ pub struct SodSummary {
     pub node_names: Vec<String>,
     pub mesh_count: usize,
     pub hardpoint_count: usize,
+    pub texture_names: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -80,8 +84,24 @@ pub fn inspect_sod(path: &Path) -> Result<SodSummary> {
             .iter()
             .filter(|node| is_hardpoint_name(&node.name))
             .count(),
+        texture_names: unique_texture_names(&sod.nodes),
         node_names: sod.nodes.into_iter().map(|node| node.name).collect(),
     })
+}
+
+pub fn resolve_texture_names(
+    names: &[String],
+    texture_roots: &[PathBuf],
+) -> Vec<(String, Option<PathBuf>)> {
+    let mut resolver = TextureResolver::new(texture_roots);
+    names
+        .iter()
+        .map(|name| (name.clone(), resolver.resolve(name)))
+        .collect()
+}
+
+pub fn validate_texture(path: &Path) -> Result<()> {
+    decode_texture(path).map(|_| ())
 }
 
 pub fn spawn_sod(
@@ -118,6 +138,9 @@ pub fn spawn_sod(
     let mut node_entities = Vec::with_capacity(sod.nodes.len());
     let mut name_to_entity = HashMap::new();
     let mut texture_cache: HashMap<String, Option<Handle<Image>>> = HashMap::new();
+    let mut texture_resolver = TextureResolver::new(texture_roots);
+    let mut loaded_textures = Vec::new();
+    let mut texture_issues = Vec::new();
     for node in &sod.nodes {
         let entity = commands
             .spawn((
@@ -143,8 +166,29 @@ pub fn spawn_sod(
             } else if let Some(cached) = texture_cache.get(&mesh.texture.to_ascii_lowercase()) {
                 cached.clone()
             } else {
-                let loaded = resolve_texture(&mesh.texture, texture_roots)
-                    .and_then(|texture_path| load_texture(&texture_path, images).ok());
+                let loaded = match texture_resolver.resolve(&mesh.texture) {
+                    Some(texture_path) => match load_texture(&texture_path, images) {
+                        Ok(handle) => {
+                            loaded_textures.push(texture_path);
+                            Some(handle)
+                        }
+                        Err(error) => {
+                            texture_issues.push(format!(
+                                "{} resolved to {} but could not be decoded: {error:#}",
+                                mesh.texture,
+                                texture_path.display()
+                            ));
+                            None
+                        }
+                    },
+                    None => {
+                        texture_issues.push(format!(
+                            "{} was not found in any texture folder",
+                            mesh.texture
+                        ));
+                        None
+                    }
+                };
                 texture_cache.insert(mesh.texture.to_ascii_lowercase(), loaded.clone());
                 loaded
             };
@@ -161,6 +205,12 @@ pub fn spawn_sod(
                         Color::rgb(0.42, 0.46, 0.52)
                     },
                     base_color_texture: texture.clone(),
+                    // Arc Lab is an authoring/diagnostic view, not a lighting
+                    // reproduction. Show resolved diffuse pixels directly so
+                    // Armada's often subtle hull detail is not washed out by
+                    // PBR exposure. Keep the grey no-texture fallback lit so
+                    // its geometry remains readable.
+                    unlit: texture.is_some(),
                     perceptual_roughness: 0.72,
                     metallic: 0.05,
                     cull_mode: None,
@@ -201,6 +251,9 @@ pub fn spawn_sod(
         radius,
         node_count: sod.nodes.len(),
         hardpoint_count,
+        referenced_texture_count: texture_cache.len(),
+        loaded_textures,
+        texture_issues,
     })
 }
 
@@ -429,8 +482,54 @@ fn build_mesh(source: &SodMesh, group: &SodGroup) -> Result<Mesh> {
     Ok(mesh)
 }
 
-fn resolve_texture(name: &str, roots: &[PathBuf]) -> Option<PathBuf> {
-    let normalized = name.replace('\\', "/");
+struct TextureResolver<'a> {
+    roots: &'a [PathBuf],
+    recursive_indexes: Option<Vec<HashMap<String, PathBuf>>>,
+}
+
+impl<'a> TextureResolver<'a> {
+    fn new(roots: &'a [PathBuf]) -> Self {
+        Self {
+            roots,
+            recursive_indexes: None,
+        }
+    }
+
+    fn resolve(&mut self, name: &str) -> Option<PathBuf> {
+        let candidates = texture_candidates(name);
+        for root in self.roots {
+            for candidate in &candidates {
+                if let Some(hit) = find_case_insensitive_relative(root, candidate) {
+                    if hit.is_file() {
+                        return Some(hit);
+                    }
+                }
+            }
+        }
+
+        if self.recursive_indexes.is_none() {
+            self.recursive_indexes = Some(build_recursive_texture_indexes(self.roots));
+        }
+        let indexes = self.recursive_indexes.as_ref()?;
+        // Root precedence is more important than extension preference. An
+        // active-mod DDS must therefore beat a parent-mod TGA even though TGA
+        // is the first extension tried within one root.
+        for index in indexes {
+            for candidate in &candidates {
+                let Some(file_name) = candidate.file_name() else {
+                    continue;
+                };
+                if let Some(hit) = index.get(&file_name.to_string_lossy().to_ascii_lowercase()) {
+                    return Some(hit.clone());
+                }
+            }
+        }
+        None
+    }
+}
+
+fn texture_candidates(name: &str) -> Vec<PathBuf> {
+    let normalized = name.trim().replace('\\', "/");
     let path = PathBuf::from(&normalized);
     let mut candidates = vec![path.clone()];
     if path.extension().is_none() {
@@ -438,37 +537,69 @@ fn resolve_texture(name: &str, roots: &[PathBuf]) -> Option<PathBuf> {
             candidates.push(path.with_extension(extension));
         }
     }
+    candidates
+}
+
+fn build_recursive_texture_indexes(roots: &[PathBuf]) -> Vec<HashMap<String, PathBuf>> {
+    let mut indexes = Vec::with_capacity(roots.len());
     for root in roots {
-        for candidate in &candidates {
-            if let Some(hit) = find_case_insensitive_relative(root, candidate) {
-                if hit.is_file() {
-                    return Some(hit);
-                }
-            }
-        }
-    }
-    let wanted_names = candidates
-        .iter()
-        .filter_map(|candidate| candidate.file_name())
-        .map(|name| name.to_string_lossy().to_ascii_lowercase())
-        .collect::<HashSet<_>>();
-    for root in roots {
-        for entry in WalkDir::new(root)
-            .max_depth(3)
+        let mut index = HashMap::new();
+        let mut paths = WalkDir::new(root)
+            .follow_links(false)
             .into_iter()
             .filter_map(|entry| entry.ok())
-        {
-            if entry.file_type().is_file()
-                && wanted_names.contains(&entry.file_name().to_string_lossy().to_ascii_lowercase())
-            {
-                return Some(entry.into_path());
-            }
+            .filter(|entry| entry.file_type().is_file() && is_texture_path(entry.path()))
+            .map(|entry| entry.into_path())
+            .collect::<Vec<_>>();
+        paths.sort_by_key(|path| {
+            path.to_string_lossy()
+                .replace('\\', "/")
+                .to_ascii_lowercase()
+        });
+        for path in paths {
+            let Some(file_name) = path.file_name() else {
+                continue;
+            };
+            index
+                .entry(file_name.to_string_lossy().to_ascii_lowercase())
+                .or_insert(path);
+        }
+        indexes.push(index);
+    }
+    indexes
+}
+
+fn is_texture_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            ["tga", "dds", "png", "jpg", "jpeg"]
+                .iter()
+                .any(|supported| extension.eq_ignore_ascii_case(supported))
+        })
+}
+
+fn unique_texture_names(nodes: &[SodNode]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut output = Vec::new();
+    for texture in nodes
+        .iter()
+        .filter_map(|node| node.mesh.as_ref())
+        .map(|mesh| mesh.texture.trim())
+        .filter(|texture| !texture.is_empty())
+    {
+        if seen.insert(texture.to_ascii_lowercase()) {
+            output.push(texture.to_string());
         }
     }
-    None
+    output
 }
 
 fn load_texture(path: &Path, images: &mut Assets<Image>) -> Result<Handle<Image>> {
+    Ok(images.add(decode_texture(path)?))
+}
+
+fn decode_texture(path: &Path) -> Result<Image> {
     let bytes = fs::read(path)?;
     let extension = path
         .extension()
@@ -493,7 +624,7 @@ fn load_texture(path: &Path, images: &mut Assets<Image>) -> Result<Handle<Image>
         ImageSampler::default(),
         RenderAssetUsages::all(),
     )?;
-    Ok(images.add(image))
+    Ok(image)
 }
 
 fn calculate_world_matrices(nodes: &[SodNode]) -> Vec<Mat4> {
@@ -609,4 +740,85 @@ fn skip<R: Read>(reader: &mut R, count: usize) -> Result<()> {
     let mut bytes = vec![0; count];
     reader.read_exact(&mut bytes)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("a2fo_arclab_texture_{label}_{unique}"));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn texture_resolver_searches_arbitrarily_nested_folders() {
+        let root = temp_dir("nested");
+        let nested = root.join("Ships/Federation/Capital/Variants");
+        fs::create_dir_all(&nested).unwrap();
+        let expected = nested.join("SovereignHull.TGA");
+        fs::write(&expected, b"fixture").unwrap();
+
+        let roots = vec![root.clone()];
+        let mut resolver = TextureResolver::new(&roots);
+        assert_eq!(resolver.resolve("sovereignhull"), Some(expected));
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn texture_resolver_preserves_root_precedence() {
+        let active = temp_dir("active");
+        let parent = temp_dir("parent");
+        fs::create_dir_all(active.join("Custom/Deep")).unwrap();
+        fs::create_dir_all(parent.join("RGB")).unwrap();
+        let expected = active.join("Custom/Deep/Fbattle.tga");
+        fs::write(&expected, b"active").unwrap();
+        fs::write(parent.join("RGB/Fbattle.tga"), b"parent").unwrap();
+
+        let roots = vec![active.clone(), parent.clone()];
+        let mut resolver = TextureResolver::new(&roots);
+        assert_eq!(resolver.resolve("FBATTLE"), Some(expected));
+        fs::remove_dir_all(active).ok();
+        fs::remove_dir_all(parent).ok();
+    }
+
+    #[test]
+    fn root_precedence_beats_extension_preference() {
+        let active = temp_dir("active_dds");
+        let parent = temp_dir("parent_tga");
+        fs::create_dir_all(active.join("Custom/Deep")).unwrap();
+        fs::create_dir_all(parent.join("RGB")).unwrap();
+        let expected = active.join("Custom/Deep/Fbattle.dds");
+        fs::write(&expected, b"active").unwrap();
+        fs::write(parent.join("RGB/Fbattle.tga"), b"parent").unwrap();
+
+        let roots = vec![active.clone(), parent.clone()];
+        let mut resolver = TextureResolver::new(&roots);
+        assert_eq!(resolver.resolve("fbattle"), Some(expected));
+        fs::remove_dir_all(active).ok();
+        fs::remove_dir_all(parent).ok();
+    }
+
+    #[test]
+    fn explicit_texture_subpaths_are_case_insensitive() {
+        let root = temp_dir("subpath");
+        let nested = root.join("Ships/Federation");
+        fs::create_dir_all(&nested).unwrap();
+        let expected = nested.join("Cruiser.DDS");
+        fs::write(&expected, b"fixture").unwrap();
+
+        let roots = vec![root.clone()];
+        let mut resolver = TextureResolver::new(&roots);
+        assert_eq!(
+            resolver.resolve("ships\\federation\\cruiser.dds"),
+            Some(expected)
+        );
+        fs::remove_dir_all(root).ok();
+    }
 }

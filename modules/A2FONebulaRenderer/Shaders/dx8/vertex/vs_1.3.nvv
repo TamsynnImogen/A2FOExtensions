@@ -1,0 +1,35 @@
+; armadaNebulaPatch reference DX8 vertex shader
+; Copyright (c) 2024 dev gao, MIT License
+;#define V_Position v0
+;#define V_NORMAL v1
+;#define V_TEXTURE v2
+;#define V_S(U) v3
+;#define V_T(V) v4
+;#define V_SxT(W) v5
+;#define r3 r3
+;
+;c0=1,1,1,1
+;c1=0.5,0.5,0.5,0.5
+;c2-c5=clip(proj) space matrix
+;c6=light dir
+;c7-c10=world space matrix
+;c11-c14=view space matrix
+;c15-c18=inverse world space matrix
+;c19=ambient color
+vs.1.1
+
+; Transform position to clip space and output it
+m4x4 oPos,v0,c2
+
+; output tex coords
+mov oT0.xy, v2.xy
+
+; light dir
+mov r1,c6
+mad oD1, r1, c1, c1
+
+;normal
+mov r2,v5
+mad oD0, r2, c1, c1
+
+;work with ps_1.3.nvv

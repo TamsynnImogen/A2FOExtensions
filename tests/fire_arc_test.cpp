@@ -1,4 +1,5 @@
 #include "fire_arc.hpp"
+#include "runtime_config.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -9,6 +10,7 @@ using a2fo::fire_arcs::ArcConfig;
 using a2fo::fire_arcs::ArcLine;
 using a2fo::fire_arcs::ArcLineStyle;
 using a2fo::fire_arcs::ArcMode;
+using a2fo::fire_arcs::FireArcSettingStatus;
 using a2fo::fire_arcs::Matrix34;
 
 constexpr float kPi = 3.14159265358979323846f;
@@ -224,6 +226,38 @@ int main() {
     if (sphere_line_count < 90 || sphere_line_count > 128) {
         std::fprintf(stderr, "unrestricted arc did not render as a sphere\n");
         return 16;
+    }
+
+    bool enabled = true;
+    if (a2fo::fire_arcs::parse_firearc_setting(
+            "int unrelated = 0;", &enabled) !=
+            FireArcSettingStatus::absent || !enabled) {
+        std::fprintf(stderr, "absent firearc setting changed its default\n");
+        return 17;
+    }
+    if (a2fo::fire_arcs::parse_firearc_setting(
+            "// module switch\nint firearc = 0;", &enabled) !=
+            FireArcSettingStatus::valid || enabled) {
+        std::fprintf(stderr, "firearc=0 was not applied\n");
+        return 18;
+    }
+    if (a2fo::fire_arcs::parse_firearc_setting(
+            "/* child override */ firearc = 1;", &enabled) !=
+            FireArcSettingStatus::valid || !enabled) {
+        std::fprintf(stderr, "firearc=1 did not override its parent\n");
+        return 19;
+    }
+    if (a2fo::fire_arcs::parse_firearc_setting(
+            "firearc = 2;", &enabled) !=
+            FireArcSettingStatus::invalid || !enabled) {
+        std::fprintf(stderr, "invalid firearc setting changed inherited state\n");
+        return 20;
+    }
+    if (a2fo::fire_arcs::parse_firearc_setting(
+            "firearc = 0; firearc = 1;", &enabled) !=
+            FireArcSettingStatus::valid || !enabled) {
+        std::fprintf(stderr, "last firearc assignment did not win\n");
+        return 21;
     }
 
     std::puts("fire arc tests passed");

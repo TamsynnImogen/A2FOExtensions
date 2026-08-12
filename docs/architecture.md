@@ -16,7 +16,7 @@ The core permanently owns shared or lifetime-sensitive engine sites:
 - Craft destruction snapshot, replacement construction, and publication;
 - extension-root overlay and native/Lua loading order.
 
-The eleven built-in native modules separate optional policy:
+The twelve built-in native modules separate optional policy:
 
 - `A2FOAlwaysShowShields.dll`: opt-in persistent native shield visibility,
   a separately tracked continuous full-shield effect, checked lifecycle calls,
@@ -37,16 +37,41 @@ The eleven built-in native modules separate optional policy:
 - `A2FOEditMenu.dll`: recursive `buildItemX` editor-menu navigation using the
   native visible menu buffer, renderer, object placement, and Back command;
 - `A2FOFireArcs.dll`: optional owner-local box and cone weapon firing volumes,
-  with checked Fleet Operations WeaponClass-constructor and system-icon-render
-  chains, per-hardpoint hover previews, and complete native fallback for weapon
-  ODFs without the new commands;
+  globally switchable through `RTS_CFG.h`, with checked Fleet Operations
+  WeaponClass-constructor and system-icon-render chains, UI-configurable
+  per-hardpoint hover previews, and complete native fallback for weapon ODFs
+  without the new commands;
 - `A2FONormalWeaponTech.dll`: ordinary-weapon technology-tree enforcement,
   using each WeaponClass' own project ID and Fleet Operations' native recursive
   team-tree evaluator while treating unlisted weapons as requirement `0`;
+- `A2FONebulaRenderer.dll`: opt-in controller for DX8 per-pixel ship lighting
+  derived from armadaNebulaPatch and per-diffuse `textureX` /
+  `emissiveX<Subsystem>` map sets (with the original six unnumbered commands
+  retained as a single-material wildcard);
+  the core owns its checked early pass-through hooks, shader resource cache,
+  and Fleet Operations alpha-transition gateway because the shared DOT3 shader
+  predates deferred module loading. Classic SODs use scoped MeshVB and checked
+  GPU/CPU workspace fixed-function combiner sites instead of the DOT3 pixel
+  shader. Loose
+  emissive maps retain their authored RGB and sharp self-lit centres, while all
+  mesh paths accumulate the ODF emissive geometry into a private frame mask. A
+  multi-tap half-resolution reduction and two dense horizontal/vertical
+  Gaussian iterations are screen-blended before `EndScene`, creating a stable
+  external halo without additive white clipping or blooming the UI. Checked
+  CraftSystem state reads keep operational maps lit, flicker control-disabled
+  maps, and switch destroyed/repairing maps off. Full generated mip chains and
+  trilinear sampling suppress UV shimmer during movement. Checked
+  reset integration releases its default-pool targets before Fleet Operations
+  resets the device. This avoids an incompatible whole-device D3D8-to-D3D9
+  replacement. It composes with A2FOCraftIdentity's completed CraftClass boundary and
+  A2FOHybridBuild's common Craft render boundary rather than claiming duplicate
+  hooks;
 - `A2FORGBTextures.dll`: presence-based redirection of Armada's legacy
   `Textures\RGB`, `Textures\Index8`, and `Textures\Compressed` assets across
   Data, parent mods, and the active mod through Armada's TGA FileExists/OpenRead
-  boundary, with null-source guards for failed minimap textures.
+  boundary. Its flattened true-colour route expands indexed, grayscale,
+  16-bit, and RLE TGA variants before loading, with null-source guards for
+  failed minimap textures.
 - `A2FOTurrets.dll`: the global semantic `turret -> sensor` classlabel,
   indexed parent-mount parsing, linked child-object lifecycle, target-driven
   yaw/pitch transforms, ownership propagation, and save/load reconnection. Its
@@ -181,6 +206,8 @@ without changing the API structure.
 Revision 10 appends the transactional classlabel ODF-default registry. The core
 owns the shared typed ParameterDB hooks; a module supplies copied command/value
 pairs which are consulted only after the normal ODF/include lookup fails.
+Revision 11 appends a checked fixed-size byte writer for data constants and
+pointer slots which cannot use the existing CALL/JMP helpers.
 Existing v4 modules continue to receive their original struct prefix. Lua has
 an independent major/revision pair and `a2fo.require_api`.
 

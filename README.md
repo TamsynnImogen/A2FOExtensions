@@ -17,6 +17,11 @@ hooks, reusable dispatch, optional native features, and mod-authored Lua logic.
   through `infoSingleCaptainTextArea` and `infoSingleRegistryTextArea`.
 - Optional always-visible native shield geometry while a configured object's
   current shield strength remains above zero.
+- Optional DX8 per-pixel ship lighting derived from armadaNebulaPatch, with
+  the remaining Fleet Operations alpha-render path preserved and per-diffuse
+  ODF-driven, subsystem-aware emissive texture channels plus native soft
+  material-space and silhouette glow that does not require a D3D8-to-D3D9
+  wrapper.
 - Optional recursive map-editor menus: a `buildItemX` target containing its own
   `buildItemX` rows opens as another submenu, with native Back navigation.
 - Experimental indexed hull-mounted turrets through matching `turretX` and
@@ -63,7 +68,8 @@ hooks, reusable dispatch, optional native features, and mod-authored Lua logic.
 - Automatic deterministic loading of `modules\*.dll`.
 - Data, `ParentMod`, and active-mod module/script overlay.
 - Optional direct Armada 1/2 legacy texture bridge for `Textures\RGB`,
-  `Textures\Index8`, and `Textures\Compressed` across the same mod roots.
+  `Textures\Index8`, and `Textures\Compressed` across the same mod roots,
+  including bounded expansion of RLE-compressed TGA types 9, 10, and 11.
 - Embedded Lua 5.4.8 runtime.
 - Restricted Lua environment with memory, file-size, and instruction limits.
 - Lua classlabel, Evolver-cocoon, and object-destroyed callbacks.
@@ -186,11 +192,20 @@ Use `box` for most arrays and hemispheres. Use `cone` with `fireArcAngle` only
 when a circular fixed-cannon or barrel-shaped volume is wanted. Native range,
 target-validity, and obstruction checks remain active.
 
+Custom fire arcs are globally enabled by default. `int firearc = 0;` in
+`RTS_CFG.h` disables both custom firing enforcement and its hover preview;
+`int firearc = 1;` explicitly enables them. Data, parent, and active-mod files
+use normal overlay precedence.
+
 For a configured weapon with an existing `weaponXiconpos` system icon,
 hovering that icon projects the live arc from every linked hardpoint into the
 tactical view. Cyan lines show the boundary and a gold line shows its centre;
 the complete wireframe turns green when the weapon's live target enters the
 arc. The hover preview does not alter the icon's normal input or tooltip.
+
+Those defaults can be changed in the active interface `.cfg` with
+`fireArcBoundaryColor`, `fireArcCenterColor`, and
+`fireArcValidTargetColor`, using the usual three `0..1` colour channels.
 
 The detailed guide includes orientation diagrams, upper/lower hemisphere
 examples, box-versus-cone corner behaviour, aliases, validation rules, runtime
@@ -383,6 +398,9 @@ Normal-weapon technology-tree enforcement is documented in
 [`modules/A2FONormalWeaponTech/README.md`](modules/A2FONormalWeaponTech/README.md).
 Indexed hull-turret ODF commands and validation status are documented in
 [`modules/A2FOTurrets/README.md`](modules/A2FOTurrets/README.md).
+DX8 per-pixel lighting, subsystem emissive ODF commands, installation, and
+current shader limitations are documented in
+[`modules/A2FONebulaRenderer/README.md`](modules/A2FONebulaRenderer/README.md).
 Armada 1 parent-mod scope and installation are documented in
 [`docs/a1-compatibility.md`](docs/a1-compatibility.md).
 Upgrade-pod configuration and ODF commands are documented in
@@ -404,9 +422,18 @@ Armada II/
 │   ├── A2FOFeaturePack.dll
 │   ├── A2FOHybridBuild.dll
 │   ├── A2FOInfoIni.dll
+│   ├── A2FONebulaRenderer.dll
 │   ├── A2FONormalWeaponTech.dll
 │   ├── A2FORGBTextures.dll
 │   └── A2FOTurrets.dll
+├── Shaders/
+│   └── dx8/
+│       ├── pixel/
+│       │   ├── ps.nvv
+│       │   └── ps_1.3.nvv
+│       └── vertex/
+│           ├── vs.nvv
+│           └── vs_1.3.nvv
 ├── scripts/
 │   └── UpgradePods.lua      (bounded tier policy; mod-overridable)
 └── A2FOExtensions.log
@@ -455,9 +482,15 @@ build/modules/A2FOInfoIni.dll
 build/modules/A2FOCraftIdentity.dll
 build/modules/A2FOEditMenu.dll
 build/modules/A2FOFireArcs.dll
+build/modules/A2FONebulaRenderer.dll
 build/modules/A2FONormalWeaponTech.dll
 build/modules/A2FORGBTextures.dll
 build/modules/A2FOTurrets.dll
+build/Shaders/dx8/vertex/vs.nvv
+build/Shaders/dx8/vertex/vs_1.3.nvv
+build/Shaders/dx8/pixel/ps.nvv
+build/Shaders/dx8/pixel/ps_1.3.nvv
+build/licenses/armada-nebula-patch.txt
 build/sta1-classic/modules/A1Compat.dll
 ```
 
@@ -482,5 +515,5 @@ Win2kDisableTaskSwitch.dll
 ```
 
 Then copy the newly built `Win2kDisableTaskSwitch.dll`,
-`A2FOExtensions.dll`, and the `modules` directory into the Fleet Operations
-root directory.
+`A2FOExtensions.dll`, the `modules` directory, and the `Shaders` directory
+into the Fleet Operations `Data` directory.

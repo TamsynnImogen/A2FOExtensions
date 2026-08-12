@@ -22,7 +22,14 @@ CRAFT_IDENTITY_MODULE := $(MODULE_DIR)/A2FOCraftIdentity.dll
 EDIT_MENU_MODULE := $(MODULE_DIR)/A2FOEditMenu.dll
 FIRE_ARCS_MODULE := $(MODULE_DIR)/A2FOFireArcs.dll
 NORMAL_WEAPON_TECH_MODULE := $(MODULE_DIR)/A2FONormalWeaponTech.dll
+NEBULA_RENDERER_MODULE := $(MODULE_DIR)/A2FONebulaRenderer.dll
 TURRETS_MODULE := $(MODULE_DIR)/A2FOTurrets.dll
+NEBULA_SHADER_ASSETS := \
+	$(BUILD_DIR)/Shaders/dx8/vertex/vs.nvv \
+	$(BUILD_DIR)/Shaders/dx8/vertex/vs_1.3.nvv \
+	$(BUILD_DIR)/Shaders/dx8/pixel/ps.nvv \
+	$(BUILD_DIR)/Shaders/dx8/pixel/ps_1.3.nvv
+NEBULA_LICENSE := $(BUILD_DIR)/licenses/armada-nebula-patch.txt
 STA1_CLASSIC_GUI_CFG := \
 	mods/STA1Classic/misc/gui_fed.cfg \
 	mods/STA1Classic/misc/gui_bor.cfg \
@@ -43,6 +50,7 @@ CRAFT_IDENTITY_TEST := $(BUILD_DIR)/craft_identity_test
 EDIT_MENU_TEST := $(BUILD_DIR)/edit_menu_test
 FIRE_ARC_TEST := $(BUILD_DIR)/fire_arc_test
 SHIELD_VISIBILITY_TEST := $(BUILD_DIR)/shield_visibility_test
+NEBULA_EMISSIVE_TEST := $(BUILD_DIR)/nebula_emissive_test
 ARCLAB_DIR := tools/A2FOArcLab
 
 LUA_SOURCES := \
@@ -78,7 +86,10 @@ CORE_SOURCES := \
 	core/extension_roots.cpp \
 	core/lua_host.cpp \
 	core/module_loader.cpp \
+	core/nebula_emissive.cpp \
+	core/nebula_renderer.cpp \
 	core/hook.cpp \
+	core/nebula_renderer_bridge.S \
 	core/delphi_bridge.S \
 	$(LUA_SOURCES)
 
@@ -106,6 +117,9 @@ release: \
 	$(EDIT_MENU_MODULE) \
 	$(FIRE_ARCS_MODULE) \
 	$(NORMAL_WEAPON_TECH_MODULE) \
+	$(NEBULA_RENDERER_MODULE) \
+	$(NEBULA_SHADER_ASSETS) \
+	$(NEBULA_LICENSE) \
 	$(TURRETS_MODULE) \
 	$(MODULE_DIR)/A2FORGBTextures.dll
 
@@ -247,11 +261,14 @@ $(FIRE_ARCS_MODULE): \
 		modules/A2FOFireArcs/module.cpp \
 		modules/A2FOFireArcs/fire_arc.cpp \
 		modules/A2FOFireArcs/fire_arc.hpp \
+		modules/A2FOFireArcs/runtime_config.cpp \
+		modules/A2FOFireArcs/runtime_config.hpp \
 		modules/A2FOFireArcs/thiscall_bridge.S \
 		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
 		-o $@ modules/A2FOFireArcs/module.cpp \
 		modules/A2FOFireArcs/fire_arc.cpp \
+		modules/A2FOFireArcs/runtime_config.cpp \
 		modules/A2FOFireArcs/thiscall_bridge.S
 
 $(NORMAL_WEAPON_TECH_MODULE): \
@@ -261,6 +278,28 @@ $(NORMAL_WEAPON_TECH_MODULE): \
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
 		-o $@ modules/A2FONormalWeaponTech/module.cpp \
 		modules/A2FONormalWeaponTech/delphi_bridge.S
+
+$(NEBULA_RENDERER_MODULE): \
+		modules/A2FONebulaRenderer/module.cpp \
+		modules/A2FONebulaRenderer/thiscall_bridge.S \
+		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
+		-o $@ modules/A2FONebulaRenderer/module.cpp \
+		modules/A2FONebulaRenderer/thiscall_bridge.S
+
+$(BUILD_DIR)/Shaders/dx8/vertex/%.nvv: \
+		modules/A2FONebulaRenderer/Shaders/dx8/vertex/%.nvv | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	cp $< $@
+
+$(BUILD_DIR)/Shaders/dx8/pixel/%.nvv: \
+		modules/A2FONebulaRenderer/Shaders/dx8/pixel/%.nvv | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	cp $< $@
+
+$(NEBULA_LICENSE): third_party/armada-nebula-patch/LICENSE.txt | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	cp $< $@
 
 $(TURRETS_MODULE): \
 		modules/A2FOTurrets/module.cpp \
@@ -369,10 +408,13 @@ $(EDIT_MENU_TEST): tests/edit_menu_test.cpp \
 
 $(FIRE_ARC_TEST): tests/fire_arc_test.cpp \
 		modules/A2FOFireArcs/fire_arc.cpp \
-		modules/A2FOFireArcs/fire_arc.hpp | $(BUILD_DIR)
+		modules/A2FOFireArcs/fire_arc.hpp \
+		modules/A2FOFireArcs/runtime_config.cpp \
+		modules/A2FOFireArcs/runtime_config.hpp | $(BUILD_DIR)
 	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
 		-Imodules/A2FOFireArcs -o $@ \
-		tests/fire_arc_test.cpp modules/A2FOFireArcs/fire_arc.cpp
+		tests/fire_arc_test.cpp modules/A2FOFireArcs/fire_arc.cpp \
+		modules/A2FOFireArcs/runtime_config.cpp
 
 $(SHIELD_VISIBILITY_TEST): tests/shield_visibility_test.cpp \
 		modules/A2FOAlwaysShowShields/shield_visibility.cpp \
@@ -382,10 +424,16 @@ $(SHIELD_VISIBILITY_TEST): tests/shield_visibility_test.cpp \
 		tests/shield_visibility_test.cpp \
 		modules/A2FOAlwaysShowShields/shield_visibility.cpp
 
+$(NEBULA_EMISSIVE_TEST): tests/nebula_emissive_test.cpp \
+		core/nebula_emissive.cpp core/nebula_emissive.hpp | $(BUILD_DIR)
+	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+		-Icore -o $@ tests/nebula_emissive_test.cpp \
+		core/nebula_emissive.cpp
+
 verify: release
 	@echo "A2FOExtensions exports:"
 	@$(OBJDUMP) -p $(BUILD_DIR)/A2FOExtensions.dll | \
-		grep -E "A2FO_Initialize|DLL Name" || true
+		grep -E "A2FO_Initialize|A2FO_NebulaRendererStatus|A2FO_NebulaRegisterEmissive(Class|Materials)|A2FO_NebulaBeginCraftRender|A2FO_NebulaEndCraftRender|DLL Name" || true
 	@echo
 	@echo "Proxy exports:"
 	@$(OBJDUMP) -p $(BUILD_DIR)/Win2kDisableTaskSwitch.dll | \
@@ -427,6 +475,10 @@ verify: release
 	@$(OBJDUMP) -p $(NORMAL_WEAPON_TECH_MODULE) | \
 		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|A2FONormalWeaponTech_AllowWeaponTrigger|DLL Name" || true
 	@echo
+	@echo "A2FONebulaRenderer module exports:"
+	@$(OBJDUMP) -p $(NEBULA_RENDERER_MODULE) | \
+		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|A2FONebulaRenderer_RegisterClass|DLL Name" || true
+	@echo
 	@echo "A2FOTurrets module exports:"
 	@$(OBJDUMP) -p $(TURRETS_MODULE) | \
 		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|DLL Name" || true
@@ -448,6 +500,7 @@ verify: release
 		$(EDIT_MENU_MODULE) \
 		$(FIRE_ARCS_MODULE) \
 		$(NORMAL_WEAPON_TECH_MODULE) \
+		$(NEBULA_RENDERER_MODULE) \
 		$(TURRETS_MODULE) \
 		$(MODULE_DIR)/A2FORGBTextures.dll; do \
 		if $(OBJDUMP) -p "$$dll" | \
@@ -481,7 +534,7 @@ verify-sdk: sdk-examples
 test: $(FPQ_PATHS_TEST) $(ODF_PATHS_TEST) $(EXTENSION_ROOTS_TEST) \
 	$(MODULE_API_TEST) $(HYBRID_PRODUCTION_TEST) $(TURRET_MATH_TEST) \
 	$(CRAFT_IDENTITY_TEST) $(EDIT_MENU_TEST) $(FIRE_ARC_TEST) \
-	$(SHIELD_VISIBILITY_TEST)
+	$(SHIELD_VISIBILITY_TEST) $(NEBULA_EMISSIVE_TEST)
 	$(FPQ_PATHS_TEST)
 	$(ODF_PATHS_TEST)
 	$(EXTENSION_ROOTS_TEST)
@@ -492,6 +545,7 @@ test: $(FPQ_PATHS_TEST) $(ODF_PATHS_TEST) $(EXTENSION_ROOTS_TEST) \
 	$(EDIT_MENU_TEST)
 	$(FIRE_ARC_TEST)
 	$(SHIELD_VISIBILITY_TEST)
+	$(NEBULA_EMISSIVE_TEST)
 
 smoke: release $(SMOKE_TEST)
 	cd $(BUILD_DIR) && wine dll_load_smoke.exe

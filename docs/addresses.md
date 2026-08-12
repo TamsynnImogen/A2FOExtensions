@@ -74,7 +74,7 @@ and this original code still performs the `..\FleetOpsHook.dll` load.
 
 ## Direct patch ledger
 
-The maintained source currently contains 82 fixed-address mutation sites plus
+The maintained source currently contains 94 fixed-address mutation sites plus
 one lazily selected per-class vtable hook. Conditional features do not
 necessarily install every site in a given run, but no code or pointer write is
 omitted below.
@@ -209,6 +209,14 @@ stores `restrictFireArc` at WeaponClass `+0x1b7` and the stock `fireArc` float
 at `+0x1b8`. The custom path does not modify either field persistently. Armada
 Matrix34 uses right/up/forward/translation vectors at
 `+0x00`/`+0x0c`/`+0x18`/`+0x24`.
+
+The optional UI-colour path validates `ParameterDB::Get(DBColor)` at Armada
+RVA `0x00135ba0` (expected `55 8b ec 81 ec 00 01 00 00`) and reads the active
+GUI ParameterDB pointer from RVA `0x0036502c`. If either lookup is unavailable,
+the hook retains its built-in boundary, centre, and valid-target colours while
+the simulation feature remains active. The `RTS_CFG.h` `firearc` switch is
+read through the extension-root API before any hook is installed, so
+`firearc = 0` leaves all three sites untouched.
 
 The hover preview additionally validates and calls Armada
 `StandardComponent::IsMouseOverAndCursorOwner` at RVA `0x0010c140`,
@@ -467,7 +475,7 @@ These sites are installed only when an extension root contains at least one of `
 
 | Image | RVA | Kind | Bytes | Expected value | Handler and purpose |
 | --- | ---: | --- | ---: | --- | --- |
-| Armada | `0x3b7f8c` | PTR | 4 | slot equals the resolved `msvcrt!fopen` export | `legacy_texture_fopen`; resolve explicit RGB/Index8/Compressed requests plus root/RGB/prepared-Index8/prepared-Compressed TGA fallback while preserving real root/mod assets; DDS requests are never redirected to TGA bytes |
+| Armada | `0x3b7f8c` | PTR | 4 | slot equals the resolved `msvcrt!fopen` export | `legacy_texture_fopen`; resolve explicit RGB/Index8/Compressed requests plus the validated/prepared root-level TGA fallback while preserving real root/mod assets; DDS requests are never redirected to TGA bytes |
 | Armada | `0x2400d0` | inline | 6 | `55 8b ec 8b 45 08` | `file_exists_hook`; make Armada's completed root-TGA request resolve to the selected physical legacy texture without claiming a missing DDS |
 | Armada | `0x240150` | inline | 6 | `55 8b ec 8b 45 08` | `open_read_hook`; open the same selected TGA through Armada's original binary stream and loader |
 | Armada | `0x242780` | inline | 5 | `55 8b ec 56 57` | `lock_surface_hook`; identify a failed mapped legacy texture and report the unavailable surface before the null-source guards run |
@@ -480,6 +488,63 @@ the retained function unchanged. Stream and guard sites are separately
 signature-gated and installed in partial-safe order. Shutdown restores the
 pointer only while the slot still contains this module's handler; inline hooks
 are process-lifetime changes.
+
+### Nebula DX8 renderer
+
+Source: [`../core/nebula_renderer.cpp`](../core/nebula_renderer.cpp)
+
+This is the DX8 portion of armadaNebulaPatch, ported from its custom loader,
+hook toolkit, and MinHook detours into checked core primitives. Armada creates
+its shared DOT3 shader before deferred modules load, so the core owns these
+sites during process attach. Every replacement remains disabled/pass-through
+until the first DOT3 compilation finds the controller DLL and all assets.
+
+| Image | RVA | Kind | Bytes | Expected bytes/value | Handler and purpose |
+| --- | ---: | --- | ---: | --- | --- |
+| Armada | `0x32b580` | DATA | 32 | padded `shaders\\dot3_directional.nvv` | replace the native DOT3 vertex-shader source with `shaders\\dx8\\vertex\\vs.nvv` |
+| Armada | `0x226e50` | inline | 10 | `55 8b ec 6a ff 68 cb ba 6a 00` | `compile_dot3_mesh_hook`; preserve native DOT3 mesh/vertex compilation and assemble the paired pixel shader |
+| Armada | `0x2279af` | inline | 6 | `ff 92 1c 01 00 00` | `a2fo_nebula_dot3_draw_hook`; while the primary DOT3 indexed draw's streams and shader are live, accumulate the current craft's ODF emissive composite into the frame mask, restore all state, and replay the original draw |
+| Armada | `0x223ce4` | inline | 7 | `8b 10 51 50 ff 52 38` | `a2fo_nebula_device_reset_hook`; release the three default-pool bloom targets immediately before Armada calls `IDirect3DDevice8::Reset`, allowing native device-lost recovery to proceed |
+| Armada | `0x223ee9` | inline | 9 | `56 8b 06 ff 90 8c 00 00 00` | `a2fo_nebula_frame_bloom_hook`; before Armada's native `IDirect3DDevice8::EndScene`, downsample and separably blur the accumulated emissive mask, add it over the completed render target, restore all state, and replay the native call |
+| Armada | `0x23e4ea` | inline | 8 | `8b 16 8b 0d 08 d5 7a 00` | `a2fo_nebula_standard_pre_hook`; after `ST3D_Standard_MeshVB::Render` configures its native material, save texture stage 1 and add the active craft's emissive composite without replacing the fixed-function lighting path |
+| Armada | `0x23e5aa` | inline | 5 | `5f 5e 85 c0 5b` | `a2fo_nebula_standard_post_hook`; immediately after the standard indexed draw, resubmit its emissive geometry to the frame mask, restore the previous stage-1 texture and all modified combiner/sampler states, then replay the native epilogue |
+| Armada | `0x232585` | inline | 7 | `8b 03 8b cb ff 50 18` | `a2fo_nebula_nonvb_pre_hook`; after the current texture-material pass is configured, activate the scoped emissive stage immediately before the selected DX8 workspace's virtual `Submit` issues its Direct3D draw |
+| Armada | `0x23258c` | inline | 6 | `8b 45 fc 46 3b f0` | `a2fo_nebula_nonvb_post_hook`; identify `ST3D_WorkspaceDirectX8` versus `ST3D_WorkspaceDirectX8NonVB` by its checked vtable, replay the second class's CPU arrays into the frame mask, restore the complete preceding texture-stage state, and continue the material-pass loop; the GPU-buffer class is captured at its exact inner draw site below |
+| Armada | `0x248bfb` | inline | 6 | `ff 92 1c 01 00 00` | `a2fo_nebula_workspace_dx8_draw_hook`; immediately before `ST3D_WorkspaceDirectX8::Submit` issues its indexed draw, accumulate the same exact still-bound rolling GPU-buffer batch into the emissive mask, restore state, and replay the native call with its already-pushed arguments |
+| Fleet Ops | `0x210bb4` | PTR | 4 | slot equals Armada base + `0x22c270` | route Fleet Ops' DOT3 `ArmadaFunctions.ST3D_GraphicsEngine_GetShaderHandle` call to `a2fo_nebula_set_pixel_shader_hook` at first DOT3 compilation, after early Fleet Ops initialisation; retain native custom-vertex-shader lookup/creation, resolve its selected live DX8 device, create the paired pixel shader, upload transform/camera constants, and select it |
+| Fleet Ops | `0x1e67d1` | inline | 13 | `8b 40 0c f7 80 2c 01 00 00 04 00 00 00` | `a2fo_nebula_alpha_hook`; disable the pixel shader at the fixed-pipeline transition, replay both displaced instructions, and resume at `0x1e67de` |
+
+`A2FOCraftIdentity` sends each completed CraftClass/ParameterDB pair to the
+optional renderer controller, which copies either the legacy six-path wildcard
+or up to 64 indexed `textureX`/six-path material sets into the core.
+`A2FOHybridBuild` wraps the native Craft render call it already owns
+with the core's begin/end exports. The renderer can therefore select a class
+policy at DOT3, MeshVB, and legacy non-VB draw time without another class
+constructor or Craft render detour. The fixed-function sites above are
+required because classic SODs may bypass both Armada's DOT3 shader path and
+`ST3D_Standard_MeshVB::Render`. Despite that renderer route's `NonVB` name,
+`fbattle.sod` was observed using `ST3D_WorkspaceDirectX8`: its `Submit` derives
+the vertex count from workspace offsets `0x04/0x30`, triangle count from
+`0x40/0x2c`, reads stride/FVF at `0x9c/0x98`, and retains start index at
+`0xbc`. The mask replay uses the native call's live `EBX` vertex count, `ECX`
+start index, and `EAX` triangle count; an earlier diagnostic cursor calculation
+divided the six-byte triangle indices by twelve and therefore rendered exactly
+half the batch. Its mask replay now occurs at the native indexed-call instruction
+so a later rolling workspace submission cannot replace that batch. When the
+narrow material hook is absent, the exact hook selects the enclosing registered
+Craft directly; this includes the main hull workspace instead of capturing only
+the 20-triangle Team-colour group. The alternate
+`ST3D_WorkspaceDirectX8NonVB` layout retains the existing checked
+`DrawIndexedPrimitiveUP` post path. Both isolated mask paths retain a neutral
+stage 0 and sample the emissive texture on stage 1, matching the visible
+material pass's UV route rather than classic stage-0 material transforms.
+
+The final site deliberately differs from upstream's five-byte middle-function
+JMP. Upstream executed the function epilogue immediately, suppressing the
+remaining alpha draws and producing its documented black editor-crystal text.
+The A2FO gateway preserves the remainder of Fleet Operations' renderer.
+`/d3d9` and `-d3d9` disable this initial module before any mutation because the
+upstream DX9 branch is unfinished and ABI-dependent.
 
 ### HybridBuild runtime hooks
 
@@ -596,9 +661,13 @@ it through ArmadaL.exe's own MSVCRT import. It never asks FOFS. Fleet
 Operations' `newSearchDirectories_init` deliberately replaces the original
 `Textures\RGB\` pathname buffer with `Textures\` during its own startup. The
 module accepts those two exact literal states and preserves root-level TGA
-priority. The remaining Armada path is a true-colour loader, so RGB files may
-answer directly while colour-mapped, 16-bit, grayscale, or RLE Index8/
-Compressed candidates are expanded to bounded temporary 24/32-bit TGAs first.
+priority. The remaining Armada path is a true-colour loader, so every candidate
+is validated regardless of folder. Already-compatible uncompressed 24/32-bit
+files answer directly, while colour-mapped, 16-bit, grayscale, and RLE TGA
+types 9, 10, and 11 are expanded to bounded temporary 24/32-bit TGAs first.
+This includes RLE files in root `Textures`, RGB, Index8, and Compressed.
+Explicit `Textures\RGB\...` true-colour requests receive the same preparation;
+explicit Index8 and Compressed requests retain their native namespaces.
 Malformed or unsupported candidates fail closed. Extension-root precedence is
 resolved before format: an active child Index8/Compressed candidate overrides
 a parent RGB candidate. Within one root the tie-break order is root, RGB,
@@ -639,6 +708,70 @@ The crash that motivated the retry follows this read-only Armada call chain:
 | `0x0e9c4a` | virtual XRGB888 blend call; its eighth argument is the lock result |
 | `0x0e7d57` | original faulting `mov (%ecx,%edi),%eax` when the source-pixel base is null |
 | `0x0e97fd` | second observed fault, `rep movsd` in `UpdateScanGridSprite`, after both legacy scan-grid texture locks remained unavailable |
+
+### Nebula DX8 renderer dependencies
+
+Source: [`../core/nebula_renderer.cpp`](../core/nebula_renderer.cpp)
+
+| Image/library | RVA/export/offset | Role |
+| --- | ---: | --- |
+| Armada | `0x22c270` | original MSVC-thiscall `ST3D_GraphicsEngine::GetShaderHandle`; always called before the paired pixel stage |
+| Armada | `0x3ad5e0` | camera-to-node matrix; its forward vector supplies vertex constant 19 as four bounded floats |
+| Storm3D shader renderer | `+0xc0` | bounded current-device index used by native `GetShaderHandle` |
+| Storm3D shader renderer | `+0xcc + index * 4` | current DX8 device-wrapper pointer table used by native `GetShaderHandle` |
+| Storm3D DX8 device wrapper | `+0x90` | live `IDirect3DDevice8*` used to create and select the paired pixel shader |
+| Storm3D shader renderer | `+0x44` | owning `ST3D_Engine*`; its texture-object registry sentinel is at engine `+0x84` |
+| `ST3D_Texture` | `+0x08`, `+0x40 + index * 4` | original texture-name pointer and per-device `ST3D_DeviceTexture*` |
+| `ST3D_DeviceTextureDirectX8` | `+0x04` | native `IDirect3DTexture8*`, compared with live texture stage 0 to bind an indexed emissive set |
+| `D3DX81ab.dll` | `D3DXAssembleShaderFromFileA` | assemble `Data\\Shaders\\dx8\\pixel\\ps.nvv` at runtime |
+| `D3DX81ab.dll` | `D3DXCreateTextureFromFileExA` | lazily load and scale loose subsystem emissive images into managed A8R8G8B8 textures |
+| `D3DX81ab.dll` | `D3DXMatrixInverse`, `D3DXMatrixMultiply`, `D3DXMatrixTranspose` | construct vertex constants 7 through 18 without adding a D3DX import-library dependency |
+
+Craft emissive state reads the class pointer at `Craft + 0x40` and the native
+five-record subsystem block pointer at `Craft + 0x1e0`. Each subsystem record
+is `0x30` bytes: `+0x00` is operational, `+0x01` is forced/control-disabled,
+`+0x04` is maximum hitpoints, `+0x18` is current hitpoints as a double, and
+`+0x28` is the timed-disable counter. Sensors are record 0, Engines 1, Weapons
+2, Life Support 3, and Shield Generator 4. Both warp and impulse emissive
+channels follow Engines because the native Craft layout has no separate
+warp/impulse damage records. Operational maps stay on; healthy forced/timed
+disabled maps flicker independently in 90 ms phases; destroyed and not-yet-
+fully-repaired maps stay off. Every read is bounded and fails open to the
+configured light when an unfamiliar layout is encountered.
+
+Indexed material selection reads the live stage-0 diffuse texture, finds its
+owning `ST3D_Texture` in the bounded type-5 Storm3D object registry, and
+normalises the original name to a lowercase basename without a directory or
+extension. The same normalisation is applied to each ODF `textureX` value.
+This binds emissive sets by actual diffuse identity rather than SOD material
+order and leaves an unmatched material untouched. The older unnumbered map set
+is retained as an explicit class-wide wildcard.
+
+Loaded emissive sources retain their authored RGB values before subsystem
+composites are cached, supplying the sharp self-lit material centre. Complete
+generated mip chains and trilinear sampling stabilise thin UV regions. DOT3,
+standard MeshVB, GPU-buffer workspace, and CPU-buffer workspace draws then
+accumulate only that emissive geometry into a full-resolution D3D8
+render-target texture. Immediately before native `EndScene`, four bilinear
+samples preserve thin lights while reducing the mask to half resolution, and
+two horizontal/vertical iterations of a dense, bilinearly paired 13-sample
+Gaussian create the broad halo without quarter-resolution grid aliasing. The
+result is screen-blended three times to recover strong light energy on DX8's
+fixed-point target while avoiding additive white clipping and unstable
+sharp-mask subtraction, without an HDR/D3D9 replacement. The mask is cleared
+lazily before the next emissive
+draw, and all render targets, viewport, shaders, streams, textures, and render
+states are restored through a full state block.
+Default-pool bloom targets are released before native device reset. This
+produces a real silhouette halo without replacing Fleet Operations' device
+with a D3D8-to-D3D9 chain, and it does not bloom unrelated UI or bright map
+pixels.
+
+The D3DX functions are resolved dynamically from Fleet Operations' existing
+DLL. The core retains the compiled buffer for its full hook lifetime. Native
+`GetShaderHandle` always runs first; if live-device resolution or pixel-shader
+creation fails, the hook returns Armada's vertex-shader handle unchanged and
+logs the first failure.
 
 ### Indexed hull-turret dependencies
 
@@ -789,7 +922,7 @@ are just as build-specific as code addresses.
 | object flags / expired / handle / class / label / team / race | `+0x14` / `+0x27` / `+0x28` / `+0x40` / `+0x48` / `+0xec` / `+0xfc` |
 | class tag / basename / project ID / menu capabilities | `+0x70` / `+0x7c` / `+0x1cc` / `+0x1d4` |
 | GameObjectClass minimap sprite / icon (`mapSprite` / `mapIcon`) | `+0x18c` / `+0x190` |
-| ST3D_Texture name / width / height | `+0x08` / `+0x1c` / `+0x20` |
+| ST3D_Texture name / width / height / per-device wrappers | `+0x08` / `+0x1c` / `+0x20` / `+0x40` |
 | Producer current build class / construction effect | `+0x254` / `+0x268` |
 | Producer queue head / count / current ID / next ID | `+0x270` / `+0x274` / `+0x2a0` / `+0x2a8` |
 | queue-item next / queue ID | `+0x08` / `+0x0c` |
@@ -895,23 +1028,30 @@ policy and immutable model-node lookup respectively.
 10. `A2FONormalWeaponTech.dll` validates its read-only weapon/team technology
    bridge and exports the optional normal-weapon trigger decision before
    A2FOTurrets claims the shared trigger hook.
-11. Deterministic filename ordering loads `A2FOFeaturePack.dll` before
+11. The core owns the isolated DX8 DOT3 shader sites early because Armada may
+   build that shared shader before deferred modules load. The sites remain
+   pass-through unless `A2FONebulaRenderer.dll` and its assets exist at first
+   DOT3 use. The deferred DLL is an opt-in/status/ODF controller; optional
+   class registration and Craft render context travel through already-owned
+   cooperative boundaries and do not add hook sites. DX9 never enables the
+   custom renderer.
+12. Deterministic filename ordering loads `A2FOFeaturePack.dll` before
    `A2FOHybridBuild.dll`. FeaturePack owns shared Producer and upgrade-station
    sites; HybridBuild composes with them through its private callback bridge.
-12. `A2FOInfoIni.dll` owns policy only. It registers a provider and installs no
+13. `A2FOInfoIni.dll` owns policy only. It registers a provider and installs no
    binary patch itself; the timing-sensitive settings hooks remain core-owned.
-13. `A2FORGBTextures.dll` loads after FeaturePack in filename order and owns an
+14. `A2FORGBTextures.dll` loads after FeaturePack in filename order and owns an
    independent, conditional Armada `fopen` IAT bridge, the TGA
    FileExists/OpenRead routes, and the validated texture-lock/minimap guards.
    FeaturePack remains the sole semantic handler registered with the core FOFS
    dispatcher.
-14. `A2FOTurrets.dll` then registers the global semantic `turret` policy and
+15. `A2FOTurrets.dll` then registers the global semantic `turret` policy and
    preflights all six of its Armada runtime sites before installing any of
    them. Child creation is deferred until the configured parent first
    simulates, after class and ODF loading has completed. Its shared callbacks
    also apply configured persistent shield visibility after native simulation
    and release it before native Craft cleanup.
-15. The destroyed-object hooks are installed after native/Lua registration and
+16. The destroyed-object hooks are installed after native/Lua registration and
    only when at least one handler needs them.
 
 Low-level hooks are process-lifetime changes. Each feature validates all of

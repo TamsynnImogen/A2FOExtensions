@@ -77,6 +77,7 @@ unsigned fire_arc_hook_count = 0;
 bool fire_arc_class_constructor_chained = false;
 bool fire_arc_target_check_chained = false;
 bool fire_arc_icon_hover_hooked = false;
+bool fire_arc_rts_config_loaded = false;
 char extension_root_path[MAX_PATH] = ".";
 char parent_extension_root_path[MAX_PATH] = ".";
 
@@ -371,6 +372,8 @@ void prepare_armada_signatures() {
         {0x55, 0x8b, 0xec, 0xa1, 0x08, 0xd5, 0x7a, 0x00};
     const std::uint8_t fire_arc_mouse_over[] =
         {0x8a, 0x41, 0x18, 0x84, 0xc0, 0x74, 0x12};
+    const std::uint8_t parameter_db_get_color[] =
+        {0x55, 0x8b, 0xec, 0x81, 0xec, 0x00, 0x01, 0x00, 0x00};
     const std::uint8_t fire_arc_get_target[] =
         {0x8b, 0x49, 0x38, 0x51, 0xe8};
     const std::uint8_t normal_weapon_tech_get_owner[] =
@@ -497,6 +500,7 @@ void prepare_armada_signatures() {
     set_signature(0x000cff90, fire_arc_world_transform);
     set_signature(0x0011b130, fire_arc_draw_line);
     set_signature(0x0010c140, fire_arc_mouse_over);
+    set_signature(0x00135ba0, parameter_db_get_color);
     set_signature(0x00271300, fire_arc_get_target);
     set_signature(0x00271050, normal_weapon_tech_get_owner);
     constexpr char rgb_literal[] = "Textures\\RGB\\";
@@ -521,6 +525,12 @@ void A2FO_CALL log_line(const char* module, const char* message) {
             "showmethemoney grants: Dilithium=1111, Tritanium=2222, "
             "Metal=7777, Supplies=4444, Crew=8888 (RTS_CFG.h)") == 0) {
         cheats_rts_config_loaded = true;
+    }
+    if (module && message && std::strcmp(module, "A2FOFireArcs") == 0 &&
+        std::strcmp(
+            message,
+            "RTS_CFG.h firearc setting: enabled") == 0) {
+        fire_arc_rts_config_loaded = true;
     }
     if (module && message && std::strcmp(module, "A2FOTurrets") == 0 &&
         std::strcmp(
@@ -980,6 +990,7 @@ int main() {
         "int SHOWMETHEMONEY_CREW = 5555;\r\n";
     constexpr char active_rts_config[] =
         "// Per-field active-mod overrides.\r\n"
+        "int firearc = 1;\r\n"
         "int SHOWMETHEMONEY_METAL = 7777;\r\n"
         "int SHOWMETHEMONEY_SUPPLIES = -5; // rejected\r\n"
         "int SHOWMETHEMONEY_CREW = 8888;\r\n";
@@ -1158,15 +1169,17 @@ int main() {
         !fire_arc_class_constructor_chained ||
         !fire_arc_target_check_chained ||
         !fire_arc_icon_hover_hooked ||
+        !fire_arc_rts_config_loaded ||
         !GetProcAddress(
             fire_arcs, "A2FOFireArcs_AllowWeaponTrigger")) {
         std::fprintf(
             stderr,
-            "A2FOFireArcs smoke state: module=%p hooks=%u constructorChained=%d targetCheckChained=%d iconHover=%d\n",
+            "A2FOFireArcs smoke state: module=%p hooks=%u constructorChained=%d targetCheckChained=%d iconHover=%d rtsConfig=%d\n",
             static_cast<void*>(fire_arcs), fire_arc_hook_count,
             fire_arc_class_constructor_chained ? 1 : 0,
             fire_arc_target_check_chained ? 1 : 0,
-            fire_arc_icon_hover_hooked ? 1 : 0);
+            fire_arc_icon_hover_hooked ? 1 : 0,
+            fire_arc_rts_config_loaded ? 1 : 0);
         return 107;
     }
 
@@ -1258,6 +1271,10 @@ int main() {
     const std::string index8_file_path = index8_path + "\\IndexOnly.TGA";
     const std::string compressed_file_path =
         compressed_path + "\\CompressedOnly.TGA";
+    const std::string rgb_rle_file_path =
+        rgb_path + "\\RgbCompressed.TGA";
+    const std::string root_rle_file_path =
+        textures_path + "\\RootCompressed.TGA";
     const std::string root_winner_path = textures_path + "\\RootWins.TGA";
     const std::string rgb_loser_path = rgb_path + "\\RootWins.TGA";
     const std::string parent_index8_loser_path =
@@ -1272,9 +1289,14 @@ int main() {
         !CreateDirectoryA(compressed_path.c_str(), nullptr)) {
         return 12;
     }
-    constexpr char rgb_contents[] = "rgb-probe";
-    // Two 2x1 TGA fixtures exercise the non-RGB preparation path: a
-    // colour-mapped 8-bit image and an RLE-compressed 24-bit image.
+    constexpr std::uint8_t rgb_contents[] = {
+        0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+        0x18, 0x00, 0x11, 0x22, 0x33,
+    };
+    // Two 2x1 fixtures exercise format preparation: a colour-mapped 8-bit
+    // image and an RLE-compressed 24-bit image. The latter is copied into all
+    // three lookup routes to prevent folder-specific decoder regressions.
     constexpr std::uint8_t index8_contents[] = {
         0x00, 0x01, 0x01, 0x00, 0x00, 0x02, 0x00, 0x18,
         0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0x00,
@@ -1286,9 +1308,13 @@ int main() {
         0x00, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0x00,
         0x18, 0x00,
-        0x01, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
+        0x81, 0x01, 0x02, 0x03,
     };
-    constexpr char root_contents[] = "root-winner";
+    constexpr std::uint8_t root_contents[] = {
+        0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+        0x18, 0x00, 0x44, 0x55, 0x66,
+    };
     constexpr char rgb_loser_contents[] = "rgb-loser--";
     constexpr char parent_loser_contents[] = "parent-rgb-loser";
     if (!write_fixture_file(rgb_file_path, rgb_contents,
@@ -1297,6 +1323,10 @@ int main() {
                             sizeof(index8_contents))) return 90;
     if (!write_fixture_file(compressed_file_path, compressed_contents,
                             sizeof(compressed_contents))) return 91;
+    if (!write_fixture_file(rgb_rle_file_path, compressed_contents,
+                            sizeof(compressed_contents))) return 111;
+    if (!write_fixture_file(root_rle_file_path, compressed_contents,
+                            sizeof(compressed_contents))) return 112;
     if (!write_fixture_file(root_winner_path, root_contents,
                             sizeof(root_contents))) return 16;
     if (!write_fixture_file(rgb_loser_path, rgb_loser_contents,
@@ -1330,7 +1360,7 @@ int main() {
     FILE* redirected_file = redirected_fopen(
         "Textures\\probe.tga", "rb");
     if (!redirected_file) return 17;
-    char redirected_contents[sizeof(rgb_contents)]{};
+    std::uint8_t redirected_contents[sizeof(rgb_contents)]{};
     const std::size_t redirected_read = std::fread(
         redirected_contents, 1, sizeof(redirected_contents), redirected_file);
     std::fclose(redirected_file);
@@ -1401,7 +1431,7 @@ int main() {
         prepared_compressed_file);
     std::fclose(prepared_compressed_file);
     constexpr std::uint8_t expected_compressed_pixels[] = {
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
+        0x01, 0x02, 0x03, 0x01, 0x02, 0x03,
     };
     if (prepared_compressed_read != sizeof(prepared_compressed) ||
         prepared_compressed[1] != 0 || prepared_compressed[2] != 2 ||
@@ -1411,6 +1441,25 @@ int main() {
                     sizeof(expected_compressed_pixels)) != 0) {
         return 99;
     }
+
+    // RLE expansion is a property of the flattened true-colour loader, not a
+    // special case of the Compressed directory. RGB and root Textures must
+    // therefore produce the same uncompressed type-2 byte stream.
+    const auto verify_prepared_rle = [&](const char* filename) -> bool {
+        FILE* file = redirected_fopen(filename, "rb");
+        if (!file) return false;
+        std::uint8_t bytes[24]{};
+        const std::size_t read = std::fread(bytes, 1, sizeof(bytes), file);
+        std::fclose(file);
+        return read == sizeof(bytes) && bytes[1] == 0 && bytes[2] == 2 &&
+               bytes[12] == 2 && bytes[14] == 1 && bytes[16] == 24 &&
+               std::memcmp(bytes + 18, expected_compressed_pixels,
+                           sizeof(expected_compressed_pixels)) == 0;
+    };
+    if (!verify_prepared_rle("Textures\\rgbcompressed.tga")) return 113;
+    if (!verify_prepared_rle("Textures\\rootcompressed.tga")) return 114;
+    if (!verify_prepared_rle(
+            "Textures\\RGB\\rgbcompressed.tga")) return 115;
 
     // Never feed TGA bytes to Fleet Ops' DDS enhancement path. Its failed DDS
     // lookup must fall through to Armada's normal root-level TGA request,
@@ -1424,7 +1473,7 @@ int main() {
     FILE* root_winner = redirected_fopen(
         "Textures\\rootwins.tga", "rb");
     if (!root_winner) return 21;
-    char root_readback[sizeof(root_contents)]{};
+    std::uint8_t root_readback[sizeof(root_contents)]{};
     const std::size_t root_read = std::fread(
         root_readback, 1, sizeof(root_readback), root_winner);
     std::fclose(root_winner);

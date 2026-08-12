@@ -1,0 +1,30 @@
+; armadaNebulaPatch reference DX8 pixel shader
+; Copyright (c) 2024 dev gao, MIT License
+ps.1.3
+def c0,1.5f,1.5f,1.5f,1.5f
+
+;sample diffuse from t0
+tex t0
+mov r0,t0
+
+;v0=Normal
+;v1=Light direction
+mov r1,v0
+
+;N dot L
+;register v have range in 0-1, v_bx2=2*(v-0.5), let it scale to -1-1
+dp3_sat r1,v1_bx2,r1_bx2
+
+;possible light up
+;mul r1,r1,c0
+
+;get emissive from diffuse.a
+add r1.rgb,r1,r0.aaa
+
+;r0=final output
+mul r0,r0,r1
+
+;test
+;mov r0,v0
+
+;this shader is not used, but as a reference for who want to coding under ps1.1-1.3

@@ -30,6 +30,11 @@ constexpr char kAlwaysShowShieldsModuleName[] =
     "A2FOAlwaysShowShields.dll";
 constexpr char kShieldCraftObserverExport[] =
     "A2FOAlwaysShowShields_UpdateCraft";
+constexpr char kCoreModuleName[] = "A2FOExtensions.dll";
+constexpr char kNebulaBeginCraftRenderExport[] =
+    "A2FO_NebulaBeginCraftRender";
+constexpr char kNebulaEndCraftRenderExport[] =
+    "A2FO_NebulaEndCraftRender";
 
 // ArmadaL.exe RVAs from the supported Armada 1.1 PDB plus the .text RVA.
 constexpr std::uintptr_t kParameterDbGetProjectIdRva = 0x135200;
@@ -356,6 +361,9 @@ HMODULE g_armada = nullptr;
 HMODULE g_fleet_ops = nullptr;
 using ShieldCraftObserver = void (A2FO_CALL *)(void* craft);
 ShieldCraftObserver g_shield_craft_observer = nullptr;
+using NebulaCraftRenderObserver = void (A2FO_CALL *)(void* craft);
+NebulaCraftRenderObserver g_nebula_begin_craft_render = nullptr;
+NebulaCraftRenderObserver g_nebula_end_craft_render = nullptr;
 CRITICAL_SECTION g_registry_lock;
 bool g_registry_lock_ready = false;
 A2FO_InlineHook g_research_start_hook{};
@@ -545,6 +553,28 @@ void resolve_shield_craft_observer() noexcept {
         log_message(
             "Shield visibility observer linked through the Fleet Ops "
             "Craft render boundary");
+    }
+}
+
+void resolve_nebula_craft_render_observers() noexcept {
+    HMODULE core = GetModuleHandleA(kCoreModuleName);
+    FARPROC begin = core
+        ? GetProcAddress(core, kNebulaBeginCraftRenderExport) : nullptr;
+    FARPROC end = core
+        ? GetProcAddress(core, kNebulaEndCraftRenderExport) : nullptr;
+    static_assert(sizeof(begin) == sizeof(g_nebula_begin_craft_render),
+                  "unexpected function-pointer size");
+    std::memcpy(&g_nebula_begin_craft_render, &begin,
+                sizeof(g_nebula_begin_craft_render));
+    std::memcpy(&g_nebula_end_craft_render, &end,
+                sizeof(g_nebula_end_craft_render));
+    if (g_nebula_begin_craft_render && g_nebula_end_craft_render) {
+        log_message(
+            "Nebula emissive context linked through the Fleet Ops Craft "
+            "render boundary");
+    } else {
+        g_nebula_begin_craft_render = nullptr;
+        g_nebula_end_craft_render = nullptr;
     }
 }
 
@@ -2799,6 +2829,22 @@ void render_queued_construction_ghosts(void* station) noexcept {
     }
 }
 
+std::uintptr_t render_craft_with_nebula_context(
+    void* render_function, void* craft, void* render_context) noexcept {
+    // The core maintains a small thread-local stack, so nested Fleet Ops craft
+    // renders restore their parent's emissive policy correctly.
+    if (g_nebula_begin_craft_render) {
+        g_nebula_begin_craft_render(craft);
+    }
+    const std::uintptr_t result = a2fo_call_thiscall_1(
+        render_function, craft,
+        reinterpret_cast<std::uintptr_t>(render_context));
+    if (g_nebula_end_craft_render) {
+        g_nebula_end_craft_render(craft);
+    }
+    return result;
+}
+
 std::uintptr_t __attribute__((fastcall)) craft_render_internal_hook(
     void* craft, void*, void* render_context) noexcept {
     // Fleet Operations-derived station objects can bypass both Armada's
@@ -2817,9 +2863,8 @@ std::uintptr_t __attribute__((fastcall)) craft_render_internal_hook(
         craft == g_last_single_hybrid_selection;
     if (g_craft_render_internal_depth != 0 ||
         (!render_cocoon && !render_construct_ghosts)) {
-        return a2fo_call_thiscall_1(
-            g_craft_render_internal_hook.gateway, craft,
-            reinterpret_cast<std::uintptr_t>(render_context));
+        return render_craft_with_nebula_context(
+            g_craft_render_internal_hook.gateway, craft, render_context);
     }
 
     ++g_craft_render_internal_depth;
@@ -2827,16 +2872,15 @@ std::uintptr_t __attribute__((fastcall)) craft_render_internal_hook(
     if (render_cocoon) {
         HybridCocoonTailSwap swapped(craft);
         result = swapped.active()
-            ? a2fo_call_thiscall_1(
+            ? render_craft_with_nebula_context(
                   at(g_armada, kEvolverRenderInternalRva), craft,
-                  reinterpret_cast<std::uintptr_t>(render_context))
-            : a2fo_call_thiscall_1(
+                  render_context)
+            : render_craft_with_nebula_context(
                   g_craft_render_internal_hook.gateway, craft,
-                  reinterpret_cast<std::uintptr_t>(render_context));
+                  render_context);
     } else {
-        result = a2fo_call_thiscall_1(
-            g_craft_render_internal_hook.gateway, craft,
-            reinterpret_cast<std::uintptr_t>(render_context));
+        result = render_craft_with_nebula_context(
+            g_craft_render_internal_hook.gateway, craft, render_context);
     }
     if (render_construct_ghosts) {
         render_queued_construction_ghosts(craft);
@@ -3502,6 +3546,7 @@ bool initialize_hybrid_production_registry(const A2FO_ModuleApi* api,
     g_armada = armada;
     g_fleet_ops = fleet_ops;
     resolve_shield_craft_observer();
+    resolve_nebula_craft_render_observers();
     // Queued ghosts are presentation-only. Validate their native renderer
     // independently so a preview incompatibility can never disable the
     // hybridbuild classlabel or its production menus.

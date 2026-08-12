@@ -23,7 +23,7 @@
 #endif
 
 #define A2FO_MODULE_API_VERSION 4u
-#define A2FO_MODULE_API_REVISION 10u
+#define A2FO_MODULE_API_REVISION 11u
 
 // The major version remains 4 so DLLs compiled against the original v4 ABI
 // continue to load. Revisions append fields to A2FO_ModuleApi; never insert or
@@ -298,6 +298,15 @@ struct A2FO_ModuleApi {
         const char* classlabel,
         const A2FO_ClasslabelOdfDefault* defaults,
         std::uint32_t default_count);
+
+    // Revision 11 addition. Replaces an exact byte range only when it still
+    // matches the supported executable signature. This is intended for data
+    // pointers and fixed-size constants which cannot use a CALL/JMP patch.
+    bool (A2FO_CALL* patch_bytes)(
+        void* target,
+        const std::uint8_t* replacement,
+        const std::uint8_t* expected,
+        std::size_t length);
 };
 
 #define A2FO_MODULE_API_V4_BASE_SIZE \
