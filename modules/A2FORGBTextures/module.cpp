@@ -471,8 +471,8 @@ bool write_prepared_tga(const std::vector<std::uint8_t>& bytes,
     return true;
 }
 
-bool prepare_non_rgb_texture(const std::string& source,
-                             std::string& prepared) {
+bool prepare_legacy_tga(const std::string& source,
+                        std::string& prepared) {
     prepared.clear();
     ConversionLockGuard lock;
     if (!lock.locked()) return false;
@@ -504,10 +504,10 @@ bool prepare_non_rgb_texture(const std::string& source,
         g_generated_texture_files.push_back(prepared);
         const LONG count = InterlockedIncrement(&g_conversion_log_count);
         if (count <= 16) {
-            log_line("Prepared non-RGB legacy TGA for the true-colour loader: " +
+            log_line("Prepared legacy TGA for the true-colour loader: " +
                      source + " -> " + prepared);
         } else if (count == 17) {
-            log_line("Further non-RGB legacy TGA preparation logs suppressed");
+            log_line("Further legacy TGA preparation logs suppressed");
         }
         return true;
     }
@@ -642,8 +642,8 @@ bool discover_legacy_texture_files(LegacyTextureDiscovery& discovery) {
         // Keep each legacy folder as a separate namespace so precedence and
         // pixel-format preparation remain explicit. Fleet Operations rewrites
         // Armada's only generated pathname to the root Textures directory;
-        // Index8/RLE candidates are expanded before they enter that retained
-        // true-colour loader path.
+        // every flattened TGA candidate is validated and RLE/indexed variants
+        // are expanded before they enter that retained true-colour loader.
         scan_legacy_folder("Compressed", compressed_files,
                            g_compressed_files,
                            discovery.compressed_roots);
@@ -883,13 +883,12 @@ bool select_root_tga(const std::string& key, std::string& physical,
     if (found == g_flattened_tga_candidates.end()) return false;
     for (auto candidate = found->second.rbegin();
          candidate != found->second.rend(); ++candidate) {
-        if (candidate->route == RootTgaRoute::index8 ||
-            candidate->route == RootTgaRoute::compressed) {
-            if (!prepare_non_rgb_texture(candidate->physical, physical)) {
-                continue;
-            }
-        } else {
-            physical = candidate->physical;
+        // The retained fallback is Armada's true-colour loader regardless of
+        // which physical folder supplied the winning file. Validate all TGA
+        // routes so type-9/10/11 RLE files in root Textures or RGB receive the
+        // same bounded expansion already used by Index8 and Compressed.
+        if (!prepare_legacy_tga(candidate->physical, physical)) {
+            continue;
         }
         route = candidate->route;
         return true;
@@ -1032,15 +1031,21 @@ FILE* __cdecl legacy_texture_fopen(const char* filename,
                 if (legacy == direct_files->end()) {
                     return original(filename, mode);
                 }
+                std::string physical = legacy->second;
+                if (request == TextureRequest::direct_rgb &&
+                    tga_filename(key) &&
+                    !prepare_legacy_tga(legacy->second, physical)) {
+                    return original(filename, mode);
+                }
                 if (InterlockedCompareExchange(
                         &g_redirect_log_count, 1, 0) == 0) {
                     std::string route = "First legacy texture fallback (";
                     route += direct_legacy_folder_name(request);
                     route += ")";
                     log_line(route + ": " + filename + " -> " +
-                             legacy->second);
+                             physical);
                 }
-                return original(legacy->second.c_str(), mode);
+                return original(physical.c_str(), mode);
             }
         }
     } catch (...) {
@@ -1063,6 +1068,9 @@ bool mapped_tga_path(const char* filename, std::string& physical) {
     }
     const auto legacy = direct_files->find(key);
     if (legacy == direct_files->end()) return false;
+    if (request == TextureRequest::direct_rgb && tga_filename(key)) {
+        return prepare_legacy_tga(legacy->second, physical);
+    }
     physical = legacy->second;
     return true;
 }

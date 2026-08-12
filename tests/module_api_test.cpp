@@ -21,10 +21,11 @@ int main() {
     assert(A2FO_MODULE_API_HAS(&api, register_producer_event_handler));
     assert(A2FO_MODULE_API_HAS(&api, dispatch_producer_event));
     assert(A2FO_MODULE_API_HAS(&api, register_classlabel_odf_defaults));
+    assert(A2FO_MODULE_API_HAS(&api, patch_bytes));
     assert(offsetof(A2FO_ModuleApi, api_revision) >=
            A2FO_MODULE_API_V4_BASE_SIZE);
     assert(A2FO_MODULE_API_VERSION == 4u);
-    assert(A2FO_MODULE_API_REVISION >= 10u);
+    assert(A2FO_MODULE_API_REVISION >= 11u);
     assert(A2FO_CAP_CLASSLABEL_ODF_DEFAULTS == (1ull << 7));
     assert(A2FO_PRODUCER_EVENT_FINISHING == 3u);
     assert(A2FO_PRODUCER_EVENT_STARTING_EFFECT == 4u);

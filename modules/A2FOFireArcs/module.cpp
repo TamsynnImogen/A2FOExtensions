@@ -10,6 +10,7 @@
 
 #include "../../sdk/include/a2fo_module_api.h"
 #include "fire_arc.hpp"
+#include "runtime_config.hpp"
 
 #include <windows.h>
 
@@ -22,6 +23,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 
@@ -49,12 +52,16 @@ using a2fo::fire_arcs::ArcMode;
 using a2fo::fire_arcs::Matrix34;
 
 constexpr char kModuleName[] = "A2FOFireArcs";
+constexpr char kRtsConfigFileName[] = "RTS_CFG.h";
+constexpr std::streamoff kMaximumRtsConfigSize = 2 * 1024 * 1024;
 
 // ArmadaL.exe 1.1 / Fleet Operations Roots RVAs.
 constexpr std::uintptr_t kWeaponClassConstructorRva = 0x00264e30;
 constexpr std::uintptr_t kWeaponCanFireAtRva = 0x0026f8c0;
 constexpr std::uintptr_t kParameterDbGetFloatRva = 0x00134df0;
 constexpr std::uintptr_t kParameterDbGetStringRva = 0x00135350;
+constexpr std::uintptr_t kParameterDbGetColorRva = 0x00135ba0;
+constexpr std::uintptr_t kGuiParameterDbPointerRva = 0x0036502c;
 constexpr std::uintptr_t kEntityGetTransformRva = 0x000cfd50;
 constexpr std::uintptr_t kEntityGetWorldTransformRva = 0x000cff90;
 constexpr std::uintptr_t kWeaponGetOwnerRva = 0x00271050;
@@ -98,6 +105,8 @@ constexpr std::uint8_t kExpectedWeaponGetTarget[] = {
     0x8b, 0x49, 0x38, 0x51, 0xe8};
 constexpr std::uint8_t kExpectedFoShipSystemIconRender[] = {
     0x55, 0x8b, 0xec, 0x83, 0xc4, 0xbc, 0x53};
+constexpr std::uint8_t kExpectedParameterDbGetColor[] = {
+    0x55, 0x8b, 0xec, 0x81, 0xec, 0x00, 0x01, 0x00, 0x00};
 
 struct OptionalFloat {
     bool present = false;
@@ -105,10 +114,24 @@ struct OptionalFloat {
     float value = 0.0f;
 };
 
+struct ArcColour {
+    float values[3]{};
+};
+
+struct ArcUiColours {
+    ArcColour boundary{{0.10f, 0.90f, 1.00f}};
+    ArcColour centre{{1.00f, 0.82f, 0.12f}};
+    ArcColour valid_target{{0.15f, 1.00f, 0.20f}};
+};
+
 const A2FO_ModuleApi* g_api = nullptr;
 HMODULE g_armada = nullptr;
 HMODULE g_fleet_ops = nullptr;
 bool g_runtime_ready = false;
+bool g_ui_colour_reader_ready = false;
+bool g_ui_colours_loaded = false;
+void* g_ui_parameter_db = nullptr;
+ArcUiColours g_ui_colours{};
 bool g_chained_fo_weapon_class_constructor = false;
 bool g_chained_fo_weapon_can_fire_at = false;
 void* g_weapon_class_constructor_original = nullptr;
@@ -130,6 +153,64 @@ volatile LONG g_logged_first_hover_visualization = 0;
 
 void log_line(const std::string& message) noexcept {
     if (g_api && g_api->log) g_api->log(kModuleName, message.c_str());
+}
+
+std::string join_path(const std::string& left, const std::string& right) {
+    if (left.empty()) return right;
+    if (right.empty()) return left;
+    if (left.back() == '\\' || left.back() == '/') return left + right;
+    return left + "\\" + right;
+}
+
+bool read_small_text_file(const std::string& path, std::string& contents) {
+    contents.clear();
+    std::ifstream input(path, std::ios::binary);
+    if (!input) return false;
+    input.seekg(0, std::ios::end);
+    const std::streamoff size = input.tellg();
+    if (size < 0 || size > kMaximumRtsConfigSize) {
+        log_line("Ignored oversized RTS configuration: " + path);
+        return false;
+    }
+    input.seekg(0, std::ios::beg);
+    std::ostringstream stream;
+    stream << input.rdbuf();
+    contents = stream.str();
+    return input.good() || input.eof();
+}
+
+bool load_firearc_enabled() {
+    bool enabled = true;
+    bool configured = false;
+    const std::uint32_t root_count = g_api->extension_root_count();
+    if (root_count > 4096) {
+        log_line("Extension-root count is invalid; firearc remains enabled");
+        return true;
+    }
+    for (std::uint32_t index = 0; index < root_count; ++index) {
+        const char* root = g_api->extension_root(index);
+        if (!root || !*root) continue;
+        const std::string path = join_path(root, kRtsConfigFileName);
+        std::string contents;
+        if (!read_small_text_file(path, contents)) continue;
+
+        bool candidate = enabled;
+        const auto status = a2fo::fire_arcs::parse_firearc_setting(
+            contents, &candidate);
+        if (status == a2fo::fire_arcs::FireArcSettingStatus::valid) {
+            enabled = candidate;
+            configured = true;
+            log_line(std::string("Applied firearc=") +
+                     (enabled ? "1" : "0") + " from " + path);
+        } else if (status ==
+                   a2fo::fire_arcs::FireArcSettingStatus::invalid) {
+            log_line("Ignored invalid firearc value in " + path);
+        }
+    }
+    log_line(std::string("RTS_CFG.h firearc setting: ") +
+             (enabled ? "enabled" : "disabled") +
+             (configured ? "" : " (default)"));
+    return enabled;
 }
 
 void* at(HMODULE module, std::uintptr_t rva) noexcept {
@@ -182,6 +263,58 @@ T read_at(const void* object, std::size_t offset,
     T value{};
     std::memcpy(&value, address, sizeof(value));
     return value;
+}
+
+bool read_ui_colour(void* parameter_db, const char* key,
+                    ArcColour* output) noexcept {
+    if (!g_ui_colour_reader_ready || !parameter_db || !key || !output) {
+        return false;
+    }
+    ArcColour loaded = *output;
+    const ArcColour fallback = *output;
+    const std::uintptr_t found = a2fo_fire_arc_call_thiscall_3(
+        at(g_armada, kParameterDbGetColorRva), parameter_db,
+        reinterpret_cast<std::uintptr_t>(key),
+        reinterpret_cast<std::uintptr_t>(&loaded),
+        reinterpret_cast<std::uintptr_t>(&fallback));
+    if ((found & 0xffu) == 0) return false;
+    for (float& channel : loaded.values) {
+        if (!std::isfinite(channel)) return false;
+        channel = std::max(0.0f, std::min(1.0f, channel));
+    }
+    *output = loaded;
+    return true;
+}
+
+void refresh_ui_colours() noexcept {
+    void* parameter_db = read_at<void*>(
+        at(g_armada, kGuiParameterDbPointerRva), 0, nullptr);
+    if (g_ui_colours_loaded && g_ui_parameter_db == parameter_db) return;
+
+    ArcUiColours loaded{};
+    bool boundary_found = false;
+    bool centre_found = false;
+    bool target_found = false;
+    if (parameter_db) {
+        boundary_found = read_ui_colour(
+            parameter_db, "fireArcBoundaryColor", &loaded.boundary);
+        centre_found = read_ui_colour(
+            parameter_db, "fireArcCenterColor", &loaded.centre);
+        target_found = read_ui_colour(
+            parameter_db, "fireArcValidTargetColor", &loaded.valid_target);
+    }
+    g_ui_colours = loaded;
+    g_ui_parameter_db = parameter_db;
+    g_ui_colours_loaded = true;
+
+    char message[220]{};
+    std::snprintf(
+        message, sizeof(message),
+        "Fire-arc UI colours: boundary=%s, centre=%s, validTarget=%s",
+        boundary_found ? "configured" : "default",
+        centre_found ? "configured" : "default",
+        target_found ? "configured" : "default");
+    log_line(message);
 }
 
 void trim_string(std::string* value) {
@@ -474,13 +607,11 @@ void draw_world_line(const ArcLine& line,
                                       const float*);
     const auto draw_line = reinterpret_cast<DrawLineFn>(
         at(g_armada, kDisplayInterfaceDrawLineRva));
-    static const float boundary_color[3]{0.10f, 0.90f, 1.00f};
-    static const float centre_color[3]{1.00f, 0.82f, 0.12f};
-    static const float target_inside_color[3]{0.15f, 1.00f, 0.20f};
     const float* color = target_inside_arc
-        ? target_inside_color
+        ? g_ui_colours.valid_target.values
         : (line.style == ArcLineStyle::centre
-              ? centre_color : boundary_color);
+              ? g_ui_colours.centre.values
+              : g_ui_colours.boundary.values);
     draw_line(line.start.values, line.end.values, color);
 }
 
@@ -637,6 +768,7 @@ void __attribute__((fastcall)) ship_system_icon_render_hook(
     a2fo_fire_arc_call_thiscall_0(
         g_ship_system_icon_render_original, icon);
     if (!g_runtime_ready) return;
+    refresh_ui_colours();
     void* weapon = weapon_for_ship_system_icon(icon);
     if (weapon) draw_hovered_weapon_arcs(weapon);
 }
@@ -871,6 +1003,16 @@ bool weapon_can_fire_at_supported() noexcept {
 bool preflight_signatures() noexcept {
     bool supported = weapon_class_constructor_supported();
     supported = weapon_can_fire_at_supported() && supported;
+    g_ui_colour_reader_ready = signature_matches(
+            g_armada, kParameterDbGetColorRva,
+            kExpectedParameterDbGetColor) &&
+        readable_range(at(g_armada, kGuiParameterDbPointerRva),
+                       sizeof(void*));
+    if (!g_ui_colour_reader_ready) {
+        // Colour configuration is cosmetic. Keep the firing feature and its
+        // built-in colours available when only this optional reader differs.
+        log_line("UI colour reader is unavailable; using default arc colours");
+    }
     if (!readable_range(at(g_armada, kParameterDbGetStringRva), 5)) {
         log_line("ParameterDB::GetString entry is unreadable");
         supported = false;
@@ -1044,13 +1186,19 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     if (!api || api->struct_size < A2FO_MODULE_API_V4_BASE_SIZE ||
         api->api_version != A2FO_MODULE_API_VERSION || !api->log ||
         !api->armada_module || !api->fleetops_module ||
-        !api->install_inline_hook || !api->patch_jump) {
+        !api->install_inline_hook || !api->patch_jump ||
+        !api->extension_root_count || !api->extension_root) {
         return false;
     }
     g_api = api;
     g_armada = static_cast<HMODULE>(api->armada_module());
     g_fleet_ops = static_cast<HMODULE>(api->fleetops_module());
     if (!g_armada || !g_fleet_ops) return false;
+
+    if (!load_firearc_enabled()) {
+        log_line("Fire-arc module disabled by RTS_CFG.h firearc=0");
+        return true;
+    }
 
     g_runtime_ready = install_runtime_hooks(api);
     if (g_runtime_ready) {

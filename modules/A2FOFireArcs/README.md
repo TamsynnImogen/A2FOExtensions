@@ -224,6 +224,26 @@ A box must declare at least one width command: `fireArcWidth`,
 A cone always requires `fireArcAngle`. Malformed or incomplete custom settings
 are logged and leave that WeaponClass on its native arc path.
 
+## Global enable switch
+
+The module is enabled by default. Add this to `RTS_CFG.h` only when a mod needs
+to override that default:
+
+```cpp
+int firearc = 1;
+```
+
+- `firearc = 1` enables custom box/cone firing enforcement and the weapon-icon
+  hover preview.
+- `firearc = 0` disables the complete module. Weapons then use only their
+  native Fleet Operations `restrictFireArc`/`fireArc` behaviour and no A2FO
+  hover wireframe is drawn.
+
+The extension reads `RTS_CFG.h` from Data, each parent mod, and the active mod
+in normal overlay order. A later valid `0` or `1` overrides an earlier value.
+An absent setting inherits the previous value; an invalid value is ignored and
+reported in `A2FOExtensions.log`.
+
 ## In-game weapon-icon preview
 
 When a selected craft exposes a weapon through `weaponXiconpos`, move the mouse
@@ -236,13 +256,26 @@ The DLL reads the hovered icon's real zero-based weapon slot, then walks that
 live Weapon instance's linked hardpoint list. It draws one wireframe volume from
 every associated hardpoint:
 
-- cyan lines show the boundary and its corner/edge rays;
-- the gold line shows the configured centre direction;
-- the complete wireframe turns green while the Weapon's live target is inside
-  the configured volume;
+- cyan lines show the boundary and its corner/edge rays by default;
+- the centre direction is gold by default;
+- the complete wireframe turns green by default while the Weapon's live target
+  is inside the configured volume;
 - an unrestricted volume is shown as a wireframe sphere;
 - the drawing uses a bounded fraction of weapon range, so it communicates arc
   direction and width rather than claiming to be a range circle.
+
+The three colours are optional UI configuration entries. Put them alongside
+the other colour commands in the active interface `.cfg` file:
+
+```ini
+fireArcBoundaryColor    = 0.10 0.90 1.00
+fireArcCenterColor      = 1.00 0.82 0.12
+fireArcValidTargetColor = 0.15 1.00 0.20
+```
+
+Each channel is a floating-point value from `0` to `1`. Missing entries retain
+the defaults shown above. The valid-target colour replaces both boundary and
+centre colours while the current target is geometrically inside the volume.
 
 Directions use the weapon owner's live right/up/forward axes—the same axes used
 by firing authorization—while each wireframe begins at its real hardpoint world

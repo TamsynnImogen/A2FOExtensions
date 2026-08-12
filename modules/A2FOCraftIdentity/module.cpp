@@ -44,6 +44,8 @@ namespace {
 
 using ShieldClassObserver = void (A2FO_CALL *)(
     void* object_class, void* parameter_db);
+using NebulaClassObserver = void (A2FO_CALL *)(
+    void* object_class, void* parameter_db);
 
 constexpr char kModuleName[] = "A2FOCraftIdentity";
 constexpr char kCraftNameCommand[] = "possibleCraftNames";
@@ -53,6 +55,9 @@ constexpr char kAlwaysShowShieldsModuleName[] =
     "A2FOAlwaysShowShields.dll";
 constexpr char kShieldClassObserverExport[] =
     "A2FOAlwaysShowShields_RegisterClass";
+constexpr char kNebulaRendererModuleName[] = "A2FONebulaRenderer.dll";
+constexpr char kNebulaClassObserverExport[] =
+    "A2FONebulaRenderer_RegisterClass";
 constexpr std::size_t kMaximumIdentityEntries = 4096;
 constexpr std::size_t kMaximumIdentityLength = 512;
 
@@ -158,6 +163,7 @@ const A2FO_ModuleApi* g_api = nullptr;
 HMODULE g_armada = nullptr;
 HMODULE g_fleet_ops = nullptr;
 ShieldClassObserver g_shield_class_observer = nullptr;
+NebulaClassObserver g_nebula_class_observer = nullptr;
 bool g_runtime_ready = false;
 bool g_chained_fo_craft_class_constructor = false;
 void* g_craft_class_constructor_original = nullptr;
@@ -186,6 +192,22 @@ void resolve_shield_class_observer() noexcept {
         log_line(
             "Shield class registration linked through "
             "A2FOAlwaysShowShields");
+    }
+}
+
+void resolve_nebula_class_observer() noexcept {
+    HMODULE renderer = GetModuleHandleA(kNebulaRendererModuleName);
+    FARPROC exported = renderer
+        ? GetProcAddress(renderer, kNebulaClassObserverExport)
+        : nullptr;
+    static_assert(sizeof(exported) == sizeof(g_nebula_class_observer),
+                  "unexpected function-pointer size");
+    std::memcpy(&g_nebula_class_observer, &exported,
+                sizeof(g_nebula_class_observer));
+    if (g_nebula_class_observer) {
+        log_line(
+            "Emissive-map class registration linked through "
+            "A2FONebulaRenderer");
     }
 }
 
@@ -385,6 +407,13 @@ std::uintptr_t __attribute__((fastcall)) craft_class_constructor_hook(
     // Fleet Operations class path.
     if (g_shield_class_observer) {
         g_shield_class_observer(self, parameter_db);
+    }
+    // A2FONebulaRenderer loads after this module alphabetically. Resolve its
+    // optional observer lazily at the first completed CraftClass rather than
+    // requiring a fragile module order or a second constructor hook.
+    if (!g_nebula_class_observer) resolve_nebula_class_observer();
+    if (g_nebula_class_observer) {
+        g_nebula_class_observer(self, parameter_db);
     }
     return result;
 }

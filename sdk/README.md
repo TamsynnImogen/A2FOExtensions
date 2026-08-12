@@ -1,4 +1,4 @@
-# Native module SDK v4 revision 10
+# Native module SDK v4 revision 11
 
 A module must be a 32-bit Windows DLL exporting:
 
@@ -144,3 +144,17 @@ pairs against a source classlabel during startup. The core consults them from
 its shared string, integer, float, and boolean ParameterDB hooks only after the
 native lookup reports the command missing, so explicit and inherited ODF
 values retain precedence.
+
+Revision 11 appends `patch_bytes(target, replacement, expected, length)`. It
+changes a fixed-size data, pointer, or constant range only when all original
+bytes still match. Modules must check the appended member boundary before use:
+
+```cpp
+if (!A2FO_MODULE_API_HAS(api, patch_bytes) || !api->patch_bytes) {
+    return false;
+}
+```
+
+Executable branches should continue to use `install_inline_hook`,
+`patch_jump`, or `patch_call`; `patch_bytes` exists for checked changes which
+do not encode a branch.

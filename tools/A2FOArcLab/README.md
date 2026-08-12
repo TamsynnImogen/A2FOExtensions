@@ -45,10 +45,16 @@ Fire-arc orientation is owner/ship-local, exactly as it is at runtime. Each
 linked hardpoint supplies the visual origin, but rotating a hardpoint in the
 SOD does not rotate an ordinary weapon's permission volume.
 
+Resolved base textures are displayed unlit so the authored diffuse pixels
+remain clear instead of being washed out by diagnostic scene lighting. Expand
+**Resolution details** to see the exact texture paths, loaded/reference count,
+and any missing or undecodable texture warnings.
+
 ## Diagnostic inspection
 
 The headless inspection mode verifies resolution and prints the detected model,
-weapon ODFs, hardpoints, and normalized custom arcs without opening a window:
+base-texture paths/decoding, weapon ODFs, hardpoints, and normalized custom arcs
+without opening a window:
 
 ```bash
 ./A2FOArcLab --inspect "/path/to/odf/ships/myship.odf"
@@ -65,6 +71,9 @@ root, preserving active-mod-first precedence. File lookup is case-insensitive
 on both Windows and Linux and searches nested ODF/SOD directories. Textures are
 resolved from `Textures/RGB`, `Textures/Index8`, `Textures/Compressed`, the
 general `Textures` directory, and SOD directories in the same root order.
+Explicit texture subpaths are honoured, while basename-only SOD references use
+a lazily built recursive index covering arbitrary texture subfolder depth.
+Active-mod, parent-mod, and shared-Data precedence remains authoritative.
 
 ODF includes and multi-line list values are supported. SOD versions 1.4 through
 1.93 are accepted. If a model cannot be resolved from `baseName` or the ODF

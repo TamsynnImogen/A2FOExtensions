@@ -239,12 +239,15 @@ glTF ---/                              `---> compiled SOD
 * [LATER] Investigate direct Fleet Operations SODX loading or a compiled model
   cache. Preserve ordinary SOD output as the compatibility path.
 
-### Nebula Patch Renderer Research
+### Nebula Patch Renderer
 
-[RESEARCH] Use [armadaNebulaPatch](https://github.com/FNSOIDATHQ/armadaNebulaPatch)
+[IMPLEMENTED, REQUIRES MANUAL VALIDATION] Use
+[armadaNebulaPatch](https://github.com/FNSOIDATHQ/armadaNebulaPatch)
 as a reverse-engineering reference for Storm3D and the Fleet Operations render
-pipeline. Its MIT-licensed discoveries are useful, but its prototype hook and
-shader implementations should not be imported wholesale.
+pipeline. `A2FONebulaRenderer.dll` now ports its DX8 shader behaviour through
+the checked A2FO API, without its competing startup proxy, hook toolkit,
+MinHook/runtime DLLs, or unfinished DX9 implementation. The four attributed
+MIT shader files are packaged under `build/Shaders/dx8`.
 
 Verified useful areas include:
 
@@ -255,15 +258,59 @@ Verified useful areas include:
 * world, view, projection, camera, material, and directional-light data;
 * loader configuration and explicit exported activation functions.
 
+Upstream update audit (2026-08-11):
+
+* Main repository commit
+  [`d01c838`](https://github.com/FNSOIDATHQ/armadaNebulaPatch/commit/d01c8384b9a8e5ee16f9a9540936f3b852cb916c)
+  advances `shaderPlusArmada` from `9c83242` to `f867372`, exposing four
+  previously unlinked commits: FX/HLSL support, a complete DX9 VS/PS draw
+  prototype, directional-light/camera data and reset handling, and a dummy
+  standard-MeshVB path. The DX8 source is byte-for-byte unchanged, so this
+  update does not directly improve the current A2FO DX8 renderer or bloom.
+* Useful recovered DX9 bindings include the selected device through device
+  vtable slot 48/token 3, native vertex/index-buffer getters, a 68-byte mesh
+  vertex declaration, active lights at `ST3D_GraphicsEngine + 0x60`, selected
+  device/index fields at `+0xC0/+0xCC`, and the camera pointer at `+0xFC`.
+  Treat these as unverified upstream observations until converted to checked
+  RVAs, signatures, and bounded A2FO structures.
+* Do not import the prototype directly. Its `pbrLite.fx` and `dot3.fx` assets
+  are absent from the repository; its standard-mesh hook still displays a
+  blocking debug message; it replaces whole functions with unchecked absolute
+  jumps; directional-light writes are not bounded to the two-element array;
+  texture `QueryInterface` references are not released; and reset cleanup only
+  releases one of the two FX objects.
+* Decision for the current 20-day functionality sprint: retain the stable DX8
+  backend. Revisit this snapshot afterward as a reverse-engineering reference
+  for a separately engineered, checked DX9 backend rather than a cherry-pick.
+
 Follow-up work:
 
+* [x] Convert the four useful DX8 absolute addresses to checked Armada/Fleet
+  Ops RVAs and validate them against the supported PE identities.
+* [x] Replace the upstream middle-function early return with an inline gateway
+  which disables the pixel shader and resumes Fleet Operations' alpha path.
+* [x] Preassemble the custom pixel shader through the shipped
+  `D3DX81ab.dll`; the active/reference shaders pass an assembler smoke test
+  under Wine.
+* [x] Add the six ODF-driven subsystem emissive channels (`emissiveWarp`,
+  `emissiveImpulse`, `emissiveShields`, `emissiveLifeSupport`,
+  `emissiveSensors`, and `emissiveWeapons`), combine active maps without extra
+  model passes, and feed the result to the DX8 shader's second sampler.
+* [x] Cover classic/non-DOT3 SODs through scoped fixed-function additive
+  stages after native material setup in both MeshVB and legacy non-VB face
+  paths; restore all stage state immediately after every draw.
+* [ ] Manually validate emissive texture loading, UV alignment, subsystem
+  disable/repair transitions, device reset, and Fleet Ops 4 bloom response.
+* [ ] Extend subsystem emissive resolution to textures stored only in FPQ
+  archives; the initial D3DX loader accepts loose image files.
+* [ ] Manually validate the corrected early-hook build in normal play,
+  nebulae, transparent geometry, map-editor
+  crystal text, device loss/reset, and hardware which rejects pixel shader 1.4.
 * [ ] Record the discovered Storm3D structures and calling conventions in a
   versioned bindings layer with sources and confidence levels.
-* [ ] Convert useful absolute addresses to RVAs or signatures and validate them
-  against the clean Sigma executable and supported Fleet Operations builds
-  before installing hooks.
-* [ ] Continue using the existing safe detour framework for functions; reserve
-  direct writes for validated constants and branch patches.
+* [ ] Convert any additional DX9 or standard-mesh addresses to RVAs/signatures
+  and validate them against the clean Sigma executable and supported Fleet
+  Operations builds before installing hooks.
 * [ ] Audit the prototype's per-draw texture `QueryInterface` lifetime, shader
   reset/recreation, directional-light bounds, error handling, and standard-mesh
   debug path before adapting any renderer logic.
@@ -271,8 +318,8 @@ Follow-up work:
   current shader source repository.
 * [ ] Use the recovered mesh and texture paths to support renderer profiling,
   texture-memory investigation, and eventually richer SODX materials.
-* [LATER] Investigate emissive, normal, and additional material maps only after
-  the existing texture matrix and resource lifetimes are understood.
+* [LATER] Investigate normal and additional material maps after the emissive
+  cache and existing texture matrix have completed manual validation.
 
 ## Features to Investigate
 

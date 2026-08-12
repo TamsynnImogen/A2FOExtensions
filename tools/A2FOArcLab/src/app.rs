@@ -1,6 +1,7 @@
 use crate::fire_arc::{ArcConfig, ArcMode};
 use crate::odf::{load_project, ArcProject, WeaponSlot};
 use crate::sod::{spawn_sod, LoadedSod, SodNodeMarker};
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPlugin};
@@ -187,6 +188,7 @@ fn setup_scene(mut commands: Commands) {
                 hdr: false,
                 ..default()
             },
+            tonemapping: Tonemapping::None,
             transform,
             ..default()
         },
@@ -275,6 +277,20 @@ fn draw_ui(
                 ));
                 for root in &project.resources.roots {
                     ui.small(format!("{} — {}", root.label, root.path.display()));
+                }
+                if let Some(model) = state.loaded_model.as_ref() {
+                    ui.separator();
+                    ui.label(format!(
+                        "Textures loaded: {}/{}",
+                        model.loaded_textures.len(),
+                        model.referenced_texture_count
+                    ));
+                    for path in &model.loaded_textures {
+                        ui.small(path.display().to_string());
+                    }
+                    for issue in &model.texture_issues {
+                        ui.colored_label(egui::Color32::YELLOW, issue);
+                    }
                 }
             });
         }
@@ -434,7 +450,7 @@ fn draw_ui(
                     }
                 }
                 if ui.button("Fit").clicked() {
-                    if let Some(model) = state.loaded_model {
+                    if let Some(model) = state.loaded_model.as_ref() {
                         camera_request.fit = Some((model.center, model.radius));
                     }
                 }
@@ -789,15 +805,23 @@ fn handle_model_load(
                 if let Some(project) = state.project.as_mut() {
                     project.model_path = Some(request.0.clone());
                 }
-                state.loaded_model = Some(model);
+                let camera_fit = (model.center, model.radius);
                 state.status = format!(
-                    "Loaded {} nodes and {} hardpoints from {}",
+                    "Loaded {} nodes, {} hardpoints, and {}/{} textures from {}{}",
                     model.node_count,
                     model.hardpoint_count,
-                    request.0.display()
+                    model.loaded_textures.len(),
+                    model.referenced_texture_count,
+                    request.0.display(),
+                    if model.texture_issues.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({} texture warning(s))", model.texture_issues.len())
+                    }
                 );
+                state.loaded_model = Some(model);
                 state.error = None;
-                camera_request.fit = Some((model.center, model.radius));
+                camera_request.fit = Some(camera_fit);
             }
             Err(error) => {
                 state.error = Some(format!("Could not load SOD: {error:#}"));
@@ -887,7 +911,7 @@ fn draw_reference_gizmos(state: Res<ArcLabState>, mut gizmos: Gizmos) {
     if !state.show_reference_grid {
         return;
     }
-    let Some(model) = state.loaded_model else {
+    let Some(model) = state.loaded_model.as_ref() else {
         return;
     };
     let center = model.center;
@@ -918,7 +942,7 @@ fn draw_fire_arc_gizmos(
     nodes: Query<(&SodNodeMarker, &GlobalTransform)>,
     mut gizmos: Gizmos,
 ) {
-    let Some(model) = state.loaded_model else {
+    let Some(model) = state.loaded_model.as_ref() else {
         return;
     };
     let Some(weapon) = state.selected_weapon() else {

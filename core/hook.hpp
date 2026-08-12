@@ -32,4 +32,9 @@ bool patch_jump(void* target, void* replacement, const std::uint8_t* expected,
 bool patch_call(void* target, void* replacement, const std::uint8_t* expected,
                 std::size_t length);
 
+// Replaces a checked, fixed-size byte range without imposing branch opcode or
+// instruction-length requirements. Suitable for data and vtable entries.
+bool patch_bytes(void* target, const std::uint8_t* replacement,
+                 const std::uint8_t* expected, std::size_t length);
+
 }  // namespace a2fo

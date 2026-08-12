@@ -72,6 +72,25 @@ bool patch_call(void* target, void* replacement, const std::uint8_t* expected,
     return write_relative_branch(target, replacement, length, 0xe8);
 }
 
+bool patch_bytes(void* target, const std::uint8_t* replacement,
+                 const std::uint8_t* expected, std::size_t length) {
+    if (!target || !replacement || !expected || length == 0 ||
+        std::memcmp(target, expected, length) != 0) {
+        return false;
+    }
+
+    DWORD old_protection = 0;
+    if (!VirtualProtect(target, length, PAGE_EXECUTE_READWRITE,
+                        &old_protection)) {
+        return false;
+    }
+    std::memcpy(target, replacement, length);
+    FlushInstructionCache(GetCurrentProcess(), target, length);
+    DWORD ignored = 0;
+    VirtualProtect(target, length, old_protection, &ignored);
+    return true;
+}
+
 bool install_inline_hook(void* target, void* replacement, std::size_t length,
                          const std::uint8_t* expected, InlineHook& hook) {
     if (!target || !replacement || !expected || length < 5 ||

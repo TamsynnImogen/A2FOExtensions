@@ -9,6 +9,7 @@
 #include "hook.hpp"
 #include "lua_host.hpp"
 #include "module_loader.hpp"
+#include "nebula_renderer.hpp"
 #include "../sdk/include/a2fo_module_api.h"
 
 #include <windows.h>
@@ -2569,6 +2570,13 @@ bool A2FO_CALL api_patch_call(void* target, void* replacement,
     return a2fo::patch_call(target, replacement, expected, length);
 }
 
+bool A2FO_CALL api_patch_bytes(void* target,
+                               const std::uint8_t* replacement,
+                               const std::uint8_t* expected,
+                               std::size_t length) {
+    return a2fo::patch_bytes(target, replacement, expected, length);
+}
+
 bool A2FO_CALL api_register_fofs_item_lookup_handler(
     const char* module_name, A2FO_FofsItemLookupHandler handler,
     void* user_data) {
@@ -2927,6 +2935,7 @@ A2FO_ModuleApi make_module_api() {
     api.dispatch_producer_event = &api_dispatch_producer_event;
     api.register_classlabel_odf_defaults =
         &api_register_classlabel_odf_defaults;
+    api.patch_bytes = &api_patch_bytes;
     return api;
 }
 
@@ -3260,6 +3269,8 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
                 install_user_profile_game_speed_hook();
             if (validate_module(g_fleet_ops, kFleetOpsTimestamp,
                                 kFleetOpsImageSize, "FleetOpsHook.dll")) {
+                a2fo::install_nebula_renderer_early(
+                    g_armada, g_fleet_ops, g_root_directory, &log_line);
                 g_fofs_item_get_lookup_hook_ready =
                     install_fofs_item_get_lookup_hook();
                 g_mod_user_directory_hook_ready =

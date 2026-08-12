@@ -2,6 +2,7 @@ mod app;
 mod fire_arc;
 mod odf;
 mod sod;
+mod window_icon;
 
 use anyhow::{bail, Context, Result};
 use app::ArcLabPlugin;
@@ -46,6 +47,7 @@ fn main() {
             ..default()
         }))
         .add_plugins(ArcLabPlugin::new(initial_ship))
+        .add_systems(Startup, window_icon::install_window_icon)
         .run();
 }
 
@@ -75,11 +77,26 @@ fn inspect_project(path: &Path) -> Result<()> {
         let summary = sod::inspect_sod(model_path).context("Parse resolved SOD")?;
         println!("SOD: {}", model_path.display());
         println!(
-            "SOD content: {} nodes, {} meshes, {} numeric hardpoints",
+            "SOD content: {} nodes, {} meshes, {} numeric hardpoints, {} base texture(s)",
             summary.node_names.len(),
             summary.mesh_count,
-            summary.hardpoint_count
+            summary.hardpoint_count,
+            summary.texture_names.len()
         );
+        let texture_roots = project.resources.texture_roots();
+        for (name, resolved) in sod::resolve_texture_names(&summary.texture_names, &texture_roots) {
+            if let Some(path) = resolved {
+                match sod::validate_texture(&path) {
+                    Ok(()) => println!("Texture: {name} -> {} (decoded)", path.display()),
+                    Err(error) => println!(
+                        "WARNING: texture '{name}' resolved to {} but did not decode: {error:#}",
+                        path.display()
+                    ),
+                }
+            } else {
+                println!("WARNING: texture '{name}' did not resolve");
+            }
+        }
         for weapon in &project.weapons {
             for hardpoint in &weapon.hardpoints {
                 if !summary

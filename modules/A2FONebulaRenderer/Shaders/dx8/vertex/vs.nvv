@@ -1,0 +1,61 @@
+; armadaNebulaPatch DX8 vertex shader
+; Copyright (c) 2024 dev gao, MIT License
+;#define V_Position v0
+;#define V_NORMAL v1
+;#define V_TEXTURE v2
+;#define V_S(U) v3
+;#define V_T(V) v4
+;#define V_SxT(W) v5
+;#define r3 r3
+;
+;c0=1,1,1,1
+;c1=0.5,0.5,0.5,0.5
+;c2-c5=clip(proj) space matrix
+;c6=light dir
+;c7-c10=world space matrix
+;c11-c14=view space matrix
+;c15-c18=inverse world space matrix
+;c19=camera dir
+;
+vs.1.1
+
+; Transform position to clip space and output it
+m4x4 oPos,v0,c2
+
+; output tex coords
+mov oT0.xy, v2.xy
+; the ODF subsystem-emissive composite uses the same ship UV layout
+mov oT1.xy, v2.xy
+
+;normal
+mov oT5, v5
+
+; light dir
+mov oT4, c6
+
+;get camera dir(view dir)
+mov r0,c19
+m3x3 r0,r0,c15
+
+;lightDir+viewDir(L+V)
+add r1,r0,c6
+
+;normalize(V)
+dp3 r0.w, r0, r0
+rsq r0.w, r0.w
+mul r0, r0, r0.w
+
+;viewDir
+mov oT2,r0
+
+;normalize(L+V)=halfwayDir(H)
+dp3 r1.w, r1, r1
+rsq r1.w, r1.w
+mul r1, r1, r1.w
+
+;halfwayDir
+mov oT3,r1
+
+;note about matrix:
+;to be honest, i am not completely sure what i transformed in code is correct
+;many transformations do not match the expected result, which confuses me a lot

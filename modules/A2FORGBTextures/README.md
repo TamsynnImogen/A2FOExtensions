@@ -31,12 +31,14 @@ Compressed file correctly overrides a parent's RGB version.
 
 Index8 is not interchangeable with RGB: Armada 1's Index8 files are genuine
 8-bit colour-mapped TGAs, while the retained Fleet Operations route enters
-Armada's true-colour pixel loader. The module therefore expands colour-mapped,
-16-bit, grayscale, and RLE TGA variants into a bounded uncompressed 24/32-bit
-temporary TGA before returning them through the flattened route. Already-safe
-24/32-bit files (including ordinary TGAs placed under Compressed) are used
-directly. Unsupported or malformed non-RGB files fail closed rather than being
-fed to the wrong decoder.
+Armada's true-colour pixel loader. Every flattened TGA candidate is therefore
+validated regardless of its physical folder. Colour-mapped, 16-bit, grayscale,
+and RLE types 9, 10, and 11 are expanded into a bounded uncompressed 24/32-bit
+temporary TGA. This includes RLE-compressed TGAs placed directly in `Textures`
+or `Textures/RGB`, as well as `Textures/Compressed`; explicit
+`Textures/RGB/...` requests receive the same preparation. Already-safe
+uncompressed 24/32-bit files are used directly. Unsupported or malformed legacy
+TGAs fail closed rather than being fed to the wrong decoder.
 
 The root-TGA route hooks Armada's `ST3D_FileStream_FileExists` and
 `ST3D_BinaryFileStream::OpenRead` boundaries, leaving Fleet Operations'
