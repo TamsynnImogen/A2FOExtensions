@@ -12,6 +12,17 @@ _a2fo_nebula_call_thiscall_1:
 	leave
 	ret
 
+	.globl _a2fo_nebula_call_thiscall_2
+_a2fo_nebula_call_thiscall_2:
+	pushl %ebp
+	movl %esp, %ebp
+	pushl 20(%ebp)
+	pushl 16(%ebp)
+	movl 12(%ebp), %ecx
+	call *8(%ebp)
+	leave
+	ret
+
 	# Storm3D's shader-handle lookup is thiscall with one stack argument.
 	.globl _a2fo_nebula_set_pixel_shader_hook
 _a2fo_nebula_set_pixel_shader_hook:

@@ -47,4 +47,44 @@ bool register_nebula_emissive_materials(
 void nebula_begin_craft_render(void* craft) noexcept;
 void nebula_end_craft_render(void* craft) noexcept;
 
+// ABI-stable descriptor copied by the core. `node` is the CraftClass SOD node
+// resolved by the optional ODF controller. system_index uses the native
+// sensors/engines/weapons/life-support/shields order; 5 is hull.
+struct DecalDescriptor {
+    std::uint32_t struct_size;
+    std::uint32_t system_index;
+    std::uint32_t threshold_index;
+    void* node;
+    const char* texture_path;
+    float offset[3];
+    float rotation_degrees[3];
+    float size[2];
+};
+
+bool register_damage_decal_class(
+    void* object_class, float damage_threshold,
+    const DecalDescriptor* descriptors, std::uint32_t descriptor_count)
+    noexcept;
+
+// A permanent hull-logo placement. When texture_path_count is zero the core
+// uses Fleet Operations' already-loaded logoFileNames texture at the craft's
+// selected possibleCraftNames index. Otherwise texture_paths is a row-aligned
+// table (normally generated from logoFileNames plus an ODF suffix).
+struct LogoDecalDescriptor {
+    std::uint32_t struct_size;
+    void* node;
+    const char* const* texture_paths;
+    std::uint32_t texture_path_count;
+    std::uint32_t use_colour_key;
+    std::uint32_t colour_key;
+    std::uint32_t flip_u;
+    float offset[3];
+    float rotation_degrees[3];
+    float size[2];
+};
+
+bool register_logo_decal_class(
+    void* object_class, const LogoDecalDescriptor* descriptors,
+    std::uint32_t descriptor_count) noexcept;
+
 }  // namespace a2fo

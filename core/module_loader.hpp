@@ -26,9 +26,9 @@ struct ModuleRegistrationObserver {
     void (*finish)(const std::string& path, bool initialized) = nullptr;
 };
 
-// Roots are ordered from lowest to highest precedence. DLLs with the same
-// basename are overlaid, then the selected modules load in deterministic
-// case-insensitive filename order.
+// Roots are ordered Data, oldest parent, ..., selected mod and are used only
+// for info.ini policy. Native DLLs are discovered exclusively in the first
+// root's modules directory, then selected in deterministic filename order.
 bool load_native_modules_from_roots(
     const std::vector<std::string>& roots,
     const A2FO_ModuleApi& api,

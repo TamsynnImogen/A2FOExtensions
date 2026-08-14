@@ -13,7 +13,9 @@
 
 #include "nebula_renderer.hpp"
 #include "nebula_emissive.hpp"
+#include "decal_math.hpp"
 #include "hook.hpp"
+#include "../sdk/include/a2fo_supported_armada.hpp"
 
 #include <windows.h>
 #include <d3d8.h>
@@ -21,6 +23,7 @@
 #include <array>
 #include <algorithm>
 #include <cstdint>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -42,6 +45,9 @@ DECLARE_INTERFACE_(ID3DXBuffer, IUnknown) {
 extern "C" {
 std::uintptr_t __cdecl a2fo_nebula_call_thiscall_1(
     void* function, void* self, std::uintptr_t argument1);
+std::uintptr_t __cdecl a2fo_nebula_call_thiscall_2(
+    void* function, void* self, std::uintptr_t argument1,
+    std::uintptr_t argument2);
 void a2fo_nebula_set_pixel_shader_hook();
 void a2fo_nebula_alpha_hook();
 void a2fo_nebula_standard_pre_hook();
@@ -89,8 +95,6 @@ using SaveSurfaceToFile = HRESULT (WINAPI*)(
 using CompileDot3Mesh = void* (__cdecl*)(const void* mesh);
 
 constexpr const char* kModuleName = "A2FONebulaRenderer";
-constexpr std::uint32_t kArmadaTimestamp = 0x3c4c76bd;
-constexpr std::uint32_t kArmadaImageSize = 0x00403999;
 constexpr std::uint32_t kFleetOpsTimestamp = 0x51f6475c;
 constexpr std::uint32_t kFleetOpsImageSize = 0x00322000;
 
@@ -141,7 +145,30 @@ constexpr std::size_t kMaximumStorm3DRegistryEntries = 65536;
 constexpr std::size_t kMaximumStorm3DTextureName = 1024;
 constexpr UINT kD3dxDefault = 0xffffffffu;
 constexpr std::size_t kCraftClassOffset = 0x40;
+constexpr std::size_t kCraftNameIndexOffset = 0x218;
+// FleetOpsHook encodes a private enhancement-record pointer across four spare
+// CraftClass bytes. The wrapper's +4 sidecar owns logoFileNames and a parallel
+// ST3D_Texture pointer table in the same row order.
+constexpr std::size_t kCraftClassEnhancementPointerByte0Offset = 0x185;
+constexpr std::size_t kCraftClassEnhancementPointerByte1Offset = 0x186;
+constexpr std::size_t kCraftClassEnhancementPointerByte2Offset = 0x187;
+constexpr std::size_t kCraftClassEnhancementPointerByte3Offset = 0x19f;
+constexpr std::size_t kEnhancementWrapperSidecarOffset = 0x04;
+constexpr std::size_t kEnhancementSidecarOwnerOffset = 0x00;
+constexpr std::size_t kEnhancementLogoNamesBeginOffset = 0x148;
+constexpr std::size_t kEnhancementLogoNamesEndOffset = 0x14c;
+constexpr std::size_t kEnhancementLogoTexturesOffset = 0x154;
+constexpr std::size_t kEnhancementMinimumReadableSize = 0x158;
+constexpr std::size_t kMaximumCraftLogoCount = 256;
+constexpr std::size_t kGameObjectCurrentHealthOffset = 0x15c;
+constexpr std::size_t kGameObjectMaximumHealthOffset = 0x160;
+constexpr std::size_t kGameObjectVelocityOffset = 0xdc;
+constexpr std::size_t kCraftPhysicsOffset = 0x1b0;
 constexpr std::size_t kCraftSubsystemsOffset = 0x1e0;
+constexpr std::uintptr_t kEntityGetWorldTransformRva = 0x000cff90;
+constexpr std::size_t kCraftClassImpulseSpeedOffset = 0x3ec;
+constexpr std::uintptr_t kTrekPhysicsVtableRva = 0x002b28a4;
+constexpr std::size_t kTrekPhysicsWarpEffectStateOffset = 0x20;
 constexpr std::size_t kSubsystemRecordSize = 0x30;
 constexpr std::size_t kSensorsRecord = 0;
 constexpr std::size_t kEnginesRecord = 1;
@@ -244,7 +271,8 @@ struct EmissiveMaterialPolicy {
                a2fo::nebula::kEmissiveSystemCount> pixels{};
     std::array<bool, a2fo::nebula::kEmissiveSystemCount> source_attempted{};
     std::array<bool, a2fo::nebula::kEmissiveSystemCount> source_loaded{};
-    std::unordered_map<std::uint8_t, IDirect3DTexture8*> composites;
+    // Low byte: active subsystem mask. High byte: motion-light profile.
+    std::unordered_map<std::uint16_t, IDirect3DTexture8*> composites;
     UINT width = 0;
     UINT height = 0;
     std::uint8_t path_mask = 0;
@@ -256,6 +284,56 @@ struct EmissiveClassPolicy {
 
 std::unordered_map<void*, std::unique_ptr<EmissiveClassPolicy>>
     g_emissive_policies;
+
+struct DamageDecal {
+    std::uint32_t system_index = 0;
+    std::uint32_t threshold_index = 1;
+    void* node = nullptr;
+    std::string texture_path;
+    std::array<float, 3> offset{};
+    std::array<float, 3> rotation_degrees{};
+    std::array<float, 2> size{{1.0f, 1.0f}};
+};
+
+struct DamageDecalClassPolicy {
+    float damage_threshold = 0.1f;
+    std::vector<DamageDecal> decals;
+};
+
+std::unordered_map<void*, std::unique_ptr<DamageDecalClassPolicy>>
+    g_damage_decal_policies;
+
+struct LogoDecal {
+    void* node = nullptr;
+    // Empty means use Fleet Operations' native logoFileNames texture table.
+    std::vector<std::string> texture_paths;
+    bool use_colour_key = false;
+    D3DCOLOR colour_key = 0;
+    bool flip_u = false;
+    std::array<float, 3> offset{};
+    std::array<float, 3> rotation_degrees{};
+    std::array<float, 2> size{{1.0f, 1.0f}};
+};
+
+struct LogoDecalClassPolicy {
+    std::vector<LogoDecal> decals;
+};
+
+std::unordered_map<void*, std::unique_ptr<LogoDecalClassPolicy>>
+    g_logo_decal_policies;
+std::unordered_map<std::string, IDirect3DTexture8*> g_damage_decal_textures;
+volatile LONG g_logged_damage_decal_draw = 0;
+volatile LONG g_logged_damage_decal_texture_failure = 0;
+volatile LONG g_logged_damage_decal_texture_unavailable = 0;
+volatile LONG g_logged_damage_decal_policy_render = 0;
+volatile LONG g_logged_damage_decal_threshold_active = 0;
+volatile LONG g_logged_damage_decal_device_unavailable = 0;
+volatile LONG g_logged_damage_decal_state_failure = 0;
+volatile LONG g_logged_damage_decal_transform_failure = 0;
+volatile LONG g_logged_damage_decal_draw_failure = 0;
+volatile LONG g_logged_logo_decal_draw = 0;
+volatile LONG g_logged_logo_decal_selection_failure = 0;
+volatile LONG g_logged_logo_decal_policy_render = 0;
 IDirect3DTexture8* g_black_emissive_texture = nullptr;
 std::unordered_map<IDirect3DBaseTexture8*, std::string>
     g_diffuse_texture_keys;
@@ -550,8 +628,12 @@ bool upload_emissive_mip_chain(
 
 IDirect3DTexture8* build_emissive_composite(
     EmissiveMaterialPolicy& policy, std::uint8_t requested_mask,
+    a2fo::nebula::CraftMotionLightState motion_state,
     IDirect3DDevice8* device) noexcept {
-    const auto existing = policy.composites.find(requested_mask);
+    const std::uint16_t cache_key = static_cast<std::uint16_t>(
+        requested_mask |
+        (static_cast<std::uint16_t>(motion_state) << 8));
+    const auto existing = policy.composites.find(cache_key);
     if (existing != policy.composites.end()) return existing->second;
 
     std::uint8_t loaded_mask = requested_mask & policy.path_mask;
@@ -568,6 +650,8 @@ IDirect3DTexture8* build_emissive_composite(
 
     std::vector<std::uint32_t> base_pixels;
     try {
+        const auto intensity_percent =
+            a2fo::nebula::emissive_intensity_percent(motion_state);
         base_pixels.resize(
             static_cast<std::size_t>(policy.width) * policy.height);
         for (UINT y = 0; y < policy.height; ++y) {
@@ -585,7 +669,7 @@ IDirect3DTexture8* build_emissive_composite(
                 }
                 base_pixels[pixel_index] =
                     a2fo::nebula::combine_emissive_pixel(
-                        sources, loaded_mask);
+                        sources, loaded_mask, intensity_percent);
             }
         }
     } catch (...) {
@@ -609,7 +693,7 @@ IDirect3DTexture8* build_emissive_composite(
         texture->Release();
         return ensure_black_emissive_texture(device);
     }
-    policy.composites.emplace(requested_mask, texture);
+    policy.composites.emplace(cache_key, texture);
     return texture;
 }
 
@@ -694,6 +778,39 @@ std::uint8_t current_emissive_mask(
         kWeaponsRecord,
         static_cast<std::uint8_t>(1u << a2fo::nebula::weapons));
     return mask;
+}
+
+a2fo::nebula::CraftMotionLightState current_craft_motion_light(
+    const void* craft) noexcept {
+    if (!craft) return a2fo::nebula::CraftMotionLightState::idle;
+
+    float velocity_squared = -1.0f;
+    const auto* velocity = static_cast<const std::uint8_t*>(craft) +
+        kGameObjectVelocityOffset;
+    if (readable_range(velocity, sizeof(float) * 3u)) {
+        float components[3]{};
+        std::memcpy(components, velocity, sizeof(components));
+        velocity_squared = components[0] * components[0] +
+            components[1] * components[1] +
+            components[2] * components[2];
+    }
+
+    void* object_class = read_at<void*>(craft, kCraftClassOffset, nullptr);
+    const float maximum_impulse_speed = read_at<float>(
+        object_class, kCraftClassImpulseSpeedOffset, -1.0f);
+
+    std::uint32_t warp_effect_state =
+        a2fo::nebula::kUnknownWarpEffectState;
+    void* physics = read_at<void*>(craft, kCraftPhysicsOffset, nullptr);
+    void* physics_vtable = read_at<void*>(physics, 0, nullptr);
+    if (physics_vtable == at(g_armada, kTrekPhysicsVtableRva)) {
+        warp_effect_state = read_at<std::uint32_t>(
+            physics, kTrekPhysicsWarpEffectStateOffset,
+            a2fo::nebula::kUnknownWarpEffectState);
+    }
+
+    return a2fo::nebula::classify_craft_motion_light(
+        warp_effect_state, velocity_squared, maximum_impulse_speed);
 }
 
 void* current_render_craft() noexcept {
@@ -832,8 +949,10 @@ bool select_current_emissive_texture(
     if (!material) return false;
     const std::uint8_t mask = current_emissive_mask(*material, craft);
     if (mask == 0) return false;
+    const a2fo::nebula::CraftMotionLightState motion_state =
+        current_craft_motion_light(craft);
     IDirect3DTexture8* texture = build_emissive_composite(
-        *material, mask, device);
+        *material, mask, motion_state, device);
     if (!texture || texture == g_black_emissive_texture) return false;
     if (selected) *selected = texture;
     return true;
@@ -880,6 +999,19 @@ bool validate_module(HMODULE module, std::uint32_t timestamp,
                       name ? name : "Renderer image");
         log_line(message);
         return false;
+    }
+    return true;
+}
+
+bool validate_armada_module(HMODULE module) noexcept {
+    const auto identity = a2fo::supported_armada::identify(module);
+    if (identity == a2fo::supported_armada::Identity::unsupported) {
+        log_line("ArmadaL.exe is not the supported Fleet Operations build");
+        return false;
+    }
+    if (identity == a2fo::supported_armada::Identity::normalized) {
+        log_line(
+            "Accepted normalized ArmadaL.exe header for early DX8 hooks");
     }
     return true;
 }
@@ -1163,6 +1295,13 @@ IDirect3DDevice8* resolve_live_device(void* renderer) noexcept {
         ? device : nullptr;
 }
 
+void release_damage_decal_textures() noexcept {
+    for (auto& entry : g_damage_decal_textures) {
+        if (entry.second) entry.second->Release();
+    }
+    g_damage_decal_textures.clear();
+}
+
 void adopt_live_device(IDirect3DDevice8* device) noexcept {
     if (!device || g_device == device) return;
     // Release our references from the previous renderer before switching.
@@ -1176,6 +1315,7 @@ void adopt_live_device(IDirect3DDevice8* device) noexcept {
     }
     g_pixel_shader = 0;
     release_all_emissive_gpu_caches();
+    release_damage_decal_textures();
     g_device = device;
 }
 
@@ -1824,6 +1964,456 @@ HRESULT draw_textured_quad(IDirect3DDevice8* device,
         D3DPT_TRIANGLESTRIP, 2, vertices.data(), sizeof(QuadVertex));
 }
 
+struct Matrix34 {
+    float values[12]{};
+};
+
+struct DamageDecalVertex {
+    float x;
+    float y;
+    float z;
+    D3DCOLOR colour;
+    float u;
+    float v;
+};
+
+std::array<float, 3> transform_decal_point(
+    const Matrix34& matrix, const std::array<float, 3>& point) noexcept {
+    return {
+        matrix.values[0] * point[0] + matrix.values[3] * point[1] +
+            matrix.values[6] * point[2] + matrix.values[9],
+        matrix.values[1] * point[0] + matrix.values[4] * point[1] +
+            matrix.values[7] * point[2] + matrix.values[10],
+        matrix.values[2] * point[0] + matrix.values[5] * point[1] +
+            matrix.values[8] * point[2] + matrix.values[11],
+    };
+}
+
+IDirect3DTexture8* damage_decal_texture(
+    IDirect3DDevice8* device, const std::string& path,
+    bool use_colour_key = false, D3DCOLOR colour_key = 0) noexcept {
+    char colour_key_text[16]{};
+    std::snprintf(
+        colour_key_text, sizeof(colour_key_text), "#%c%06lx",
+        use_colour_key ? 'k' : 'n',
+        static_cast<unsigned long>(colour_key & 0x00ffffffu));
+    const std::string cache_key = path + colour_key_text;
+    const auto found = g_damage_decal_textures.find(cache_key);
+    if (found != g_damage_decal_textures.end()) return found->second;
+    if (!device || !g_create_texture_from_file || path.empty()) {
+        if (InterlockedCompareExchange(
+                &g_logged_damage_decal_texture_unavailable, 1, 0) == 0) {
+            char message[256]{};
+            std::snprintf(
+                message, sizeof(message),
+                "Damage decal texture loader unavailable: device=%s loader=%s path=%s",
+                device ? "ready" : "missing",
+                g_create_texture_from_file ? "ready" : "missing",
+                path.empty() ? "empty" : "ready");
+            log_line(message);
+        }
+        return nullptr;
+    }
+    IDirect3DTexture8* texture = nullptr;
+    const HRESULT result = g_create_texture_from_file(
+        device, path.c_str(), kD3dxDefault, kD3dxDefault, 0, 0,
+        D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, kD3dxDefault, kD3dxDefault,
+        use_colour_key ? colour_key : 0, nullptr, nullptr, &texture);
+    if (FAILED(result) || !texture) {
+        if (InterlockedCompareExchange(
+                &g_logged_damage_decal_texture_failure, 1, 0) == 0) {
+            char message[1400]{};
+            std::snprintf(message, sizeof(message),
+                          "Could not load damage decal texture '%s' "
+                          "(HRESULT 0x%08lx)", path.c_str(),
+                          static_cast<unsigned long>(
+                              static_cast<std::uint32_t>(result)));
+            log_line(message);
+        }
+        if (texture) texture->Release();
+        return nullptr;
+    }
+    g_damage_decal_textures.emplace(cache_key, texture);
+    return texture;
+}
+
+float craft_damage_fraction(void* craft, void* object_class,
+                            std::uint32_t system_index) noexcept {
+    if (!craft || !object_class) return 0.0f;
+    double current = 0.0;
+    double maximum = 0.0;
+    if (system_index < kSubsystemRecordSize / kSubsystemRecordSize * 5u) {
+        void* systems = read_at<void*>(
+            craft, kCraftSubsystemsOffset, nullptr);
+        const auto* record = systems
+            ? static_cast<const std::uint8_t*>(systems) +
+                system_index * kSubsystemRecordSize : nullptr;
+        const std::int32_t maximum_value = read_at<std::int32_t>(
+            record, 0x04, 0);
+        current = read_at<double>(record, 0x18, 0.0);
+        maximum = static_cast<double>(maximum_value);
+    } else if (system_index == 5u) {
+        current = static_cast<double>(read_at<float>(
+            craft, kGameObjectCurrentHealthOffset, 0.0f));
+        maximum = static_cast<double>(read_at<float>(
+            craft, kGameObjectMaximumHealthOffset, 0.0f));
+    }
+    if (!std::isfinite(current) || !std::isfinite(maximum) ||
+        maximum <= 0.0001) return 0.0f;
+    return std::clamp(
+        static_cast<float>(1.0 - current / maximum), 0.0f, 1.0f);
+}
+
+bool draw_decal_quad(
+    void* craft, void* node, const std::array<float, 3>& offset,
+    const std::array<float, 3>& rotation_degrees,
+    const std::array<float, 2>& size, IDirect3DTexture8* texture,
+    IDirect3DDevice8* device, bool flip_u = false) noexcept {
+    if (!craft || !node || !texture || !device) return false;
+    Matrix34 transform{};
+    const std::uintptr_t result = a2fo_nebula_call_thiscall_2(
+        at(g_armada, kEntityGetWorldTransformRva), craft,
+        reinterpret_cast<std::uintptr_t>(&transform),
+        reinterpret_cast<std::uintptr_t>(node));
+    if (result != reinterpret_cast<std::uintptr_t>(&transform)) {
+        if (InterlockedCompareExchange(
+                &g_logged_damage_decal_transform_failure, 1, 0) == 0) {
+            char message[192]{};
+            std::snprintf(message, sizeof(message),
+                          "Decal hardpoint transform failed: craft=%p node=%p result=%p",
+                          craft, node,
+                          reinterpret_cast<void*>(result));
+            log_line(message);
+        }
+        return false;
+    }
+
+    const float half_width = size[0] * 0.5f;
+    const float half_height = size[1] * 0.5f;
+    const float lift = std::max(size[0], size[1]) * 0.0025f;
+    const std::array<std::array<float, 3>, 4> corners{{
+        {{-half_width, half_height, lift}},
+        {{half_width, half_height, lift}},
+        {{-half_width, -half_height, lift}},
+        {{half_width, -half_height, lift}},
+    }};
+    const float left_u = flip_u ? 1.0f : 0.0f;
+    const float right_u = flip_u ? 0.0f : 1.0f;
+    const std::array<std::array<float, 2>, 4> uv{{
+        {{left_u, 0.0f}}, {{right_u, 0.0f}},
+        {{left_u, 1.0f}}, {{right_u, 1.0f}},
+    }};
+    std::array<DamageDecalVertex, 4> vertices{};
+    for (std::size_t index = 0; index < vertices.size(); ++index) {
+        auto local = a2fo::decal::rotate_xyz(
+            corners[index], rotation_degrees);
+        for (std::size_t axis = 0; axis < 3; ++axis) {
+            local[axis] += offset[axis];
+        }
+        const auto world = transform_decal_point(transform, local);
+        vertices[index] = {world[0], world[1], world[2], 0xffffffffu,
+                           uv[index][0], uv[index][1]};
+    }
+    device->SetTexture(0, texture);
+    const HRESULT draw_result = device->DrawPrimitiveUP(
+        D3DPT_TRIANGLESTRIP, 2, vertices.data(),
+        sizeof(DamageDecalVertex));
+    if (FAILED(draw_result) && InterlockedCompareExchange(
+            &g_logged_damage_decal_draw_failure, 1, 0) == 0) {
+        log_hresult("Decal DrawPrimitiveUP", draw_result);
+    }
+    return SUCCEEDED(draw_result);
+}
+
+bool draw_damage_decal(void* craft, const DamageDecal& decal,
+                       IDirect3DDevice8* device) noexcept {
+    IDirect3DTexture8* texture = damage_decal_texture(
+        device, decal.texture_path);
+    return draw_decal_quad(
+        craft, decal.node, decal.offset, decal.rotation_degrees,
+        decal.size, texture, device);
+}
+
+bool prepare_decal_render_state(
+    IDirect3DDevice8* device, DWORD* state_block) noexcept {
+    if (!device || !state_block) return false;
+    *state_block = 0;
+    const HRESULT state_result =
+        device->CreateStateBlock(D3DSBT_ALL, state_block);
+    if (FAILED(state_result)) {
+        if (InterlockedCompareExchange(
+                &g_logged_damage_decal_state_failure, 1, 0) == 0) {
+            log_hresult("Decal CreateStateBlock", state_result);
+        }
+        return false;
+    }
+    device->SetPixelShader(0);
+    device->SetVertexShader(D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+    D3DMATRIX identity{};
+    identity._11 = identity._22 = identity._33 = identity._44 = 1.0f;
+    device->SetTransform(D3DTS_WORLD, &identity);
+    device->SetRenderState(D3DRS_LIGHTING, FALSE);
+    device->SetRenderState(D3DRS_FOGENABLE, FALSE);
+    device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+    device->SetRenderState(D3DRS_ZENABLE, D3DZB_TRUE);
+    device->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
+    device->SetRenderState(D3DRS_ZBIAS, 1);
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+    device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+    device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+    device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+    device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+    device->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
+    device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
+    device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+    device->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_DIFFUSE);
+    device->SetTextureStageState(0, D3DTSS_MINFILTER, D3DTEXF_LINEAR);
+    device->SetTextureStageState(0, D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
+    device->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+    device->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+    return true;
+}
+
+void render_damage_decals(void* craft) noexcept {
+    if (!craft) return;
+    void* object_class = read_at<void*>(craft, kCraftClassOffset, nullptr);
+    const auto found = g_damage_decal_policies.find(object_class);
+    if (found == g_damage_decal_policies.end() || !found->second) return;
+    const DamageDecalClassPolicy& policy = *found->second;
+    if (policy.decals.empty() || policy.damage_threshold <= 0.0f) return;
+    if (InterlockedCompareExchange(
+            &g_logged_damage_decal_policy_render, 1, 0) == 0) {
+        const float current_hull = read_at<float>(
+            craft, kGameObjectCurrentHealthOffset, 0.0f);
+        const float maximum_hull = read_at<float>(
+            craft, kGameObjectMaximumHealthOffset, 0.0f);
+        char message[256]{};
+        std::snprintf(
+            message, sizeof(message),
+            "Registered decal craft reached render: craft=%p class=%p hull=%.3f/%.3f threshold=%.3f decals=%u",
+            craft, object_class, static_cast<double>(current_hull),
+            static_cast<double>(maximum_hull),
+            static_cast<double>(policy.damage_threshold),
+            static_cast<unsigned>(policy.decals.size()));
+        log_line(message);
+    }
+    std::array<std::uint32_t, 6> active_bands{};
+    std::array<float, 6> damage_fractions{};
+    for (std::size_t index = 0; index < active_bands.size(); ++index) {
+        damage_fractions[index] = craft_damage_fraction(
+            craft, object_class, static_cast<std::uint32_t>(index));
+        active_bands[index] = static_cast<std::uint32_t>(
+            std::floor((damage_fractions[index] + 0.00001f) /
+                       policy.damage_threshold));
+    }
+    const DamageDecal* first_active = nullptr;
+    for (const DamageDecal& decal : policy.decals) {
+        if (decal.system_index < active_bands.size() &&
+            (decal.threshold_index == 0 ||
+             decal.threshold_index <= active_bands[decal.system_index])) {
+            first_active = &decal;
+            break;
+        }
+    }
+    if (!first_active) return;
+    if (InterlockedCompareExchange(
+            &g_logged_damage_decal_threshold_active, 1, 0) == 0) {
+        char message[320]{};
+        std::snprintf(
+            message, sizeof(message),
+            "Damage decal became active: system=%u damage=%.3f band=%u required=%u%s",
+            static_cast<unsigned>(first_active->system_index),
+            static_cast<double>(
+                damage_fractions[first_active->system_index]),
+            static_cast<unsigned>(
+                active_bands[first_active->system_index]),
+            static_cast<unsigned>(first_active->threshold_index),
+            first_active->threshold_index == 0 ? " (preview)" : "");
+        log_line(message);
+    }
+    if (!g_device) {
+        void* renderer = read_at<void*>(
+            at(g_armada, kGraphicsEnginePointerRva), 0, nullptr);
+        IDirect3DDevice8* device = resolve_live_device(renderer);
+        if (device) adopt_live_device(device);
+    }
+    if (!g_device) {
+        if (InterlockedCompareExchange(
+                &g_logged_damage_decal_device_unavailable, 1, 0) == 0) {
+            log_line("Damage decal is active, but the live DX8 device could not be resolved");
+        }
+        return;
+    }
+    if (!g_create_texture_from_file && !load_d3dx()) return;
+    DWORD state_block = 0;
+    if (!prepare_decal_render_state(g_device, &state_block)) return;
+
+    std::size_t drawn = 0;
+    for (const DamageDecal& decal : policy.decals) {
+        if (decal.system_index >= active_bands.size() ||
+            (decal.threshold_index != 0 &&
+             decal.threshold_index > active_bands[decal.system_index])) {
+            continue;
+        }
+        if (draw_damage_decal(craft, decal, g_device)) ++drawn;
+    }
+    g_device->ApplyStateBlock(state_block);
+    g_device->DeleteStateBlock(state_block);
+    if (drawn != 0 && InterlockedCompareExchange(
+            &g_logged_damage_decal_draw, 1, 0) == 0) {
+        log_line("Rendered the first subsystem/hull damage decal");
+    }
+}
+
+IDirect3DTexture8* native_storm_texture(void* texture) noexcept {
+    if (!texture || !g_armada) return nullptr;
+    void* renderer = read_at<void*>(
+        at(g_armada, kGraphicsEnginePointerRva), 0, nullptr);
+    const std::uint32_t device_index = read_at<std::uint32_t>(
+        renderer, kCurrentDeviceIndexOffset, kMaximumStormDeviceCount);
+    if (device_index >= kMaximumStormDeviceCount) return nullptr;
+    void* device_texture = read_at<void*>(
+        texture, kStorm3DTextureDeviceArrayOffset +
+            device_index * sizeof(void*), nullptr);
+    IDirect3DTexture8* native = read_at<IDirect3DTexture8*>(
+        device_texture, kStorm3DDeviceTextureNativeOffset, nullptr);
+    return native && readable_range(native, sizeof(void*)) ? native : nullptr;
+}
+
+void* fleet_ops_craft_class_enhancement(void* object_class) noexcept {
+    if (!object_class) return nullptr;
+    const std::uint32_t byte0 = read_at<std::uint8_t>(
+        object_class, kCraftClassEnhancementPointerByte0Offset, 0);
+    const std::uint32_t byte1 = read_at<std::uint8_t>(
+        object_class, kCraftClassEnhancementPointerByte1Offset, 0);
+    const std::uint32_t byte2 = read_at<std::uint8_t>(
+        object_class, kCraftClassEnhancementPointerByte2Offset, 0);
+    const std::uint32_t byte3 = read_at<std::uint8_t>(
+        object_class, kCraftClassEnhancementPointerByte3Offset, 0);
+    const std::uintptr_t encoded = byte0 | (byte1 << 8u) |
+        (byte2 << 16u) | (byte3 << 24u);
+    void* wrapper = reinterpret_cast<void*>(encoded);
+    if (!readable_range(
+            wrapper, kEnhancementWrapperSidecarOffset + sizeof(void*))) {
+        return nullptr;
+    }
+    void* sidecar = read_at<void*>(
+        wrapper, kEnhancementWrapperSidecarOffset, nullptr);
+    if (!readable_range(sidecar, kEnhancementMinimumReadableSize) ||
+        read_at<void*>(sidecar, kEnhancementSidecarOwnerOffset, nullptr) !=
+            object_class) {
+        return nullptr;
+    }
+    return sidecar;
+}
+
+IDirect3DTexture8* selected_logo_texture(
+    void* craft, void* object_class, const LogoDecal& decal,
+    IDirect3DDevice8* device, std::int32_t* selected_index,
+    std::size_t* available_count) noexcept {
+    if (selected_index) *selected_index = -1;
+    if (available_count) *available_count = 0;
+    const std::int32_t index = read_at<std::int32_t>(
+        craft, kCraftNameIndexOffset, -1);
+    if (selected_index) *selected_index = index;
+    if (index < 0) return nullptr;
+
+    if (!decal.texture_paths.empty()) {
+        if (available_count) *available_count = decal.texture_paths.size();
+        if (static_cast<std::size_t>(index) < decal.texture_paths.size()) {
+            const std::string& path = decal.texture_paths[index];
+            if (!path.empty() &&
+                (g_create_texture_from_file || load_d3dx())) {
+                IDirect3DTexture8* texture = damage_decal_texture(
+                    device, path, decal.use_colour_key,
+                    decal.colour_key);
+                if (texture) return texture;
+            }
+        }
+        // An empty/missing loose row may still be a valid FPQ asset already
+        // loaded by Fleet Operations. Continue into its native texture table.
+    }
+
+    void* enhancement = fleet_ops_craft_class_enhancement(object_class);
+    if (!enhancement) return nullptr;
+    const std::uintptr_t begin = read_at<std::uintptr_t>(
+        enhancement, kEnhancementLogoNamesBeginOffset, 0);
+    const std::uintptr_t end = read_at<std::uintptr_t>(
+        enhancement, kEnhancementLogoNamesEndOffset, 0);
+    if (end < begin || (end - begin) % sizeof(void*) != 0) return nullptr;
+    const std::size_t count = (end - begin) / sizeof(void*);
+    if (available_count) *available_count = count;
+    if (count > kMaximumCraftLogoCount ||
+        static_cast<std::size_t>(index) >= count) {
+        return nullptr;
+    }
+    void* table = read_at<void*>(
+        enhancement, kEnhancementLogoTexturesOffset, nullptr);
+    void* storm_texture = read_at<void*>(
+        table, static_cast<std::size_t>(index) * sizeof(void*), nullptr);
+    return native_storm_texture(storm_texture);
+}
+
+void render_logo_decals(void* craft) noexcept {
+    if (!craft) return;
+    void* object_class = read_at<void*>(craft, kCraftClassOffset, nullptr);
+    const auto found = g_logo_decal_policies.find(object_class);
+    if (found == g_logo_decal_policies.end() || !found->second ||
+        found->second->decals.empty()) {
+        return;
+    }
+    const LogoDecalClassPolicy& policy = *found->second;
+    if (InterlockedCompareExchange(
+            &g_logged_logo_decal_policy_render, 1, 0) == 0) {
+        char message[192]{};
+        std::snprintf(
+            message, sizeof(message),
+            "Registered logo-decal craft reached render: craft=%p class=%p placements=%u",
+            craft, object_class,
+            static_cast<unsigned>(policy.decals.size()));
+        log_line(message);
+    }
+    if (!g_device) {
+        void* renderer = read_at<void*>(
+            at(g_armada, kGraphicsEnginePointerRva), 0, nullptr);
+        IDirect3DDevice8* device = resolve_live_device(renderer);
+        if (device) adopt_live_device(device);
+    }
+    if (!g_device) return;
+
+    DWORD state_block = 0;
+    if (!prepare_decal_render_state(g_device, &state_block)) return;
+    std::size_t drawn = 0;
+    std::int32_t failed_index = -1;
+    std::size_t failed_count = 0;
+    for (const LogoDecal& decal : policy.decals) {
+        IDirect3DTexture8* texture = selected_logo_texture(
+            craft, object_class, decal, g_device, &failed_index,
+            &failed_count);
+        if (!texture) continue;
+        if (draw_decal_quad(
+                craft, decal.node, decal.offset, decal.rotation_degrees,
+                decal.size, texture, g_device, decal.flip_u)) {
+            ++drawn;
+        }
+    }
+    g_device->ApplyStateBlock(state_block);
+    g_device->DeleteStateBlock(state_block);
+    if (drawn != 0 && InterlockedCompareExchange(
+            &g_logged_logo_decal_draw, 1, 0) == 0) {
+        log_line("Rendered the first selected craft logo decal");
+    } else if (drawn == 0 && InterlockedCompareExchange(
+            &g_logged_logo_decal_selection_failure, 1, 0) == 0) {
+        char message[224]{};
+        std::snprintf(
+            message, sizeof(message),
+            "Logo decal had no usable selected texture: possibleCraftNames index=%ld available logo rows=%u",
+            static_cast<long>(failed_index),
+            static_cast<unsigned>(failed_count));
+        log_line(message);
+    }
+}
+
 bool draw_blur_pass(IDirect3DDevice8* device,
                     const BloomTarget& source, BloomTarget& destination,
                     bool horizontal) noexcept {
@@ -2427,8 +3017,7 @@ bool install_nebula_renderer_early(HMODULE armada, HMODULE fleet_ops,
     g_fleet_ops = fleet_ops;
     g_root_directory = root_directory;
     g_log = log;
-    if (!validate_module(g_armada, kArmadaTimestamp, kArmadaImageSize,
-                         "ArmadaL.exe") ||
+    if (!validate_armada_module(g_armada) ||
         !validate_module(g_fleet_ops, kFleetOpsTimestamp, kFleetOpsImageSize,
                          "FleetOpsHook.dll") ||
         !install_hooks_early()) {
@@ -2506,6 +3095,111 @@ bool register_nebula_emissive_materials(
     }
 }
 
+bool register_damage_decal_class(
+    void* object_class, float damage_threshold,
+    const DecalDescriptor* descriptors, std::uint32_t descriptor_count)
+    noexcept {
+    if (!object_class || !descriptors || descriptor_count == 0 ||
+        descriptor_count > 384 || !std::isfinite(damage_threshold) ||
+        damage_threshold <= 0.0f || damage_threshold > 1.0f) {
+        return false;
+    }
+    try {
+        auto policy = std::make_unique<DamageDecalClassPolicy>();
+        policy->damage_threshold = damage_threshold;
+        policy->decals.reserve(descriptor_count);
+        for (std::uint32_t index = 0; index < descriptor_count; ++index) {
+            const DecalDescriptor& source = descriptors[index];
+            if (source.struct_size < sizeof(DecalDescriptor) ||
+                source.system_index > 5 ||
+                !source.node || !source.texture_path ||
+                !*source.texture_path ||
+                !std::isfinite(source.size[0]) ||
+                !std::isfinite(source.size[1]) ||
+                source.size[0] <= 0.0f || source.size[1] <= 0.0f) {
+                continue;
+            }
+            DamageDecal decal;
+            decal.system_index = source.system_index;
+            decal.threshold_index = source.threshold_index;
+            decal.node = source.node;
+            decal.texture_path = source.texture_path;
+            std::copy_n(source.offset, 3, decal.offset.begin());
+            std::copy_n(source.rotation_degrees, 3,
+                        decal.rotation_degrees.begin());
+            std::copy_n(source.size, 2, decal.size.begin());
+            const bool finite = std::all_of(
+                decal.offset.begin(), decal.offset.end(),
+                [](float value) { return std::isfinite(value); }) &&
+                std::all_of(
+                    decal.rotation_degrees.begin(),
+                    decal.rotation_degrees.end(),
+                    [](float value) { return std::isfinite(value); });
+            if (finite) policy->decals.push_back(std::move(decal));
+        }
+        if (policy->decals.empty()) return false;
+        g_damage_decal_policies[object_class] = std::move(policy);
+        return true;
+    } catch (...) {
+        log_line("Could not retain a CraftClass damage-decal policy");
+        return false;
+    }
+}
+
+bool register_logo_decal_class(
+    void* object_class, const LogoDecalDescriptor* descriptors,
+    std::uint32_t descriptor_count) noexcept {
+    if (!object_class || !descriptors || descriptor_count == 0 ||
+        descriptor_count > 64) {
+        return false;
+    }
+    try {
+        auto policy = std::make_unique<LogoDecalClassPolicy>();
+        policy->decals.reserve(descriptor_count);
+        for (std::uint32_t index = 0; index < descriptor_count; ++index) {
+            const LogoDecalDescriptor& source = descriptors[index];
+            if (source.struct_size < sizeof(LogoDecalDescriptor) ||
+                !source.node || source.texture_path_count > 256 ||
+                (source.texture_path_count != 0 && !source.texture_paths) ||
+                !std::isfinite(source.size[0]) ||
+                !std::isfinite(source.size[1]) ||
+                source.size[0] <= 0.0f || source.size[1] <= 0.0f) {
+                continue;
+            }
+            LogoDecal decal;
+            decal.node = source.node;
+            decal.use_colour_key = source.use_colour_key != 0;
+            decal.colour_key = source.colour_key & 0x00ffffffu;
+            decal.flip_u = source.flip_u != 0;
+            std::copy_n(source.offset, 3, decal.offset.begin());
+            std::copy_n(source.rotation_degrees, 3,
+                        decal.rotation_degrees.begin());
+            std::copy_n(source.size, 2, decal.size.begin());
+            const bool finite = std::all_of(
+                decal.offset.begin(), decal.offset.end(),
+                [](float value) { return std::isfinite(value); }) &&
+                std::all_of(
+                    decal.rotation_degrees.begin(),
+                    decal.rotation_degrees.end(),
+                    [](float value) { return std::isfinite(value); });
+            if (!finite) continue;
+            decal.texture_paths.reserve(source.texture_path_count);
+            for (std::uint32_t row = 0;
+                 row < source.texture_path_count; ++row) {
+                const char* path = source.texture_paths[row];
+                decal.texture_paths.emplace_back(path ? path : "");
+            }
+            policy->decals.push_back(std::move(decal));
+        }
+        if (policy->decals.empty()) return false;
+        g_logo_decal_policies[object_class] = std::move(policy);
+        return true;
+    } catch (...) {
+        log_line("Could not retain a CraftClass logo-decal policy");
+        return false;
+    }
+}
+
 void nebula_begin_craft_render(void* craft) noexcept {
     if (g_craft_render_depth < g_craft_render_stack.size()) {
         g_craft_render_stack[g_craft_render_depth++] = craft;
@@ -2521,7 +3215,9 @@ void nebula_begin_craft_render(void* craft) noexcept {
     }
 }
 
-void nebula_end_craft_render(void*) noexcept {
+void nebula_end_craft_render(void* craft) noexcept {
+    render_logo_decals(craft);
+    render_damage_decals(craft);
     if (g_craft_render_overflow != 0) {
         --g_craft_render_overflow;
         return;
@@ -2565,4 +3261,22 @@ void __cdecl A2FO_NebulaBeginCraftRender(void* craft) {
 extern "C" __declspec(dllexport)
 void __cdecl A2FO_NebulaEndCraftRender(void* craft) {
     a2fo::nebula_end_craft_render(craft);
+}
+
+extern "C" __declspec(dllexport)
+int __cdecl A2FO_DecalRegisterClass(
+    void* object_class, float damage_threshold,
+    const a2fo::DecalDescriptor* descriptors,
+    std::uint32_t descriptor_count) {
+    return a2fo::register_damage_decal_class(
+        object_class, damage_threshold, descriptors, descriptor_count)
+        ? 1 : 0;
+}
+
+extern "C" __declspec(dllexport)
+int __cdecl A2FO_LogoDecalRegisterClass(
+    void* object_class, const a2fo::LogoDecalDescriptor* descriptors,
+    std::uint32_t descriptor_count) {
+    return a2fo::register_logo_decal_class(
+        object_class, descriptors, descriptor_count) ? 1 : 0;
 }

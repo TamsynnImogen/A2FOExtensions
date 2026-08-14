@@ -18,6 +18,53 @@ int main() {
            0xffc0d020u);
     assert(combine_emissive_pixel(pixels, 0x3fu) == 0xfff0d0e0u);
 
+    std::array<std::uint32_t, kEmissiveSystemCount> intensity{};
+    intensity.fill(100u);
+    intensity[warp] = 125u;
+    assert(combine_emissive_pixel(pixels, 1u << warp, intensity) ==
+           0xfff01428u);
+    intensity[warp] = 200u;
+    assert(combine_emissive_pixel(pixels, 1u << warp, intensity) ==
+           0xffff2040u);
+    intensity[warp] = 100u;
+    intensity[impulse] = 150u;
+    assert(combine_emissive_pixel(
+               pixels, (1u << warp) | (1u << impulse), intensity) ==
+           0xffc0ff20u);
+
+    assert(classify_craft_motion_light(0u, 0.0f, 120.0f) ==
+           CraftMotionLightState::gravity_well);
+    assert(classify_craft_motion_light(0u, 25.0f, 120.0f) ==
+           CraftMotionLightState::impulse);
+    assert(classify_craft_motion_light(1u, 40000.0f, 120.0f) ==
+           CraftMotionLightState::gravity_well);
+    assert(classify_craft_motion_light(2u, 0.0f, 120.0f) ==
+           CraftMotionLightState::warp);
+    assert(classify_craft_motion_light(3u, 40000.0f, 120.0f) ==
+           CraftMotionLightState::gravity_well);
+    assert(classify_craft_motion_light(
+               kUnknownWarpEffectState, 0.0f, 120.0f) ==
+           CraftMotionLightState::idle);
+    assert(classify_craft_motion_light(
+               kUnknownWarpEffectState, 10000.0f, 120.0f) ==
+           CraftMotionLightState::impulse);
+    assert(classify_craft_motion_light(
+               kUnknownWarpEffectState, 40000.0f, 120.0f) ==
+           CraftMotionLightState::warp);
+
+    const auto gravity_intensity = emissive_intensity_percent(
+        CraftMotionLightState::gravity_well);
+    assert(gravity_intensity[warp] == 125u);
+    assert(gravity_intensity[impulse] == 100u);
+    const auto impulse_intensity = emissive_intensity_percent(
+        CraftMotionLightState::impulse);
+    assert(impulse_intensity[warp] == 125u);
+    assert(impulse_intensity[impulse] == 150u);
+    const auto warp_intensity = emissive_intensity_percent(
+        CraftMotionLightState::warp);
+    assert(warp_intensity[warp] == 200u);
+    assert(warp_intensity[impulse] == 100u);
+
     assert(classify_subsystem_light(true, false, 100, 100.0, 0.0f) ==
            SubsystemLightState::operational);
     assert(classify_subsystem_light(false, true, 100, 100.0, 0.0f) ==

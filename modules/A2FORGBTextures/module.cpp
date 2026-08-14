@@ -6,6 +6,7 @@
  */
 
 #include "../../sdk/include/a2fo_module_api.h"
+#include "../../sdk/include/a2fo_supported_armada.hpp"
 
 #include <windows.h>
 
@@ -28,9 +29,6 @@ constexpr const char* kTexturesPrefix = "textures\\";
 constexpr const char* kRgbPrefix = "rgb\\";
 constexpr const char* kIndex8Prefix = "index8\\";
 constexpr const char* kCompressedPrefix = "compressed\\";
-
-constexpr std::uint32_t kArmadaTimestamp = 0x3c4c76bd;
-constexpr std::uint32_t kArmadaImageSize = 0x00403999;
 
 // Armada II 1.1 locations. These are validated before the IAT pointer is
 // changed; docs/addresses.md is the human-readable register for them.
@@ -754,9 +752,12 @@ bool validate_armada() {
         reinterpret_cast<const std::uint8_t*>(g_armada) + dos->e_lfanew);
     if (!readable_range(nt, sizeof(*nt)) ||
         nt->Signature != IMAGE_NT_SIGNATURE ||
-        nt->FileHeader.Machine != IMAGE_FILE_MACHINE_I386 ||
-        nt->FileHeader.TimeDateStamp != kArmadaTimestamp ||
-        nt->OptionalHeader.SizeOfImage != kArmadaImageSize) {
+        nt->FileHeader.Machine != IMAGE_FILE_MACHINE_I386) {
+        log_line("ArmadaL.exe has no valid PE header");
+        return false;
+    }
+    const auto identity = a2fo::supported_armada::identify(g_armada);
+    if (identity == a2fo::supported_armada::Identity::unsupported) {
         char message[192]{};
         std::snprintf(
             message, sizeof(message),
@@ -768,11 +769,16 @@ bool validate_armada() {
         log_line(message);
         return false;
     }
+    if (identity == a2fo::supported_armada::Identity::normalized) {
+        log_line(
+            "Accepted normalized ArmadaL.exe header from supported "
+            "on-disk image fingerprint");
+    }
     // Fleet Operations installs its own texture callbacks before native A2FO
     // modules load and may rewrite code in this chain. These bytes are useful
-    // provenance diagnostics, not safe runtime gates. The exact PE identity,
-    // legacy literal, and fopen import ownership below are the hard gates for
-    // the one pointer this module actually modifies.
+    // provenance diagnostics, not safe runtime gates. The supported image
+    // identity, legacy literal, and fopen import ownership below are the hard
+    // gates for the one pointer this module actually modifies.
     observe_signature("file-existence helper", kFileExistsRva,
                       kExpectedFileExists);
     observe_signature("read-parameters entry", kReadFileParametersRva,

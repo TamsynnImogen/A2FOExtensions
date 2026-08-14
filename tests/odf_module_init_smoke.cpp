@@ -61,9 +61,17 @@ bool cheats_show_me_the_money_hooked = false;
 bool cheats_chat_init_hooked = false;
 bool cheats_rts_config_loaded = false;
 bool edit_menu_update_hooked = false;
+bool mission_selector_single_hooked = false;
+bool mission_selector_accept_hooked = false;
 bool always_show_shields_starbase_hooked = false;
 bool always_show_shields_publish_hooked = false;
 bool always_show_shields_render_list_hooked = false;
+bool texture_variants_update_hooked = false;
+bool texture_variants_borg_call_patched = false;
+bool texture_variants_race_call_patched = false;
+bool texture_variants_render_call_patched = false;
+bool texture_variants_scoped_render_call_patched = false;
+bool texture_variants_constructor_chained = false;
 bool turret_alias_registered = false;
 bool turret_odf_defaults_registered = false;
 unsigned turret_hook_count = 0;
@@ -78,6 +86,9 @@ bool fire_arc_class_constructor_chained = false;
 bool fire_arc_target_check_chained = false;
 bool fire_arc_icon_hover_hooked = false;
 bool fire_arc_rts_config_loaded = false;
+unsigned weapon_damage_hook_count = 0;
+bool weapon_damage_constructor_chained = false;
+bool initializing_weapon_damage = false;
 char extension_root_path[MAX_PATH] = ".";
 char parent_extension_root_path[MAX_PATH] = ".";
 
@@ -374,17 +385,69 @@ void prepare_armada_signatures() {
         {0x8a, 0x41, 0x18, 0x84, 0xc0, 0x74, 0x12};
     const std::uint8_t parameter_db_get_color[] =
         {0x55, 0x8b, 0xec, 0x81, 0xec, 0x00, 0x01, 0x00, 0x00};
+    const std::uint8_t parameter_db_get_bool[] =
+        {0x55, 0x8b, 0xec, 0x81, 0xec, 0x00, 0x01, 0x00, 0x00};
+    const std::uint8_t parameter_db_get_lookup[] =
+        {0x55, 0x8b, 0xec, 0x81, 0xec, 0x04, 0x01, 0x00, 0x00};
+    const std::uint8_t weapon_damage_lookup_constructor[] =
+        {0x8b, 0xc1, 0x33, 0xc9, 0xc7, 0x00};
+    const std::uint8_t weapon_damage_lookup_destructor[] =
+        {0xc7, 0x01, 0x84, 0xce, 0x6b, 0x00};
+    const std::uint8_t weapon_damage_lookup_find[] =
+        {0x55, 0x8b, 0xec, 0x51, 0x53, 0x56, 0x8b, 0x71, 0x08};
+    const std::uint8_t weapon_damage_craft_damage[] =
+        {0x55, 0x8b, 0xec, 0x83, 0xec, 0x10};
+    const std::uint8_t weapon_damage_hull_amount[] =
+        {0x8b, 0x43, 0x04, 0xc7, 0x45,
+         0xfc, 0x00, 0x00, 0x00, 0x00};
     const std::uint8_t fire_arc_get_target[] =
         {0x8b, 0x49, 0x38, 0x51, 0xe8};
     const std::uint8_t normal_weapon_tech_get_owner[] =
         {0x8b, 0x49, 0x18, 0x51, 0xe8};
     const std::uint8_t edit_menu_update[] =
         {0x55, 0x8b, 0xec, 0x81, 0xec, 0xc4, 0x00, 0x00, 0x00};
+    const std::uint8_t mission_selector_do_single[] =
+        {0x8b, 0x0d, 0x08, 0xd5, 0x7a, 0x00};
+    const std::uint8_t mission_selector_accept[] =
+        {0x55, 0x8b, 0xec, 0x8b, 0x45, 0x08};
+    const std::uint8_t mission_selector_campaign_available[] =
+        {0x55, 0x8b, 0xec, 0x8b, 0x45, 0x08};
+    const std::uint8_t mission_selector_setup[] =
+        {0x55, 0x8b, 0xec, 0x6a, 0xff, 0x68};
     const std::uint8_t create_shield_hit[] =
         {0x55, 0x8b, 0xec, 0x6a, 0xff,
          0x68, 0x87, 0xb5, 0x69, 0x00};
     const std::uint8_t stop_shield_effect[] =
         {0x55, 0x8b, 0xec, 0x83, 0xec, 0x08, 0x8d, 0x45};
+    const std::uint8_t texture_variants_borg_call[] =
+        {0xe8, 0x3d, 0xf3, 0x00, 0x00};
+    const std::uint8_t texture_variants_render_call[] =
+        {0xe8, 0xc0, 0x48, 0xff, 0xff};
+    const std::uint8_t texture_variants_scoped_render_call[] =
+        {0xe8, 0x93, 0xa6, 0x00, 0x00};
+    const std::uint8_t texture_variants_instance_render[] =
+        {0x55, 0x8b, 0xec, 0x51, 0x8b, 0x81};
+    const std::uint8_t texture_variants_generate_filename[] =
+        {0x55, 0x8b, 0xec, 0x51, 0x53, 0x56, 0x57};
+    const std::uint8_t texture_variants_set_borg[] =
+        {0x55, 0x8b, 0xec, 0x56, 0x57};
+    const std::uint8_t texture_variants_get_texture[] =
+        {0x55, 0x8b, 0xec, 0x8b, 0x45, 0x08, 0x8b};
+    const std::uint8_t texture_variants_set_texture[] =
+        {0x55, 0x8b, 0xec, 0x83, 0xec, 0x10, 0x53};
+    const std::uint8_t texture_variants_find[] =
+        {0x55, 0x8b, 0xec, 0x64, 0xa1, 0x00};
+    const std::uint8_t texture_variants_explosion_find[] =
+        {0x55, 0x8b, 0xec, 0x6a, 0xff,
+         0x68, 0xf8, 0xaf, 0x69};
+    const std::uint8_t texture_variants_physical_dimensions[] =
+        {0x8b, 0x41, 0x04, 0x83, 0xc0, 0x34};
+    const std::uint8_t texture_variants_node_particle_add[] =
+        {0x55, 0x8b, 0xec, 0x83, 0xec, 0x34};
+    const std::uint8_t texture_variants_position_particle_add[] =
+        {0x55, 0x8b, 0xec, 0x83, 0xec, 0x34};
+    const std::uint8_t texture_variants_craft_class_constructor[] =
+        {0x55, 0x8b, 0xec, 0x6a, 0xff};
     set_signature(0x0d4280, queue_class_command);
     set_signature(0x0d45f0, dequeue_class_command);
     set_signature(0x0b77d0, dtor);
@@ -403,8 +466,26 @@ void prepare_armada_signatures() {
     set_signature(0x135350, parameter_string_dispatcher);
     set_signature(0x0cd1f0, find_lazy_by_project_id);
     set_signature(0x11c610, edit_menu_update);
+    set_signature(0x1dbd90, mission_selector_do_single);
+    set_signature(0x1d6d50, mission_selector_accept);
+    set_signature(0x1dbd60, mission_selector_campaign_available);
+    set_signature(0x1dcc00, mission_selector_setup);
     set_signature(0x0743b0, create_shield_hit);
     set_signature(0x074770, stop_shield_effect);
+    set_signature(0x23307e, texture_variants_borg_call);
+    set_signature(0x0cb2ab, texture_variants_render_call);
+    set_signature(0x0cb318, texture_variants_scoped_render_call);
+    set_signature(0x0d59b0, texture_variants_instance_render);
+    set_signature(0x2423c0, texture_variants_generate_filename);
+    set_signature(0x0bfb70, texture_variants_set_borg);
+    set_signature(0x231380, texture_variants_get_texture);
+    set_signature(0x2313b0, texture_variants_set_texture);
+    set_signature(0x242870, texture_variants_find);
+    set_signature(0x064ce0, texture_variants_explosion_find);
+    set_signature(0x0cfd70, texture_variants_physical_dimensions);
+    set_signature(0x0733c0, texture_variants_node_particle_add);
+    set_signature(0x0734c0, texture_variants_position_particle_add);
+    set_signature(0x0bf090, texture_variants_craft_class_constructor);
     set_signature(0x0b80f0, producer_get_action);
     set_signature(0x0afa30, construction_rig_get_action);
     set_signature(0x0afbc0, construction_rig_start);
@@ -501,6 +582,13 @@ void prepare_armada_signatures() {
     set_signature(0x0011b130, fire_arc_draw_line);
     set_signature(0x0010c140, fire_arc_mouse_over);
     set_signature(0x00135ba0, parameter_db_get_color);
+    set_signature(0x00134f50, parameter_db_get_bool);
+    set_signature(0x00135630, parameter_db_get_lookup);
+    set_signature(0x0025cfb0, weapon_damage_lookup_constructor);
+    set_signature(0x0025cfd0, weapon_damage_lookup_destructor);
+    set_signature(0x0025d170, weapon_damage_lookup_find);
+    set_signature(0x000c4bb0, weapon_damage_craft_damage);
+    set_signature(0x000c5f08, weapon_damage_hull_amount);
     set_signature(0x00271300, fire_arc_get_target);
     set_signature(0x00271050, normal_weapon_tech_get_owner);
     constexpr char rgb_literal[] = "Textures\\RGB\\";
@@ -832,6 +920,14 @@ bool A2FO_CALL install_hook(void* target, void* replacement,
         edit_menu_update_hooked = true;
     }
     if (fake_armada && target == static_cast<std::uint8_t*>(fake_armada) +
+            0x1dbd90) {
+        mission_selector_single_hooked = true;
+    }
+    if (fake_armada && target == static_cast<std::uint8_t*>(fake_armada) +
+            0x1d6d50) {
+        mission_selector_accept_hooked = true;
+    }
+    if (fake_armada && target == static_cast<std::uint8_t*>(fake_armada) +
             0x242780) {
         rgb_lock_surface_hooked = true;
     }
@@ -863,6 +959,11 @@ bool A2FO_CALL install_hook(void* target, void* replacement,
             0x00072b60) {
         always_show_shields_render_list_hooked = true;
     }
+    if (fleet_ops && target ==
+            static_cast<std::uint8_t*>(static_cast<void*>(fleet_ops)) +
+                0x001fb250) {
+        texture_variants_update_hooked = true;
+    }
     if (fake_armada &&
         (target == static_cast<std::uint8_t*>(fake_armada) + 0x000cc480 ||
          target == static_cast<std::uint8_t*>(fake_armada) + 0x000c1fd0 ||
@@ -881,6 +982,10 @@ bool A2FO_CALL install_hook(void* target, void* replacement,
                 0x001ed458) {
         fire_arc_icon_hover_hooked = true;
         ++fire_arc_hook_count;
+    }
+    if (fake_armada && target ==
+            static_cast<std::uint8_t*>(fake_armada) + 0x000c4bb0) {
+        ++weapon_damage_hook_count;
     }
     if (fake_armada &&
         (target == static_cast<std::uint8_t*>(fake_armada) + 0x000ab710 ||
@@ -926,6 +1031,19 @@ bool A2FO_CALL patch_call(void* target, void* replacement,
     } else if (fake_armada && target ==
             static_cast<std::uint8_t*>(fake_armada) + 0x0f29e4) {
         hybrid_ship_display_single_object_simulate_patched = true;
+    } else if (fake_armada && target ==
+            static_cast<std::uint8_t*>(fake_armada) + 0x23307e) {
+        texture_variants_borg_call_patched = true;
+    } else if (fleet_ops && target ==
+            static_cast<std::uint8_t*>(static_cast<void*>(fleet_ops)) +
+                0x10b98b) {
+        texture_variants_race_call_patched = true;
+    } else if (fake_armada && target ==
+            static_cast<std::uint8_t*>(fake_armada) + 0x0cb2ab) {
+        texture_variants_render_call_patched = true;
+    } else if (fake_armada && target ==
+            static_cast<std::uint8_t*>(fake_armada) + 0x0cb318) {
+        texture_variants_scoped_render_call_patched = true;
     } else {
         ++bink_call_patch_count;
     }
@@ -950,13 +1068,26 @@ bool A2FO_CALL patch_jump(void* target, void* replacement,
     }
     if (fake_armada && target ==
             static_cast<std::uint8_t*>(fake_armada) + 0x00264e30) {
-        fire_arc_class_constructor_chained = true;
-        ++fire_arc_hook_count;
+        if (initializing_weapon_damage) {
+            weapon_damage_constructor_chained = true;
+            ++weapon_damage_hook_count;
+        } else {
+            fire_arc_class_constructor_chained = true;
+            ++fire_arc_hook_count;
+        }
     }
     if (fake_armada && target ==
             static_cast<std::uint8_t*>(fake_armada) + 0x0026f8c0) {
         fire_arc_target_check_chained = true;
         ++fire_arc_hook_count;
+    }
+    if (fake_armada && target ==
+            static_cast<std::uint8_t*>(fake_armada) + 0x000c5f08) {
+        ++weapon_damage_hook_count;
+    }
+    if (fake_armada && target ==
+            static_cast<std::uint8_t*>(fake_armada) + 0x000bf090) {
+        texture_variants_constructor_chained = true;
     }
     return true;
 }
@@ -1118,6 +1249,12 @@ int main() {
     HMODULE edit_menu = initialize_module(
         "modules\\A2FOEditMenu.dll");
     if (!edit_menu || !edit_menu_update_hooked) return 109;
+    HMODULE mission_selector = initialize_module(
+        "modules\\A2FOMissionSelector.dll");
+    if (!mission_selector || !mission_selector_single_hooked ||
+        !mission_selector_accept_hooked) {
+        return 119;
+    }
     HMODULE always_show_shields = initialize_module(
         "modules\\A2FOAlwaysShowShields.dll");
     if (!always_show_shields || !always_show_shields_starbase_hooked ||
@@ -1133,6 +1270,34 @@ int main() {
             always_show_shields,
             "A2FOAlwaysShowShields_CleanupCraft")) {
         return 110;
+    }
+    // CraftIdentity is deliberately absent from this smoke. Reproduce Fleet
+    // Operations' pre-extension CraftClass push/ret detour so TextureVariants
+    // proves its independent fallback registration chain.
+    auto* craft_class_site =
+        static_cast<std::uint8_t*>(fake_armada) + 0x000bf090;
+    craft_class_site[0] = 0x68;
+    const std::uint32_t fo_craft_class_handler =
+        static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(
+            static_cast<std::uint8_t*>(static_cast<void*>(fleet_ops)) +
+            0x0010d6e4));
+    std::memcpy(
+        craft_class_site + 1, &fo_craft_class_handler,
+        sizeof(fo_craft_class_handler));
+    craft_class_site[5] = 0xc3;
+
+    HMODULE texture_variants = initialize_module(
+        "modules\\A2FOTextureVariants.dll");
+    if (!texture_variants || !texture_variants_borg_call_patched ||
+        !texture_variants_race_call_patched ||
+        !texture_variants_update_hooked ||
+        !texture_variants_render_call_patched ||
+        !texture_variants_scoped_render_call_patched ||
+        !texture_variants_constructor_chained ||
+        !GetProcAddress(
+            texture_variants,
+            "A2FOTextureVariants_RegisterClass")) {
+        return 116;
     }
     // Fleet Operations installs its own GameObjectClass-constructor and
     // Craft::Simulate detours before A2FO's native modules load. Reproduce
@@ -1183,6 +1348,36 @@ int main() {
         return 107;
     }
 
+    // The fixture patch callback validates chaining but intentionally does not
+    // rewrite code bytes. Recreate FireArcs' real five-byte near jump so the
+    // damage-controls smoke exercises its live A2FO-to-A2FO chain, rather than
+    // seeing Fleet Operations' original push/ret detour a second time.
+    auto* weapon_class_site =
+        static_cast<std::uint8_t*>(fake_armada) + 0x00264e30;
+    FARPROC fire_arc_chain_target = GetProcAddress(
+        fire_arcs, "A2FOFireArcs_AllowWeaponTrigger");
+    if (!fire_arc_chain_target) return 118;
+    const auto displacement = static_cast<std::int32_t>(
+        reinterpret_cast<std::uintptr_t>(fire_arc_chain_target) -
+        (reinterpret_cast<std::uintptr_t>(weapon_class_site) + 5u));
+    weapon_class_site[0] = 0xe9;
+    std::memcpy(weapon_class_site + 1, &displacement, sizeof(displacement));
+
+    initializing_weapon_damage = true;
+    HMODULE weapon_damage_controls = initialize_module(
+        "modules\\A2FOWeaponDamageControls.dll");
+    initializing_weapon_damage = false;
+    if (!weapon_damage_controls || weapon_damage_hook_count != 3 ||
+        !weapon_damage_constructor_chained) {
+        std::fprintf(
+            stderr,
+            "A2FOWeaponDamageControls smoke state: module=%p hooks=%u constructorChained=%d\n",
+            static_cast<void*>(weapon_damage_controls),
+            weapon_damage_hook_count,
+            weapon_damage_constructor_chained ? 1 : 0);
+        return 117;
+    }
+
     HMODULE normal_weapon_tech = initialize_module(
         "modules\\A2FONormalWeaponTech.dll");
     if (!normal_weapon_tech || !normal_weapon_tech_initialized ||
@@ -1219,7 +1414,7 @@ int main() {
         return 106;
     }
     HMODULE inactive_a1 = initialize_module(
-        "sta1-classic\\modules\\A1Compat.dll");
+        "modules\\A1Compat.dll");
     if (inactive_a1 || wingman_alias_registered ||
         wingman_odf_defaults_registered ||
         constructionrig_odf_defaults_registered ||
@@ -1229,7 +1424,7 @@ int main() {
     if (!write_fixture_file(a1_marker_path, a1_marker,
                             sizeof(a1_marker))) return 26;
     HMODULE a1_compat = initialize_module(
-        "sta1-classic\\modules\\A1Compat.dll");
+        "modules\\A1Compat.dll");
     if (!a1_compat || !wingman_alias_registered ||
         !wingman_odf_defaults_registered ||
         !constructionrig_odf_defaults_registered ||
@@ -1560,9 +1755,14 @@ int main() {
     FreeLibrary(info);
     FreeLibrary(hybrid);
     FreeLibrary(turrets);
+    shutdown_module(texture_variants);
+    FreeLibrary(texture_variants);
     FreeLibrary(always_show_shields);
     FreeLibrary(normal_weapon_tech);
+    FreeLibrary(weapon_damage_controls);
     FreeLibrary(fire_arcs);
+    shutdown_module(mission_selector);
+    FreeLibrary(mission_selector);
     FreeLibrary(edit_menu);
     FreeLibrary(cheats);
     shutdown_module(a1_compat);

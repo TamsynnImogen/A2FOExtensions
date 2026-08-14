@@ -1,8 +1,10 @@
+use crate::coordinate::{armada_to_viewer_matrix, armada_to_viewer_vector};
 use crate::odf::find_case_insensitive_relative;
 use anyhow::{anyhow, Context, Result};
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
+use bevy::render::render_resource::TextureFormat;
 use bevy::render::texture::{CompressedImageFormats, ImageSampler, ImageType};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -35,6 +37,9 @@ pub struct LoadedSod {
 #[derive(Debug, Clone)]
 pub struct SodSummary {
     pub node_names: Vec<String>,
+    pub node_world_matrices: Vec<(String, Mat4)>,
+    pub center: Vec3,
+    pub radius: f32,
     pub mesh_count: usize,
     pub hardpoint_count: usize,
     pub texture_names: Vec<String>,
@@ -77,6 +82,8 @@ struct SodFace {
 pub fn inspect_sod(path: &Path) -> Result<SodSummary> {
     let bytes = fs::read(path).with_context(|| format!("Read SOD {}", path.display()))?;
     let sod = SodFile::parse(&bytes)?;
+    let world_matrices = calculate_world_matrices(&sod.nodes);
+    let (center, radius) = calculate_bounds(&sod.nodes, &world_matrices);
     Ok(SodSummary {
         mesh_count: sod.nodes.iter().filter(|node| node.mesh.is_some()).count(),
         hardpoint_count: sod
@@ -85,7 +92,15 @@ pub fn inspect_sod(path: &Path) -> Result<SodSummary> {
             .filter(|node| is_hardpoint_name(&node.name))
             .count(),
         texture_names: unique_texture_names(&sod.nodes),
-        node_names: sod.nodes.into_iter().map(|node| node.name).collect(),
+        node_names: sod.nodes.iter().map(|node| node.name.clone()).collect(),
+        node_world_matrices: sod
+            .nodes
+            .iter()
+            .zip(world_matrices)
+            .map(|(node, matrix)| (node.name.clone(), matrix))
+            .collect(),
+        center,
+        radius,
     })
 }
 
@@ -447,24 +462,28 @@ fn build_mesh(source: &SodMesh, group: &SodGroup) -> Result<Mesh> {
         for (corner, output_index) in triangle.iter_mut().enumerate() {
             let key = (face.vertices[corner], face.uvs[corner]);
             *output_index = *vertex_map.entry(key).or_insert_with(|| {
-                positions.push(
-                    source
-                        .vertices
-                        .get(key.0 as usize)
-                        .copied()
-                        .unwrap_or([0.0; 3]),
-                );
+                let position = source
+                    .vertices
+                    .get(key.0 as usize)
+                    .copied()
+                    .unwrap_or([0.0; 3]);
+                positions.push(armada_to_viewer_vector(Vec3::from_array(position)).to_array());
+                // SOD V coordinates already match Bevy's decoded image origin.
+                // The reference 3ds Max importer flips V for Max specifically;
+                // doing that here would turn correctly oriented hull art over.
                 texture_coordinates
                     .push(source.uvs.get(key.1 as usize).copied().unwrap_or([0.0; 2]));
                 normals.push(Vec3::ZERO);
                 (positions.len() - 1) as u32
             });
         }
-        indices.extend_from_slice(&[triangle[0], triangle[2], triangle[1]]);
+        // The forward-axis reflection supplies the handedness change that the
+        // old loader tried to emulate by reversing only triangle winding.
+        indices.extend_from_slice(&triangle);
         let a = Vec3::from_array(positions[triangle[0] as usize]);
         let b = Vec3::from_array(positions[triangle[1] as usize]);
         let c = Vec3::from_array(positions[triangle[2] as usize]);
-        let normal = (c - a).cross(b - a);
+        let normal = (b - a).cross(c - a);
         for index in triangle {
             normals[index as usize] += normal;
         }
@@ -595,8 +614,36 @@ fn unique_texture_names(nodes: &[SodNode]) -> Vec<String> {
     output
 }
 
-fn load_texture(path: &Path, images: &mut Assets<Image>) -> Result<Handle<Image>> {
+pub fn load_texture(path: &Path, images: &mut Assets<Image>) -> Result<Handle<Image>> {
     Ok(images.add(decode_texture(path)?))
+}
+
+pub fn load_texture_with_colour_key(
+    path: &Path,
+    images: &mut Assets<Image>,
+    colour_key: Option<[u8; 3]>,
+) -> Result<Handle<Image>> {
+    let mut image = decode_texture(path)?;
+    if let Some(key) = colour_key {
+        match image.texture_descriptor.format {
+            TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb => {
+                for pixel in image.data.chunks_exact_mut(4) {
+                    if pixel[..3] == key {
+                        pixel[3] = 0;
+                    }
+                }
+            }
+            TextureFormat::Bgra8Unorm | TextureFormat::Bgra8UnormSrgb => {
+                for pixel in image.data.chunks_exact_mut(4) {
+                    if [pixel[2], pixel[1], pixel[0]] == key {
+                        pixel[3] = 0;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(images.add(image))
 }
 
 fn decode_texture(path: &Path) -> Result<Image> {
@@ -681,7 +728,8 @@ fn calculate_bounds(nodes: &[SodNode], world: &[Mat4]) -> (Vec3, f32) {
     for (index, node) in nodes.iter().enumerate() {
         if let Some(mesh) = &node.mesh {
             for vertex in &mesh.vertices {
-                let point = world[index].transform_point3(Vec3::from_array(*vertex));
+                let point = world[index]
+                    .transform_point3(armada_to_viewer_vector(Vec3::from_array(*vertex)));
                 if point.is_finite() {
                     minimum = minimum.min(point);
                     maximum = maximum.max(point);
@@ -699,10 +747,11 @@ fn calculate_bounds(nodes: &[SodNode], world: &[Mat4]) -> (Vec3, f32) {
 }
 
 fn matrix_to_mat4(matrix: &[f32; 12]) -> Mat4 {
-    Mat4::from_cols_array(&[
+    let armada = Mat4::from_cols_array(&[
         matrix[0], matrix[1], matrix[2], 0.0, matrix[3], matrix[4], matrix[5], 0.0, matrix[6],
         matrix[7], matrix[8], 0.0, matrix[9], matrix[10], matrix[11], 1.0,
-    ])
+    ]);
+    armada_to_viewer_matrix(armada)
 }
 
 fn matrix_to_transform(matrix: &[f32; 12]) -> Transform {
@@ -745,6 +794,7 @@ fn skip<R: Read>(reader: &mut R, count: usize) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::render::mesh::VertexAttributeValues;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir(label: &str) -> PathBuf {
@@ -755,6 +805,46 @@ mod tests {
         let path = std::env::temp_dir().join(format!("a2fo_arclab_texture_{label}_{unique}"));
         fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[test]
+    fn mesh_conversion_fixes_chirality_without_mirroring_uvs() {
+        let source = SodMesh {
+            material: "default".to_string(),
+            texture: "test".to_string(),
+            vertices: vec![[1.0, 2.0, 3.0], [4.0, 2.0, 3.0], [1.0, 5.0, 6.0]],
+            uvs: vec![[0.1, 0.2], [0.7, 0.3], [0.4, 0.9]],
+            groups: Vec::new(),
+        };
+        let group = SodGroup {
+            material: "default".to_string(),
+            faces: vec![SodFace {
+                vertices: [0, 1, 2],
+                uvs: [0, 1, 2],
+            }],
+        };
+
+        let mesh = build_mesh(&source, &group).unwrap();
+        let Some(VertexAttributeValues::Float32x3(positions)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("mesh positions were not Float32x3");
+        };
+        assert_eq!(
+            positions,
+            &vec![[1.0, 2.0, -3.0], [4.0, 2.0, -3.0], [1.0, 5.0, -6.0]]
+        );
+
+        let Some(VertexAttributeValues::Float32x2(uvs)) = mesh.attribute(Mesh::ATTRIBUTE_UV_0)
+        else {
+            panic!("mesh UVs were not Float32x2");
+        };
+        assert_eq!(uvs, &source.uvs);
+
+        let Some(Indices::U32(indices)) = mesh.indices() else {
+            panic!("mesh indices were not U32");
+        };
+        assert_eq!(indices, &vec![0, 1, 2]);
     }
 
     #[test]

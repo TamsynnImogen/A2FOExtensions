@@ -45,6 +45,57 @@ _a2fo_call_delphi_two_registers:
 	leave
 	ret
 
+	# Delphi constructor entry: EAX=class, DL=allocation flag, ECX=owner.
+	.globl _a2fo_call_delphi_constructor
+_a2fo_call_delphi_constructor:
+	pushl %ebp
+	movl %esp, %ebp
+	movl 12(%ebp), %eax
+	movl $1, %edx
+	movl 16(%ebp), %ecx
+	call *8(%ebp)
+	leave
+	ret
+
+	# TControl.SetBounds uses EAX=self, EDX=left, ECX=top and two
+	# callee-cleaned stack arguments (width, height).
+	.globl _a2fo_call_delphi_set_bounds
+_a2fo_call_delphi_set_bounds:
+	pushl %ebp
+	movl %esp, %ebp
+	pushl 24(%ebp)
+	pushl 28(%ebp)
+	movl 20(%ebp), %ecx
+	movl 16(%ebp), %edx
+	movl 12(%ebp), %eax
+	call *8(%ebp)
+	leave
+	ret
+
+	# Fleet Operations' Mods form uses Delphi event handlers. These entry
+	# shims retain the EAX/EDX arguments before calling ordinary cdecl C++.
+	.globl _a2fo_mod_settings_form_show_bridge
+_a2fo_mod_settings_form_show_bridge:
+	pushl %eax
+	call _a2fo_mod_settings_form_show_hook_cpp
+	addl $4, %esp
+	ret
+
+	.globl _a2fo_mod_settings_launch_bridge
+_a2fo_mod_settings_launch_bridge:
+	pushl %edx
+	pushl %eax
+	call _a2fo_mod_settings_launch_hook_cpp
+	addl $8, %esp
+	ret
+
+	.globl _a2fo_module_menu_jet_button_click_bridge
+_a2fo_module_menu_jet_button_click_bridge:
+	pushl %eax
+	call _a2fo_module_menu_jet_button_click_hook_cpp
+	addl $4, %esp
+	ret
+
 	# Armada gameplay methods use MSVC thiscall (ECX=self).
 	.globl _a2fo_call_evolver_build_class
 _a2fo_call_evolver_build_class:
