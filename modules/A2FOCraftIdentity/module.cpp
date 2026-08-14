@@ -46,6 +46,8 @@ using ShieldClassObserver = void (A2FO_CALL *)(
     void* object_class, void* parameter_db);
 using NebulaClassObserver = void (A2FO_CALL *)(
     void* object_class, void* parameter_db);
+using TextureVariantsClassObserver = void (A2FO_CALL *)(
+    void* object_class, void* parameter_db);
 
 constexpr char kModuleName[] = "A2FOCraftIdentity";
 constexpr char kCraftNameCommand[] = "possibleCraftNames";
@@ -58,6 +60,10 @@ constexpr char kShieldClassObserverExport[] =
 constexpr char kNebulaRendererModuleName[] = "A2FONebulaRenderer.dll";
 constexpr char kNebulaClassObserverExport[] =
     "A2FONebulaRenderer_RegisterClass";
+constexpr char kTextureVariantsModuleName[] =
+    "A2FOTextureVariants.dll";
+constexpr char kTextureVariantsClassObserverExport[] =
+    "A2FOTextureVariants_RegisterClass";
 constexpr std::size_t kMaximumIdentityEntries = 4096;
 constexpr std::size_t kMaximumIdentityLength = 512;
 
@@ -164,6 +170,7 @@ HMODULE g_armada = nullptr;
 HMODULE g_fleet_ops = nullptr;
 ShieldClassObserver g_shield_class_observer = nullptr;
 NebulaClassObserver g_nebula_class_observer = nullptr;
+TextureVariantsClassObserver g_texture_variants_class_observer = nullptr;
 bool g_runtime_ready = false;
 bool g_chained_fo_craft_class_constructor = false;
 void* g_craft_class_constructor_original = nullptr;
@@ -208,6 +215,23 @@ void resolve_nebula_class_observer() noexcept {
         log_line(
             "Emissive-map class registration linked through "
             "A2FONebulaRenderer");
+    }
+}
+
+void resolve_texture_variants_class_observer() noexcept {
+    HMODULE variants = GetModuleHandleA(kTextureVariantsModuleName);
+    FARPROC exported = variants
+        ? GetProcAddress(variants, kTextureVariantsClassObserverExport)
+        : nullptr;
+    static_assert(
+        sizeof(exported) == sizeof(g_texture_variants_class_observer),
+        "unexpected function-pointer size");
+    std::memcpy(&g_texture_variants_class_observer, &exported,
+                sizeof(g_texture_variants_class_observer));
+    if (g_texture_variants_class_observer) {
+        log_line(
+            "Subsystem mesh class registration linked through "
+            "A2FOTextureVariants");
     }
 }
 
@@ -414,6 +438,14 @@ std::uintptr_t __attribute__((fastcall)) craft_class_constructor_hook(
     if (!g_nebula_class_observer) resolve_nebula_class_observer();
     if (g_nebula_class_observer) {
         g_nebula_class_observer(self, parameter_db);
+    }
+    // TextureVariants is alphabetically later than this module, so resolve
+    // its optional completed-CraftClass observer lazily as well.
+    if (!g_texture_variants_class_observer) {
+        resolve_texture_variants_class_observer();
+    }
+    if (g_texture_variants_class_observer) {
+        g_texture_variants_class_observer(self, parameter_db);
     }
     return result;
 }

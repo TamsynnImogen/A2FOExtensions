@@ -17,6 +17,9 @@ hooks, reusable dispatch, optional native features, and mod-authored Lua logic.
   through `infoSingleCaptainTextArea` and `infoSingleRegistryTextArea`.
 - Optional always-visible native shield geometry while a configured object's
   current shield strength remains above zero.
+- Optional per-instance SOD matrix animation for hardpoint/null nodes, so
+  weapons and other gameplay queries follow both directly animated hardpoints
+  and animated ancestors.
 - Optional DX8 per-pixel ship lighting derived from armadaNebulaPatch, with
   the remaining Fleet Operations alpha-render path preserved and per-diffuse
   ODF-driven, subsystem-aware emissive texture channels plus native soft
@@ -47,6 +50,8 @@ hooks, reusable dispatch, optional native features, and mod-authored Lua logic.
   is destroyed.
 - Resource-shortage pause and automatic production retry.
 - Experimental save/load markers for continuous-production state.
+- Automatic aspect-correct scaling of Fleet Operations' D3D9 intro and
+  Armada's GDI and menu/campaign Bink movie paths to the active viewport.
 - `DefaultGameSpeed` field in `info.ini`, accepting speeds 1–6.
 - `SettingsDirectory` field for redirecting mod configuration and profile
   files.
@@ -65,8 +70,10 @@ hooks, reusable dispatch, optional native features, and mod-authored Lua logic.
 ## Modding framework
 
 - Versioned native module API with backward-compatible capability revisions.
-- Automatic deterministic loading of `modules\*.dll`.
-- Data, `ParentMod`, and active-mod module/script overlay.
+- Automatic deterministic loading of globally installed `Data\modules\*.dll`.
+- Per-mod module selection through the Mods-screen **Modules** button and
+  `[modules]` policy; mod-local native DLL folders are ignored.
+- Data, `ParentMod`, and active-mod script overlay.
 - Optional direct Armada 1/2 legacy texture bridge for `Textures\RGB`,
   `Textures\Index8`, and `Textures\Compressed` across the same mod roots,
   including bounded expansion of RLE-compressed TGA types 9, 10, and 11.
@@ -83,6 +90,12 @@ hooks, reusable dispatch, optional native features, and mod-authored Lua logic.
 - Checked hook signatures and supported-binary validation.
 
 ## Current modding commands
+
+The exhaustive index is
+[`docs/modder-command-reference.md`](docs/modder-command-reference.md). It
+lists every extension-owned ODF, INI, CFG, Lua, asset, SOD, control, and
+authoring convention, including features which require no new command. The
+sections below provide the most commonly used examples and explanations.
 
 ### `info.ini`
 
@@ -110,6 +123,25 @@ existing saved profile still takes precedence.
 See [`docs/fleetops-info-defaults.md`](docs/fleetops-info-defaults.md) for the
 full resolution rules.
 
+Native modules are selected separately from `[mod]`:
+
+```ini
+[modules]
+required0 = "A1Compat"
+reject0 = "A2FOCheats"
+active0 = "A2FOFireArcs"
+active1 = "A2FOSwarmSystem"
+```
+
+`requiredX` modules are always selected and block launch when absent.
+`rejectX` modules are incompatible and cannot be selected. `activeX` records
+the optional modules selected for that mod. Names are case-insensitive and may
+omit `.dll`; sparse numeric indices are accepted. Parent requirements and
+rejections are inherited, while optional selections belong to the most
+specific mod. Existing mods without a `[modules]` section retain legacy
+load-all behaviour until a selection is saved. Native DLLs must be installed
+centrally under `Data/modules`; a mod's own `modules` folder is never loaded.
+
 ### Edit-menu ODF commands
 
 The stock `editmenu.odf` and first category level remain unchanged. A category
@@ -128,6 +160,18 @@ one remains a native object-list leaf. Each visible page retains the native
 12-entry limit, recursive depth is capped at 32, cycles are rejected, and Back
 returns one level at a time. See
 [`modules/A2FOEditMenu/README.md`](modules/A2FOEditMenu/README.md).
+
+### Single-player mission selector
+
+`A2FOMissionSelector.dll` replaces the separate Single Player and fixed-row
+Mission Select dialogs with one scrollable campaign/mission browser. The four
+stock campaigns retain native availability, progression, filenames, and
+launch. Optional `mission_selector.ini` metadata supplies campaign text,
+mission descriptions/objectives, preview images, replacement BZNs, and
+additional custom campaign sections; missing metadata falls back safely to
+native filenames. Custom campaigns use static unlock policy until independent
+saveable progression is implemented. See
+[`modules/A2FOMissionSelector/README.md`](modules/A2FOMissionSelector/README.md).
 
 ### `RTS_CFG.h` cheat amounts
 
@@ -160,6 +204,71 @@ regeneration are not changed.
 See
 [modules/A2FOAlwaysShowShields/README.md](modules/A2FOAlwaysShowShields/README.md)
 for runtime ownership and inheritance details.
+
+### Faction-owned model textures and SOD nodes
+
+Faction ODFs can select a suffix for every owned ship/station model:
+
+```cpp
+factionTextureSuffix = "_k"
+```
+
+A mesh using `hull` then prefers `hull_k.dds`, falling back per mesh to
+`hull_k.tga` and finally its ordinary base/Borg texture. Capturing the unit
+changes the suffix to its new owner's faction on the next update. The same
+module shows a SOD node whose name matches the owning faction ODF's existing
+`name` value and hides nodes matching other loaded factions. Armada's native
+`borg` node remains authoritative. The module also lets native Borg `_b`
+alternates pass the model preflight when only the DDS exists. See
+[`modules/A2FOTextureVariants/README.md`](modules/A2FOTextureVariants/README.md).
+
+The same module can swap out a model part when a subsystem is destroyed:
+
+```cpp
+engineMesh1 = "nacelle_l"
+engineMesh1explosion = "xfirebsm"
+engineMesh2 = "nacelle_r"
+engineMesh2explosion = "xfirebsm"
+```
+
+It selects one valid numbered SOD node per destruction, hides it only on that
+craft, places the paired explosion at the node, emits localized native repair
+sparks while hitpoints rise, and restores the part when the subsystem is fully
+operational. `sensor`, `engine`, `weapon`, `lifeSupport`, and
+`shieldGenerator` are the supported command stems.
+
+### Weapon shield and hull damage controls
+
+Ordinary weapon ODFs can independently disable shield or hull damage:
+
+```cpp
+canDamageShields = true
+canDamageHull = true
+shieldDamageModifier = 1.0
+hullDamageModifier = 1.0
+```
+
+The booleans default to `true` and the modifiers default to `1.0`, leaving
+every existing weapon unchanged. `shieldDamageModifier` multiplies damage
+while shields absorb the hit; `hullDamageModifier` multiplies damage against
+exposed hull and shield-breaking spillover. Set
+only `canDamageHull = false` for a shield-only weapon: shields take their
+normal share and any spillover is discarded. Set only
+`canDamageShields = false` to make shields block the complete hit until they
+are down, after which the weapon can damage hull normally.
+Setting both to `false` suppresses the weapon's primary shield and hull damage.
+Both modifiers also accept Armada's `hitChance`/`damageBase` target-table form:
+
+```cpp
+shieldDamageModifier = 1.0 "fed_sovereign.odf" 0.5 "bcruise1.odf" 2.0
+hullDamageModifier = 1.0 "fed_sovereign.odf" 1.5 "bcruise1.odf" 0.25
+```
+
+The first value is the fallback and each quoted unit ODF/value pair overrides
+it when that unit class is the target.
+These commands belong in the general **weapon ODF**, not its ordnance ODF.
+See
+[`modules/A2FOWeaponDamageControls/README.md`](modules/A2FOWeaponDamageControls/README.md).
 
 ### Weapon fire arcs — read this first
 
@@ -211,6 +320,64 @@ The detailed guide includes orientation diagrams, upper/lower hemisphere
 examples, box-versus-cone corner behaviour, aliases, validation rules, runtime
 ordering, and technology-tree troubleshooting:
 [`modules/A2FOFireArcs/README.md`](modules/A2FOFireArcs/README.md).
+
+### Point-defense firing cycles
+
+`PointDefenseLaser` and `OrdnanceDefenseWeapon` weapon ODFs can use a
+contiguous numbered delay sequence:
+
+```cpp
+shotDelay0 = 0.1
+shotDelay1 = 0.1
+shotDelay2 = 2.0
+saveFireCyclePoint = 2
+shotCycleResetTime = 15.0
+```
+
+Each successful shot/interception advances once. The final entry loops to
+`saveFireCyclePoint`, and a ready weapon which remains idle for
+`shotCycleResetTime` returns to `shotDelay0`. Numbered delays override the
+ordinary `shotDelay`; without `shotDelay0`, the module enforces unnumbered
+`shotDelay` as a single-delay cycle. For `PointDefenseLaser`, this replaces
+Roots' late Jan_B timer check with a pre-fire countdown gate. Targeting,
+interception, hit chance, attack behavior, and native reload modifiers are
+unchanged. See
+[`modules/A2FOPointDefenseCycles/README.md`](modules/A2FOPointDefenseCycles/README.md)
+for validation, save/load, and runtime details.
+
+### Dynamic ambient swarms
+
+Any rendered `GameObject` ODF can define one or more independent groups of
+lightweight visual traffic:
+
+```cpp
+swarm0 = "fbee"
+swarm0Count = 10
+swarm0Radius = 50.0
+swarm0Hardpoint = "dock01" "dock02"
+swarm0Interaction = "hp01" "hp02"
+swarm0InteractionTime = 3.0
+```
+
+Each member is a native shared-model instance plus host-local movement state,
+not a ship or map unit. It has no AI, weapons, selection, collision, physics,
+commands, or save record. Routes, speeds, interaction visits, dwell periods,
+and occasional returns are randomized per member. Lightweight swept sphere
+avoidance keeps the visuals outside the host mesh, while local separation keeps
+members from clumping at shared destinations, without making them physics
+objects. Multiple numbered swarm definitions, moving hosts, hardpoint lists,
+and automatic reconstruction after load are supported. See
+[`modules/A2FOSwarmSystem/README.md`](modules/A2FOSwarmSystem/README.md) for the
+complete command table, limits, lifecycle, and runtime boundary.
+
+### Animated hardpoints
+
+`A2FOAnimatedHardpoints` makes existing SOD matrix channels affect gameplay
+hardpoint positions and transforms. It requires no ODF command: animate the
+null node normally in the model. A hardpoint also follows matrix animation on
+any ancestor in its SOD hierarchy. See
+[`modules/A2FOAnimatedHardpoints/README.md`](modules/A2FOAnimatedHardpoints/README.md)
+for the runtime boundary and compatibility details.
 
 For visual authoring, the cross-platform
 [`A2FO Arc Lab`](tools/A2FOArcLab/README.md) debug tool loads the ship ODF and
@@ -384,22 +551,36 @@ signature, helper/global RVAs, startup-loader provenance, and object-layout
 offsets—is in [`docs/addresses.md`](docs/addresses.md).
 The two optional Fleet Ops mod-information fields are documented in
 [`docs/fleetops-info-defaults.md`](docs/fleetops-info-defaults.md).
+The complete modder command and feature index is in
+[`docs/modder-command-reference.md`](docs/modder-command-reference.md).
 Legacy texture-folder activation and precedence are documented in
 [`modules/A2FORGBTextures/README.md`](modules/A2FORGBTextures/README.md).
+Faction-owned model texture suffixes, Race-name SOD nodes, and the Borg DDS
+alternate repair are documented in
+[`modules/A2FOTextureVariants/README.md`](modules/A2FOTextureVariants/README.md).
 Captain/registry ODF lists and GUI fields are documented in
 [`modules/A2FOCraftIdentity/README.md`](modules/A2FOCraftIdentity/README.md).
 Persistent shield visibility is documented in
 [modules/A2FOAlwaysShowShields/README.md](modules/A2FOAlwaysShowShields/README.md).
 Recursive editor-menu ODF nesting is documented in
 [`modules/A2FOEditMenu/README.md`](modules/A2FOEditMenu/README.md).
+The combined campaign and mission browser is documented in
+[`modules/A2FOMissionSelector/README.md`](modules/A2FOMissionSelector/README.md).
 Three-dimensional weapon firing volumes are documented in
 [`modules/A2FOFireArcs/README.md`](modules/A2FOFireArcs/README.md).
+Independent weapon shield/hull damage controls are documented in
+[`modules/A2FOWeaponDamageControls/README.md`](modules/A2FOWeaponDamageControls/README.md).
 Normal-weapon technology-tree enforcement is documented in
 [`modules/A2FONormalWeaponTech/README.md`](modules/A2FONormalWeaponTech/README.md).
+Point-defense numbered shot-delay cycles are documented in
+[`modules/A2FOPointDefenseCycles/README.md`](modules/A2FOPointDefenseCycles/README.md).
+Dynamic render-only ambient swarms are documented in
+[`modules/A2FOSwarmSystem/README.md`](modules/A2FOSwarmSystem/README.md).
 Indexed hull-turret ODF commands and validation status are documented in
 [`modules/A2FOTurrets/README.md`](modules/A2FOTurrets/README.md).
-DX8 per-pixel lighting, subsystem emissive ODF commands, installation, and
-current shader limitations are documented in
+DX8 per-pixel lighting, subsystem emissive commands, damage decals, selected
+`logoFileNames` hull-name decals, installation, and current shader limitations
+are documented in
 [`modules/A2FONebulaRenderer/README.md`](modules/A2FONebulaRenderer/README.md).
 Armada 1 parent-mod scope and installation are documented in
 [`docs/a1-compatibility.md`](docs/a1-compatibility.md).
@@ -415,17 +596,24 @@ Armada II/
 ├── Win2kDisableTaskSwitch.original.dll
 ├── modules/
 │   ├── A2FOAlwaysShowShields.dll
+│   ├── A2FOAnimatedHardpoints.dll
 │   ├── A2FOCheats.dll
 │   ├── A2FOCraftIdentity.dll
 │   ├── A2FOEditMenu.dll
+│   ├── A2FOMissionSelector.dll
 │   ├── A2FOFireArcs.dll
 │   ├── A2FOFeaturePack.dll
 │   ├── A2FOHybridBuild.dll
 │   ├── A2FOInfoIni.dll
 │   ├── A2FONebulaRenderer.dll
 │   ├── A2FONormalWeaponTech.dll
+│   ├── A2FOPointDefenseCycles.dll
 │   ├── A2FORGBTextures.dll
-│   └── A2FOTurrets.dll
+│   ├── A2FOSwarmSystem.dll
+│   ├── A2FOTextureVariants.dll
+│   ├── A2FOTurrets.dll
+│   ├── A2FOWeaponDamageControls.dll
+│   └── A1Compat.dll
 ├── Shaders/
 │   └── dx8/
 │       ├── pixel/
@@ -475,23 +663,29 @@ Outputs:
 build/A2FOExtensions.dll
 build/Win2kDisableTaskSwitch.dll
 build/modules/A2FOAlwaysShowShields.dll
+build/modules/A2FOAnimatedHardpoints.dll
+build/modules/A1Compat.dll
 build/modules/A2FOCheats.dll
 build/modules/A2FOFeaturePack.dll
 build/modules/A2FOHybridBuild.dll
 build/modules/A2FOInfoIni.dll
 build/modules/A2FOCraftIdentity.dll
 build/modules/A2FOEditMenu.dll
+build/modules/A2FOMissionSelector.dll
 build/modules/A2FOFireArcs.dll
 build/modules/A2FONebulaRenderer.dll
 build/modules/A2FONormalWeaponTech.dll
+build/modules/A2FOPointDefenseCycles.dll
 build/modules/A2FORGBTextures.dll
+build/modules/A2FOSwarmSystem.dll
+build/modules/A2FOTextureVariants.dll
 build/modules/A2FOTurrets.dll
+build/modules/A2FOWeaponDamageControls.dll
 build/Shaders/dx8/vertex/vs.nvv
 build/Shaders/dx8/vertex/vs_1.3.nvv
 build/Shaders/dx8/pixel/ps.nvv
 build/Shaders/dx8/pixel/ps_1.3.nvv
 build/licenses/armada-nebula-patch.txt
-build/sta1-classic/modules/A1Compat.dll
 ```
 
 Build the optional parent-mod package with `make sta1-classic` and inspect it

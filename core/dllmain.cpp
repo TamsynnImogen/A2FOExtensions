@@ -9,8 +9,10 @@
 #include "hook.hpp"
 #include "lua_host.hpp"
 #include "module_loader.hpp"
+#include "module_menu.hpp"
 #include "nebula_renderer.hpp"
 #include "../sdk/include/a2fo_module_api.h"
+#include "../sdk/include/a2fo_supported_armada.hpp"
 
 #include <windows.h>
 
@@ -34,8 +36,6 @@ namespace {
 //     convention: EAX/EDX/ECX before any stack arguments).
 // Every address below is an RVA from the supported module's load base, never a
 // process-global absolute address. docs/addresses.md records their provenance.
-constexpr std::uint32_t kArmadaTimestamp = 0x3c4c76bd;
-constexpr std::uint32_t kArmadaImageSize = 0x00403999;
 constexpr std::uint32_t kFleetOpsTimestamp = 0x51f6475c;
 constexpr std::uint32_t kFleetOpsImageSize = 0x00322000;
 
@@ -182,6 +182,7 @@ bool g_default_game_speed_hook_ready = false;
 bool g_runtime_game_speed_hook_ready = false;
 bool g_user_profile_game_speed_hook_ready = false;
 bool g_object_destroyed_hook_ready = false;
+bool g_module_menu_hook_ready = false;
 a2fo::InlineHook g_build_class_hook;
 a2fo::InlineHook g_dtor_hook;
 a2fo::InlineHook g_parameter_db_get_string_hook;
@@ -397,6 +398,47 @@ bool validate_module(HMODULE module, std::uint32_t timestamp,
         return false;
     }
     return true;
+}
+
+bool validate_armada_module(HMODULE module) {
+    constexpr const char* label = "ArmadaL.exe";
+    if (!module) {
+        log_line(std::string(label) + " is not loaded");
+        return false;
+    }
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) {
+        log_line(std::string(label) + " has no DOS header");
+        return false;
+    }
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(
+        reinterpret_cast<const std::uint8_t*>(module) + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE ||
+        nt->FileHeader.Machine != IMAGE_FILE_MACHINE_I386 ||
+        nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
+        log_line(std::string(label) + " has an unsupported PE header");
+        return false;
+    }
+
+    const auto identity = a2fo::supported_armada::identify(module);
+    if (identity == a2fo::supported_armada::Identity::canonical) {
+        return true;
+    }
+    if (identity == a2fo::supported_armada::Identity::normalized) {
+        log_line(
+            "ArmadaL.exe normalized PE header accepted "
+            "(supported on-disk read-only fingerprint matched)");
+        return true;
+    }
+
+    char message[256]{};
+    std::snprintf(message, sizeof(message),
+                  "%s version mismatch (timestamp=%08lx, image=%08lx)",
+                  label,
+                  static_cast<unsigned long>(nt->FileHeader.TimeDateStamp),
+                  static_cast<unsigned long>(nt->OptionalHeader.SizeOfImage));
+    log_line(message);
+    return false;
 }
 
 template <typename T = void>
@@ -2949,7 +2991,7 @@ DWORD WINAPI initialize(void*) {
             Sleep(10);
         }
     }
-    if (!validate_module(g_armada, kArmadaTimestamp, kArmadaImageSize, "ArmadaL.exe") ||
+    if (!validate_armada_module(g_armada) ||
         !validate_module(g_fleet_ops, kFleetOpsTimestamp, kFleetOpsImageSize,
                          "FleetOpsHook.dll")) {
         log_line("No hooks installed");
@@ -3032,6 +3074,11 @@ DWORD WINAPI initialize(void*) {
                " search roots");
       for (const std::string& root : g_extension_roots) {
           log_line("  extension root: " + root);
+      }
+
+      if (!g_module_menu_hook_ready && g_fleet_ops) {
+          g_module_menu_hook_ready = a2fo::install_module_menu(
+              g_fleet_ops, g_extension_roots.front(), &log_line);
       }
 
       // Modules may retain this pointer and the extension-root strings for
@@ -3262,8 +3309,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
         }
         InitializeCriticalSection(&g_state_lock);
         g_state_lock_ready = true;
-        if (validate_module(g_armada, kArmadaTimestamp, kArmadaImageSize,
-                            "ArmadaL.exe")) {
+        if (validate_armada_module(g_armada)) {
             g_evolver_hooks_ready = install_evolver_hooks();
             g_user_profile_game_speed_hook_ready =
                 install_user_profile_game_speed_hook();

@@ -23,7 +23,9 @@ A2FOArcLab.exe "C:\Games\Fleet Ops\Data\Mods\My Mod\odf\ships\myship.odf"
 ./A2FOArcLab "/games/Fleet Ops/Data/Mods/My Mod/odf/ships/myship.odf"
 ```
 
-The left panel selects a discovered weapon slot. The right panel provides:
+The left panel selects a discovered weapon slot. The right panel separates the
+Fire Arc, Damage Decal, and Ship Name Logo Decal editors into tabs. The Fire
+Arc tab provides:
 
 - all-hardpoints and single-hardpoint views;
 - previous/next hardpoint cycling (`[` and `]` also work);
@@ -34,12 +36,19 @@ The left panel selects a discovered weapon slot. The right panel provides:
   geometry;
 - copy and save actions for the generated weapon-ODF block.
 
-Right-drag orbits the camera, middle-drag pans, and the mouse wheel zooms.
+The viewport has Top, Bottom, Front, Back, Left, and Right model-relative view
+buttons, plus Fit. Right-drag orbits the camera, middle-drag pans, and the mouse
+wheel zooms.
 The coloured axes and orientation legend use the extension's convention:
 
 ```text
 +X = starboard/right   +Y = dorsal/up   +Z = forward
 ```
+
+Arc Lab maps that Armada RUF convention into the viewer as one coherent basis
+change. Meshes, node transforms, hardpoints, camera presets, and displayed arc
+directions therefore retain the same handedness; saved ODF angles remain in
+their native Armada convention and are never rewritten by the viewer.
 
 Fire-arc orientation is owner/ship-local, exactly as it is at runtime. Each
 linked hardpoint supplies the visual origin, but rotating a hardpoint in the
@@ -118,3 +127,19 @@ Arc Lab visualizes permission geometry; the game still applies weapon range,
 target validity, obstruction, technology, and other firing checks. SOD
 animations are deliberately not played, and the model renderer is intended for
 diagnostics rather than exact in-game lighting reproduction.
+Arc Lab also includes a mapped-decal placement panel. Damage mode accepts a
+subsystem or hull channel and an alpha texture. Ship-logo mode reads
+`possibleCraftNames` and `logoFileNames` from the loaded ODF, lets the author
+preview any aligned row, and exports `logoDecalX` placement commands without
+repeating the logo filenames. An optional suffix automatically selects split
+art such as `_upper`, `_lower`, or `_nacelle`. Both modes attach the preview to
+the selected hardpoint and share offset, rotation, and size controls.
+Ship-logo mode can also treat pure white as transparent, previews that colour
+key, and exports `logoDecalXColourKey = "255 255 255"`. The size controls now
+show each plane dimension as a percentage of the loaded model diameter, so
+camera zoom does not give a misleading impression of its in-game scale.
+
+Loose logo textures are previewed automatically. The in-game renderer can also
+reuse an unsuffixed logo already loaded from an FPQ, but Arc Lab does not yet
+decode packed FPQ textures for its preview; placement commands remain valid in
+that case.

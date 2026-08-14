@@ -163,8 +163,19 @@ system control or a timed-disable effect flickers irregularly on and off, with
 each ship/system using an independent 90 ms phase. A destroyed system—and a
 destroyed system still repairing below its full native hitpoint count—keeps its
 map off. A missing command adds nothing and preserves normal rendering.
-Composite textures are created lazily for only the active combinations actually
-encountered by each material and are cached afterward.
+
+Engine-map intensity also follows live movement. The authored RGB level is
+100%; warp emission rises to 125% in Fleet Operations' normal/gravity-well
+regime and to 200% only in the native steady at-warp state. While a ship is
+actually moving at impulse, impulse emission rises to 150% and warp emission
+retains its 125% gravity-well level. Warp-in and warp-out use the lower warp
+profile so the full change coincides with the engine's own at-warp state.
+Channels saturate at 255, so very bright source artwork may show most of the
+extra energy in the framebuffer halo rather than its already-white centre.
+
+Composite textures are created lazily for only the active subsystem and motion
+profiles actually encountered by each material and are cached afterward; no
+texture is rebuilt every frame.
 
 The shader makes these pixels self-lit and independent of map lighting. The
 runtime preserves that sharp material centre and also renders only the active
@@ -196,6 +207,102 @@ only captured geometry. The CPU-array layout remains captured immediately after
 its UP draw. The isolated fixed-function mask keeps a neutral stage 0 and
 samples the emissive map through stage 1, matching the visible emissive layer's
 proven UV route on classic mirrored meshes.
+
+## Subsystem and hull damage decals
+
+The same core DX8 render boundary can draw alpha-textured quads attached to
+SOD hardpoints. Each entry belongs to one native subsystem or to hull health
+and appears when its numbered damage interval has been crossed:
+
+```odf
+damageThreshold = 0.1
+
+// Optional authoring/debug mode: show every configured decal immediately.
+// Remove this (or set it to 0) for normal damage-threshold behaviour.
+damageDecalPreview = 1
+
+hullScorch1 = "scorch"
+hullScorch1Hardpoint = "hp06"
+hullScorch1Offset = "0.0 0.0 0.2"
+hullScorch1Rotation = "0.0 0.0 0.0"
+hullScorch1Size = "6.0 6.0"
+
+enginesScorch1 = "scorch_engine"
+enginesScorch1Hardpoint = "hp10"
+enginesScorch1Offset = "0.0 0.0 0.15"
+enginesScorch1Rotation = "0.0 0.0 0.0"
+enginesScorch1Size = "4.0 4.0"
+```
+
+Supported prefixes are `sensors`, `engines`, `weapons`, `lifeSupport`,
+`shieldGenerator`, and `hull`. Entry 1 appears at one threshold, entry 2 at
+two thresholds, and so on. Hull uses the live GameObject current/maximum health
+fields at `+0x15c/+0x160`; the other five use their native CraftSystem records.
+Decals are per-instance, depth-tested, alpha blended, and follow animated
+hardpoint transforms.
+
+`damageDecalPreview = 1` bypasses the health check while placing or diagnosing
+decals. It uses the exact same texture, hardpoint transform, and DX8 draw path
+as normal damage decals; set it back to `0` once placement is complete.
+
+For compatibility, a ship with only `scorchTextureX` and native
+`*TargetHardpoints` lists receives automatically generated entries. Explicit
+`<system>ScorchX...` placement commands take priority. A2FO Arc Lab includes a
+live decal placement panel and generates the explicit ODF block.
+
+## Selected ship-name logo decals
+
+Permanent mapped logo planes can follow Fleet Operations' selected ship-name
+row without repeating texture names in the ship ODF:
+
+```odf
+possibleCraftNames = "USS Enterprise" "USS Excelsior"
+logoFileNames = "logo_enterprise" "logo_excelsior"
+
+// Uses the selected logoFileNames entry exactly. Packed FPQ textures work.
+logoDecal1Hardpoint = "hp_name"
+logoDecal1Offset = "0.0 0.0 0.12"
+logoDecal1Rotation = "0.0 0.0 0.0"
+logoDecal1Size = "5.5 1.2"
+// Optional for legacy RGB artwork with an opaque white background.
+logoDecal1ColourKey = "255 255 255"
+// Optional when the mapped plane is viewed from its reverse-facing side.
+logoDecal1FlipU = 1
+
+// Optional split artwork: logo_enterprise_lower.dds, etc.
+logoDecal2Hardpoint = "hp_name_lower"
+logoDecal2Suffix = "_lower"
+logoDecal2Offset = "0.0 0.0 0.12"
+logoDecal2Rotation = "180.0 0.0 0.0"
+logoDecal2Size = "5.5 1.2"
+```
+
+`logoDecalX` is indexed from 1 through 64. The placement is permanent and the
+runtime reads the craft's native selected `possibleCraftNames` index every
+frame, so capture, save/load, and native name selection continue to choose the
+matching `logoFileNames` row.
+
+`ScaleSOD` is applied automatically to decal sizes and offsets, so Arc Lab's
+raw-SOD placement remains aligned with the scaled model rendered in game.
+`FlipU = 1` reverses the texture horizontally without changing the plane's
+position or rotation; this is useful when the exposed hull side is the back
+face of the mapped plane.
+
+With no `Suffix`, the renderer reuses Fleet Operations' already-loaded native
+logo texture and therefore supports both loose and packed assets. A suffix is
+inserted before an existing extension, or appended to an extensionless name:
+`name.tga` plus `_upper` becomes `name_upper.tga`; `name` becomes
+`name_upper`. Suffixed variants are resolved automatically as loose `.dds`,
+`.tga`, `.png`, or `.bmp` files in the normal texture roots. Separate
+placements can use `_upper`, `_lower`, `_nacelle_left`, and so on; the modder
+only supplies the suffix and transform, not a second row list.
+
+RGBA/32-bit TGA and DDS alpha is blended directly. `ColourKey` is optional and
+takes an RGB triplet from 0 through 255; matching pixels become transparent
+when a loose logo file is loaded. This is useful for older 24-bit name art,
+which has no alpha channel. Packed textures use Fleet Operations' existing
+native texture object and therefore need authored alpha rather than the loose-
+file colour-key conversion.
 
 ## Current shader limitations
 

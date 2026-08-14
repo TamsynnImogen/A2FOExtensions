@@ -1,4 +1,5 @@
 mod app;
+mod coordinate;
 mod fire_arc;
 mod odf;
 mod sod;
@@ -83,6 +84,10 @@ fn inspect_project(path: &Path) -> Result<()> {
             summary.hardpoint_count,
             summary.texture_names.len()
         );
+        println!(
+            "SOD bounds: center {:.3}, {:.3}, {:.3}; radius {:.3}",
+            summary.center.x, summary.center.y, summary.center.z, summary.radius
+        );
         let texture_roots = project.resources.texture_roots();
         for (name, resolved) in sod::resolve_texture_names(&summary.texture_names, &texture_roots) {
             if let Some(path) = resolved {
@@ -107,6 +112,16 @@ fn inspect_project(path: &Path) -> Result<()> {
                     println!(
                         "WARNING: weapon{} hardpoint '{}' is absent from the SOD",
                         weapon.slot, hardpoint
+                    );
+                } else if let Some((_, transform)) = summary
+                    .node_world_matrices
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case(hardpoint))
+                {
+                    let scale = transform.to_scale_rotation_translation().0;
+                    println!(
+                        "    hardpoint transform: {} scale {:.4}, {:.4}, {:.4}",
+                        hardpoint, scale.x, scale.y, scale.z
                     );
                 }
             }

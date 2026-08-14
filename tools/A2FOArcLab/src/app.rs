@@ -1,9 +1,13 @@
+use crate::coordinate::{armada_to_viewer_matrix, armada_to_viewer_vector, FORWARD, RIGHT, UP};
 use crate::fire_arc::{ArcConfig, ArcMode};
 use crate::odf::{load_project, ArcProject, WeaponSlot};
-use crate::sod::{spawn_sod, LoadedSod, SodNodeMarker};
+use crate::sod::{
+    load_texture_with_colour_key, resolve_texture_names, spawn_sod, LoadedSod, SodNodeMarker,
+};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::prelude::*;
+use bevy::render::mesh::VertexAttributeValues;
 use bevy_egui::{egui, EguiContexts, EguiPlugin};
 use rfd::FileDialog;
 use std::collections::HashSet;
@@ -29,10 +33,18 @@ impl Plugin for ArcLabPlugin {
             .init_resource::<CameraRequest>()
             .add_event::<LoadShipRequest>()
             .add_event::<LoadModelRequest>()
+            .add_event::<LoadDecalTextureRequest>()
             .add_systems(Startup, (setup_scene, open_initial_ship).chain())
             .add_systems(
                 Update,
-                (draw_ui, handle_ship_load, handle_model_load).chain(),
+                (
+                    draw_ui,
+                    handle_ship_load,
+                    handle_model_load,
+                    handle_decal_texture_load,
+                    update_decal_preview,
+                )
+                    .chain(),
             )
             .add_systems(
                 Update,
@@ -55,12 +67,104 @@ struct LoadShipRequest(PathBuf);
 #[derive(Event)]
 struct LoadModelRequest(PathBuf);
 
+#[derive(Event)]
+struct LoadDecalTextureRequest {
+    path: PathBuf,
+    colour_key: Option<[u8; 3]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DecalSystem {
+    Sensors,
+    Engines,
+    Weapons,
+    LifeSupport,
+    ShieldGenerator,
+    Hull,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DecalKind {
+    Damage,
+    ShipLogo,
+}
+
+impl DecalSystem {
+    const ALL: [Self; 6] = [
+        Self::Sensors,
+        Self::Engines,
+        Self::Weapons,
+        Self::LifeSupport,
+        Self::ShieldGenerator,
+        Self::Hull,
+    ];
+
+    fn command(self) -> &'static str {
+        match self {
+            Self::Sensors => "sensors",
+            Self::Engines => "engines",
+            Self::Weapons => "weapons",
+            Self::LifeSupport => "lifeSupport",
+            Self::ShieldGenerator => "shieldGenerator",
+            Self::Hull => "hull",
+        }
+    }
+}
+
+struct ConfiguredDecal {
+    system: DecalSystem,
+    index: usize,
+    hardpoint: String,
+    texture_path: Option<PathBuf>,
+    offset: Vec3,
+    rotation: Vec3,
+    size: Vec2,
+    damage_threshold: f32,
+}
+
+struct ConfiguredLogoDecal {
+    index: usize,
+    hardpoint: String,
+    suffix: String,
+    texture_path: Option<PathBuf>,
+    offset: Vec3,
+    rotation: Vec3,
+    size: Vec2,
+    white_transparent: bool,
+    flip_u: bool,
+}
+
+#[derive(Component)]
+struct DecalPreview;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CameraPreset {
-    Perspective,
-    Front,
-    Side,
     Top,
+    Bottom,
+    Front,
+    Back,
+    Left,
+    Right,
+}
+
+impl CameraPreset {
+    fn orbit_angles(self) -> (f32, f32) {
+        match self {
+            Self::Top => (0.0, 1.535),
+            Self::Bottom => (0.0, -1.535),
+            Self::Front => (0.0, 0.0),
+            Self::Back => (std::f32::consts::PI, 0.0),
+            Self::Left => (-FRAC_PI_2, 0.0),
+            Self::Right => (FRAC_PI_2, 0.0),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditorTab {
+    FireArcs,
+    DamageDecal,
+    ShipNameLogoDecal,
 }
 
 #[derive(Resource, Default)]
@@ -77,6 +181,7 @@ struct ArcLabState {
     show_all_hardpoints: bool,
     config: ArcConfig,
     dirty: bool,
+    editor_tab: EditorTab,
     status: String,
     error: Option<String>,
     loaded_model: Option<LoadedSod>,
@@ -84,6 +189,20 @@ struct ArcLabState {
     show_probe: bool,
     probe_yaw: f32,
     probe_pitch: f32,
+    decal_kind: DecalKind,
+    decal_system: DecalSystem,
+    decal_index: usize,
+    decal_hardpoint: String,
+    decal_texture: Option<PathBuf>,
+    decal_image: Option<Handle<Image>>,
+    decal_offset: Vec3,
+    decal_rotation: Vec3,
+    decal_size: Vec2,
+    damage_threshold: f32,
+    logo_suffix: String,
+    logo_sample_row: usize,
+    logo_white_transparent: bool,
+    logo_flip_u: bool,
 }
 
 impl Default for ArcLabState {
@@ -95,6 +214,7 @@ impl Default for ArcLabState {
             show_all_hardpoints: true,
             config: ArcConfig::default(),
             dirty: false,
+            editor_tab: EditorTab::FireArcs,
             status: "Open a ship or station ODF to begin.".to_string(),
             error: None,
             loaded_model: None,
@@ -102,6 +222,20 @@ impl Default for ArcLabState {
             show_probe: true,
             probe_yaw: 0.0,
             probe_pitch: 0.0,
+            decal_kind: DecalKind::Damage,
+            decal_system: DecalSystem::Hull,
+            decal_index: 1,
+            decal_hardpoint: "hp06".to_string(),
+            decal_texture: None,
+            decal_image: None,
+            decal_offset: Vec3::ZERO,
+            decal_rotation: Vec3::ZERO,
+            decal_size: Vec2::splat(6.0),
+            damage_threshold: 0.1,
+            logo_suffix: String::new(),
+            logo_sample_row: 0,
+            logo_white_transparent: false,
+            logo_flip_u: false,
         }
     }
 }
@@ -208,6 +342,7 @@ fn draw_ui(
     mut state: ResMut<ArcLabState>,
     mut load_ship: EventWriter<LoadShipRequest>,
     mut load_model: EventWriter<LoadModelRequest>,
+    mut load_decal_texture: EventWriter<LoadDecalTextureRequest>,
     mut camera_request: ResMut<CameraRequest>,
     nodes: Query<(&SodNodeMarker, &GlobalTransform)>,
     camera: Query<(&Camera, &GlobalTransform), With<OrbitCamera>>,
@@ -362,61 +497,43 @@ fn draw_ui(
         .resizable(true)
         .default_width(355.0)
         .show(context, |ui| {
-            ui.heading("Arc Editor");
-            let weapon = state.selected_weapon().cloned();
-            let Some(weapon) = weapon else {
-                ui.separator();
-                ui.label("Select a discovered weapon.");
-                return;
-            };
-
-            ui.strong(format!("weapon{} · {}", weapon.slot, weapon.display_name));
-            if let Some(path) = weapon.odf_path.as_ref() {
-                ui.small(path.display().to_string());
-            } else {
-                ui.colored_label(egui::Color32::LIGHT_RED, "Weapon ODF was not resolved");
-            }
-
-            ui.separator();
-            draw_hardpoint_controls(ui, &mut state, &weapon, &nodes);
-            ui.separator();
-            draw_arc_controls(ui, &mut state);
-            ui.separator();
-            draw_derived_coverage(ui, state.config);
-
-            if !weapon.arc.errors.is_empty() {
-                ui.separator();
-                ui.colored_label(egui::Color32::LIGHT_RED, "Current ODF arc is invalid:");
-                for error in &weapon.arc.errors {
-                    ui.colored_label(egui::Color32::LIGHT_RED, error);
-                }
-            } else if weapon.arc.config.is_none() {
-                ui.separator();
-                ui.colored_label(
-                    egui::Color32::YELLOW,
-                    "No custom fire arc is currently configured. Copying the block below opts this weapon in.",
+            ui.horizontal_wrapped(|ui| {
+                ui.selectable_value(&mut state.editor_tab, EditorTab::FireArcs, "Fire Arcs");
+                ui.selectable_value(
+                    &mut state.editor_tab,
+                    EditorTab::DamageDecal,
+                    "Damage Decal",
                 );
-            }
-
-            if !weapon.warnings.is_empty() {
-                ui.separator();
-                for warning in &weapon.warnings {
-                    ui.colored_label(egui::Color32::YELLOW, warning);
+                ui.selectable_value(
+                    &mut state.editor_tab,
+                    EditorTab::ShipNameLogoDecal,
+                    "Ship Name Logo Decal",
+                );
+            });
+            ui.separator();
+            egui::ScrollArea::vertical().show(ui, |ui| match state.editor_tab {
+                EditorTab::FireArcs => {
+                    draw_fire_arc_editor(ui, &mut state, &nodes);
                 }
-            }
-
-            if !weapon.arc.sources.is_empty() {
-                ui.collapsing("Resolved ODF sources", |ui| {
-                    for (command, path, line) in &weapon.arc.sources {
-                        ui.label(format!("{command}: {}:{line}", path.display()));
-                    }
-                });
-            }
-
-            ui.separator();
-            draw_probe_controls(ui, &mut state);
-            ui.separator();
-            draw_snippet_controls(ui, state.config);
+                EditorTab::DamageDecal => {
+                    draw_decal_controls(
+                        ui,
+                        &mut state,
+                        DecalKind::Damage,
+                        &nodes,
+                        &mut load_decal_texture,
+                    );
+                }
+                EditorTab::ShipNameLogoDecal => {
+                    draw_decal_controls(
+                        ui,
+                        &mut state,
+                        DecalKind::ShipLogo,
+                        &nodes,
+                        &mut load_decal_texture,
+                    );
+                }
+            });
         });
 
     egui::CentralPanel::default()
@@ -438,12 +555,14 @@ fn draw_ui(
                 egui::FontId::monospace(13.0),
                 egui::Color32::from_gray(175),
             );
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 for (label, preset) in [
-                    ("Perspective", CameraPreset::Perspective),
-                    ("Front", CameraPreset::Front),
-                    ("Side", CameraPreset::Side),
                     ("Top", CameraPreset::Top),
+                    ("Bottom", CameraPreset::Bottom),
+                    ("Front", CameraPreset::Front),
+                    ("Back", CameraPreset::Back),
+                    ("Left", CameraPreset::Left),
+                    ("Right", CameraPreset::Right),
                 ] {
                     if ui.button(label).clicked() {
                         camera_request.preset = Some(preset);
@@ -461,6 +580,68 @@ fn draw_ui(
         state.select_weapon(index);
     }
     draw_hardpoint_labels(context, &state, &nodes, &camera);
+}
+
+fn draw_fire_arc_editor(
+    ui: &mut egui::Ui,
+    state: &mut ArcLabState,
+    nodes: &Query<(&SodNodeMarker, &GlobalTransform)>,
+) {
+    ui.heading("Fire Arc Editor");
+    let weapon = state.selected_weapon().cloned();
+    let Some(weapon) = weapon else {
+        ui.separator();
+        ui.label("Select a discovered weapon.");
+        return;
+    };
+
+    ui.strong(format!("weapon{} · {}", weapon.slot, weapon.display_name));
+    if let Some(path) = weapon.odf_path.as_ref() {
+        ui.small(path.display().to_string());
+    } else {
+        ui.colored_label(egui::Color32::LIGHT_RED, "Weapon ODF was not resolved");
+    }
+
+    ui.separator();
+    draw_hardpoint_controls(ui, state, &weapon, nodes);
+    ui.separator();
+    draw_arc_controls(ui, state);
+    ui.separator();
+    draw_derived_coverage(ui, state.config);
+
+    if !weapon.arc.errors.is_empty() {
+        ui.separator();
+        ui.colored_label(egui::Color32::LIGHT_RED, "Current ODF arc is invalid:");
+        for error in &weapon.arc.errors {
+            ui.colored_label(egui::Color32::LIGHT_RED, error);
+        }
+    } else if weapon.arc.config.is_none() {
+        ui.separator();
+        ui.colored_label(
+            egui::Color32::YELLOW,
+            "No custom fire arc is currently configured. Copying the block below opts this weapon in.",
+        );
+    }
+
+    if !weapon.warnings.is_empty() {
+        ui.separator();
+        for warning in &weapon.warnings {
+            ui.colored_label(egui::Color32::YELLOW, warning);
+        }
+    }
+
+    if !weapon.arc.sources.is_empty() {
+        ui.collapsing("Resolved ODF sources", |ui| {
+            for (command, path, line) in &weapon.arc.sources {
+                ui.label(format!("{command}: {}:{line}", path.display()));
+            }
+        });
+    }
+
+    ui.separator();
+    draw_probe_controls(ui, state);
+    ui.separator();
+    draw_snippet_controls(ui, state.config);
 }
 
 fn draw_hardpoint_controls(
@@ -736,9 +917,268 @@ fn draw_snippet_controls(ui: &mut egui::Ui, config: ArcConfig) {
     });
 }
 
+fn draw_decal_controls(
+    ui: &mut egui::Ui,
+    state: &mut ArcLabState,
+    kind: DecalKind,
+    nodes: &Query<(&SodNodeMarker, &GlobalTransform)>,
+    load_texture_request: &mut EventWriter<LoadDecalTextureRequest>,
+) {
+    let previous_kind = state.decal_kind;
+    state.decal_kind = kind;
+    ui.heading(match kind {
+        DecalKind::Damage => "Damage Decal Placement",
+        DecalKind::ShipLogo => "Ship Name Logo Decal Placement",
+    });
+
+    let logo_names = state
+        .project
+        .as_ref()
+        .map(|project| project.ship.list("logoFileNames"))
+        .unwrap_or_default();
+    let craft_names = state
+        .project
+        .as_ref()
+        .map(|project| project.ship.list("possibleCraftNames"))
+        .unwrap_or_default();
+    let previous_logo_row = state.logo_sample_row;
+    let previous_logo_suffix = state.logo_suffix.clone();
+    let previous_logo_white_transparent = state.logo_white_transparent;
+    let previous_logo_flip_u = state.logo_flip_u;
+
+    match state.decal_kind {
+        DecalKind::Damage => {
+            ui.horizontal(|ui| {
+                ui.label("Damage channel");
+                egui::ComboBox::from_id_source("decal_system")
+                    .selected_text(state.decal_system.command())
+                    .show_ui(ui, |ui| {
+                        for system in DecalSystem::ALL {
+                            ui.selectable_value(&mut state.decal_system, system, system.command());
+                        }
+                    });
+            });
+            ui.horizontal(|ui| {
+                ui.label("Threshold step");
+                ui.add(egui::DragValue::new(&mut state.decal_index).clamp_range(1..=64));
+                ui.label("Damage interval");
+                ui.add(
+                    egui::DragValue::new(&mut state.damage_threshold)
+                        .speed(0.01)
+                        .clamp_range(0.01..=1.0),
+                );
+            });
+        }
+        DecalKind::ShipLogo => {
+            ui.horizontal(|ui| {
+                ui.label("Placement index");
+                ui.add(egui::DragValue::new(&mut state.decal_index).clamp_range(1..=64));
+                ui.label("Filename suffix");
+                ui.text_edit_singleline(&mut state.logo_suffix);
+            });
+            if logo_names.is_empty() {
+                ui.colored_label(
+                    egui::Color32::YELLOW,
+                    "The loaded ODF has no logoFileNames rows.",
+                );
+            } else {
+                state.logo_sample_row = state.logo_sample_row.min(logo_names.len() - 1);
+                let selected_label = craft_names
+                    .get(state.logo_sample_row)
+                    .filter(|name| !name.is_empty())
+                    .cloned()
+                    .unwrap_or_else(|| format!("Row {}", state.logo_sample_row + 1));
+                ui.horizontal(|ui| {
+                    ui.label("Preview row");
+                    egui::ComboBox::from_id_source("logo_sample_row")
+                        .selected_text(selected_label)
+                        .show_ui(ui, |ui| {
+                            for (row, logo_name) in logo_names.iter().enumerate() {
+                                let craft_name = craft_names
+                                    .get(row)
+                                    .filter(|name| !name.is_empty())
+                                    .map(String::as_str)
+                                    .unwrap_or("Unnamed craft");
+                                ui.selectable_value(
+                                    &mut state.logo_sample_row,
+                                    row,
+                                    format!("{}: {} → {}", row + 1, craft_name, logo_name),
+                                );
+                            }
+                        });
+                });
+                let selected_source =
+                    logo_name_with_suffix(&logo_names[state.logo_sample_row], &state.logo_suffix);
+                ui.small(format!("Automatic texture: {selected_source}"));
+            }
+            ui.checkbox(
+                &mut state.logo_white_transparent,
+                "Treat pure white as transparent",
+            );
+            ui.checkbox(&mut state.logo_flip_u, "Flip texture horizontally");
+        }
+    }
+    let mut hardpoints = nodes
+        .iter()
+        .filter(|(node, _)| crate::sod::is_hardpoint_name(&node.name))
+        .map(|(node, _)| node.name.clone())
+        .collect::<Vec<_>>();
+    hardpoints.sort_by_key(|value| value.to_ascii_lowercase());
+    ui.horizontal(|ui| {
+        ui.label("Hardpoint");
+        egui::ComboBox::from_id_source("decal_hardpoint")
+            .selected_text(&state.decal_hardpoint)
+            .show_ui(ui, |ui| {
+                for hardpoint in hardpoints {
+                    ui.selectable_value(&mut state.decal_hardpoint, hardpoint.clone(), hardpoint);
+                }
+            });
+    });
+    if state.decal_kind == DecalKind::Damage {
+        if previous_kind != state.decal_kind {
+            state.decal_texture = None;
+            state.decal_image = None;
+        }
+        ui.horizontal(|ui| {
+            if ui.button("Choose decal texture…").clicked() {
+                if let Some(path) = FileDialog::new()
+                    .add_filter("Decal image", &["dds", "tga", "png", "bmp"])
+                    .pick_file()
+                {
+                    load_texture_request.send(LoadDecalTextureRequest {
+                        path,
+                        colour_key: None,
+                    });
+                }
+            }
+            if let Some(path) = state.decal_texture.as_ref() {
+                ui.small(path.display().to_string());
+            }
+        });
+    } else if previous_kind != state.decal_kind
+        || previous_logo_row != state.logo_sample_row
+        || previous_logo_suffix != state.logo_suffix
+        || previous_logo_white_transparent != state.logo_white_transparent
+        || previous_logo_flip_u != state.logo_flip_u
+    {
+        state.decal_texture = None;
+        state.decal_image = None;
+        if let Some(path) = state.project.as_ref().and_then(|project| {
+            resolve_logo_preview_path(project, state.logo_sample_row, &state.logo_suffix)
+        }) {
+            load_texture_request.send(LoadDecalTextureRequest {
+                path,
+                colour_key: state.logo_white_transparent.then_some([255; 3]),
+            });
+        }
+    }
+    vector3_row(ui, "Offset", &mut state.decal_offset, 0.05, "");
+    vector3_row(ui, "Rotation", &mut state.decal_rotation, 1.0, "°");
+    ui.horizontal(|ui| {
+        ui.label("Size");
+        ui.add(egui::DragValue::new(&mut state.decal_size.x).speed(0.1));
+        ui.add(egui::DragValue::new(&mut state.decal_size.y).speed(0.1));
+    });
+    state.decal_size.x = state.decal_size.x.max(0.01);
+    state.decal_size.y = state.decal_size.y.max(0.01);
+    if let Some(model) = state
+        .loaded_model
+        .as_ref()
+        .filter(|model| model.radius > 0.0)
+    {
+        let diameter = model.radius * 2.0;
+        ui.small(format!(
+            "Plane size: {:.1}% × {:.1}% of the model diameter",
+            state.decal_size.x / diameter * 100.0,
+            state.decal_size.y / diameter * 100.0
+        ));
+    }
+
+    let snippet = match state.decal_kind {
+        DecalKind::Damage => {
+            let texture_name = state
+                .decal_texture
+                .as_ref()
+                .and_then(|path| path.file_stem())
+                .and_then(|name| name.to_str())
+                .unwrap_or("scorch");
+            let base = format!(
+                "{}Scorch{}",
+                state.decal_system.command(),
+                state.decal_index
+            );
+            format!(
+                "damageThreshold = {:.3}\n{} = \"{}\"\n{}Hardpoint = \"{}\"\n{}Offset = \"{:.3} {:.3} {:.3}\"\n{}Rotation = \"{:.3} {:.3} {:.3}\"\n{}Size = \"{:.3} {:.3}\"\n",
+                state.damage_threshold, base, texture_name, base,
+                state.decal_hardpoint, base, state.decal_offset.x,
+                state.decal_offset.y, state.decal_offset.z, base,
+                state.decal_rotation.x, state.decal_rotation.y,
+                state.decal_rotation.z, base, state.decal_size.x,
+                state.decal_size.y)
+        }
+        DecalKind::ShipLogo => {
+            let base = format!("logoDecal{}", state.decal_index);
+            let suffix = if state.logo_suffix.is_empty() {
+                String::new()
+            } else {
+                format!("{}Suffix = \"{}\"\n", base, state.logo_suffix)
+            };
+            let colour_key = if state.logo_white_transparent {
+                format!("{}ColourKey = \"255 255 255\"\n", base)
+            } else {
+                String::new()
+            };
+            let flip_u = if state.logo_flip_u {
+                format!("{}FlipU = 1\n", base)
+            } else {
+                String::new()
+            };
+            format!(
+                "{}Hardpoint = \"{}\"\n{}{}{}{}Offset = \"{:.3} {:.3} {:.3}\"\n{}Rotation = \"{:.3} {:.3} {:.3}\"\n{}Size = \"{:.3} {:.3}\"\n",
+                base, state.decal_hardpoint, suffix, colour_key, flip_u, base,
+                state.decal_offset.x, state.decal_offset.y,
+                state.decal_offset.z, base, state.decal_rotation.x,
+                state.decal_rotation.y, state.decal_rotation.z, base,
+                state.decal_size.x, state.decal_size.y)
+        }
+    };
+    let mut display = snippet.clone();
+    ui.add(
+        egui::TextEdit::multiline(&mut display)
+            .font(egui::TextStyle::Monospace)
+            .desired_width(f32::INFINITY)
+            .interactive(false),
+    );
+    if ui.button("Copy mapped-decal ODF block").clicked() {
+        ui.output_mut(|output| output.copied_text = snippet);
+    }
+}
+
+fn vector3_row(ui: &mut egui::Ui, label: &str, value: &mut Vec3, speed: f32, suffix: &str) {
+    ui.horizontal(|ui| {
+        ui.label(label);
+        ui.add(
+            egui::DragValue::new(&mut value.x)
+                .speed(speed)
+                .suffix(suffix),
+        );
+        ui.add(
+            egui::DragValue::new(&mut value.y)
+                .speed(speed)
+                .suffix(suffix),
+        );
+        ui.add(
+            egui::DragValue::new(&mut value.z)
+                .speed(speed)
+                .suffix(suffix),
+        );
+    });
+}
+
 fn handle_ship_load(
     mut requests: EventReader<LoadShipRequest>,
     mut model_requests: EventWriter<LoadModelRequest>,
+    mut decal_texture_requests: EventWriter<LoadDecalTextureRequest>,
     mut state: ResMut<ArcLabState>,
     mut commands: Commands,
 ) {
@@ -752,6 +1192,8 @@ fn handle_ship_load(
             Ok(project) => {
                 let model_path = project.model_path.clone();
                 let weapon_count = project.weapons.len();
+                let configured_decal = configured_decal(&project);
+                let configured_logo_decal = configured_logo_decal(&project);
                 state.project = Some(project);
                 state.selected_weapon = 0;
                 state.selected_hardpoint = 0;
@@ -763,6 +1205,43 @@ fn handle_ship_load(
                     .unwrap_or_default();
                 state.dirty = false;
                 state.status = format!("Resolved {weapon_count} weapon slot(s)");
+                if let Some(decal) = configured_logo_decal {
+                    state.decal_kind = DecalKind::ShipLogo;
+                    state.decal_index = decal.index;
+                    state.decal_hardpoint = decal.hardpoint;
+                    state.logo_suffix = decal.suffix;
+                    state.logo_sample_row = 0;
+                    state.logo_white_transparent = decal.white_transparent;
+                    state.logo_flip_u = decal.flip_u;
+                    state.decal_offset = decal.offset;
+                    state.decal_rotation = decal.rotation;
+                    state.decal_size = decal.size;
+                    state.decal_texture = None;
+                    state.decal_image = None;
+                    if let Some(path) = decal.texture_path {
+                        decal_texture_requests.send(LoadDecalTextureRequest {
+                            path,
+                            colour_key: decal.white_transparent.then_some([255; 3]),
+                        });
+                    }
+                } else if let Some(decal) = configured_decal {
+                    state.decal_kind = DecalKind::Damage;
+                    state.decal_system = decal.system;
+                    state.decal_index = decal.index;
+                    state.decal_hardpoint = decal.hardpoint;
+                    state.decal_offset = decal.offset;
+                    state.decal_rotation = decal.rotation;
+                    state.decal_size = decal.size;
+                    state.damage_threshold = decal.damage_threshold;
+                    state.decal_texture = None;
+                    state.decal_image = None;
+                    if let Some(path) = decal.texture_path {
+                        decal_texture_requests.send(LoadDecalTextureRequest {
+                            path,
+                            colour_key: None,
+                        });
+                    }
+                }
                 if let Some(path) = model_path {
                     model_requests.send(LoadModelRequest(path));
                 }
@@ -773,6 +1252,159 @@ fn handle_ship_load(
             }
         }
     }
+}
+
+fn configured_decal(project: &ArcProject) -> Option<ConfiguredDecal> {
+    let damage_threshold = project
+        .ship
+        .string("damageThreshold")
+        .and_then(|value| parse_scalar(&value))
+        .filter(|value| *value > 0.0 && *value <= 1.0)
+        .unwrap_or(0.1);
+    for system in DecalSystem::ALL {
+        for index in 1..=64 {
+            let base = format!("{}Scorch{index}", system.command());
+            let Some(texture_name) = project.ship.string(&base) else {
+                continue;
+            };
+            let hardpoint = project
+                .ship
+                .string(&format!("{base}Hardpoint"))
+                .unwrap_or_else(|| "hp01".to_string());
+            let offset = project
+                .ship
+                .string(&format!("{base}Offset"))
+                .and_then(|value| parse_vector3(&value))
+                .unwrap_or(Vec3::ZERO);
+            let rotation = project
+                .ship
+                .string(&format!("{base}Rotation"))
+                .and_then(|value| parse_vector3(&value))
+                .unwrap_or(Vec3::ZERO);
+            let size = project
+                .ship
+                .string(&format!("{base}Size"))
+                .and_then(|value| parse_vector2(&value))
+                .unwrap_or(Vec2::splat(6.0));
+            let texture_path =
+                resolve_texture_names(&[texture_name], &project.resources.texture_roots())
+                    .into_iter()
+                    .next()
+                    .and_then(|(_, path)| path);
+            return Some(ConfiguredDecal {
+                system,
+                index,
+                hardpoint,
+                texture_path,
+                offset,
+                rotation,
+                size,
+                damage_threshold,
+            });
+        }
+    }
+    None
+}
+
+fn configured_logo_decal(project: &ArcProject) -> Option<ConfiguredLogoDecal> {
+    for index in 1..=64 {
+        let base = format!("logoDecal{index}");
+        let Some(hardpoint) = project.ship.string(&format!("{base}Hardpoint")) else {
+            continue;
+        };
+        let suffix = project
+            .ship
+            .string(&format!("{base}Suffix"))
+            .unwrap_or_default();
+        let offset = project
+            .ship
+            .string(&format!("{base}Offset"))
+            .and_then(|value| parse_vector3(&value))
+            .unwrap_or(Vec3::ZERO);
+        let rotation = project
+            .ship
+            .string(&format!("{base}Rotation"))
+            .and_then(|value| parse_vector3(&value))
+            .unwrap_or(Vec3::ZERO);
+        let size = project
+            .ship
+            .string(&format!("{base}Size"))
+            .and_then(|value| parse_vector2(&value))
+            .unwrap_or(Vec2::splat(6.0));
+        let texture_path = resolve_logo_preview_path(project, 0, &suffix);
+        let white_transparent = project
+            .ship
+            .string(&format!("{base}ColourKey"))
+            .and_then(|value| parse_components::<3>(&value))
+            .is_some_and(|value| value.iter().all(|channel| (*channel - 255.0).abs() < 0.5));
+        let flip_u = project
+            .ship
+            .string(&format!("{base}FlipU"))
+            .and_then(|value| value.parse::<f32>().ok())
+            .is_some_and(|value| value != 0.0);
+        return Some(ConfiguredLogoDecal {
+            index,
+            hardpoint,
+            suffix,
+            texture_path,
+            offset,
+            rotation,
+            size,
+            white_transparent,
+            flip_u,
+        });
+    }
+    None
+}
+
+fn logo_name_with_suffix(source: &str, suffix: &str) -> String {
+    if suffix.is_empty() {
+        return source.to_string();
+    }
+    let slash = source.rfind(['\\', '/']);
+    let dot = source.rfind('.');
+    if let Some(dot) = dot.filter(|dot| slash.map_or(true, |slash| *dot > slash + 1)) {
+        let mut result = source.to_string();
+        result.insert_str(dot, suffix);
+        result
+    } else {
+        format!("{source}{suffix}")
+    }
+}
+
+fn resolve_logo_preview_path(project: &ArcProject, row: usize, suffix: &str) -> Option<PathBuf> {
+    let logo_name = project.ship.list("logoFileNames").get(row)?.clone();
+    let requested = logo_name_with_suffix(&logo_name, suffix);
+    resolve_texture_names(&[requested], &project.resources.texture_roots())
+        .into_iter()
+        .next()
+        .and_then(|(_, path)| path)
+}
+
+fn parse_scalar(value: &str) -> Option<f32> {
+    value
+        .trim()
+        .trim_end_matches(['f', 'F'])
+        .parse::<f32>()
+        .ok()
+        .filter(|value| value.is_finite())
+}
+
+fn parse_components<const N: usize>(value: &str) -> Option<[f32; N]> {
+    let components = value
+        .split(|character: char| character.is_whitespace() || character == ',')
+        .filter(|part| !part.is_empty())
+        .map(parse_scalar)
+        .collect::<Option<Vec<_>>>()?;
+    components.try_into().ok()
+}
+
+fn parse_vector3(value: &str) -> Option<Vec3> {
+    parse_components::<3>(value).map(Vec3::from_array)
+}
+
+fn parse_vector2(value: &str) -> Option<Vec2> {
+    parse_components::<2>(value).map(Vec2::from_array)
 }
 
 fn handle_model_load(
@@ -830,6 +1462,91 @@ fn handle_model_load(
     }
 }
 
+fn handle_decal_texture_load(
+    mut requests: EventReader<LoadDecalTextureRequest>,
+    mut state: ResMut<ArcLabState>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    for request in requests.read() {
+        match load_texture_with_colour_key(&request.path, &mut images, request.colour_key) {
+            Ok(image) => {
+                state.decal_texture = Some(request.path.clone());
+                state.decal_image = Some(image);
+                state.error = None;
+            }
+            Err(error) => {
+                state.error = Some(format!(
+                    "Could not load decal texture {}: {error:#}",
+                    request.path.display()
+                ))
+            }
+        }
+    }
+}
+
+fn update_decal_preview(
+    mut commands: Commands,
+    state: Res<ArcLabState>,
+    nodes: Query<(&SodNodeMarker, Entity)>,
+    previews: Query<Entity, With<DecalPreview>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    if !state.is_changed() {
+        return;
+    }
+    for entity in previews.iter() {
+        commands.entity(entity).despawn_recursive();
+    }
+    let Some(image) = state.decal_image.clone() else {
+        return;
+    };
+    let Some((_, hardpoint)) = nodes
+        .iter()
+        .find(|(node, _)| node.name.eq_ignore_ascii_case(&state.decal_hardpoint))
+    else {
+        return;
+    };
+    let mut preview_mesh = Mesh::from(Rectangle::new(state.decal_size.x, state.decal_size.y));
+    if state.decal_kind == DecalKind::ShipLogo && state.logo_flip_u {
+        if let Some(VertexAttributeValues::Float32x2(uvs)) =
+            preview_mesh.attribute_mut(Mesh::ATTRIBUTE_UV_0)
+        {
+            for uv in uvs {
+                uv[0] = 1.0 - uv[0];
+            }
+        }
+    }
+    let mesh = meshes.add(preview_mesh);
+    let material = materials.add(StandardMaterial {
+        base_color_texture: Some(image),
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        cull_mode: None,
+        ..default()
+    });
+    let armada_rotation = Mat4::from_quat(Quat::from_euler(
+        EulerRot::XYZ,
+        state.decal_rotation.x.to_radians(),
+        state.decal_rotation.y.to_radians(),
+        state.decal_rotation.z.to_radians(),
+    ));
+    let mut transform = Transform::from_matrix(armada_to_viewer_matrix(armada_rotation));
+    transform.translation = armada_to_viewer_vector(state.decal_offset);
+    commands.entity(hardpoint).with_children(|children| {
+        children.spawn((
+            PbrBundle {
+                mesh,
+                material,
+                transform,
+                ..default()
+            },
+            DecalPreview,
+            Name::new("Mapped decal preview"),
+        ));
+    });
+}
+
 fn orbit_camera(
     mut cameras: Query<(&mut Transform, &mut OrbitCamera)>,
     mut motions: EventReader<MouseMotion>,
@@ -868,24 +1585,7 @@ fn orbit_camera(
         orbit.radius = (radius * 2.6).max(1.0);
     }
     if let Some(preset) = request.preset.take() {
-        match preset {
-            CameraPreset::Perspective => {
-                orbit.yaw = 0.65;
-                orbit.pitch = 0.42;
-            }
-            CameraPreset::Front => {
-                orbit.yaw = 0.0;
-                orbit.pitch = 0.0;
-            }
-            CameraPreset::Side => {
-                orbit.yaw = FRAC_PI_2;
-                orbit.pitch = 0.0;
-            }
-            CameraPreset::Top => {
-                orbit.yaw = 0.0;
-                orbit.pitch = 1.535;
-            }
-        }
+        (orbit.yaw, orbit.pitch) = preset.orbit_angles();
     }
     apply_orbit_transform(&mut transform, &orbit);
 }
@@ -893,7 +1593,11 @@ fn orbit_camera(
 fn apply_orbit_transform(transform: &mut Transform, orbit: &OrbitCamera) {
     let (sin_yaw, cos_yaw) = orbit.yaw.sin_cos();
     let (sin_pitch, cos_pitch) = orbit.pitch.sin_cos();
-    let direction = Vec3::new(cos_pitch * sin_yaw, sin_pitch, cos_pitch * cos_yaw);
+    let direction = armada_to_viewer_vector(Vec3::new(
+        cos_pitch * sin_yaw,
+        sin_pitch,
+        cos_pitch * cos_yaw,
+    ));
     transform.translation = orbit.target + direction * orbit.radius;
     transform.look_at(orbit.target, Vec3::Y);
 }
@@ -932,9 +1636,9 @@ fn draw_reference_gizmos(state: Res<ArcLabState>, mut gizmos: Gizmos) {
         );
     }
     let axis = extent * 0.45;
-    gizmos.arrow(center, center + Vec3::X * axis, Color::RED);
-    gizmos.arrow(center, center + Vec3::Y * axis, Color::GREEN);
-    gizmos.arrow(center, center + Vec3::Z * axis, Color::BLUE);
+    gizmos.arrow(center, center + RIGHT * axis, Color::RED);
+    gizmos.arrow(center, center + UP * axis, Color::GREEN);
+    gizmos.arrow(center, center + FORWARD * axis, Color::BLUE);
 }
 
 fn draw_fire_arc_gizmos(
@@ -969,9 +1673,10 @@ fn draw_fire_arc_gizmos(
     }
 
     if state.show_probe {
-        let direction = direction_for(state.probe_yaw, state.probe_pitch);
+        let armada_direction = direction_for(state.probe_yaw, state.probe_pitch);
+        let direction = armada_to_viewer_vector(armada_direction);
         let target = model.center + direction * radius;
-        let allowed = state.config.allows_identity(direction.to_array());
+        let allowed = state.config.allows_identity(armada_direction.to_array());
         let color = if allowed {
             Color::LIME_GREEN
         } else {
@@ -989,7 +1694,7 @@ fn draw_fire_arc_gizmos(
 
 fn draw_arc_gizmo(gizmos: &mut Gizmos, origin: Vec3, radius: f32, config: ArcConfig, color: Color) {
     let config = config.normalized();
-    let centre = direction_for(config.yaw_degrees, config.pitch_degrees);
+    let centre = viewer_direction_for(config.yaw_degrees, config.pitch_degrees);
     gizmos.arrow(origin, origin + centre * radius * 0.92, color);
     match config.mode() {
         ArcMode::Box => draw_box_gizmo(gizmos, origin, radius, config, color),
@@ -1010,7 +1715,7 @@ fn draw_box_gizmo(gizmos: &mut Gizmos, origin: Vec3, radius: f32, config: ArcCon
         for yaw_index in 0..=yaw_steps {
             let yaw_fraction = yaw_index as f32 / yaw_steps as f32;
             let yaw = yaw_min + (yaw_max - yaw_min) * yaw_fraction;
-            let point = origin + direction_for(yaw, pitch) * radius;
+            let point = origin + viewer_direction_for(yaw, pitch) * radius;
             if let Some(previous) = previous {
                 gizmos.line(previous, point, color);
             }
@@ -1026,7 +1731,7 @@ fn draw_box_gizmo(gizmos: &mut Gizmos, origin: Vec3, radius: f32, config: ArcCon
         for pitch_index in 0..=pitch_steps {
             let pitch_fraction = pitch_index as f32 / pitch_steps as f32;
             let pitch = pitch_min + (pitch_max - pitch_min) * pitch_fraction;
-            let point = origin + direction_for(yaw, pitch) * radius;
+            let point = origin + viewer_direction_for(yaw, pitch) * radius;
             if let Some(previous) = previous {
                 gizmos.line(previous, point, color);
             }
@@ -1039,7 +1744,11 @@ fn draw_box_gizmo(gizmos: &mut Gizmos, origin: Vec3, radius: f32, config: ArcCon
         (yaw_max, pitch_min),
         (yaw_max, pitch_max),
     ] {
-        gizmos.line(origin, origin + direction_for(yaw, pitch) * radius, color);
+        gizmos.line(
+            origin,
+            origin + viewer_direction_for(yaw, pitch) * radius,
+            color,
+        );
     }
 }
 
@@ -1054,7 +1763,7 @@ fn draw_cone_gizmo(
         gizmos.sphere(origin, Quat::IDENTITY, radius, color);
         return;
     }
-    let centre = direction_for(config.yaw_degrees, config.pitch_degrees).normalize_or_zero();
+    let centre = viewer_direction_for(config.yaw_degrees, config.pitch_degrees).normalize_or_zero();
     let helper = if centre.dot(Vec3::Y).abs() > 0.98 {
         Vec3::X
     } else {
@@ -1159,6 +1868,10 @@ fn direction_for(yaw_degrees: f32, pitch_degrees: f32) -> Vec3 {
     Vec3::new(yaw.sin() * cos_pitch, pitch.sin(), yaw.cos() * cos_pitch)
 }
 
+fn viewer_direction_for(yaw_degrees: f32, pitch_degrees: f32) -> Vec3 {
+    armada_to_viewer_vector(direction_for(yaw_degrees, pitch_degrees))
+}
+
 fn box_preset(yaw: f32, pitch: f32, yaw_width: f32, pitch_width: f32) -> ArcConfig {
     let mut config = ArcConfig::default();
     config.yaw_degrees = yaw;
@@ -1175,4 +1888,57 @@ fn same_config(left: ArcConfig, right: ArcConfig) -> bool {
         && left.yaw_angle_degrees.to_bits() == right.yaw_angle_degrees.to_bits()
         && left.pitch_angle_degrees.to_bits() == right.pitch_angle_degrees.to_bits()
         && left.cone_angle_degrees.to_bits() == right.cone_angle_degrees.to_bits()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dll_and_viewer_directions_share_armada_angle_semantics() {
+        assert!(direction_for(0.0, 0.0).abs_diff_eq(Vec3::Z, 0.0001));
+        assert!(viewer_direction_for(0.0, 0.0).abs_diff_eq(FORWARD, 0.0001));
+        assert!(viewer_direction_for(90.0, 0.0).abs_diff_eq(RIGHT, 0.0001));
+        assert!(viewer_direction_for(0.0, 90.0).abs_diff_eq(UP, 0.0001));
+    }
+
+    #[test]
+    fn camera_face_presets_use_the_expected_model_relative_axes() {
+        for (preset, expected) in [
+            (CameraPreset::Top, UP),
+            (CameraPreset::Bottom, -UP),
+            (CameraPreset::Front, FORWARD),
+            (CameraPreset::Back, -FORWARD),
+            (CameraPreset::Left, -RIGHT),
+            (CameraPreset::Right, RIGHT),
+        ] {
+            let (yaw, pitch) = preset.orbit_angles();
+            let armada_direction = Vec3::new(
+                pitch.cos() * yaw.sin(),
+                pitch.sin(),
+                pitch.cos() * yaw.cos(),
+            );
+            let actual = armada_to_viewer_vector(armada_direction);
+            assert!(
+                actual.dot(expected) > 0.999,
+                "{preset:?} camera direction was {actual:?}, expected {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn logo_suffix_is_inserted_before_an_existing_extension() {
+        assert_eq!(
+            logo_name_with_suffix("logos\\enterprise.tga", "_upper"),
+            "logos\\enterprise_upper.tga"
+        );
+        assert_eq!(
+            logo_name_with_suffix("enterprise", "_lower"),
+            "enterprise_lower"
+        );
+        assert_eq!(
+            logo_name_with_suffix("enterprise.dds", ""),
+            "enterprise.dds"
+        );
+    }
 }

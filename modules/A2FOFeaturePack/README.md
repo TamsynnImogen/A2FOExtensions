@@ -8,7 +8,15 @@ features behind the core's versioned semantic dispatchers:
 - Ctrl+Alt continuous production, using synchronized build orders and a
   save/load marker.
 - bounded ship-system upgrade tiers selected by Lua;
-- `tier<Tier>BuildItem<Index>` parsing for upgrade stations.
+- `tier<Tier>BuildItem<Index>` parsing for upgrade stations;
+- automatic aspect-correct scaling of Fleet Operations' D3D9 intro, Armada's
+  GDI movie window, and Armada's menu/campaign texture movie path to the live
+  viewport.
+
+Movie scaling has no mod command. It activates with the feature pack and
+preserves each movie's aspect ratio while fitting and centring it in the
+current render/client area. Every path is signature checked independently;
+an unavailable path remains native and is reported in `A2FOExtensions.log`.
 
 The module owns the general Producer queue and ResearchStation class hooks used
 by continuous production and configurable upgrade pods. Those same sites are

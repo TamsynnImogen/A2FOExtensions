@@ -40,7 +40,10 @@ has ended.
 API v3 exposes the deterministic extension-root list through
 `extension_root_count()` and `extension_root(index)`. Roots are ordered from
 lowest to highest precedence: the shared Data folder, parent mods, then the
-selected mod. Native modules with the same basename follow that overlay order.
+selected mod. This root list remains available for asset and policy lookup,
+but native DLL discovery is deliberately restricted to `Data/modules`.
+Per-mod `info.ini` `[modules]` entries select those global DLLs; mod-local
+`modules` directories are ignored and cannot override executable code.
 
 API v4 adds startup-only semantic registration for classlabel aliases and the
 Evolver cocoon ODF command. The core retains the checked engine hooks while a

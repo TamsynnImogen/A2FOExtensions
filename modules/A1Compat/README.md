@@ -1,14 +1,29 @@
 # A1Compat native module
 
 `A1Compat.dll` owns Armada 1-specific compatibility policy for the
-`STA1 Classic` parent mod. It is packaged inside that mod's `modules` folder
-rather than the shared Data-level module folder, so it is discovered only when
-`STA1 Classic` or one of its child addons is active.
+`STA1 Classic` parent mod. The DLL is installed centrally in `Data/modules`
+and selected as a required module by that parent's `info.ini`. The parent and
+its children activate the policy through the separate marker described below;
+ordinary mods cannot inherit it accidentally.
 
 Initialization also requires `a1compat.ini` in one of the active extension
-roots. A misplaced global copy therefore rejects initialization rather than
-enabling A1 policy for unrelated mods. The marker is owned by the parent and is
+roots. Selecting the DLL for an unrelated mod therefore rejects initialization
+rather than enabling A1 policy. The marker is owned by the parent and is
 inherited automatically by its child addons.
+
+The marker may also contain one diagnostic setting:
+
+```ini
+[A1Compat]
+SafeMode = 0
+```
+
+`SafeMode` defaults to false and accepts `1/true/yes/on/enabled` or
+`0/false/no/off/disabled`, case-insensitively. When enabled, the module keeps
+the `wingman` alias, missing-only class defaults, and `Addon` overlay but does
+not install its riskier executable diagnostics or officer-quarter runtime
+hooks. This is intended for isolating a conversion-specific startup failure,
+not for ordinary play.
 
 The initial implementation registers the Armada 1 classlabel alias:
 
@@ -95,10 +110,10 @@ unchanged data or an offline converter. Shared facilities such as recursive ODF
 lookup and optional `Textures/RGB`, `Textures/Index8`, and
 `Textures/Compressed` loading remain in their general modules.
 
-Do not install `A1Compat.dll` globally. Ordinary FO4 and STA2 mods must remain
-unaffected when the `STA1 Classic` parent is absent.
+Install `A1Compat.dll` centrally, but select it only through the `STA1 Classic`
+parent's `[modules]` policy. Ordinary FO4 and STA2 mods remain unaffected when
+the marker is absent.
 
-Do not keep backup DLLs in an active mod's `modules` directory. The extension
-loader initializes every `.dll` it finds there; an older A1Compat backup can
-register the same policy first and cause the intended build to reject
-initialization. Store backups outside the active mod tree.
+Do not keep backup `.dll` files in `Data/modules`. They become separate
+installed module candidates and legacy load-all mods may initialize them.
+Store backups outside the game tree or give them a non-DLL extension.

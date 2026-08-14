@@ -6,14 +6,15 @@ Install this template as:
 Data/Mods/STA1 Classic/
 ```
 
-The first skeleton inherits `Fleet Ops 4.0` and supplies `A1Compat.dll`. It
+The first skeleton inherits `Fleet Ops 4.0` and requires the globally installed
+`A1Compat.dll` and `A2FORGBTextures.dll` modules. It
 does not yet contain the proprietary Armada 1 races or assets and is therefore
 not a playable Armada 1 conversion by itself.
 
-The development build stages the compatibility modules under:
+The development build stages the compatibility modules centrally under:
 
 ```text
-build/sta1-classic/modules/
+build/modules/
 ```
 
 It also supplies the four stock Armada 2 race CFG layouts in `misc`. Armada 1's
@@ -28,9 +29,6 @@ The intended installed layout is:
 STA1 Classic/
   info.ini
   a1compat.ini
-  modules/
-    A1Compat.dll
-    A2FORGBTextures.dll
   AI/
   bzn/
   misc/
@@ -42,6 +40,9 @@ STA1 Classic/
   textures/
 ```
 
+Mods do not ship or override native DLLs. The `[modules]` section in `info.ini`
+selects names from the installation's `Data/modules` directory.
+
 `A2FORGBTextures.dll` remains presence-based: it only redirects legacy TGA
 lookups when an active extension root contains `Textures/RGB`,
 `Textures/Index8`, or `Textures/Compressed`.
@@ -49,6 +50,10 @@ lookups when an active extension root contains `Textures/RGB`,
 `a1compat.ini` is the activation marker required by `A1Compat.dll`. Keep it in
 the parent root so child addons inherit the compatibility policy without
 shipping another DLL or marker.
+Its `[A1Compat] SafeMode` setting defaults to `0`. Set it to `1` only while
+isolating a compatibility-hook failure; the essential alias/default/overlay
+policy remains active, but runtime diagnostics and officer-quarter hooks are
+withheld.
 
 The Wingman compatibility alias also supplies the 13 stock defaults recorded
 in `odf/ships/a2craft.odf` when an object and all of its included parents omit

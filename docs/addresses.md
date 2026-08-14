@@ -33,9 +33,19 @@ targets.
 
 ## Supported binary identities
 
-The core rejects `ArmadaL.exe` or `FleetOpsHook.dll` unless their PE timestamp
-and `SizeOfImage` match. SHA-256 and file size identify the exact local
-reference binaries used for this audit; they are not currently runtime checks.
+The core rejects `FleetOpsHook.dll` unless its PE timestamp and `SizeOfImage`
+match. It accepts the canonical `ArmadaL.exe` identity below, plus the
+header-normalized form produced by ArmadaTextSave and related Fleet Ops tools.
+That form has a save-time timestamp which changes on every rewrite and a
+section-aligned `SizeOfImage` of `0x00404000`; the core therefore verifies its
+preferred base, entry point, section layout, and the supported on-disk `.rdata`
+fingerprint (`RVA 0x002ae000`, size `0x0003de90`, CRC-32 `0x8511f68c`). The
+on-disk bytes are used because Fleet Ops can modify the loaded read-only image
+before the extension core attaches. The same shared identity check is used by
+core renderer hooks and optional native modules which depend on Armada code.
+Every runtime patch still has its own exact instruction signature check.
+SHA-256 and file size identify the exact local reference binaries used for this
+audit; they are not otherwise runtime checks.
 
 | Image | PE timestamp | `SizeOfImage` | Preferred base | File size | Reference SHA-256 |
 | --- | ---: | ---: | ---: | ---: | --- |
@@ -107,10 +117,33 @@ Source: [`../core/dllmain.cpp`](../core/dllmain.cpp)
 | Fleet Ops | `0x13e744` | inline | 5 | `55 8b ec 6a 00` | `fo_settings_get_instance_hook`; apply/save the first-run `Settings.xml` speed |
 | Fleet Ops | `0x13e93c` | inline | 5 | `55 8b ec 51 53` | `game_configuration_new_hook`; initialize new configuration defaults |
 | Fleet Ops | `0x13ea8c` | inline | 5 | `55 8b ec 51 53` | `game_configuration_load_profile_hook`; preserve the configured runtime default across profile loading |
+| Fleet Ops | `0x1bf89c` | inline | 5 | `55 8b ec 33 c9` | `a2fo_mod_settings_form_show_bridge`; call the native `TModSettingsForm.FormShow`, then add the main-DLL-owned Modules button |
+| Fleet Ops | `0x1bef2c` | inline | 10 | `53 56 8b d8 8b b3 70 03 00 00` | `a2fo_mod_settings_launch_bridge`; validate required/rejected module policy before chaining `actLaunchNowExecute` |
 
 The object-destroyed pair at `0x0cd1f0` and `0x0c6ab0` is installed only when
 a native or Lua destroyed-object handler has registered. The other core sites
 are installed before class, ODF, settings, or profile loading as appropriate.
+
+The Mods-screen bridge additionally calls the read-only NextGrid row helper at
+FleetOpsHook RVA `0x0019f110`. Its synthetic first row stores a null data
+pointer to represent Data; real rows store `TModificationInfo*`. The supported
+`TModSettingsForm` layout places its HWND at `+0x1c4`, grid
+at `+0x370`, Launch button at `+0x39c`, and Visit Website button at `+0x3a0`;
+VCL `TControl` bounds are read from
+`+0x40/+0x44/+0x48/+0x4c`. The selected grid row's opaque data pointer is at
+`+0x08`; `TModificationInfo` stores the folder and title Delphi strings at
+`+0x0c` and `+0x10`. These offsets came from the public FleetOpsHook map,
+published-form RTTI, and disassembly of `ListMods`, `UpdateModSelection`, and
+`FormShow` for the validated binary identity above. `TJetButton` is a
+windowless VCL control and Fleet Operations repaints over ordinary native/GDI
+overlays. The integration therefore constructs a genuine form-owned
+`TJetButton` using its validated constructor at RVA `0x000dcb20`, attaches it
+through `TControl.SetParent` (`0x000c55f0`), sets its VCL bounds and caption,
+assigns the stock large-centred button images through
+`FODialogAssignButtonImagesLargeCenter` (`0x001784c0`, style `8`),
+and intercepts only `TJetButton.Click` at RVA `0x000dd260` to open the selector
+for that one object. This uses Fleet Operations' normal control renderer and
+event dispatch; it installs no input-device hook or capture.
 
 When the active extension-root chain contains `a1compat.ini`, `A1Compat.dll`
 transactionally registers `wingman -> craft` with the core-owned classlabel
@@ -176,6 +209,11 @@ object handle/class/name-index fields at offsets `+0x28`/`+0x40`/`+0x218`, and
 reads `InfoDisplay`'s selected craft and native captain text component at
 `+0x1e8` and `+0xbc`. The captain component's live LTRB rectangle at `+0x58`
 anchors both extension fields without reapplying the panel origin.
+Every output passed to that string-vector getter must use Armada's full
+16-byte layout: a four-byte allocator field followed by begin, end, and
+capacity pointers. A three-pointer/12-byte temporary corrupts the caller stack
+and reaches Armada's pointer-vector insertion at VA `0x00530106` with a null
+destination.
 
 `A2FOFireArcs.dll` owns the optional three-dimensional weapon-arc runtime:
 
@@ -232,6 +270,38 @@ the bounded visualization scale. Line directions retain the same owner matrix
 used by the firing gate while only their origins use each hardpoint's world
 translation.
 
+`A2FOWeaponDamageControls.dll` owns the two optional weapon damage-channel
+commands:
+
+| Image | RVA | Kind | Bytes | Expected bytes | Handler and purpose |
+| --- | ---: | --- | ---: | --- | --- |
+| Armada | `0x00264e30` | inline/JMP chain | 5/6 | stock `55 8b ec 6a ff`, Fleet Operations' checked `68 <handler> c3` to RVA `0x0010ef74`, or the live five-byte near jump into the already-loaded `A2FOFireArcs.dll` | `weapon_class_constructor_hook`; chain the completed WeaponClass constructor, read the two channel permissions through `ParameterDB::Get(bool)` and the two modifiers through Armada's native `ParameterDB::Get(cLookup)`, and retain explicit or inherited policies by WeaponClass pointer |
+| Armada | `0x000c4bb0` | inline | 6 | `55 8b ec 83 ec 10` | `craft_damage_hook`; identify the firing WeaponClass from the embedded ordnance DamageInfo, copy the 32-byte record, add only the requested native damage flags, and pass the private copy through the complete native Craft damage path |
+| Armada | `0x000c5f08` | JMP | 10 | `8b 43 04 c7 45 fc 00 00 00 00` | `a2fo_weapon_damage_hull_amount_bridge`; after native shield absorption/spillover resolution, multiply Craft::Damage's frame-local hull/system amount by the active per-hit hull correction, replay the displaced damage-type load and local initialization, then resume at RVA `0x000c5f12` |
+
+Armada stores the firing Weapon pointer at Ordnance `+0x38`, embeds its
+DamageInfo at `+0x3c`, and stores the WeaponClass pointer at Weapon `+0x04`.
+DamageInfo flags are a 32-bit field at `+0x14`: native bit `0x01` bypasses
+shield subtraction, while bit `0x80` zeros the later hull/system amount. When
+`canDamageShields` is false and Craft `+0x1c8` still holds positive shield
+strength, the module combines both bits so the shield blocks the complete hit
+without losing strength. Once the shield reaches zero, a hull-enabled weapon
+returns to the native hull path. The module only ORs flags, so an ordnance's
+existing `ignoreShield`/shield-only state cannot be cleared by a default-true
+command. The live `ParameterDB::Get(bool)` entry is Armada RVA `0x00134f50`.
+The modifiers use `ParameterDB::Get(cLookup)` at RVA `0x00135630`, with native
+`cLookup` construction/destruction/resolution at RVAs `0x0025cfb0`,
+`0x0025cfd0`, and `0x0025d170`. That is the same project-ID table mechanism
+used by stock `damageBase` and `hitChance`: the first number is the fallback,
+followed by quoted target ODF/value pairs. The target Craft's class is at
+`+0x40`, whose project-ID object pointer is at class `+0x1cc`. The outer hook
+scales the copied DamageInfo by the resolved shield modifier while shields are
+active, and the internal bridge corrects only any resolved spillover by
+`hull / shield`; exposed-hull hits are scaled directly by the resolved hull
+modifier. A zero shield modifier cannot produce spillover.
+Deterministic filename order ensures `A2FOFireArcs.dll` owns its constructor
+chain first when both modules are active.
+
 `A2FONormalWeaponTech.dll` installs no independent engine hook. A normal
 WeaponClass stores its own four-byte project-ID object pointer at `+0x208`,
 copied from `ParameterDB+0x34` by Armada's constructor in the same pattern as
@@ -245,6 +315,96 @@ RVA `0x00120680` (expected prefix
 fail-open/default-`0` path. `WeaponClass+0x1b4` identifies special weapons,
 which bypass this added filter because Fleet Operations already owns their
 technology behaviour.
+
+`A2FOPointDefenseCycles.dll` owns the optional numbered-delay runtime for the
+two point-defense classlabels:
+
+| Image | RVA | Kind | Bytes | Expected bytes | Handler and purpose |
+| --- | ---: | --- | ---: | --- | --- |
+| Armada | `0x0026c090` | inline | 5 | `55 8b ec 6a ff` | `point_defense_build_class_hook`; retain a validated `PointDefenseLaser` delay policy by the completed WeaponClass pointer |
+| FleetOpsHook | `0x001f8794` | inline | 6 | `55 8b ec 83 c4 f8` | `ordnance_defense_build_class_hook`; retain the matching `OrdnanceDefenseWeapon` policy without extending Fleet Operations' class layout |
+| Armada | `0x0026c180` | inline | 6 | `55 8b ec 83 ec 74` | `point_defense_simulate_hook`; update idle-reset state only when the pre-fire timer gate ran and no shot advanced the cycle |
+| Armada | `0x0026c1d7` | JMP | 5 | `e9 44 58 19 00` | `a2fo_point_defense_pdl_timer_gate_bridge`; replace Roots' late Jan_B timing cave entry with a pre-fire timer gate, continuing target search at RVA `0x0026c1dd` only when ready and otherwise leaving through RVA `0x0026c3c7` |
+| FleetOpsHook | `0x001f80cc` | inline | 9 | `55 8b ec 81 c4 54 ff ff ff` | `ordnance_defense_simulate_hook`; apply the same per-instance idle-reset rule around Fleet Operations' native interceptor loop |
+| Armada | `0x00270dd0` | inline | 5 | `55 8b ec 51 56` | `weapon_reset_shot_timer_hook`; supply one selected `PointDefenseLaser` delay only while native `Weapon::mResetShotTimer` applies the existing owner/reload modifiers |
+| FleetOpsHook | `0x00134ea4` | JMP | 25 | `8b 45 fc 89 c2 8b 52 04 d9 82 4c 02 00 00 d9 58 28 8b 55 e8 e9 31 35 0c 00` | `a2fo_point_defense_odw_delay_bridge`; replace only the successful `OrdnanceDefenseWeapon` class-delay assignment, then continue at RVA `0x001f83ee` with its weapon and candidate registers restored |
+| Armada | `0x0026ebc0` / `0x0026ec50` | inline | 5 each | `55 8b ec 53 56` | `weapon_load_hook` / `weapon_save_hook`; chain the complete native fields first, then restore/append the next cycle index and idle-reset remainder only for configured point-defense classes |
+| Armada | `0x0026eed0` | inline | 5 | `55 8b ec 6a ff` | `weapon_destructor_hook`; erase the instance sidecar before the common native Weapon destructor runs |
+
+All sites are preflighted before the first patch. Numeric commands are read
+through Armada `ParameterDB::GetFloat` at RVA `0x00134df0`, with
+`ParameterDB::GetString` at `0x00135350` distinguishing malformed/quoted
+values. Weapon stores its class pointer at `+0x04` and native shot timer at
+`+0x28`; WeaponClass stores unnumbered `shotDelay` at `+0x24c`. Save support
+uses Armada's ordinary `FileWriter` float/integer entries at RVAs
+`0x0012ee70`/`0x0012ee30` and matching `FileReader` entries at
+`0x0012efb0`/`0x0012ef70`. The FleetOpsHook RVAs include the PE `.text`
+section adjustment; their linker-map segment offsets are `0x1000` lower.
+Armada's base WeaponClass constructor does parse `shotDelay` into `+0x24c`,
+but stock PointDefenseLaser never consults its inherited timer. Roots' replaced
+branch at RVA `0x0026c1d7` entered a Jan_B cave which advanced the timer before
+search but deferred its readiness check until after a firing attempt. The new
+bridge retains direct scalar countdown and the successful-shot reset path, but
+moves readiness enforcement before target search. It deliberately avoids
+re-entering an engine timer routine from the already-active simulation frame.
+
+Cycle policy and operational details are in
+[`modules/A2FOPointDefenseCycles/README.md`](../modules/A2FOPointDefenseCycles/README.md).
+
+`A2FOSwarmSystem.dll` owns dynamic render-only ambient traffic. It uses the
+stock global `WorkerBee` colony only as a checked simulation/render frame
+boundary; its members are independent `ST3D_Instance` values and never enter
+Armada's `GameObject` list.
+
+| Image | RVA | Kind | Bytes | Expected bytes | Handler and purpose |
+| --- | ---: | --- | ---: | --- | --- |
+| Armada | `0x00067db0` | inline | 9 | `55 8b ec 81 ec 08 01 00 00` | `bee_colony_simulate_hook`; chain stock simulation, discover configured hosts, update host-local sidecars, and release absent hosts when `this` is the global worker-bee colony |
+| Armada | `0x000688a0` | inline | 8 | `55 8b ec 51 8b 01 53 56` | `bee_colony_render_hook`; chain stock rendering, apply each live host transform, reuse native bee visibility, and draw the retained visual instances |
+
+The module preflights every unshared native function it invokes before
+installing its first hook. The core has already signature-checked and detoured
+the two `ParameterDB::Get` entries by deferred-module load time, so the module
+accepts either their stock prefixes or the core's five-byte near jumps. Fleet
+Operations may likewise detour Armada's shared `operator delete`; the module
+requires its live entry to remain readable and uses it rather than bypassing
+the active memory manager.
+Principal read-only bindings are:
+
+| Binding | Armada RVA / layout | Expected prefix or role |
+| --- | ---: | --- |
+| global `WorkerBee` colony | `0x00336e48` | singleton identity used to reject the unrelated drone-colony passes |
+| `GameObject::objectList` pointer | `0x00361084` | MSVC list head at `+0x04`, count at `+0x08`, object in node `+0x08` |
+| `BeeColony::ShouldDrawBee` | `0x00068d50` | `55 8b ec 8b 45 08`; reads only the owner handle at synthetic Bee `+0xbc` before applying native visibility/spectator policy |
+| `GameObjectClass::GetHierarchyRoot` / `GetOdfName` | `0x000cd940` / `0x000ce370` | checked SOD-root and native ODF-name access |
+| `Entity::GetTransform` / `GetWorldTransform` | `0x000cfd50` / `0x000cff90` | checked host and hardpoint transforms |
+| `Entity::GetBoundingSphere` | `0x000cfd70` | `8b 41 04 83 c0 34 c3`; host-local centre/radius used for lightweight host-mesh exclusion |
+| `ST3D_Node::FindRecursive` | `0x00238780` | `55 8b ec 56 57`; named launch/interaction hardpoint resolution |
+| `ParameterDB` constructor / destructor | `0x00134160` / `0x001341d0` | reopen each distinct host ODF through the native VFS/include/parent-mod path |
+| `ParameterDB::Get(int/float/bool)` | `0x00134bf0` / `0x00134df0` / `0x00134f50` | native typed parsing for counts, movement values, and flags |
+| `ParameterDB::Get(char*)` / string vector | `0x00135350` / `0x00135e80` | model names and the engine's existing quoted ODF list semantics |
+| `ST3D_Instance` constructor / destructor | `0x0022e120` / `0x0022e1f0` | checked lifetime for the `0x84`-byte render-only instance |
+| `ST3D_Instance::SetAnimationFlags` / `TriggerAnimation` | `0x0022e290` / `0x0022ea90` | native worker-bee-compatible animation initialization; static SODs are unaffected |
+| `ST3D_Instance::ScaleGeometry` / `SetTransform` | `0x0022e2c0` / `0x0022e330` | per-definition scale and per-frame world transform |
+| `ST3D_Instance::Render` / `SetDatabase` | `0x0022e750` / `0x0022eed0` | native shared-model render and SOD/database selection |
+| engine `operator delete` | `0x002527d0` | release strings allocated by native vector parsing |
+
+The `ST3D_Instance` linker-map segment offsets are `0x1000` below these PE
+RVAs; the table deliberately records executable RVAs. Host identity uses
+`GameObject+0x28`, expiration uses `+0x27`, and the shared class pointer uses
+`+0x40`. The instance's logical/visible database pointers are `+0x7c/+0x80`.
+Positions and targets remain host-local; interaction hardpoints are converted
+back from their live world transforms on each approach/dwell update. Armada's
+existing host sphere plus each visual instance's scaled sphere provides a
+conservative exclusion boundary; swept movement is projected and redirected
+tangentially on contact without enabling physics or collision. Bounded
+sidecar-only pair relaxation prevents same-definition members from clumping,
+including while dwelling at a shared hardpoint. Per-hardpoint sidecar
+reservations cap concurrent approach/dwell traffic, and each visit must be
+followed by a roaming leg. Save files contain no swarm records, so normal host
+restoration reconstructs the ODF-defined visuals deterministically.
+
+Configuration, caps, and lifecycle details are in
+[`modules/A2FOSwarmSystem/README.md`](../modules/A2FOSwarmSystem/README.md).
 
 `A2FOEditMenu.dll` owns recursive `buildItemX` navigation in Armada's map
 editor:
@@ -267,6 +427,31 @@ entry requires its exact stock signature; the public resolver and allocator
 entries need to remain readable because Fleet Operations may already detour
 them to its active object database or memory manager. Parser and runtime details are in
 [`modules/A2FOEditMenu/README.md`](../modules/A2FOEditMenu/README.md).
+
+`A2FOMissionSelector.dll` owns the single-player shell replacement:
+
+| Image | RVA | Kind | Bytes | Expected bytes | Handler and purpose |
+| --- | ---: | --- | ---: | --- | --- |
+| Armada | `0x001dbd90` | inline | 6 | `8b 0d 08 d5 7a 00` | `do_single_hook`; open the combined campaign/mission browser, falling through its gateway to the complete native Single Player dialog if catalog or dialog creation fails |
+| Armada | `0x001d6d50` | inline | 6 | `55 8b ec 8b 45 08` | `do_mission_select_hook`; normally retain the native Mission Select dialog, but accept exactly one preselected mission while the replacement invokes native `SetupMission` |
+
+The module validates native `SetupMission(HWND, int&)` at Armada RVA
+`0x001dcc00` (`55 8b ec 6a ff 68`) before installing either hook. It validates
+and calls `CampaignAvailable(int)` at RVA `0x001dbd60`
+(`55 8b ec 8b 45 08`), reads the current campaign at
+`0x003a89a4`, selected mission byte at `0x003a89ac`, campaign progress bytes at
+`0x003a89ad`, tutorial count at `0x003a89b5`, and the four-by-ten mission
+filename pointer table at `0x003a8afc`. Back restores the stock main-menu shell
+state (`1`) at `0x003a8980` before ending the modal dialog, matching the native
+Single Player dialog's exit path. Start writes only the two native
+selection globals, arms the one-shot acceptance bridge, and enters
+`SetupMission`; Armada still chooses the mission filename, switches game
+state, and closes the modal dialog. For an INI-defined custom BZN, the module
+temporarily replaces exactly one checked cell in that table with the selected
+filename, calls `SetupMission`, and restores the original pointer before
+returning to its dialog procedure. It never expands or indexes past the native
+four-by-ten allocation. Details and metadata precedence are in
+[`modules/A2FOMissionSelector/README.md`](../modules/A2FOMissionSelector/README.md).
 
 `A2FOTurrets.dll` owns the global indexed linked-turret runtime:
 
@@ -697,6 +882,92 @@ has failed and Armada has constructed its normal root-level TGA path.
 | Armada | `0x32d178` | original NUL-terminated `Textures\RGB\` buffer; accepted after Fleet Ops rewrites it to the exact `Textures\` form |
 | Armada | `0x3b7f8c` | imported `fopen` slot; must equal the resolved `msvcrt!fopen` export before the pointer write |
 
+### Ownership-aware texture and node variants
+
+Source: [`../modules/A2FOTextureVariants/module.cpp`](../modules/A2FOTextureVariants/module.cpp)
+
+The Borg repair replaces only the TGA-only preflight CALL. It invokes the
+original generator first and accepts a matching DDS only when that native test
+fails. The faction route captures `factionTextureSuffix` and the existing Race
+ODF `name` while Fleet Operations' Race `ParameterDB` is still alive, follows
+each `CraftInstance`'s live owning Race, and replaces the existing render-time
+Borg swap CALL. Its wrapper always invokes native
+`CraftClass::SetBorgMeshTextures` first, retaining Fleet Operations' Jan_B
+diffuse/bump patch inside that routine.
+
+When `A2FOCraftIdentity.dll` is active, the subsystem-damage route receives
+completed CraftClass/ParameterDB pairs through its cooperative observer and
+adds no constructor patch. If CraftIdentity is not selected for a mod,
+TextureVariants instead chains only the validated stock/Fleet Ops CraftClass
+constructor boundary at Armada RVA `0x0bf090` (the Fleet Ops handler is RVA
+`0x10d6e4`). The Fleet Ops update callback observes live CraftSystem
+transitions and the per-craft render wrapper applies the selected hidden node
+and every descendant immediately before that individual shared SOD renders,
+then restores the shared hierarchy after the draw returns.
+
+| Image | RVA | Role and validation |
+| --- | ---: | --- |
+| Armada | `0x23307e` | Borg alternate call to `GenerateTextureFilename`; patched CALL, checked bytes `e8 3d f3 00 00` |
+| Armada | `0x2423c0` | original TGA filename generator; dependency bytes `55 8b ec 51 53 56 57` |
+| Armada | `0x2400d0` | `ST3D_FileStream::FileExists`; used for the same `Textures\\*.dds`/`.tga` probes as the Fleet Ops texture enhancement and allowed to be owned by the RGB bridge |
+| Armada | `0x0cb2ab` | `CraftInstance::RenderInternal` call to `SetBorgMeshTextures`; patched CALL, checked bytes `e8 c0 48 ff ff` |
+| Armada | `0x0cb2b0` | native post-CALL `borg` node selector; retained unchanged and executes after the wrapper returns |
+| Armada | `0x0cb318` | final `CraftInstance` render CALL after native damage/`borg` node selection; patched CALL, checked bytes `e8 93 a6 00 00`; scopes the missing-subtree flags and root repair scale to one draw |
+| Armada | `0x0d59b0` | original `CraftInstance` render routine reached by the scoped wrapper; dependency bytes `55 8b ec 51 8b 81` |
+| Armada | `0x0bfb70` | native/Jan_B `CraftClass::SetBorgMeshTextures`; dependency bytes `55 8b ec 56 57` |
+| Armada | `0x231380` | `ST3D_Mesh::GetTexture`; dependency bytes `55 8b ec 8b 45 08 8b` |
+| Armada | `0x2313b0` | `ST3D_Mesh::SetTexture`; diffuse-slot writer, dependency bytes `55 8b ec 83 ec 10 53` |
+| Armada | `0x242870` | `ST3D_Texture::Find`; variant allocation/cache route, dependency bytes `55 8b ec 64 a1 00` |
+| Armada | `0x135200` | `ParameterDB::GetProjectId`; resolves each optional `<subsystem>MeshXexplosion`, dependency bytes `55 8b ec 81 ec 40 01 00 00` |
+| Armada | `0x064ce0` | `ExplosionClass::Find`; resolves the configured cPrjID, dependency bytes `55 8b ec 6a ff 68 f8 af 69`; returned class virtual slot `+0x08` builds the correct derived explosion |
+| Armada | `0x0cfd50` | `Entity::GetTransform`; converts sampled repair positions back into the owning craft's local coordinates, dependency bytes `8b 41 04 83 c0 44 c3` |
+| Armada | `0x0cff90` | `Entity::GetWorldTransform`; supplies the selected SOD node's 48-byte world Matrix34, dependency bytes `55 8b ec 8b 45 0c 8b 49 04` |
+| Armada | `0x0cfd70` | `Entity::GetPhysicalDimensions`; supplies the craft radius used to scale repair sparks, dependency bytes `8b 41 04 83 c0 34` |
+| Armada | `0x0733c0` | `NodeParticleEffect::AddParticle`; attaches stock `xspark` to the selected missing node, dependency bytes `55 8b ec 83 ec 34` |
+| Armada | `0x0734c0` | position overload of `NodeParticleEffect::AddParticle`; emits moving stock `xspark` welding effects at deterministic mesh-surface samples, dependency bytes `55 8b ec 83 ec 34` |
+| Fleet Ops | `0x10b98b` | Race-load `ParameterDB` destructor CALL; patched after exact bytes `e8 98 72 0d 00`, with Race in EBX and `ParameterDB` in EAX |
+| Fleet Ops | `0x1e2c28` | original Delphi `TParameterDB.Destruct` wrapper; dependency bytes `55 8b ec 51 89 45 fc` |
+| Fleet Ops | `0x1fb250` | `CraftInstance_Update_Callback`; seven-byte checked inline hook `55 8b ec 51 53 56 57` whose gateway preserves the complete Fleet Ops callback |
+
+The supported object layout reads `GameObject+0xfc` for the live owning Race,
+matching Armada's native Borg update. `CraftClass+0x1d8` owns the geometry;
+its first Storm3D node is at geometry `+0x3c`. Nodes link siblings/children at
+`+0x1c/+0x20`, store their name pointer at `+0x08`, and store render flags at
+`+0xbc`. Like the native `borg` route, custom faction nodes clear flag bits 0
+and 1 for the matching owner and set both for other loaded races; all other
+bits are preserved. Descendants inherit the parent node state. The native
+`borg` node is excluded from the custom selector. Mesh Borg alternates are at
+`+0x13c`. Cached original `ST3D_Texture` database/name/flags fields are
+`+0x04/+0x08/+0x18`.
+
+Subsystem entries additionally enumerate the configured node's complete
+child hierarchy through `+0x20`, following `+0x1c` only within each direct
+child list so unrelated siblings cannot be captured. While the part is
+missing, bits 0 and 1 are set on the root and every descendant. During repair,
+the root may render at its eased scale but every descendant remains hidden
+until completion. Applying this after native damage/`borg` selection prevents
+either native branch from revealing an attachment in empty space. Exact
+pre-draw flags and scales are restored after each draw because the model is
+shared between every instance of its CraftClass.
+
+Subsystem runtime state uses `Craft+0x1e0`, a pointer to five 0x30-byte
+CraftSystem records ordered sensors, engines, weapons, life support, and
+shield generator. Each record exposes operational/forced-disabled bytes at
+`+0x00/+0x01`, maximum hitpoints at `+0x04`, current hitpoints as a double at
+`+0x18`, and temporary disable time at `+0x28`. `GameObject+0x28/+0x40`
+provide the stable handle and CraftClass. Timed/forced disables do not select
+a part; a genuinely destroyed system does. Increasing hitpoints drive repair
+sparks and eased mesh reconstruction; the operational byte completes and
+releases the visual state. Initially destroyed systems hide a deterministic
+part without a false load-time explosion.
+For resolved mesh nodes, the ordinary uniform scale at `ST3D_Node+0x54` is
+retained and multiplied by eased subsystem repair progress immediately before
+that craft renders. The mesh/MRM virtual type is `1`/`9`, with its calculated
+local bounding minimum and maximum at `+0xe4/+0xf0`; deterministic points on
+that surface are transformed node-local to world and then back to craft-local
+for the position-particle overload. Group nodes keep their original scale and
+use the node-bound fallback.
+
 The crash that motivated the retry follows this read-only Armada call chain:
 
 | RVA | Role |
@@ -727,6 +998,22 @@ Source: [`../core/nebula_renderer.cpp`](../core/nebula_renderer.cpp)
 | `D3DX81ab.dll` | `D3DXCreateTextureFromFileExA` | lazily load and scale loose subsystem emissive images into managed A8R8G8B8 textures |
 | `D3DX81ab.dll` | `D3DXMatrixInverse`, `D3DXMatrixMultiply`, `D3DXMatrixTranspose` | construct vertex constants 7 through 18 without adding a D3DX import-library dependency |
 
+Motion-dependent emissive reads use the supported Fleet Operations layout:
+
+| Native object | Offset/RVA | Role |
+| --- | ---: | --- |
+| `GameObject` | `+0xdc` | live three-float linear velocity used to distinguish stationary and impulse travel |
+| `Craft` | `+0x1b0` | native physics-controller pointer |
+| Armada Trek-physics vtable | `0x2b28a4` | validates the controller type before any derived state is read |
+| Trek-physics controller | `+0x20` | `warpEffectState`: 0 normal/gravity-well, 1 warp-in, 2 steady warp, 3 warp-out |
+| `CraftClass` | `+0x3ec` | maximum impulse speed used only as a conservative fallback for non-Trek physics controllers |
+
+The full warp intensity is selected only for native state 2. State 0 with a
+non-zero live velocity selects the impulse-travel profile; states 1 and 3 keep
+the lower gravity-well warp profile. If the validated Trek controller is not
+available, a velocity above 105% of the class impulse limit is treated as warp.
+All pointers and ranges are bounded before use.
+
 Craft emissive state reads the class pointer at `Craft + 0x40` and the native
 five-record subsystem block pointer at `Craft + 0x1e0`. Each subsystem record
 is `0x30` bytes: `+0x00` is operational, `+0x01` is forced/control-disabled,
@@ -738,6 +1025,27 @@ warp/impulse damage records. Operational maps stay on; healthy forced/timed
 disabled maps flicker independently in 90 ms phases; destroyed and not-yet-
 fully-repaired maps stay off. Every read is bounded and fails open to the
 configured light when an unfamiliar layout is encountered.
+
+Subsystem/hull damage decals share that five-record subsystem layout. Hull
+damage instead reads `GameObject+0x15c` for current health and `+0x160` for
+the live per-instance maximum health. Armada's native health update at RVA
+`0x000d2080` writes `+0x15c` and recomputes the cached `+0x158` health ratio;
+its ratio getter at RVA `0x00400ef0` independently divides `+0x15c` by
+`+0x160`. `Craft+0x1c8` is current shields and must not be used for hull
+activation.
+
+Selected ship-name logo decals read Fleet Operations' native name selection
+at `Craft+0x218`. FleetOpsHook VA `0x5a90bc84` reconstructs an enhancement-
+wrapper pointer from four CraftClass bytes at `+0x185/+0x186/+0x187/+0x19f`;
+the wrapper's `+0x04` points to the CraftClass enhancement sidecar and that
+sidecar's first pointer identifies its owning class. The `logoFileNames` vector
+begin/end are at sidecar `+0x148/+0x14c`, while its parallel loaded
+`ST3D_Texture*` table is at sidecar `+0x154`. FleetOpsHook VA `0x5a90ce59`
+initialises and reads that vector; VA `0x5a90ce85` derives its bounded row
+count, and VA `0x5a90cef2` loads each non-empty texture into the parallel table.
+The decal renderer uses the selected row directly for the unsuffixed case.
+Suffixed multi-plane variants remain controller-resolved loose files and retain
+the same row indexing.
 
 Indexed material selection reads the live stage-0 diffuse texture, finds its
 owning `ST3D_Texture` in the bounded type-5 Storm3D object registry, and
@@ -1004,11 +1312,11 @@ policy and immutable model-node lookup respectively.
    installed during process attach before Armada class/settings/profile work.
 3. The deferred worker revalidates the binaries, installs any core site not
    already ready, and discovers modules outside the loader lock.
-4. When present in the active parent chain, `A1Compat.dll` loads first by
-   deterministic filename order. It registers A1 policy only when an active
-   extension root contains `a1compat.ini`, including `Addon` ODF overlay
-   precedence, and owns the four A1-scoped diagnostic/defensive hooks listed
-   above.
+4. When required by the active parent chain, the globally installed
+   `A1Compat.dll` loads first by deterministic filename order. It registers A1
+   policy only when an active extension root contains `a1compat.ini`, including
+   `Addon` ODF overlay precedence, and owns the four A1-scoped
+   diagnostic/defensive hooks listed above.
 5. `A2FOAlwaysShowShields.dll` validates the native shield-effect routines
    and exports class, simulation, and cleanup observers before A2FOTurrets
    claims the three shared engine hooks used to invoke them.
@@ -1040,18 +1348,40 @@ policy and immutable model-node lookup respectively.
    sites; HybridBuild composes with them through its private callback bridge.
 13. `A2FOInfoIni.dll` owns policy only. It registers a provider and installs no
    binary patch itself; the timing-sensitive settings hooks remain core-owned.
-14. `A2FORGBTextures.dll` loads after FeaturePack in filename order and owns an
+14. `A2FOPointDefenseCycles.dll` preflights its Armada and Fleet Operations
+   class, simulation, pre-fire gate, timer, save/load, cleanup, and successful
+   firing-attempt sites before installing its timing-only runtime. Weapon ODFs
+   without a numbered cycle use ordinary `shotDelay`; PointDefenseLaser now
+   enforces it before attempting to fire.
+15. `A2FORGBTextures.dll` loads after FeaturePack in filename order and owns an
    independent, conditional Armada `fopen` IAT bridge, the TGA
    FileExists/OpenRead routes, and the validated texture-lock/minimap guards.
    FeaturePack remains the sole semantic handler registered with the core FOFS
    dispatcher.
-15. `A2FOTurrets.dll` then registers the global semantic `turret` policy and
+16. `A2FOSwarmSystem.dll` preflights its worker-bee frame boundaries and all
+   native parsing, hierarchy, transform, visibility, instance, and allocation
+   helpers before installing either hook. It has no shared semantic callback
+   dependency and creates no `GameObject` entries.
+17. `A2FOTextureVariants.dll` captures Race names and optional texture suffixes
+   before each Race ParameterDB is destroyed, then follows live craft ownership
+   through the checked Fleet Operations update callback. Its render wrapper
+   retains the native Borg texture/node route and selects only custom nodes
+   matching the current owner's Race name. `A2FOCraftIdentity.dll` lazily
+   resolves its exported completed-CraftClass observer for numbered subsystem
+   mesh/explosion policies; no second CraftClass entry hook is installed while
+   that owner is active. If it is not selected, TextureVariants uses the exact
+   validated Fleet Ops constructor chain as its independent fallback.
+18. `A2FOTurrets.dll` then registers the global semantic `turret` policy and
    preflights all six of its Armada runtime sites before installing any of
    them. Child creation is deferred until the configured parent first
    simulates, after class and ODF loading has completed. Its shared callbacks
    also apply configured persistent shield visibility after native simulation
    and release it before native Craft cleanup.
-16. The destroyed-object hooks are installed after native/Lua registration and
+19. `A2FOWeaponDamageControls.dll` loads after FireArcs by filename order,
+   chains its live WeaponClass constructor detour when present, and installs
+   the common Craft damage hooks. Weapon ODFs without any of the four damage
+   commands retain no sidecar and stay on the exact native damage path.
+20. The destroyed-object hooks are installed after native/Lua registration and
    only when at least one handler needs them.
 
 Low-level hooks are process-lifetime changes. Each feature validates all of

@@ -14,9 +14,10 @@ The core permanently owns shared or lifetime-sensitive engine sites:
 - ParameterDB/classlabel and Evolver/cocoon dispatch;
 - early Fleet Ops settings and profile-default dispatch sites;
 - Craft destruction snapshot, replacement construction, and publication;
-- extension-root overlay and native/Lua loading order.
+- global native-module policy and extension-root Lua loading order;
+- Fleet Operations Mods-screen module selection and launch validation.
 
-The twelve built-in native modules separate optional policy:
+The built-in native modules separate optional policy:
 
 - `A2FOAlwaysShowShields.dll`: opt-in persistent native shield visibility,
   a separately tracked continuous full-shield effect, checked lifecycle calls,
@@ -36,6 +37,9 @@ The twelve built-in native modules separate optional policy:
   Operations' native craft-name index, plus selected-object panel text fields;
 - `A2FOEditMenu.dll`: recursive `buildItemX` editor-menu navigation using the
   native visible menu buffer, renderer, object placement, and Back command;
+- `A2FOMissionSelector.dll`: a scrollable combined campaign/mission shell
+  dialog with moddable descriptions and previews, while Armada retains native
+  availability, progression, filename selection, and mission launch;
 - `A2FOFireArcs.dll`: optional owner-local box and cone weapon firing volumes,
   globally switchable through `RTS_CFG.h`, with checked Fleet Operations
   WeaponClass-constructor and system-icon-render chains, UI-configurable
@@ -66,12 +70,28 @@ The twelve built-in native modules separate optional policy:
   replacement. It composes with A2FOCraftIdentity's completed CraftClass boundary and
   A2FOHybridBuild's common Craft render boundary rather than claiming duplicate
   hooks;
+- `A2FOPointDefenseCycles.dll`: per-instance, saveable numbered shot-delay
+  cycles for `PointDefenseLaser` and `OrdnanceDefenseWeapon`, plus accurate
+  pre-fire enforcement of ordinary `shotDelay` for PointDefenseLaser while
+  preserving the native target/interception paths and reload modifiers;
+- `A2FOTextureVariants.dll`: render-time faction texture suffix selection and
+  case-insensitive Race-name SOD node visibility using each craft's live owner,
+  plus DDS-aware native Borg alternate preflight. Shared class geometry is
+  restored/reselected immediately before each craft draw, while Armada retains
+  ownership of its native `borg` node and Jan_B diffuse/bump route;
 - `A2FORGBTextures.dll`: presence-based redirection of Armada's legacy
   `Textures\RGB`, `Textures\Index8`, and `Textures\Compressed` assets across
   Data, parent mods, and the active mod through Armada's TGA FileExists/OpenRead
   boundary. Its flattened true-colour route expands indexed, grayscale,
   16-bit, and RLE TGA variants before loading, with null-source guards for
   failed minimap textures.
+- `A2FOSwarmSystem.dll`: sparse numbered ambient-traffic definitions on any
+  rendered host ODF, implemented as shared-model `ST3D_Instance` visuals with
+  host-local randomized movement, launch/interaction hardpoint visits, dwell
+  and return states, conservative swept host-bounds avoidance, bounded local
+  member separation and hardpoint occupancy, native worker-bee visibility
+  policy, and automatic lifecycle reconstruction without creating gameplay
+  objects;
 - `A2FOTurrets.dll`: the global semantic `turret -> sensor` classlabel,
   indexed parent-mount parsing, linked child-object lifecycle, target-driven
   yaw/pitch transforms, ownership propagation, and save/load reconnection. Its
@@ -81,14 +101,13 @@ The twelve built-in native modules separate optional policy:
   `A2FOAlwaysShowShields.dll`; A2FOCraftIdentity supplies that module's common
   ship/station CraftClass registration bridge.
 
-`A1Compat.dll` is an optional parent-mod module rather than a globally installed
-built-in. It is packaged under `STA1 Classic/modules` and owns A1-only policy,
+`A1Compat.dll` is an optional globally installed module selected by the
+`STA1 Classic` parent's `[modules]` requirements. It owns A1-only policy,
 beginning with `wingman -> craft`, missing-only `a2craft.odf`, `a2const.odf`,
 and `a2freight.odf` defaults, Armada 1 `Addon` ODF precedence, the
 starbase officer-quarter system, and the signature-checked legacy nebula
-sprite-node guard. The extension-root module
-overlay therefore activates it only when `STA1 Classic` or one of its children
-is selected.
+sprite-node guard. Its activation marker and required policy therefore enable
+it only when `STA1 Classic` or one of its children is selected.
 
 FeaturePack owns the general Producer queue and ResearchStation class hooks.
 HybridBuild registers a private callback table with FeaturePack so those shared
@@ -121,8 +140,12 @@ needed a helper:
   host-testable path and precedence rules used by the core and FeaturePack.
 - `core/lua_host.*` owns the bounded Lua state and converts engine events into
   pointer-free script values.
-- `core/module_loader.*` owns DLL overlay, deterministic ordering, registration
-  transactions, and shutdown ordering.
+- `core/module_policy.*` owns host-testable `[modules]` parsing, inherited
+  constraints, legacy compatibility, and `activeX` persistence.
+- `core/module_loader.*` owns global DLL discovery, deterministic ordering,
+  registration transactions, and shutdown ordering.
+- `core/module_menu.*` owns the supported Fleet Operations Mods-screen button,
+  selector dialog, and launch-requirement validation.
 - `modules/<name>/module.cpp` owns that module's engine-facing state and hooks.
   Pure parsing or mathematics is split into a neighbouring source/header pair
   whenever it can be tested without loading the game.
@@ -153,9 +176,12 @@ All engine callbacks obey the same maintenance rules:
 ## Deterministic extension overlay
 
 Roots are ordered from lowest to highest precedence: shared `Data`, each
-`ParentMod`, then the active mod. DLLs and scripts with the same case-insensitive
-basename are replaced by the higher-precedence copy. The resulting native DLLs
-and Lua files execute in case-insensitive filename order.
+`ParentMod`, then the active mod. Lua scripts with the same case-insensitive
+basename are replaced by the higher-precedence copy and execute in deterministic
+filename order. Native DLLs do not participate in this overlay: they are
+discovered only under `Data/modules` and filtered by the root chain's
+`[modules]` rules before deterministic loading. This prevents a mod from
+silently supplying or replacing executable code.
 
 ## Registration transactions
 

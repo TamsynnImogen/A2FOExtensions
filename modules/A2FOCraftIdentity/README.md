@@ -60,3 +60,8 @@ while its display/scissor state remains active. The selected ship-name
 component supplies Fleet Operations' display, font, scaling and clipping
 state. If preflight fails, installed hooks remain safe pass-throughs and the
 log reports that the runtime is disabled.
+
+This completed-CraftClass boundary also forwards optional class observers to
+the shield, nebula-renderer, and texture-variant modules. The texture observer
+registers numbered subsystem damage meshes without competing for a second
+CraftClass constructor hook.

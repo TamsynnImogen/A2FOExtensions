@@ -5,11 +5,10 @@
  */
 
 #include "module_loader.hpp"
+#include "module_policy.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <cstring>
-#include <map>
 
 namespace a2fo {
 namespace {
@@ -21,18 +20,10 @@ std::string join_path(const std::string& left, const std::string& right) {
     return left + "\\" + right;
 }
 
-bool has_dll_extension(const std::string& name) {
-    if (name.size() < 4) return false;
-    const std::string extension = name.substr(name.size() - 4);
-    return _stricmp(extension.c_str(), ".dll") == 0;
-}
-
-std::string lower_ascii(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(),
-                   [](unsigned char ch) {
-                       return static_cast<char>(std::tolower(ch));
-                   });
-    return value;
+bool directory_exists(const std::string& path) {
+    const DWORD attributes = GetFileAttributesA(path.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES &&
+           (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
 }  // namespace
@@ -48,43 +39,45 @@ bool load_native_modules_from_roots(
         return true;
     }
 
-    // The Data-level directory is part of the installation layout and may be
-    // created automatically. Never create directories inside a mod merely by
-    // selecting it.
-    CreateDirectoryA(join_path(roots.front(), "modules").c_str(), nullptr);
-
-    std::map<std::string, std::string> selected_paths;
-    for (const std::string& root : roots) {
-        const std::string directory = join_path(root, "modules");
-        WIN32_FIND_DATAA data{};
-        HANDLE search = FindFirstFileA(
-            join_path(directory, "*.dll").c_str(), &data);
-        if (search == INVALID_HANDLE_VALUE) continue;
-        do {
-            if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ||
-                !has_dll_extension(data.cFileName)) {
-                continue;
-            }
-            const std::string path = join_path(directory, data.cFileName);
-            const std::string key = lower_ascii(data.cFileName);
-            const auto previous = selected_paths.find(key);
-            if (previous != selected_paths.end()) {
-                log_line("Module loader: " + path + " overrides " +
-                         previous->second);
-            }
-            selected_paths[key] = path;
-        } while (FindNextFileA(search, &data));
-        FindClose(search);
+    // Native code has one authoritative installation directory. Mod-local
+    // DLL folders are intentionally ignored: info.ini selects global modules
+    // by name, so a mod cannot silently replace executable code.
+    std::vector<std::string> diagnostics;
+    const std::vector<InstalledModule> installed =
+        discover_installed_modules(roots.front(), &diagnostics);
+    for (const std::string& diagnostic : diagnostics) {
+        log_line("Module loader: " + diagnostic);
     }
-
-    if (selected_paths.empty()) {
+    for (std::size_t index = 1; index < roots.size(); ++index) {
+        const std::string directory = join_path(roots[index], "modules");
+        if (directory_exists(directory)) {
+            log_line("Module loader: ignored mod-local module directory: " +
+                     directory);
+        }
+    }
+    if (installed.empty()) {
         log_line("Module loader: no native modules found");
         return true;
     }
 
-    bool all_ok = true;
-    for (const auto& selected : selected_paths) {
-        const std::string& path = selected.second;
+    const ModulePolicy policy = evaluate_module_policy(roots, installed);
+    for (const std::string& diagnostic : policy.diagnostics) {
+        log_line("Module policy: " + diagnostic);
+    }
+    log_line(policy.managed
+                 ? "Module policy: managed selection enabled"
+                 : "Module policy: no [modules] section; legacy load-all mode");
+
+    bool all_ok = policy.valid;
+    for (const ModulePolicyEntry& selected : policy.entries) {
+        if (selected.state != ModulePolicyState::active &&
+            selected.state != ModulePolicyState::required) {
+            if (selected.installed) {
+                log_line("Module loader: skipped " + selected.filename);
+            }
+            continue;
+        }
+        const std::string& path = selected.path;
         HMODULE module = LoadLibraryA(path.c_str());
         if (!module) {
             log_line("Module loader: LoadLibrary failed (error " +

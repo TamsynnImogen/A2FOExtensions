@@ -3,6 +3,80 @@
 - Re-enable the shell display monitor only after its fullscreen handling can be
   proven not to alter legacy menu and modal-dialog layouts.
 
+## Point-Defense Firing Cycles
+
+[IMPLEMENTED, REQUIRES MANUAL VALIDATION]
+
+Extend both `classLabel = "PointDefenseLaser"` and
+`classLabel = "OrdnanceDefenseWeapon"` through a dedicated optional module so
+they support the complete numbered firing-cycle contract:
+
+```ini
+shotDelay0 = 0.1
+shotDelay1 = 0.1
+shotDelay2 = 2.0
+saveFireCyclePoint = 2
+shotCycleResetTime = 15.0
+```
+
+The existing unnumbered `shotDelay` support must remain the backwards-
+compatible default whenever no `shotDelayX` entries are present. The new
+module must add timing only and preserve each classlabel's native target
+selection, interception, hit-chance, reload-modifier, and attack behaviour.
+
+* [x] Parse contiguous `shotDelay0..X` values with safe bounds and validation;
+  numbered delays take precedence over unnumbered `shotDelay`.
+* [x] Implement `saveFireCyclePoint` and `shotCycleResetTime` with CannonImp-
+  compatible semantics without reusing CannonImp's incompatible object/class
+  layouts.
+* [x] Keep cycle position and idle/reset timing per weapon instance rather
+  than mutating the shared weapon class.
+* [x] Advance the cycle once per successful point-defense shot/interception;
+  verify how `OrdnanceDefenseWeapon` handles multiple candidates in one tick.
+* [x] Preserve native reload modifiers for every selected numbered delay.
+* [x] Serialize and restore cycle state across save/load, and clean sidecar
+  state during destruction and ownership/status transitions.
+* [ ] Verify deterministic single-player and multiplayer behaviour in game.
+* [x] Add focused host tests and document precedence, reset behaviour, invalid
+  values, and compatibility fallback.
+* [x] Fix A2FO Arc Lab rendering imported SODs mirrored. Audit the SOD-to-viewer
+  coordinate-system/handedness conversion, triangle winding, UV orientation,
+  hardpoint positions, and displayed fire-arc directions together; validate
+  locally without changing any saved ODF values.
+* [ ] Confirm the corrected Windows build against the tester's asymmetrical,
+  labelled `fed_enterprise.sod` asset when it is available again.
+
+## Dynamic Ambient Swarms
+
+[IMPLEMENTED, REQUIRES MANUAL VALIDATION] `A2FOSwarmSystem.dll` provides
+sparse `swarm0..63` definitions on ordinary host ODFs. Members are native
+render instances with sidecar movement state and never become selectable,
+collidable, AI-controlled, saveable map units. See
+`modules/A2FOSwarmSystem/README.md`.
+
+* [x] Parse multiple independent swarm definitions through native
+  `ParameterDB`, including native string-vector launch and interaction lists.
+* [x] Spawn shared-model visual instances with bounded per-definition and
+  per-host counts, randomized routes/speeds, interaction dwell, and optional
+  return cycles.
+* [x] Keep movement host-local, refresh animated hardpoint destinations, and
+  reconstruct automatically after load while cleaning up removed hosts.
+* [x] Keep members outside the host/model combined bounding radius with swept
+  segment checks and tangential sliding, without enabling engine collision.
+* [x] Prevent same-definition clumping using scaled visual bounds, persistent
+  dwell offsets, and bounded allocation-free separation passes.
+* [x] Limit concurrent interaction/return hardpoint reservations and require a
+  roaming leg after every visit so authored points cannot collect the swarm.
+* [x] Unit-test deterministic random movement, roaming bounds, host transform
+  round trips, smooth arrival, host exclusion/tunnelling, member separation,
+  and visual facing transforms.
+* [ ] Validate launch, roaming, interaction, return, visibility, destruction,
+  and save/load reconstruction on a stationary station in Fleet Operations.
+* [ ] Validate translating, rotating, and warping hosts, multiple swarm types,
+  malformed commands, missing hardpoints, and missing models in game.
+* [ ] Benchmark increasing members and simultaneous hosts; record CPU frame
+  cost, draw calls, RAM, and VRAM before changing the documented safety caps.
+
 ## Architecture and Refactoring
 
 * [x] Make Lua destruction callbacks declare which ODF fields they require. The legacy Lua form retains a deprecated wreckage compatibility shim; the core itself no longer hard-codes those fields.
@@ -239,6 +313,51 @@ glTF ---/                              `---> compiled SOD
 * [LATER] Investigate direct Fleet Operations SODX loading or a compiled model
   cache. Preserve ordinary SOD output as the compatibility path.
 
+### Decal Mapping and Runtime Overlays
+
+[DESIGN] Add a visual decal-mapping mode to A2FO Arc Lab and a matching
+optional runtime module. The first use case is Fleet Operations hull naming
+without requiring every imported model and texture set to be rebuilt around
+an authored `stlogo` mesh. The same bounded system should later support ship
+registries, faction insignia, hull markings, and cosmetic scorch marks.
+
+The authoring workflow should load the resolved ship ODF/SOD and a sample
+transparent texture, let the user place it directly on the hull, then export
+copy-ready ODF commands describing the selected texture source and ship-local
+position, rotation, size, surface offset, and UV mirroring.
+
+[IMPLEMENTED, REQUIRES MANUAL VALIDATION] The first bounded mapped-plane path
+now handles subsystem and hull damage decals. Arc Lab previews an alpha texture
+on a selected hardpoint with numeric offset/rotation/size controls and exports
+copy-ready `<system>ScorchX` commands. The core DX8 renderer draws per-instance
+depth-tested quads from live subsystem or hull damage thresholds. Surface
+click placement, mirroring, and the broader validation matrix remain below.
+Hull-name placements can now follow the selected
+`logoFileNames`/`possibleCraftNames` row, with optional per-plane filename
+suffixes for split hull artwork.
+
+* [x] Define bounded indexed decal ODF commands whose source follows Fleet
+  Operations' selected `logoFileNames`/`possibleCraftNames` row.
+* [ ] Add decal preview geometry to Arc Lab with click-to-place surface-normal
+  alignment, translate/rotate/resize controls, fine numeric nudging, alpha
+  preview, and z-fighting/intersection warnings.
+* [ ] Add port, starboard, dorsal, and ventral authoring views plus a mirror
+  operation which corrects placement, orientation, and text-reading direction.
+* [x] Generate a copyable ODF block for subsystem/hull scorch decals.
+* [ ] Optionally insert/update only the extension-owned decal block in a
+  selected loose ODF.
+* [x] Implement lightweight per-craft textured quads in the core-owned DX8
+  renderer without modifying the SOD or competing for a second render hook.
+* [ ] Preserve native ship-name row selection, ownership/visibility, cloaking,
+  capture, model replacement, destruction, and save/load behaviour.
+* [ ] Batch or otherwise bound decal draws and cap the number per craft so the
+  feature remains safe in the 32-bit renderer.
+* [ ] Validate flat, curved, concave, animated, multi-LOD, and faction/Borg
+  texture-variant hulls. Document when multiple smaller planes are preferable
+  to one large decal.
+* [LATER] Reuse the mapped-plane path for bounded cosmetic impact/scorch marks
+  once reliable hit positions and sensible persistence rules are available.
+
 ### Nebula Patch Renderer
 
 [IMPLEMENTED, REQUIRES MANUAL VALIDATION] Use
@@ -399,30 +518,33 @@ Work after community approval:
 
 ### Single-Player Mission Selector Redesign
 
-[DESIGN] Replace the fixed native Single Player mission selector with a
+[IMPLEMENTED, AWAITING MANUAL VALIDATION] Replace the fixed native Single Player mission selector with a
 dedicated A2FO module while retaining Armada's existing mission-launch and
 campaign-progression paths.
 
 Planned scope:
 
-* [ ] Show the supported predefined campaigns in a scrollable campaign list
-  with campaign icons, a banner, and overview text.
-* [ ] Show each campaign's missions in a scrollable list with native
+* [ ] Add campaign icons and a banner to the implemented scrollable campaign
+  list and overview text.
+* [x] Show each campaign's missions in a scrollable list with native
   unlock/progression state.
-* [ ] Show the selected mission's thumbnail, description, and objectives.
-* [ ] Provide Back and Start Mission controls which reuse the native shell and
+* [x] Show the selected mission's thumbnail, description, and objectives.
+* [x] Provide Back and Start Mission controls which reuse the native shell and
   mission setup paths.
-* [ ] Scale or adapt the layout safely across Fleet Operations' supported
+* [x] Scale or adapt the layout safely across Fleet Operations' supported
   resolutions and aspect ratios.
-* [ ] Keep campaign and mission display metadata/assets moddable without
+* [x] Keep campaign and mission display metadata/assets moddable without
   turning the selector into an in-game campaign editor.
 
 Explicitly out of scope:
 
 * in-game campaign creation;
-* arbitrary custom-campaign creation or importing;
 * mission star ratings and scoring persistence;
 * a per-mission difficulty selector.
+
+INI-defined custom campaigns and BZN lists are implemented. Their `unlocked`
+policy is currently static; independent saveable custom-campaign progression
+remains future work.
 
 ### Expanded Construction Queues
 

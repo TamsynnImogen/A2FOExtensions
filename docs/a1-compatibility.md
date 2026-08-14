@@ -35,19 +35,35 @@ Name=Star Trek: Armada Classic
 AssetVersion=50000
 ParentMod="Fleet Ops 4.0"
 standalone=0
+
+[modules]
+required0="A1Compat"
+required1="A2FORGBTextures"
 ```
 
 The root also contains `a1compat.ini`, an extension-owned activation marker.
+Its optional diagnostic setting is:
 
-`A1Compat.dll` belongs in `STA1 Classic/modules`, not `Data/modules`. The
-extension-root loader consequently activates A1 policy only for the parent or
-one of its children. Shared modules such as `A2FORGBTextures.dll` may also be
-packaged with the parent and remain inactive when their corresponding legacy
-assets are absent.
+```ini
+[A1Compat]
+SafeMode = 0
+```
+
+It accepts `1/true/yes/on/enabled` and `0/false/no/off/disabled`.
+Safe mode retains the `wingman` alias, missing-only class defaults, and
+`Addon` overlay while withholding the riskier executable diagnostics and
+officer-quarter runtime hooks.
+
+`A1Compat.dll` and `A2FORGBTextures.dll` belong in the central `Data/modules`
+directory. The parent's required module policy selects them for the parent and
+its children; mods cannot ship or override DLLs in their own folder.
+`A2FORGBTextures.dll` remains inert when the corresponding legacy texture
+directories are absent.
 
 The DLL additionally checks the active extension-root chain for
-`a1compat.ini`. If the DLL is mistakenly installed globally, initialization is
-rejected unless the A1 parent marker is genuinely present in the active chain.
+`a1compat.ini`. If the DLL is mistakenly selected outside the A1 parent,
+initialization is rejected unless the marker is genuinely present in the
+active chain.
 
 An A1 child addon uses:
 
