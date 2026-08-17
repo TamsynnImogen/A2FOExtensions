@@ -91,6 +91,8 @@ constexpr std::size_t kMaximumMembersPerDefinition = 256;
 constexpr std::size_t kMaximumMembersPerHost = 1024;
 constexpr std::size_t kMaximumHardpoints = 128;
 constexpr std::size_t kMaximumObjects = 1000000;
+constexpr std::uint32_t kHostDiscoveryIntervalTicks = 256;
+constexpr std::uint32_t kHostDiscoveryMinimumTicks = 16;
 
 constexpr std::uint8_t kExpectedBeeColonySimulate[] = {
     0x55, 0x8b, 0xec, 0x81, 0xec, 0x08, 0x01, 0x00, 0x00};
@@ -251,6 +253,11 @@ HMODULE g_armada = nullptr;
 bool g_runtime_ready = false;
 bool g_inside_simulation = false;
 std::uint32_t g_epoch = 0;
+std::uint32_t g_host_discovery_countdown = 0;
+std::uint32_t g_last_object_count =
+    std::numeric_limits<std::uint32_t>::max();
+void* g_cached_object_list = nullptr;
+void* g_cached_object_list_head = nullptr;
 A2FO_InlineHook g_bee_simulate_hook{};
 A2FO_InlineHook g_bee_render_hook{};
 std::unordered_map<void*, ClassPolicy> g_class_policies;
@@ -295,6 +302,17 @@ T read_at(const void* object, std::size_t offset, T fallback = T{}) noexcept {
     if (!readable_range(address, sizeof(T))) return fallback;
     T result{};
     std::memcpy(&result, address, sizeof(result));
+    return result;
+}
+
+template <typename T>
+T read_live_at(const void* object, std::size_t offset,
+               T fallback = T{}) noexcept {
+    if (!object) return fallback;
+    T result{};
+    std::memcpy(&result,
+                static_cast<const std::uint8_t*>(object) + offset,
+                sizeof(result));
     return result;
 }
 
@@ -1083,9 +1101,12 @@ HostRuntime create_host_runtime(void* object, const ClassPolicy& policy) {
 }
 
 void observe_host(void* object) noexcept {
-    if (!object || object_expired(object)) return;
-    const std::uint32_t handle = object_handle(object);
-    void* class_pointer = object_class(object);
+    if (!object || read_live_at<std::uint8_t>(
+            object, kObjectExpiredOffset, 1) != 0) return;
+    const std::uint32_t handle = read_live_at<std::uint32_t>(
+        object, kObjectHandleOffset, 0);
+    void* class_pointer = read_live_at<void*>(
+        object, kObjectClassOffset, nullptr);
     if (handle == 0 || !class_pointer) return;
     const ClassPolicy* policy = ensure_class_policy(class_pointer);
     if (!policy || policy->definitions.empty()) return;
@@ -1106,19 +1127,44 @@ void observe_host(void* object) noexcept {
     }
 }
 
-void enumerate_hosts() noexcept {
-    void* list = read_at<void*>(
+bool live_object_list(void** list_output, void** head_output,
+                      std::uint32_t* count_output) noexcept {
+    void* list = read_live_at<void*>(
         at(g_armada, kGameObjectListPointerRva), 0, nullptr);
-    void* head = read_at<void*>(list, 4, nullptr);
-    std::uint32_t count = read_at<std::uint32_t>(list, 8, 0);
-    if (!head || count > kMaximumObjects) return;
-    void* node = read_at<void*>(head, 0, nullptr);
+    if (list != g_cached_object_list) {
+        if (!readable_range(list, 12)) return false;
+        g_cached_object_list = list;
+    }
+    void* current_head = read_live_at<void*>(list, 4, nullptr);
+    if (current_head != g_cached_object_list_head) {
+        if (!readable_range(current_head, 12)) return false;
+        g_cached_object_list_head = current_head;
+    }
+    void* head = g_cached_object_list_head;
+    std::uint32_t count = read_live_at<std::uint32_t>(list, 8, 0);
+    if (!head || count > kMaximumObjects) return false;
+    if (list_output) *list_output = list;
+    if (head_output) *head_output = head;
+    if (count_output) *count_output = count;
+    return true;
+}
+
+bool enumerate_hosts(std::uint32_t* count_output) noexcept {
+    void* list = nullptr;
+    void* head = nullptr;
+    std::uint32_t count = 0;
+    if (!live_object_list(&list, &head, &count)) return false;
+    (void)list;
+    void* node = read_live_at<void*>(head, 0, nullptr);
     for (std::uint32_t index = 0;
          node && node != head && index < count; ++index) {
-        void* next = read_at<void*>(node, 0, nullptr);
-        observe_host(read_at<void*>(node, 8, nullptr));
+        void* next = read_live_at<void*>(node, 0, nullptr);
+        observe_host(read_live_at<void*>(node, 8, nullptr));
+        if (next == node) break;
         node = next;
     }
+    if (count_output) *count_output = count;
+    return true;
 }
 
 void update_agent(const HostRuntime& host, RuntimeGroup* group, Agent* agent,
@@ -1209,11 +1255,12 @@ void separate_group_members(HostRuntime& host, RuntimeGroup* group,
                             const SwarmDefinition& definition) noexcept {
     if (!group || group->agents.size() < 2) return;
 
-    // A few bounded relaxation passes are sufficient for the normal small
-    // ambient groups. Work remains capped at 256 members per definition and
-    // uses no collision objects, spatial database, or per-frame allocation.
-    constexpr unsigned kRelaxationPasses = 3;
-    for (unsigned pass = 0; pass < kRelaxationPasses; ++pass) {
+    // Small authored groups benefit from extra relaxation. Large ambient
+    // groups use one pass so the fallback remains bounded instead of doing
+    // three full O(n^2) sweeps at the 256-member limit.
+    const unsigned relaxation_passes = group->agents.size() <= 16
+        ? 3u : (group->agents.size() <= 64 ? 2u : 1u);
+    for (unsigned pass = 0; pass < relaxation_passes; ++pass) {
         for (std::size_t left_index = 0;
              left_index + 1 < group->agents.size(); ++left_index) {
             Agent* left = group->agents[left_index].get();
@@ -1225,6 +1272,15 @@ void separate_group_members(HostRuntime& host, RuntimeGroup* group,
                 const float minimum_distance =
                     left->visual_radius + right->visual_radius +
                     definition.member_separation;
+                const Vec3 separation = a2fo::swarm::subtract(
+                    left->position, right->position);
+                const float distance_squared =
+                    a2fo::swarm::length_squared(separation);
+                if (std::isfinite(distance_squared) &&
+                    distance_squared >=
+                        minimum_distance * minimum_distance) {
+                    continue;
+                }
                 a2fo::swarm::separate_pair(
                     &left->position, &left->direction,
                     &right->position, &right->direction,
@@ -1267,12 +1323,30 @@ void simulate_swarms(float elapsed_seconds) noexcept {
             g_epoch = 1;
             for (auto& entry : g_hosts) entry.second.last_seen_epoch = 0;
         }
-        enumerate_hosts();
+        std::uint32_t current_object_count = 0;
+        const bool object_count_available = live_object_list(
+            nullptr, nullptr, &current_object_count);
+        const bool object_count_changed = object_count_available &&
+            current_object_count != g_last_object_count;
+        const bool changed_scan_due = object_count_changed &&
+            g_host_discovery_countdown <=
+                kHostDiscoveryIntervalTicks -
+                    kHostDiscoveryMinimumTicks - 1;
+        bool enumerated_hosts = false;
+        if (g_host_discovery_countdown == 0 || changed_scan_due) {
+            std::uint32_t enumerated_count = 0;
+            enumerated_hosts = enumerate_hosts(&enumerated_count);
+            if (enumerated_hosts) g_last_object_count = enumerated_count;
+            g_host_discovery_countdown = kHostDiscoveryIntervalTicks - 1;
+        } else {
+            --g_host_discovery_countdown;
+        }
 
         elapsed_seconds = std::max(0.0f, std::min(elapsed_seconds, 0.25f));
         for (auto& host_entry : g_hosts) {
             HostRuntime& host = host_entry.second;
-            if (host.last_seen_epoch != g_epoch || !host.object ||
+            if ((enumerated_hosts && host.last_seen_epoch != g_epoch) ||
+                !host.object ||
                 object_expired(host.object)) continue;
             const auto policy = g_class_policies.find(host.object_class);
             if (policy == g_class_policies.end()) continue;
@@ -1291,7 +1365,8 @@ void simulate_swarms(float elapsed_seconds) noexcept {
         }
 
         for (auto iterator = g_hosts.begin(); iterator != g_hosts.end();) {
-            if (iterator->second.last_seen_epoch != g_epoch ||
+            if ((enumerated_hosts &&
+                 iterator->second.last_seen_epoch != g_epoch) ||
                 !iterator->second.object ||
                 object_expired(iterator->second.object)) {
                 iterator = g_hosts.erase(iterator);
@@ -1541,4 +1616,8 @@ void A2FO_CALL A2FO_ModuleShutdown() {
     g_runtime_ready = false;
     g_hosts.clear();
     g_class_policies.clear();
+    g_host_discovery_countdown = 0;
+    g_last_object_count = std::numeric_limits<std::uint32_t>::max();
+    g_cached_object_list = nullptr;
+    g_cached_object_list_head = nullptr;
 }

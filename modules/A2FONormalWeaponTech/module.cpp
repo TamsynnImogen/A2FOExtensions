@@ -4,8 +4,8 @@
  * Stock Armada/Fleet Ops applies technology entries to special weapons, but
  * ordinary cannon, phaser, pulse, and torpedo WeaponClasses do not consult the
  * owning team's tree before triggering. This module exports a fail-open
- * trigger filter consumed by A2FOTurrets' shared Weapon::Trigger(GameObject)
- * hook. Unlisted weapon ODFs are intentionally equivalent to a `0` entry.
+ * trigger filter registered with the core's shared Weapon::Trigger event.
+ * Unlisted weapon ODFs are intentionally equivalent to a `0` entry.
  */
 
 #include "../../sdk/include/a2fo_module_api.h"
@@ -86,13 +86,13 @@ bool readable_range(const void* address, std::size_t size) noexcept {
 }
 
 template <typename T>
-T read_at(const void* object, std::size_t offset,
-          T fallback = T{}) noexcept {
-    const auto* address = object
-        ? static_cast<const std::uint8_t*>(object) + offset : nullptr;
-    if (!readable_range(address, sizeof(T))) return fallback;
+T read_live_at(const void* object, std::size_t offset,
+               T fallback = T{}) noexcept {
+    if (!object) return fallback;
     T value{};
-    std::memcpy(&value, address, sizeof(value));
+    std::memcpy(&value,
+                static_cast<const std::uint8_t*>(object) + offset,
+                sizeof(value));
     return value;
 }
 
@@ -118,42 +118,42 @@ void log_decision(const char* decision, std::uint32_t project_id,
 bool normal_weapon_technology_allows(void* weapon) noexcept {
     if (!g_runtime_ready || !weapon) return true;
 
-    void* weapon_class = read_at<void*>(
+    void* weapon_class = read_live_at<void*>(
         weapon, kWeaponClassOnWeaponOffset, nullptr);
     if (!weapon_class) return true;
 
     // Special weapons already have a native technology path. Applying the
     // ordinary-weapon filter as well could change their established rules.
-    if (read_at<std::uint8_t>(
+    if (read_live_at<std::uint8_t>(
             weapon_class, kWeaponClassSpecialOffset, 0) != 0) {
         return true;
     }
 
-    const void* project_id_object = read_at<const void*>(
+    const void* project_id_object = read_live_at<const void*>(
         weapon_class, kWeaponClassProjectIdOffset, nullptr);
-    const std::uint32_t project_id = read_at<std::uint32_t>(
+    const std::uint32_t project_id = read_live_at<std::uint32_t>(
         project_id_object, 0, 0);
     if (project_id == 0 || project_id > 0x7fffffffu) return true;
 
     void* owner = reinterpret_cast<void*>(
         a2fo_normal_weapon_tech_call_thiscall_0(
             at(g_armada, kWeaponGetOwnerRva), weapon));
-    const std::int32_t team_index = read_at<std::int32_t>(
+    const std::int32_t team_index = read_live_at<std::int32_t>(
         owner, kGameObjectTeamOffset, -1);
     if (!owner || team_index < 0 || team_index > kMaximumTeamIndex) {
         return true;
     }
 
-    void* technology_trees = read_at<void*>(
+    void* technology_trees = read_live_at<void*>(
         at(g_fleet_ops, kTeamTechnologyTreesPointerRva), 0, nullptr);
-    void* team_tree = read_at<void*>(
+    void* team_tree = read_live_at<void*>(
         technology_trees,
         static_cast<std::size_t>(team_index) * sizeof(void*), nullptr);
-    void* technology_items = read_at<void*>(
+    void* technology_items = read_live_at<void*>(
         team_tree, kTechnologyTreeItemsOffset, nullptr);
     if (!team_tree || !technology_items) return true;
 
-    void* technology_item = read_at<void*>(
+    void* technology_item = read_live_at<void*>(
         technology_items,
         static_cast<std::size_t>(project_id - 1) * sizeof(void*), nullptr);
     if (!technology_item) {
@@ -181,6 +181,14 @@ bool normal_weapon_technology_allows(void* weapon) noexcept {
     return allowed;
 }
 
+bool A2FO_CALL weapon_trigger_handler(
+    const A2FO_WeaponTriggerEvent* event, void*) {
+    if (!event || event->struct_size < sizeof(*event)) return false;
+    if (event->kind == A2FO_WEAPON_TRIGGER_COMMITTED) return true;
+    if (event->kind != A2FO_WEAPON_TRIGGER_PRECHECK) return false;
+    return normal_weapon_technology_allows(event->weapon);
+}
+
 }  // namespace
 
 extern "C" __declspec(dllexport)
@@ -194,6 +202,15 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     g_armada = static_cast<HMODULE>(api->armada_module());
     g_fleet_ops = static_cast<HMODULE>(api->fleetops_module());
     if (!g_armada || !g_fleet_ops) return false;
+
+    if (!A2FO_MODULE_API_HAS(api, register_weapon_trigger_handler) ||
+        !api->register_weapon_trigger_handler ||
+        (api->capabilities & A2FO_CAP_WEAPON_TRIGGER_EVENTS) == 0 ||
+        !api->register_weapon_trigger_handler(
+            kModuleName, &weapon_trigger_handler, nullptr)) {
+        log_line("Shared weapon-trigger registration is unavailable");
+        return false;
+    }
 
     g_runtime_ready =
         signature_matches(

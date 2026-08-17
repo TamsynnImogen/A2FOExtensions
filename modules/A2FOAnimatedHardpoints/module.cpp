@@ -16,6 +16,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 extern "C" {
 std::uintptr_t __cdecl a2fo_animated_hardpoints_call_thiscall_0(
@@ -53,6 +54,7 @@ constexpr std::size_t kAnimationStartOffset = 0x18;
 constexpr std::size_t kMaximumHierarchyDepth = 256;
 constexpr std::size_t kMaximumAnimationChannels = 4096;
 constexpr std::size_t kMaximumIdentifierLength = 255;
+constexpr std::size_t kDatabaseCacheSlots = 1024;
 
 constexpr std::array<std::uint8_t, 6> kExpectedWorldPosition{
     0x55, 0x8b, 0xec, 0x83, 0xec, 0x60};
@@ -74,6 +76,31 @@ A2FO_InlineHook g_world_transform_hook{};
 bool g_runtime_ready = false;
 bool g_inside_lookup = false;
 bool g_logged_first_animation = false;
+
+struct MatrixChannel {
+    void* channel = nullptr;
+    void* evaluate_and_play = nullptr;
+    const char* name = nullptr;
+};
+
+struct NodeResolution {
+    void* logical_node = nullptr;
+    void* visible_node = nullptr;
+};
+
+struct DatabaseCache {
+    void* database = nullptr;
+    void* hierarchy_root = nullptr;
+    std::vector<MatrixChannel> matrix_channels;
+    std::vector<NodeResolution> node_resolutions;
+    void* last_evaluated_instance = nullptr;
+    float last_current_time = 0.0f;
+    float last_start_time = 0.0f;
+    bool last_triggered = false;
+    bool evaluation_valid = false;
+};
+
+std::array<DatabaseCache, kDatabaseCacheSlots> g_database_caches{};
 
 void* at(HMODULE module, std::uintptr_t rva) noexcept {
     return reinterpret_cast<void*>(
@@ -114,10 +141,35 @@ T read_at(const void* base, std::size_t offset, T fallback = T{}) noexcept {
     return value;
 }
 
+template <typename T>
+T read_live_at(const void* base, std::size_t offset,
+               T fallback = T{}) noexcept {
+    if (!base) return fallback;
+    T value{};
+    std::memcpy(
+        &value,
+        reinterpret_cast<const std::uint8_t*>(base) + offset,
+        sizeof(value));
+    return value;
+}
+
 bool readable_identifier(const char* value) noexcept {
     if (!value) return false;
-    for (std::size_t index = 0; index <= kMaximumIdentifierLength; ++index) {
-        if (!readable_range(value + index, 1)) return false;
+    MEMORY_BASIC_INFORMATION information{};
+    if (VirtualQuery(value, &information, sizeof(information)) !=
+            sizeof(information) ||
+        information.State != MEM_COMMIT ||
+        (information.Protect & (PAGE_NOACCESS | PAGE_GUARD)) != 0) {
+        return false;
+    }
+    const auto begin = reinterpret_cast<std::uintptr_t>(value);
+    const auto region_end = reinterpret_cast<std::uintptr_t>(
+        information.BaseAddress) + information.RegionSize;
+    if (begin >= region_end) return false;
+    const std::size_t available = static_cast<std::size_t>(region_end - begin);
+    const std::size_t maximum = available < kMaximumIdentifierLength + 1
+        ? available : kMaximumIdentifierLength + 1;
+    for (std::size_t index = 0; index < maximum; ++index) {
         if (value[index] == '\0') return index != 0;
     }
     return false;
@@ -136,10 +188,10 @@ bool signature_matches(std::uintptr_t rva, const std::uint8_t* expected,
 }
 
 bool is_null_node(void* node) noexcept {
-    void** vtable = read_at<void**>(node, 0, nullptr);
-    if (!vtable || !readable_range(vtable + 1, sizeof(void*))) return false;
+    void** vtable = read_live_at<void**>(node, 0, nullptr);
+    if (!vtable) return false;
     void* get_type = vtable[1];
-    if (!readable_range(get_type, 1)) return false;
+    if (!get_type) return false;
     return a2fo_animated_hardpoints_call_thiscall_0(get_type, node) == 0;
 }
 
@@ -156,7 +208,7 @@ void* next_animation(void* channel) noexcept {
 }
 
 bool is_matrix_animation(void* channel) noexcept {
-    return read_at<void*>(channel, 0, nullptr) ==
+    return read_live_at<void*>(channel, 0, nullptr) ==
            at(g_armada, kMatrixAnimationVtableRva);
 }
 
@@ -175,91 +227,160 @@ std::size_t collect_ancestor_names(
 }
 
 bool hierarchy_has_matrix_channel(
-    void* database,
+    const DatabaseCache& cache,
     const std::array<const char*, kMaximumHierarchyDepth>& names,
     std::size_t name_count) noexcept {
-    void* channel = first_animation(database);
-    for (std::size_t index = 0;
-         channel && index < kMaximumAnimationChannels;
-         ++index, channel = next_animation(channel)) {
-        if (!is_matrix_animation(channel)) continue;
-        const char* channel_name =
-            read_at<const char*>(channel, kNodeNameOffset, nullptr);
+    for (const MatrixChannel& channel : cache.matrix_channels) {
         for (std::size_t name_index = 0; name_index < name_count;
              ++name_index) {
-            if (same_identifier(channel_name, names[name_index])) return true;
+            if (same_identifier(channel.name, names[name_index])) return true;
         }
     }
     return false;
 }
 
-void evaluate_matrix_channels(void* instance, void* database) noexcept {
-    const float saved_current = read_at<float>(
+DatabaseCache* database_cache(void* database) noexcept {
+    if (!database) return nullptr;
+    void* root = read_live_at<void*>(
+        database, kDatabaseHierarchyRootOffset, nullptr);
+    if (!root) return nullptr;
+
+    const std::size_t slot =
+        (reinterpret_cast<std::uintptr_t>(database) >> 4) %
+        g_database_caches.size();
+    DatabaseCache& cache = g_database_caches[slot];
+    if (cache.database == database && cache.hierarchy_root == root) {
+        return &cache;
+    }
+
+    cache.database = nullptr;
+    cache.hierarchy_root = nullptr;
+    cache.matrix_channels.clear();
+    cache.node_resolutions.clear();
+    cache.last_evaluated_instance = nullptr;
+    cache.evaluation_valid = false;
+
+    try {
+        cache.matrix_channels.reserve(16);
+        void* channel = first_animation(database);
+        for (std::size_t index = 0;
+             channel && index < kMaximumAnimationChannels;
+             ++index, channel = next_animation(channel)) {
+            if (!is_matrix_animation(channel)) continue;
+            void** vtable = read_live_at<void**>(channel, 0, nullptr);
+            void* evaluate_and_play = vtable ? vtable[4] : nullptr;
+            const char* name = read_live_at<const char*>(
+                channel, kNodeNameOffset, nullptr);
+            if (!evaluate_and_play || !readable_identifier(name)) continue;
+            cache.matrix_channels.push_back(
+                MatrixChannel{channel, evaluate_and_play, name});
+        }
+    } catch (...) {
+        cache.matrix_channels.clear();
+        return nullptr;
+    }
+
+    cache.database = database;
+    cache.hierarchy_root = root;
+    return &cache;
+}
+
+void* resolve_visible_node(DatabaseCache& cache, void* logical_node) noexcept {
+    for (const NodeResolution& resolution : cache.node_resolutions) {
+        if (resolution.logical_node == logical_node) {
+            return resolution.visible_node;
+        }
+    }
+
+    void* visible_node = nullptr;
+    if (is_null_node(logical_node) && !cache.matrix_channels.empty()) {
+        std::array<const char*, kMaximumHierarchyDepth> names{};
+        const std::size_t name_count = collect_ancestor_names(
+            logical_node, names);
+        if (name_count != 0 &&
+            hierarchy_has_matrix_channel(cache, names, name_count)) {
+            visible_node = reinterpret_cast<void*>(
+                a2fo_animated_hardpoints_call_thiscall_1(
+                    at(g_armada, kNodeFindRecursiveRva),
+                    cache.hierarchy_root,
+                    reinterpret_cast<std::uintptr_t>(names[0])));
+        }
+    }
+
+    try {
+        cache.node_resolutions.push_back(
+            NodeResolution{logical_node, visible_node});
+    } catch (...) {
+    }
+    return visible_node;
+}
+
+void evaluate_matrix_channels(
+    void* instance, DatabaseCache& cache) noexcept {
+    const float saved_current = read_live_at<float>(
         at(g_armada, kAnimationCurrentTimeRva), 0, 0.0f);
-    const float saved_start = read_at<float>(
+    const float saved_start = read_live_at<float>(
         at(g_armada, kAnimationStartTimeRva), 0, 0.0f);
+    const bool triggered =
+        read_live_at<std::uint8_t>(
+            instance, kAnimationTriggeredOffset, 0) != 0;
+    const float start = triggered
+        ? read_live_at<float>(instance, kAnimationStartOffset, 0.0f)
+        : 0.0f;
 
     using SetStartTime = float(__cdecl*)(float);
     using ForceFirstFrame = void(__cdecl*)();
-    const bool triggered =
-        read_at<std::uint8_t>(instance, kAnimationTriggeredOffset, 0) != 0;
     if (triggered) {
-        const float start =
-            read_at<float>(instance, kAnimationStartOffset, 0.0f);
         reinterpret_cast<SetStartTime>(
             at(g_armada, kAnimationSetStartTimeRva))(start);
     } else {
         reinterpret_cast<ForceFirstFrame>(
             at(g_armada, kAnimationForceFirstFrameRva))();
     }
+    const float evaluation_time = read_live_at<float>(
+        at(g_armada, kAnimationCurrentTimeRva), 0, 0.0f);
 
-    void* channel = first_animation(database);
-    for (std::size_t index = 0;
-         channel && index < kMaximumAnimationChannels;
-         ++index, channel = next_animation(channel)) {
-        if (!is_matrix_animation(channel)) continue;
-        void** vtable = read_at<void**>(channel, 0, nullptr);
-        if (!vtable || !readable_range(vtable + 4, sizeof(void*))) continue;
-        void* evaluate_and_play = vtable[4];
-        if (!readable_range(evaluate_and_play, 1)) continue;
-        a2fo_animated_hardpoints_call_thiscall_1(
-            evaluate_and_play, channel, 0);
-    }
-
-    if (readable_range(at(g_armada, kAnimationCurrentTimeRva), sizeof(float))) {
+    if (cache.evaluation_valid &&
+        cache.last_evaluated_instance == instance &&
+        cache.last_triggered == triggered &&
+        cache.last_current_time == evaluation_time &&
+        ((!triggered) || cache.last_start_time == start)) {
         std::memcpy(at(g_armada, kAnimationCurrentTimeRva),
                     &saved_current, sizeof(saved_current));
-    }
-    if (readable_range(at(g_armada, kAnimationStartTimeRva), sizeof(float))) {
         std::memcpy(at(g_armada, kAnimationStartTimeRva),
                     &saved_start, sizeof(saved_start));
+        return;
     }
+
+    for (const MatrixChannel& channel : cache.matrix_channels) {
+        a2fo_animated_hardpoints_call_thiscall_1(
+            channel.evaluate_and_play, channel.channel, 0);
+    }
+
+    std::memcpy(at(g_armada, kAnimationCurrentTimeRva),
+                &saved_current, sizeof(saved_current));
+    std::memcpy(at(g_armada, kAnimationStartTimeRva),
+                &saved_start, sizeof(saved_start));
+
+    cache.last_evaluated_instance = instance;
+    cache.last_current_time = evaluation_time;
+    cache.last_start_time = start;
+    cache.last_triggered = triggered;
+    cache.evaluation_valid = true;
 }
 
 void* animated_visible_node(void* instance, void* logical_node) noexcept {
-    if (!instance || !logical_node || !is_null_node(logical_node)) return nullptr;
+    if (!instance || !logical_node) return nullptr;
 
-    void* database = read_at<void*>(
+    void* database = read_live_at<void*>(
         instance, kInstanceVisibleDatabaseOffset, nullptr);
     if (!database) return nullptr;
-
-    std::array<const char*, kMaximumHierarchyDepth> names{};
-    const std::size_t name_count = collect_ancestor_names(logical_node, names);
-    if (name_count == 0 ||
-        !hierarchy_has_matrix_channel(database, names, name_count)) {
-        return nullptr;
-    }
-
-    void* root = read_at<void*>(
-        database, kDatabaseHierarchyRootOffset, nullptr);
-    if (!root) return nullptr;
-    void* visible_node = reinterpret_cast<void*>(
-        a2fo_animated_hardpoints_call_thiscall_1(
-            at(g_armada, kNodeFindRecursiveRva), root,
-            reinterpret_cast<std::uintptr_t>(names[0])));
+    DatabaseCache* cache = database_cache(database);
+    if (!cache) return nullptr;
+    void* visible_node = resolve_visible_node(*cache, logical_node);
     if (!visible_node) return nullptr;
 
-    evaluate_matrix_channels(instance, database);
+    evaluate_matrix_channels(instance, *cache);
     if (!g_logged_first_animation) {
         g_logged_first_animation = true;
         log_line("Applied a per-instance SOD matrix channel to a hardpoint "

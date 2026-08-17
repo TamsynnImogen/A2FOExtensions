@@ -45,6 +45,23 @@ _a2fo_call_delphi_two_registers:
 	leave
 	ret
 
+	# Replaces the ParameterDB destructor call at the end of Fleet Operations'
+	# Race loader. EBX is the completed Race and EAX is the still-live
+	# ParameterDB. Dispatch copied ODF fields, then preserve the original
+	# Delphi destructor call with EAX restored.
+	.globl _a2fo_race_parameter_db_dispatch_bridge
+_a2fo_race_parameter_db_dispatch_bridge:
+	pushfl
+	pushal
+	pushl %eax
+	pushl %ebx
+	call _a2fo_dispatch_race_odf_loaded
+	addl $8, %esp
+	popal
+	popfl
+	call *_g_a2fo_race_parameter_db_destructor
+	ret
+
 	# Delphi constructor entry: EAX=class, DL=allocation flag, ECX=owner.
 	.globl _a2fo_call_delphi_constructor
 _a2fo_call_delphi_constructor:
@@ -151,6 +168,29 @@ _a2fo_call_game_object_construct:
 _a2fo_call_game_object_argument:
 	pushl %ebp
 	movl %esp, %ebp
+	pushl 16(%ebp)
+	movl 12(%ebp), %ecx
+	call *8(%ebp)
+	leave
+	ret
+
+	# Generic MSVC thiscall bridges used by the core-owned shared weapon and
+	# Craft dispatch boundaries.
+	.globl _a2fo_call_thiscall_1
+_a2fo_call_thiscall_1:
+	pushl %ebp
+	movl %esp, %ebp
+	pushl 16(%ebp)
+	movl 12(%ebp), %ecx
+	call *8(%ebp)
+	leave
+	ret
+
+	.globl _a2fo_call_thiscall_2
+_a2fo_call_thiscall_2:
+	pushl %ebp
+	movl %esp, %ebp
+	pushl 20(%ebp)
 	pushl 16(%ebp)
 	movl 12(%ebp), %ecx
 	call *8(%ebp)

@@ -50,6 +50,8 @@ constexpr int kMaximumConfiguredCampaign = 127;
 constexpr int kMaximumConfiguredMission = 511;
 constexpr std::size_t kMaximumMissionName = 260;
 constexpr std::streamoff kMaximumMetadataSize = 1024 * 1024;
+constexpr const char* kDefaultCampaignBackground =
+    "single\\singleplay.png";
 
 constexpr std::array<std::uint8_t, 6> kExpectedDoSingle{
     0x8b, 0x0d, 0x08, 0xd5, 0x7a, 0x00};
@@ -422,6 +424,7 @@ struct CampaignEntry {
     int index = 0;
     std::string title;
     std::string overview;
+    std::string background_path;
     bool unlocked = false;
     std::vector<MissionEntry> missions;
 };
@@ -502,6 +505,19 @@ std::vector<CampaignEntry> build_catalog() {
             metadata, section, "title", fallback_title);
         campaign.overview = metadata_value(
             metadata, section, "overview", fallback_overview);
+        const std::string configured_background = metadata_value(
+            metadata, section, "background");
+        if (!configured_background.empty()) {
+            campaign.background_path = resolve_asset(configured_background);
+            if (campaign.background_path.empty()) {
+                log_line("Campaign background was not found for [" + section +
+                         "]: " + configured_background);
+            }
+        }
+        if (campaign.background_path.empty()) {
+            campaign.background_path = resolve_asset(
+                kDefaultCampaignBackground);
+        }
 
         std::set<int> mission_indices =
             configured_mission_indices(metadata, campaign_index);
@@ -600,6 +616,8 @@ struct SelectorContext {
     int campaign = 0;
     int mission_position = 0;
     int native_preview_handle = 0;
+    std::unique_ptr<Gdiplus::Image> background;
+    std::string background_source_path;
     std::unique_ptr<Gdiplus::Image> thumbnail;
     std::string thumbnail_error;
 };
@@ -625,6 +643,79 @@ const MissionEntry* selected_mission(const SelectorContext& context) {
         return nullptr;
     }
     return &campaign->missions[context.mission_position];
+}
+
+void redraw_dialog_background(SelectorContext& context) noexcept {
+    if (!context.dialog) return;
+    RedrawWindow(
+        context.dialog, nullptr, nullptr,
+        RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+}
+
+void load_campaign_background(SelectorContext& context) {
+    const CampaignEntry* campaign = selected_campaign(context);
+    const std::string path = campaign ? campaign->background_path : std::string{};
+    if (path == context.background_source_path) return;
+
+    context.background_source_path = path;
+    context.background.reset();
+    if (path.empty() || !g_gdiplus_token) {
+        redraw_dialog_background(context);
+        return;
+    }
+
+    const std::wstring wide_path = widen(path);
+    if (wide_path.empty()) {
+        log_line("Campaign background path could not be converted: " + path);
+        redraw_dialog_background(context);
+        return;
+    }
+    std::unique_ptr<Gdiplus::Image> image(
+        Gdiplus::Image::FromFile(wide_path.c_str(), FALSE));
+    if (!image || image->GetLastStatus() != Gdiplus::Ok ||
+        image->GetWidth() == 0 || image->GetHeight() == 0) {
+        log_line("Campaign background could not be loaded: " + path);
+    } else {
+        context.background = std::move(image);
+    }
+    redraw_dialog_background(context);
+}
+
+void draw_dialog_background(
+    SelectorContext& context, HDC device_context) noexcept {
+    if (!device_context || !context.dialog) return;
+    RECT client{};
+    if (!GetClientRect(context.dialog, &client)) return;
+    FillRect(device_context, &client, g_background_brush);
+    if (!context.background) return;
+
+    const UINT source_width = context.background->GetWidth();
+    const UINT source_height = context.background->GetHeight();
+    const int available_width = client.right - client.left;
+    const int available_height = client.bottom - client.top;
+    if (source_width == 0 || source_height == 0 ||
+        available_width <= 0 || available_height <= 0) {
+        return;
+    }
+
+    const double scale = std::max(
+        static_cast<double>(available_width) / source_width,
+        static_cast<double>(available_height) / source_height);
+    const int draw_width = std::max(
+        1, static_cast<int>(source_width * scale));
+    const int draw_height = std::max(
+        1, static_cast<int>(source_height * scale));
+    const int x = client.left + (available_width - draw_width) / 2;
+    const int y = client.top + (available_height - draw_height) / 2;
+
+    Gdiplus::Graphics graphics(device_context);
+    graphics.SetInterpolationMode(
+        Gdiplus::InterpolationModeHighQualityBicubic);
+    graphics.DrawImage(
+        context.background.get(), x, y, draw_width, draw_height);
+    Gdiplus::SolidBrush shade(Gdiplus::Color(96, 0, 0, 0));
+    graphics.FillRectangle(
+        &shade, client.left, client.top, available_width, available_height);
 }
 
 void load_thumbnail(SelectorContext& context) {
@@ -681,6 +772,7 @@ void update_mission_details(SelectorContext& context) {
 void populate_missions(SelectorContext& context) {
     SendMessageA(context.mission_list, LB_RESETCONTENT, 0, 0);
     const CampaignEntry* campaign = selected_campaign(context);
+    load_campaign_background(context);
     if (!campaign) return;
     SetWindowTextA(context.overview, campaign->overview.c_str());
     for (std::size_t index = 0; index < campaign->missions.size(); ++index) {
@@ -1022,8 +1114,13 @@ INT_PTR CALLBACK selector_dialog_proc(
     if (!context) return FALSE;
 
     switch (message) {
+        case WM_ERASEBKGND:
+            draw_dialog_background(
+                *context, reinterpret_cast<HDC>(wparam));
+            return TRUE;
         case WM_SIZE:
             layout_controls(*context);
+            InvalidateRect(dialog, nullptr, TRUE);
             return TRUE;
         case WM_COMMAND: {
             const int identifier = LOWORD(wparam);
@@ -1086,16 +1183,23 @@ INT_PTR CALLBACK selector_dialog_proc(
             }
             return TRUE;
         }
-        case WM_CTLCOLORSTATIC:
+        case WM_CTLCOLORSTATIC: {
+            HDC dc = reinterpret_cast<HDC>(wparam);
+            SetTextColor(dc, RGB(230, 235, 240));
+            if (reinterpret_cast<HWND>(lparam) == context->overview) {
+                SetBkMode(dc, TRANSPARENT);
+                return reinterpret_cast<INT_PTR>(
+                    GetStockObject(NULL_BRUSH));
+            }
+            SetBkColor(dc, RGB(8, 10, 14));
+            return reinterpret_cast<INT_PTR>(g_background_brush);
+        }
         case WM_CTLCOLOREDIT:
         case WM_CTLCOLORLISTBOX: {
             HDC dc = reinterpret_cast<HDC>(wparam);
             SetTextColor(dc, RGB(230, 235, 240));
-            SetBkColor(dc, message == WM_CTLCOLORSTATIC
-                ? RGB(8, 10, 14) : RGB(10, 12, 16));
-            return reinterpret_cast<INT_PTR>(
-                message == WM_CTLCOLORSTATIC
-                    ? g_background_brush : g_field_brush);
+            SetBkColor(dc, RGB(10, 12, 16));
+            return reinterpret_cast<INT_PTR>(g_field_brush);
         }
         case WM_CLOSE:
             exit_to_main_menu(dialog, "window close");
@@ -1207,7 +1311,7 @@ void initialize_drawing_resources() noexcept {
         if (Gdiplus::GdiplusStartup(
                 &g_gdiplus_token, &input, nullptr) != Gdiplus::Ok) {
             g_gdiplus_token = 0;
-            log_line("GDI+ was unavailable; mission thumbnails are disabled");
+            log_line("GDI+ was unavailable; mission images are disabled");
         }
     }
 }

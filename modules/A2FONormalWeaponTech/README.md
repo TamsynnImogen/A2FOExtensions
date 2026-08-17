@@ -23,6 +23,7 @@ fblockedweapon.odf -1
 - Invalid or unavailable runtime state fails open so the extension cannot
   disable every weapon merely because a supported structure is absent.
 
-The module exports `A2FONormalWeaponTech_AllowWeaponTrigger`. The shared
-`Weapon::Trigger(GameObject)` hook in `A2FOTurrets.dll` consumes that filter;
-both DLLs must therefore be installed for ordinary-weapon enforcement.
+The module registers with the core's shared `Weapon::Trigger(GameObject)`
+dispatcher and does not require `A2FOTurrets.dll`. The exported
+`A2FONormalWeaponTech_AllowWeaponTrigger` entry remains available for older
+native clients.

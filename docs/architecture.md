@@ -14,7 +14,9 @@ The core permanently owns shared or lifetime-sensitive engine sites:
 - ParameterDB/classlabel and Evolver/cocoon dispatch;
 - early Fleet Ops settings and profile-default dispatch sites;
 - Craft destruction snapshot, replacement construction, and publication;
-- global native-module policy and extension-root Lua loading order;
+- shared WeaponClass loading, two-phase weapon triggering, and Craft
+  simulation/cleanup/post-load dispatch;
+- global native-module policy and inherited extension-root ordering;
 - Fleet Operations Mods-screen module selection and launch validation.
 
 The built-in native modules separate optional policy:
@@ -23,6 +25,10 @@ The built-in native modules separate optional policy:
   a separately tracked continuous full-shield effect, checked lifecycle calls,
   central mission-publication, Starbase, and Fleet Ops common-render coverage, and
   the per-class ODF policy cache;
+- `A2FOBuildTooltips.dll`: plain-text build durations in normal and verbose
+  build-button tooltips, sourced from Armada's local-team adjusted construction
+  time so game-setup and team modifiers remain authoritative, plus non-zero
+  additional-resource costs when the resource module is active;
 - `A2FOFeaturePack.dll`: recursive ODF indexing, queue conveniences, upgrade
   pods, and Bink scaling;
 - `A2FOHybridBuild.dll`: `hybridbuild -> research`, the `cocoon` command, four
@@ -34,7 +40,9 @@ The built-in native modules separate optional policy:
   `showmethemoney` grants (10,000 defaults) and restored `m`, `dis`, `crash`,
   and team-elimination `elim` commands;
 - `A2FOCraftIdentity.dll`: captain and registry ODF rows aligned to Fleet
-  Operations' native craft-name index, plus selected-object panel text fields;
+  Operations' native craft-name index, plus selected-object panel identity,
+  ammunition, directional-shield graphics, the ranked-craft XP bar, and
+  native hover regions for selected shield and XP status bars;
 - `A2FOEditMenu.dll`: recursive `buildItemX` editor-menu navigation using the
   native visible menu buffer, renderer, object placement, and Back command;
 - `A2FOMissionSelector.dll`: a scrollable combined campaign/mission shell
@@ -42,12 +50,26 @@ The built-in native modules separate optional policy:
   availability, progression, filename selection, and mission launch;
 - `A2FOFireArcs.dll`: optional owner-local box and cone weapon firing volumes,
   globally switchable through `RTS_CFG.h`, with checked Fleet Operations
-  WeaponClass-constructor and system-icon-render chains, UI-configurable
+  target-authorization and system-icon-render chains, UI-configurable
   per-hardpoint hover previews, and complete native fallback for weapon ODFs
   without the new commands;
+- `A2FOEnergySystems.dll`: per-Craft Photon and Quantum Torpedo stores,
+  per-launched-shot ammunition debit, automatic or provider-only recharge,
+  same-team yard/RepairShip resupply, selected-panel current/maximum status,
+  and save/load persistence;
+- `A2FODirectionalShields.dll`: strictly opt-in four-facing Craft shield
+  sidecars, A2 `maxShields` validation with an A1 missing-command fallback,
+  owner-local hit classification, aggregate reconciliation, and depleted-arc
+  impact-flare filtering with per-facing native effect colour, composed
+  through WeaponDamageControls' single checked `Craft::Damage` hook;
 - `A2FONormalWeaponTech.dll`: ordinary-weapon technology-tree enforcement,
   using each WeaponClass' own project ID and Fleet Operations' native recursive
   team-tree evaluator while treating unlisted weapons as requirement `0`;
+- `A2FOResources.dll`: four independent sidecar resources beside the six
+  native pools, with shared class/Race ODF dispatch, Producer payment/refund
+  integration, an extra resource-panel row, and native extension accessors;
+- `A2FOWreckage.dll`: deterministic ODF-driven destroyed-craft replacement,
+  using the core's shared destruction snapshot and publication dispatcher;
 - `A2FONebulaRenderer.dll`: opt-in controller for DX8 per-pixel ship lighting
   derived from armadaNebulaPatch and per-diffuse `textureX` /
   `emissiveX<Subsystem>` map sets (with the original six unnumbered commands
@@ -138,8 +160,6 @@ needed a helper:
 - `core/hook.*` is the only general-purpose machine-code patch writer.
 - `core/extension_roots.*`, `fpq_paths.*`, and `odf_paths.*` contain the
   host-testable path and precedence rules used by the core and FeaturePack.
-- `core/lua_host.*` owns the bounded Lua state and converts engine events into
-  pointer-free script values.
 - `core/module_policy.*` owns host-testable `[modules]` parsing, inherited
   constraints, legacy compatibility, and `activeX` persistence.
 - `core/module_loader.*` owns global DLL discovery, deterministic ordering,
@@ -176,19 +196,19 @@ All engine callbacks obey the same maintenance rules:
 ## Deterministic extension overlay
 
 Roots are ordered from lowest to highest precedence: shared `Data`, each
-`ParentMod`, then the active mod. Lua scripts with the same case-insensitive
-basename are replaced by the higher-precedence copy and execute in deterministic
-filename order. Native DLLs do not participate in this overlay: they are
+`ParentMod`, then the active mod. Native modules use that order when reading
+inherited configuration and assets, with later roots overriding earlier
+values. Native DLLs do not participate in this overlay: they are
 discovered only under `Data/modules` and filtered by the root chain's
 `[modules]` rules before deterministic loading. This prevents a mod from
 silently supplying or replacing executable code.
 
 ## Registration transactions
 
-Each `A2FO_ModuleInit` and each Lua startup chunk is a transaction. The core
-records its dispatcher registrations and ownership claims. If initialization
-returns false, throws where catchable, or reports a Lua error, the core rolls
-that script/module back before continuing. A rejected DLL is unloaded only
+Each `A2FO_ModuleInit` is a transaction. The core records its dispatcher
+registrations and ownership claims. If initialization returns false or throws
+where catchable, the core rolls that module back before continuing. A rejected
+DLL is unloaded only
 after its registrations have been removed.
 
 Registrations are startup-only. Low-level hooks installed directly by a module
@@ -202,7 +222,6 @@ low-level hook.
 Craft::Explode (checked core hook)
   -> copy handle, team, transform, source ODF and declared ODF fields
   -> native handlers in module/registration order
-  -> Lua handlers in script/registration order
   -> first valid claim wins
   -> core finds, constructs, positions and publishes replacement
   -> original explosion continues
@@ -210,9 +229,8 @@ Craft::Explode (checked core hook)
 
 Every handler declares its required ODF field names at startup. The snapshot is
 the case-insensitive union of active declarations, plus `basename`. Native
-event pointers and Lua ODF views are callback-scoped. No script receives an
-engine pointer, and the core validates replacement names, flags, and ownership
-before acting.
+event pointers are callback-scoped, and the core validates replacement names,
+flags, and ownership before acting.
 
 This dispatcher is also useful groundwork for later Noxter mechanics: it gives
 future infestation or spawn-on-death modules a deterministic, synchronized
@@ -234,8 +252,13 @@ owns the shared typed ParameterDB hooks; a module supplies copied command/value
 pairs which are consulted only after the normal ODF/include lookup fails.
 Revision 11 appends a checked fixed-size byte writer for data constants and
 pointer slots which cannot use the existing CALL/JMP helpers.
-Existing v4 modules continue to receive their original struct prefix. Lua has
-an independent major/revision pair and `a2fo.require_api`.
+Revision 12 appends a copied runtime query for Fleet Operations' resolved
+per-mod settings directory so modules do not duplicate `SettingsDirectory`
+resolution policy.
+Revision 13 adds shared completed-object-class and completed-Race ODF
+dispatchers. Revision 14 adds shared WeaponClass, weapon-trigger, and Craft
+lifecycle dispatchers. Existing v4 modules continue to receive their original
+struct prefix.
 
-See [`../sdk/README.md`](../sdk/README.md), [`lua-api.md`](lua-api.md), and
+See [`../sdk/README.md`](../sdk/README.md) and
 [`addresses.md`](addresses.md).

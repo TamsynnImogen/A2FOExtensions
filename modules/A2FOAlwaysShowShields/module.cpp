@@ -110,6 +110,8 @@ std::unordered_set<void*> g_observed_crafts;
 std::unordered_set<void*> g_logged_creation_failures;
 std::unordered_map<std::string, std::string> g_loose_odf_paths;
 bool g_logged_object_list_scan = false;
+void* g_cached_list_owner = nullptr;
+void* g_cached_list_sentinel = nullptr;
 
 const char* class_odf_name(void* object_class) noexcept;
 void update_craft(void* craft) noexcept;
@@ -461,13 +463,21 @@ bool class_policy_enabled(void* object_class) noexcept {
 }
 
 bool signatures_supported() noexcept {
-    if (!g_armada ||
-        std::memcmp(at(kCreateShieldHitRva),
-                    kExpectedCreateShieldHit.data(),
-                    kExpectedCreateShieldHit.size()) != 0 ||
-        std::memcmp(at(kStopShieldEffectRva),
-                    kExpectedStopShieldEffect.data(),
-                    kExpectedStopShieldEffect.size()) != 0 ||
+    const auto* create_entry = static_cast<const std::uint8_t*>(
+        at(kCreateShieldHitRva));
+    const bool create_supported =
+        readable_range(create_entry, kExpectedCreateShieldHit.size()) &&
+        (std::memcmp(create_entry, kExpectedCreateShieldHit.data(),
+                     kExpectedCreateShieldHit.size()) == 0 ||
+         create_entry[0] == 0xe9);
+    const auto* stop_entry = static_cast<const std::uint8_t*>(
+        at(kStopShieldEffectRva));
+    const bool stop_supported =
+        readable_range(stop_entry, kExpectedStopShieldEffect.size()) &&
+        (std::memcmp(stop_entry, kExpectedStopShieldEffect.data(),
+                     kExpectedStopShieldEffect.size()) == 0 ||
+         stop_entry[0] == 0xe9);
+    if (!g_armada || !create_supported || !stop_supported ||
         std::memcmp(at(kStarbaseSimulateRva),
                     kExpectedStarbaseSimulate.data(),
                     kExpectedStarbaseSimulate.size()) != 0 ||
@@ -687,28 +697,32 @@ void update_craft(void* craft) noexcept {
 }
 
 void update_all_crafts() noexcept {
-    void* list_owner = nullptr;
     void* list_global = at(kGameObjectListRva);
-    if (!readable_range(list_global, sizeof(list_owner))) return;
-    std::memcpy(&list_owner, list_global, sizeof(list_owner));
-    if (!readable_range(
-            list_owner, sizeof(void*) * 2)) {
-        return;
+    if (!readable_range(list_global, sizeof(void*))) return;
+    void* list_owner = read_at<void*>(list_global, 0);
+    if (list_owner != g_cached_list_owner) {
+        if (!readable_range(list_owner, sizeof(void*) * 2)) return;
+        g_cached_list_owner = list_owner;
     }
+    void* current_sentinel = read_at<void*>(list_owner, sizeof(void*));
+    if (current_sentinel != g_cached_list_sentinel) {
+        if (!readable_range(current_sentinel, sizeof(void*) * 3)) return;
+        g_cached_list_sentinel = current_sentinel;
+    }
+    void* sentinel = g_cached_list_sentinel;
+    if (!sentinel) return;
 
-    void* sentinel = read_at<void*>(list_owner, sizeof(void*));
-    if (!readable_range(sentinel, sizeof(void*) * 3)) return;
+    // This hook runs immediately before Armada traverses this same live list
+    // for rendering. Validate the owner/sentinel only when they change, then
+    // use direct reads for the nodes Armada is about to consume itself. A
+    // VirtualQuery for every node and object was a large Wine-side cost.
     void* node = read_at<void*>(sentinel, 0);
     std::size_t visited = 0;
     constexpr std::size_t kMaximumObjectsPerPass = 65536;
     while (node && node != sentinel && visited < kMaximumObjectsPerPass) {
-        if (!readable_range(node, sizeof(void*) * 3)) break;
         void* next = read_at<void*>(node, 0);
         void* object = read_at<void*>(node, sizeof(void*) * 2);
-        if (readable_range(
-                object, kObjectClassOffset + sizeof(void*))) {
-            update_craft(object);
-        }
+        if (object) update_craft(object);
         ++visited;
         if (next == node) break;
         node = next;
@@ -840,4 +854,6 @@ void A2FO_CALL A2FO_ModuleShutdown() {
     g_logged_creation_failures.clear();
     g_loose_odf_paths.clear();
     g_logged_object_list_scan = false;
+    g_cached_list_owner = nullptr;
+    g_cached_list_sentinel = nullptr;
 }

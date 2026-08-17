@@ -82,17 +82,15 @@ The turret's weapon ODF can use Armada's existing `restrictFireArc` and
 the turret's live orientation. See
 [`../A2FOFireArcs/README.md`](../A2FOFireArcs/README.md).
 
-The turret module's existing `Weapon::Trigger(GameObject)` hook also hosts
-A2FOFireArcs' final full-3D trigger filter and A2FONormalWeaponTech's ordinary
-weapon technology filter. This keeps vertical rejection out of Armada's
-two-dimensional attack-movement path and gives both features one safe final
-trigger gate. Each link is optional and discovered at module load; ordinary
-turret behavior is unchanged when either filter module is absent.
+The core's shared `Weapon::Trigger(GameObject)` dispatcher hosts Turrets,
+FireArcs, NormalWeaponTech, and torpedo-ammunition prechecks at one safe final
+gate. Each module remains optional and no longer depends on Turrets merely to
+receive trigger events.
 
 The same single-owner rule applies to `A2FOAlwaysShowShields.dll`.
 A2FOCraftIdentity forwards completed CraftClass construction for ships and
 stations. A2FOTurrets additionally forwards its GameObjectClass construction
-path, each post-native Craft simulation, and pre-native Craft cleanup. The
+path. Craft simulation and cleanup now use the core dispatcher. The
 shield module retains all ODF policy and rendering decisions; the owning
 modules merely prevent another DLL from detouring the same engine functions.
 

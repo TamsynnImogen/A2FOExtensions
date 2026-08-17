@@ -7,6 +7,7 @@
 #include "upgrade_pods.hpp"
 
 #include "hybrid_bridge_client.hpp"
+#include "upgrade_pod_config.hpp"
 
 #include <algorithm>
 #include <array>
@@ -14,7 +15,9 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -24,7 +27,10 @@ namespace {
 
 constexpr const char* kModuleName = "A2FOFeaturePack";
 constexpr std::uint32_t kNativeMaximumTier = 3;
+constexpr std::uint32_t kDefaultMaximumTier = 6;
 constexpr std::uint32_t kHardMaximumTier = 16;
+constexpr const char* kRtsConfigFileName = "RTS_CFG.h";
+constexpr std::streamoff kMaximumRtsConfigSize = 2 * 1024 * 1024;
 constexpr std::uint32_t kResearchPodClassTag = 0x52535250u;
 constexpr std::size_t kShipUpgradeSystemCount = 5;
 
@@ -124,6 +130,7 @@ bool g_upgrade_hooks_ready = false;
 volatile LONG g_extended_compare_log_count = 0;
 volatile LONG g_chain_bridge_log_count = 0;
 volatile LONG g_station_progression_log_count = 0;
+std::uint32_t g_configured_maximum_tier = kDefaultMaximumTier;
 
 A2FO_InlineHook g_pod_class_hook{};
 A2FO_InlineHook g_pod_class_dtor_hook{};
@@ -197,14 +204,70 @@ void log_message(const std::string& message) noexcept {
 }
 
 std::uint32_t configured_maximum_tier() noexcept {
-    if (!g_api ||
-        !A2FO_MODULE_API_HAS(g_api, upgrade_pod_maximum_tier) ||
-        !g_api->upgrade_pod_maximum_tier) {
-        return kNativeMaximumTier;
+    return g_configured_maximum_tier;
+}
+
+std::string join_path(const std::string& left, const std::string& right) {
+    if (left.empty()) return right;
+    if (right.empty()) return left;
+    if (left.back() == '\\' || left.back() == '/') return left + right;
+    return left + "\\" + right;
+}
+
+bool read_small_text_file(const std::string& path, std::string& contents) {
+    contents.clear();
+    std::ifstream input(path, std::ios::binary);
+    if (!input) return false;
+    input.seekg(0, std::ios::end);
+    const std::streamoff size = input.tellg();
+    if (size < 0 || size > kMaximumRtsConfigSize) {
+        log_message("Ignored oversized RTS configuration: " + path);
+        return false;
     }
-    return std::max(kNativeMaximumTier,
-                    std::min(kHardMaximumTier,
-                             g_api->upgrade_pod_maximum_tier()));
+    input.seekg(0, std::ios::beg);
+    std::ostringstream stream;
+    stream << input.rdbuf();
+    contents = stream.str();
+    return input.good() || input.eof();
+}
+
+void load_upgrade_pod_maximum_tier() {
+    g_configured_maximum_tier = kDefaultMaximumTier;
+    bool configured = false;
+    const std::uint32_t root_count = g_api->extension_root_count();
+    if (root_count > 4096) {
+        log_message(
+            "Extension-root count is invalid; upgrade-pod maximum remains 6");
+        return;
+    }
+    for (std::uint32_t index = 0; index < root_count; ++index) {
+        const char* root = g_api->extension_root(index);
+        if (!root || !*root) continue;
+        const std::string path = join_path(root, kRtsConfigFileName);
+        std::string contents;
+        if (!read_small_text_file(path, contents)) continue;
+
+        std::uint32_t candidate = g_configured_maximum_tier;
+        const auto status = a2fo::upgrade_pods::parse_maximum_tier_setting(
+            contents, &candidate);
+        if (status ==
+            a2fo::upgrade_pods::MaximumTierSettingStatus::valid) {
+            g_configured_maximum_tier = candidate;
+            configured = true;
+            log_message(
+                "Applied upgradePodMaximumTier=" +
+                std::to_string(g_configured_maximum_tier) + " from " + path);
+        } else if (status ==
+                   a2fo::upgrade_pods::MaximumTierSettingStatus::invalid) {
+            log_message(
+                "Ignored invalid upgradePodMaximumTier in " + path +
+                " (valid range 3-16)");
+        }
+    }
+    log_message(
+        "RTS_CFG.h upgrade-pod maximum: " +
+        std::to_string(g_configured_maximum_tier) +
+        (configured ? "" : " (default)"));
 }
 
 template <std::size_t Size>
@@ -971,10 +1034,7 @@ bool initialize_upgrade_pods(const A2FO_ModuleApi* api,
                              HMODULE armada,
                              HMODULE fleet_ops) {
     if (!api || !armada || !fleet_ops || !api->install_inline_hook ||
-        !A2FO_MODULE_API_HAS(api, upgrade_pod_maximum_tier) ||
-        api->api_revision < 2 ||
-        (api->capabilities & A2FO_CAP_UPGRADE_POD_POLICY) == 0 ||
-        !api->upgrade_pod_maximum_tier) {
+        !api->extension_root_count || !api->extension_root) {
         if (api && api->log) {
             api->log(kModuleName,
                      "Configurable upgrade pods unavailable in this core");
@@ -1019,6 +1079,7 @@ bool initialize_upgrade_pods(const A2FO_ModuleApi* api,
 
     g_api = api;
     g_armada = armada;
+    load_upgrade_pod_maximum_tier();
     InitializeCriticalSection(&g_upgrade_lock);
     g_upgrade_lock_ready = true;
 
@@ -1072,8 +1133,9 @@ bool initialize_upgrade_pods(const A2FO_ModuleApi* api,
         return false;
     }
     g_upgrade_hooks_ready = true;
-    api->log(kModuleName,
-             "Configurable upgrade pods enabled (Lua maximum 3-16)");
+    log_message(
+        "Configurable upgrade pods enabled (RTS_CFG.h maximum " +
+        std::to_string(g_configured_maximum_tier) + ")");
     return true;
 }
 

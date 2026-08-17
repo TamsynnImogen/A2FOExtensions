@@ -1,7 +1,7 @@
 # Modder command and feature reference
 
 This is the central index of the public modding surface shipped by
-A2FOExtensions. It lists every extension-owned ODF, INI, CFG, Lua, asset, and
+A2FOExtensions. It lists every extension-owned ODF, INI, CFG, asset, and
 authoring convention. The linked module guides remain authoritative for
 runtime details, validation rules, and current limitations.
 
@@ -21,25 +21,31 @@ loaded.
 | [`A1Compat`](../modules/A1Compat/README.md) | `a1compat.ini`, the `wingman` alias, A1 missing-only ODF defaults, `Addon` overlay, and officer-quarter compatibility |
 | [`A2FOAlwaysShowShields`](../modules/A2FOAlwaysShowShields/README.md) | `alwaysShowShields` object command |
 | [`A2FOAnimatedHardpoints`](../modules/A2FOAnimatedHardpoints/README.md) | SOD matrix animation for gameplay hardpoint/null transforms; no ODF command |
+| [`A2FOBuildTooltips`](../modules/A2FOBuildTooltips/README.md) | adjusted build-time text in normal and verbose build-button tooltips; no ODF command |
 | [`A2FOCheats`](../modules/A2FOCheats/README.md) | configurable `showmethemoney` resources and restored single-player chat cheats |
-| [`A2FOCraftIdentity`](../modules/A2FOCraftIdentity/README.md) | captain/registry lists and selected-object GUI fields |
+| [`A2FOCraftIdentity`](../modules/A2FOCraftIdentity/README.md) | captain/registry lists, ammunition/directional-shield UI, XP bar, and selected shield/XP tooltips |
+| [`A2FODirectionalShields`](../modules/A2FODirectionalShields/README.md) | optional forward, aft, port, and starboard Craft shield facings |
 | [`A2FOEditMenu`](../modules/A2FOEditMenu/README.md) | recursive `buildItemX` edit-menu submenus |
 | [`A2FOFeaturePack`](../modules/A2FOFeaturePack/README.md) | recursive ODF/FPQ discovery, queue controls, extended upgrade pods, and viewport-correct Bink movies |
 | [`A2FOFireArcs`](../modules/A2FOFireArcs/README.md) | three-dimensional weapon fire volumes and tactical hover preview |
+| [`A2FOEnergySystems`](../modules/A2FOEnergySystems/README.md) | Photon and Quantum Torpedo ammunition, recharge, and resupply |
 | [`A2FOHybridBuild`](../modules/A2FOHybridBuild/README.md) | `hybridbuild`, four production lists, shared queue, placements, and cocoons |
 | [`A2FOInfoIni`](../modules/A2FOInfoIni/README.md) | `SettingsDirectory` and `DefaultGameSpeed` |
+| [`A2FOInstantActionSettings`](../modules/A2FOInstantActionSettings/README.md) | restored Instant Action `Load Settings` behavior; no new command |
 | [`A2FOMissionSelector`](../modules/A2FOMissionSelector/README.md) | scrollable stock/custom campaign browser and `mission_selector.ini` |
 | [`A2FONebulaRenderer`](../modules/A2FONebulaRenderer/README.md) | DX8 per-pixel lighting, emissive maps, damage decals, and ship-name logo decals |
 | [`A2FONormalWeaponTech`](../modules/A2FONormalWeaponTech/README.md) | normal-weapon `.tt` prerequisite enforcement; no new ODF command |
 | [`A2FOPointDefenseCycles`](../modules/A2FOPointDefenseCycles/README.md) | CannonImp-style numbered point-defense firing delays |
+| [`A2FOResources`](../modules/A2FOResources/README.md) | four independent resources, object costs, Race starting values, panel row, and native accessors |
 | [`A2FORGBTextures`](../modules/A2FORGBTextures/README.md) | presence-based legacy RGB/Index8/Compressed TGA loading; no ODF command |
 | [`A2FOSwarmSystem`](../modules/A2FOSwarmSystem/README.md) | lightweight render-only ambient swarms |
 | [`A2FOTextureVariants`](../modules/A2FOTextureVariants/README.md) | faction textures/nodes, Borg DDS repair, and subsystem damage meshes |
 | [`A2FOTurrets`](../modules/A2FOTurrets/README.md) | indexed independently armed hull turrets |
 | [`A2FOWeaponDamageControls`](../modules/A2FOWeaponDamageControls/README.md) | independent shield/hull permission and damage multipliers |
+| [`A2FOWreckage`](../modules/A2FOWreckage/README.md) | deterministic native `wreckage` replacement policy |
 
-The core also supplies deterministic module/script loading, module policy,
-Lua hosting, checked semantic dispatch, and the versioned
+The core also supplies deterministic module loading, module policy, checked
+semantic dispatch, and the versioned
 [`native module SDK`](../sdk/README.md).
 
 ## `info.ini`
@@ -71,6 +77,187 @@ inherit through `ParentMod`; the most specific mod owns the optional `activeX`
 list. A mod chain with no `[modules]` section retains legacy load-all behavior.
 The Mods screen's **Modules** button edits only `activeX` rows.
 
+## Ten-resource extension
+
+`A2FOResources.dll` retains Armada/Fleet Operations' six native pools and adds
+four independent sidecar pools: tritanium, supply, credits, and collective
+connections. They are deliberately separate from latinum, metal, officers,
+and biomatter even though older Fleet Operations interfaces used those native
+slots as aliases.
+
+Object costs are non-negative integers and default to zero:
+
+```ini
+tritaniumCost = 120
+supplyCost = 8
+creditsCost = 25
+collectiveconnectionsCost = 3
+```
+
+Race ODFs may define `normalTritanium`, `lotsTritanium`, `normalSupply`,
+`lotsSupply`, `normalCredits`, `lotsCredits`,
+`normalCollectiveConnections`, and `lotsCollectiveConnections`. GUI rectangles
+`resource_6` through `resource_9` optionally position the second resource row.
+
+All ten resources accept Race-specific presentation fields. The added four are
+consumed by A2FO's panel, tooltip, build-cost, and API paths. Targeted
+ResourceComponent paths consume the short and verbose tooltip fields for crew,
+dilithium, latinum, metal, and biomatter. Native compact costs use cached icon
+glyphs, including the separately stored officer field, while verbose costs use
+the cached `Res` names. The native top resource panel has no label text to
+replace. Use one of
+`crew`, `officer`, `dilithium`, `latinum`, `metal`, `biomatter`, `tritanium`,
+`supply`, `credits`, or `collectiveconnections` followed by `Res`, `Tooltip`,
+`VerboseTooltip`, or `Icon`. A value names a `Dynamic_Localized_Strings.h` key when one
+exists and otherwise acts as literal text. For example:
+`creditsRes = "GUI_CP_FED_CREDITS_RES"`. A native field such as
+`metalRes = "Duranium"` changes the verbose palette cost name, while
+`metalIcon` changes its compact glyph. Neither changes the top-panel number.
+
+See [the resource module guide](../modules/A2FOResources/README.md) for layout,
+native accessors, and the current save-persistence limitation.
+
+## Photon and Quantum Torpedo stores
+
+`A2FOEnergySystems.dll` adds two per-Craft ammunition pools. Craft ODFs use
+`maxPhotonTorpedoes`, `photonTorpedoRate`, and
+`photonTorpedoRechargeMode`, or `maxQuantumTorpedoes`,
+`quantumTorpedoRate`, and `quantumTorpedoRechargeMode`. Mode `1`
+recharges continuously; mode `2` recharges only near a same-team provider.
+Weapon ODFs consume them with `photonTorpedoCost` or
+`quantumTorpedoCost`. The selected cost is charged once for each successfully
+launched projectile, so multi-projectile volleys consume one cost per shot.
+
+Configured stores appear in the selected-craft panel as whole-number
+`current/maximum` values. GUI rectangles `infoSinglePhotonTorpedoesTextArea` and
+`infoSingleQuantumTorpedoesTextArea` optionally position the two rows;
+`photonTorpedoColor` and `quantumTorpedoColor` optionally colour them.
+Without explicit rectangles the rows use offsets `+16` and `+40` from the
+selected name anchor.
+
+Each Craft ODF may customize their presentation independently:
+
+```cpp
+photonTorpedoDisplayMode = 1
+photonTorpedoValueDisplayMode = 0
+photonTorpedoLabel = "Photon Magazine"
+photonTorpedoTooltip = "Photon Torpedo Ammunition"
+photonTorpedoVerboseTooltip = "The ship's photon torpedo reserve."
+
+quantumTorpedoDisplayMode = 2
+quantumTorpedoValueDisplayMode = 1
+quantumTorpedoIcon = "all_interface"
+quantumTorpedoIconPos = 71 151 34 34
+quantumTorpedoTooltip = "Quantum Torpedo Ammunition"
+quantumTorpedoVerboseTooltip = "The ship's quantum torpedo reserve."
+```
+
+Display mode `1` shows `label: current/maximum`; mode `2` shows the selected
+atlas crop followed by `current/maximum`. `*Icon` may name a registered GUI
+sprite, or one of the stock atlas names `all_interface`, `all_interface2`,
+`all_interface_races`, `all_interface_ranks`, and `all_interface_ranks2`.
+`*IconPos` is the `x y width height` source rectangle inside that texture; the
+renderer places it automatically at the store's text row. A missing or invalid
+icon retains the compact `current/maximum` value without restoring the label.
+Label and tooltip values name a
+`Dynamic_Localized_Strings.h` key when one exists and otherwise act as literal
+text. Native normal/verbose tooltip timing applies to both the row and icon.
+
+The separate `*ValueDisplayMode` follows Fleet Operations'
+`specialEnergyDisplayMode` convention and defaults to `0`:
+
+- `0` displays the remaining store as an integer percent.
+- `1` displays integer `current/maximum` amounts.
+- `2` displays `GUI_SD_SPE_READY` when full, rounded-up seconds while actively
+  recharging, or `GUI_SD_AMMO_WAITING` while a resupply-only store is out of
+  provider range. The latter key falls back to `Resupply` when it is absent.
+- `3` replaces the value text with a left-to-right capacity bar. Text mode
+  retains the label; icon mode retains the icon.
+
+Both the text and icon are green above 50%, yellow from 25% through 50%, and
+red at or below 25%. GUI configuration may override those colours independently
+for each store:
+
+```cpp
+photonTorpedoColor = 0.0 1.0 0.0
+photonTorpedoLowColor = 1.0 1.0 0.0
+photonTorpedoCriticalColor = 1.0 0.0 0.0
+quantumTorpedoColor = 0.0 1.0 0.0
+quantumTorpedoLowColor = 1.0 1.0 0.0
+quantumTorpedoCriticalColor = 1.0 0.0 0.0
+```
+
+Shipyards and `RepairShip` classes provide resupply within 200 units by
+default. `torpedoResupply` overrides provider status and
+`torpedoResupplyRange` overrides its range. See
+[the energy-system guide](../modules/A2FOEnergySystems/README.md) for the full
+contract and save-game note.
+
+## Optional directional shields
+
+`A2FODirectionalShields.dll` divides an explicitly opted-in Craft's native
+shield total into four facings:
+
+```cpp
+maxShields = 650
+directionalShields = 1
+forwardShieldStrength = 200
+aftShieldStrength = 150
+portShieldStrength = 150
+starboardShieldStrength = 150
+```
+
+The enable command is mandatory and all four strengths must be positive. A
+Craft without `directionalShields = 1` receives no sidecar state or altered
+damage routing, even if strength fields are present. The four values should
+sum to an explicitly declared native `maxShields`. A mismatch rejects the
+policy. If `maxShields` is absent, as is common in A1 ODFs, the module derives
+the native shield ceiling from the four values. `maxHealth` and `healthRate`
+remain the independent hull pool and repair rate, while native `shieldRate`
+recharges the aggregate and is shared across depleted facings. Select
+`A2FOWeaponDamageControls` as well, because it owns the checked
+`Craft::Damage` bridge.
+
+`A2FOCraftIdentity` can display the four current/maximum values in the
+selected-Craft panel. Use
+`infoSingleDirectionalShieldsForwardAftTextArea` and
+`infoSingleDirectionalShieldsPortStarboardTextArea` for the two rows, with an
+optional `directionalShieldColor`. The arc ring also accepts
+`directionalShieldLowColor` and `directionalShieldCriticalColor`; defaults are
+green above 50%, orange from 25% through 50%, and red at or below 25%. A fixed
+`128 128`
+`infoSingleDirectionalShieldsGraphicArea` enables the optional arc-ring origin
+when the loaded GUI sprite table defines `dsf`, `dsb`, `dsl`, and `dsr`. The
+visible segment rectangles can be overridden per Craft ODF with
+`forwardShieldPos`, `aftShieldPos`, `portShieldPos`, and
+`starboardShieldPos`, each using `x y width height` coordinates relative to
+that graphic area. Their defaults are `26 0 76 20`, `26 108 76 20`,
+`0 26 20 76`, and `108 26 20 76`. The first pair depletes horizontally from
+its centre and the second vertically; this eased presentation never delays
+the underlying shield value.
+
+The active mod's `ART_CFG.h` can select the presentation mode and assign each
+logical facing to one of the four physical compass slots:
+
+```cpp
+int directionalShieldDisplayMode = 1;
+int directionalShieldForwardPosition = 0;
+int directionalShieldAftPosition = 2;
+int directionalShieldPortPosition = 3;
+int directionalShieldStarboardPosition = 1;
+```
+
+Display mode `1` is the normal proportional drain. Mode `2` keeps every arc
+at full size and communicates its health only through the green, orange, and
+red state colours; an exactly depleted arc becomes black. Position values are
+`0 = north`, `1 = east`, `2 = south`,
+and `3 = west`. Each position must be used exactly once; an out-of-range or
+duplicate final mapping is ignored and the existing per-Craft ODF placement
+is retained. Higher-precedence extension roots override individual ART
+assignments. See
+[the directional-shield guide](../modules/A2FODirectionalShields/README.md)
+for hit classification, layout, and the current save limitation.
+
 ## `a1compat.ini`
 
 The presence of `a1compat.ini` anywhere in the active extension-root chain is
@@ -101,6 +288,7 @@ map to Armada's four native campaigns, whose native mission slots are
 | --- | --- | --- |
 | campaign | `title` | Displayed campaign name |
 | campaign | `overview` | Campaign summary |
+| campaign | `background` | PNG, BMP, JPEG, or JPG image shown behind the selector while this campaign is selected |
 | campaign | `unlocked` | `0` or `1`; custom campaigns default to unlocked |
 | mission | `file` | BZN filename; required for custom missions and optional as a stock-slot launch override |
 | mission | `title` | Displayed mission name |
@@ -112,7 +300,8 @@ map to Armada's four native campaigns, whose native mission slots are
 | mission | `nativeMission` | Advanced borrowed launch slot, `0..9` |
 
 See the [mission-selector guide](../modules/A2FOMissionSelector/README.md) for
-native progression, automatic thumbnail lookup, and custom-launch behavior.
+native progression, campaign-background fallback, automatic thumbnail lookup,
+and custom-launch behavior.
 
 ## `RTS_CFG.h` and interface CFG commands
 
@@ -141,6 +330,17 @@ The active interface CFG may override three RGB float triplets:
 - `fireArcCenterColor`
 - `fireArcValidTargetColor`
 
+### Upgrade-pod maximum
+
+`int upgradePodMaximumTier = 6;` selects the highest permitted pod tier.
+Valid values are 3–16 and the default is 6. Files are read in extension-root
+order, so a child mod's valid assignment overrides its parent's assignment.
+Fleet Operations does not merge native `RTS_CFG.h` files: a child copy shadows
+the complete parent file. Preserve the full parent contents and includes when
+adding this command to a child mod. A minimal one-command child file can remove
+`ART_CFG.h` and the parent's camera, renderer, map, interface, and gameplay
+defaults.
+
 ### Craft identity panel
 
 The active GUI configuration accepts:
@@ -151,6 +351,10 @@ The active GUI configuration accepts:
 | `infoSingleRegistryTextArea` | Selected-panel `x y width height` rectangle |
 | `captainNameColor` | Optional captain RGB float triplet |
 | `shipRegistryColor` | Optional registry RGB float triplet |
+| `infoSingleShieldBarArea` | Existing selected shield-bar rectangle; A2FO adds its hover region |
+| `infoSingleExperienceBarArea` | Optional ranked-craft XP-bar `x y width height` rectangle |
+| `experienceBarColor` | Optional ranked-craft XP-bar RGB float triplet |
+| `experienceBarBackgroundColor` | Optional empty XP-track RGB float triplet |
 | `captainName` | Legacy captain-rectangle fallback |
 | `shipRegistry` | Legacy registry-rectangle fallback |
 
@@ -178,6 +382,8 @@ the preflight so `_b.dds` works without a matching TGA.
 | `alwaysShowShields` | Keep native shield geometry visible while shield strength is above zero; default `0`. |
 | `possibleCaptainNames` | Captain rows aligned to native `possibleCraftNames`. |
 | `possibleCraftRegistry` | Registry rows aligned to native `possibleCraftNames`. |
+| `shieldTooltip` | Optional selected shield-bar short tooltip or localization key. |
+| `shieldVerboseTooltip` | Optional selected shield-bar verbose tooltip or localization key. |
 
 The list row selected by Fleet Operations for `possibleCraftNames` selects the
 same row in both companion lists.
@@ -255,7 +461,7 @@ The child ODF uses `classLabel = "turret"` and may set:
 
 | Command | Meaning |
 | --- | --- |
-| `wreckage` | Replacement ODF created at a destroyed craft's transform by `scripts/Wreckage.lua`. |
+| `wreckage` | Replacement ODF created at a destroyed craft's transform by `A2FOWreckage`. |
 | `wreckageChance` | Deterministic chance percentage `0..100`; default `100`. |
 | `cocoon` | Evolver/HybridBuild cocoon SOD, with optional `.sod`. |
 | `upgradeLevel` | Existing pod level; the extension safely supports configured levels through 16. |
@@ -458,37 +664,6 @@ Native `ScaleSOD` is applied automatically to offsets and sizes.
   wins within its own root.
 - `A2FOFeaturePack`: Bink intro, GDI movie, and menu/campaign movie output is
   fitted to the active viewport automatically; there is no mod command.
-
-## Lua API
-
-Selected scripts are overlaid by basename from Data through parent mods to the
-active mod, then execute once in case-insensitive filename order.
-
-Public values and calls are:
-
-```lua
-a2fo.api_version
-a2fo.api_revision
-a2fo.lua_version
-a2fo.extension_roots
-
-a2fo.log(message)
-a2fo.require_api(major, revision)
-a2fo.has_capability(name)
-a2fo.configure_upgrade_pods({ maximum_tier = 6 })
-a2fo.on_classlabel(function(classlabel, odf) end)
-a2fo.on_evolver_cocoon(function(odf) end)
-a2fo.on_object_destroyed({"fieldName"}, function(event) end)
-
-odf:get_string(command)
-odf:get_string(command, default)
-event:roll_percent(chance)
-```
-
-Destroyed-object callbacks return `nil` or a table containing `odf`, optional
-`inherit_position`, optional `inherit_rotation`, and optional `owner`
-(`"neutral"` or `"original"`). See the complete [Lua API](lua-api.md) for
-lifetime, ownership, rollback, and validation rules.
 
 ## Controls and authoring tools
 

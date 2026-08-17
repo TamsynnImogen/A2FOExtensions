@@ -434,6 +434,17 @@ T read_at(const void* object, std::size_t offset,
     return value;
 }
 
+template <typename T>
+T read_live_at(const void* object, std::size_t offset,
+               T fallback = T{}) noexcept {
+    if (!object) return fallback;
+    T value{};
+    std::memcpy(&value,
+                static_cast<const std::uint8_t*>(object) + offset,
+                sizeof(value));
+    return value;
+}
+
 void* at(HMODULE module, std::uintptr_t rva) noexcept;
 
 void release_emissive_gpu_cache(EmissiveMaterialPolicy& policy) noexcept {
@@ -1718,7 +1729,8 @@ void workspace_dx8_emissive_mask_draw(IDirect3DDevice8* live_device,
                                       UINT native_vertex_count,
                                       UINT native_start_index,
                                       UINT native_primitive_count) noexcept {
-    if (!live_device || !workspace ||
+    if (InterlockedCompareExchange(&g_runtime_enabled, 0, 0) == 0 ||
+        !live_device || !workspace ||
         read_at<const void*>(workspace, 0, nullptr) !=
             at(g_armada, kWorkspaceDirectX8VtableRva)) {
         return;
@@ -2175,8 +2187,9 @@ bool prepare_decal_render_state(
 }
 
 void render_damage_decals(void* craft) noexcept {
-    if (!craft) return;
-    void* object_class = read_at<void*>(craft, kCraftClassOffset, nullptr);
+    if (!craft || g_damage_decal_policies.empty()) return;
+    void* object_class = read_live_at<void*>(
+        craft, kCraftClassOffset, nullptr);
     const auto found = g_damage_decal_policies.find(object_class);
     if (found == g_damage_decal_policies.end() || !found->second) return;
     const DamageDecalClassPolicy& policy = *found->second;
@@ -2355,8 +2368,9 @@ IDirect3DTexture8* selected_logo_texture(
 }
 
 void render_logo_decals(void* craft) noexcept {
-    if (!craft) return;
-    void* object_class = read_at<void*>(craft, kCraftClassOffset, nullptr);
+    if (!craft || g_logo_decal_policies.empty()) return;
+    void* object_class = read_live_at<void*>(
+        craft, kCraftClassOffset, nullptr);
     const auto found = g_logo_decal_policies.find(object_class);
     if (found == g_logo_decal_policies.end() || !found->second ||
         found->second->decals.empty()) {
@@ -2705,7 +2719,15 @@ bool ensure_pixel_shader(IDirect3DDevice8* device) noexcept {
     if (FAILED(result) || pixel_shader == 0) {
         if (InterlockedCompareExchange(&g_logged_create_failure, 1, 0) == 0) {
             log_hresult("IDirect3DDevice8::CreatePixelShader", result);
+            log_line("Live DX8 device rejected the Nebula pixel shader; "
+                     "native rendering retained for this session");
         }
+        // CreatePixelShader can be reached for every DOT3 material. Once the
+        // live device has rejected this already-assembled shader, retrying on
+        // every draw only repeats an expensive failing driver call. Preserve
+        // all installed gateways as native pass-throughs for the session.
+        InterlockedExchange(&g_runtime_enabled, 0);
+        InterlockedExchange(&g_activation_state, -1);
         return false;
     }
     g_pixel_shader = pixel_shader;
@@ -3206,7 +3228,9 @@ void nebula_begin_craft_render(void* craft) noexcept {
     } else {
         ++g_craft_render_overflow;
     }
-    void* object_class = read_at<void*>(craft, kCraftClassOffset, nullptr);
+    if (g_emissive_policies.empty()) return;
+    void* object_class = read_live_at<void*>(
+        craft, kCraftClassOffset, nullptr);
     if (g_emissive_policies.find(object_class) !=
             g_emissive_policies.end() &&
         InterlockedCompareExchange(

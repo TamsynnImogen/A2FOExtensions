@@ -3,6 +3,17 @@
 - Re-enable the shell display monitor only after its fullscreen handling can be
   proven not to alter legacy menu and modal-dialog layouts.
 
+## Photon and Quantum Torpedo Stores
+
+[PLANNED]
+
+* [ ] Allow one weapon ODF to declare both `photonTorpedoCost` and
+  `quantumTorpedoCost`. The pre-fire check must require sufficient ammunition
+  in both pools, and a committed trigger must deduct both costs atomically and
+  exactly once. Preserve the existing single-pool and no-cost behaviours and
+  add tests for insufficient pools, multi-projectile triggers, and invalid
+  values.
+
 ## Point-Defense Firing Cycles
 
 [IMPLEMENTED, REQUIRES MANUAL VALIDATION]
@@ -79,17 +90,18 @@ collidable, AI-controlled, saveable map units. See
 
 ## Architecture and Refactoring
 
-* [x] Make Lua destruction callbacks declare which ODF fields they require. The legacy Lua form retains a deprecated wreckage compatibility shim; the core itself no longer hard-codes those fields.
+* [x] Make native destruction handlers declare which ODF fields they require;
+  the core itself does not hard-code wreckage fields.
 * [x] Split HybridBuild and Fleet Ops `info.ini` defaults into dedicated
   `A2FOHybridBuild.dll` and `A2FOInfoIni.dll` modules. The core retains only
   shared/timing-sensitive dispatch hooks, and FeaturePack retains shared queue
   and ResearchStation hook ownership through a callback bridge.
 * [x] Rename the `ODFRecursive` source folder to `A2FOFeaturePack`.
 * [x] Document hook ownership and add a core-owned native destruction dispatcher. See `docs/architecture.md`.
-* [x] Add compatible API revision/capability checks for Lua scripts and native modules.
-* [x] Make native-module and Lua-script registration transactional so failed initializers cannot leave dangling callbacks.
+* [x] Add compatible API revision/capability checks for native modules.
+* [x] Make native-module registration transactional so failed initializers
+  cannot leave dangling callbacks.
 * [x] Add the optional shared `A2FORGBTextures.dll` module.
-* [RESEARCH] Investigate safely unloading and reloading Lua scripts during development.
 
 ## Build and Repository Cleanup
 
@@ -107,7 +119,6 @@ collidable, AI-controlled, saveable map units. See
   * hook invocation counts
   * callback execution time
   * module execution time
-  * Lua callback execution time
   * ODF and FPQ indexing and lookup time
   * repeated `ParameterDB` lookups
   * object update loops
@@ -119,7 +130,7 @@ collidable, AI-controlled, saveable map units. See
 * [PERFORMANCE] Record callback frequency as well as total and maximum duration,
   so a cheap callback invoked excessively is still visible as a hotspot.
 * [PERFORMANCE] Add a compact end-of-session or on-demand profiling report with
-  per-hook, per-module, and per-Lua-callback totals.
+  per-hook and per-module totals.
 * [PERFORMANCE] Establish repeatable baselines against the clean Sigma engine
   before changing hot paths. Optimise only hotspots confirmed by profiles.
 * [PERFORMANCE] Ensure profiling and verbose logging can be disabled in release builds.
@@ -526,6 +537,8 @@ Planned scope:
 
 * [ ] Add campaign icons and a banner to the implemented scrollable campaign
   list and overview text.
+* [x] Change the selector background with the selected campaign through
+  optional moddable image metadata and a safe common/dark fallback.
 * [x] Show each campaign's missions in a scrollable list with native
   unlock/progression state.
 * [x] Show the selected mission's thumbnail, description, and objectives.
@@ -545,6 +558,57 @@ Explicitly out of scope:
 INI-defined custom campaigns and BZN lists are implemented. Their `unlocked`
 policy is currently static; independent saveable custom-campaign progression
 remains future work.
+
+### Ten Independent Resources
+
+[CORE IMPLEMENTED, ECONOMY AND UI INTEGRATION IN PROGRESS]
+`A2FOResources.dll` extends the six native resources with independent
+tritanium, supply, credits, and collective-connections pools. Starting values,
+Producer costs/refunds, native-extension access, and a text-based second
+resource-panel row are implemented. The remaining systems must use the new
+indices `6..9` directly; Fleet Operations' historical tritanium and supplies
+helpers alias native latinum and biomatter and are not suitable fallbacks.
+
+* [x] Store, initialize, read, add, and set all four independent team balances.
+* [x] Enforce `tritaniumCost`, `supplyCost`, `creditsCost`, and
+  `collectiveconnectionsCost` in Producer affordability, payment, cancellation,
+  and refund paths.
+* [x] Draw independent balances in configurable `resource_6..resource_9`
+  rectangles without pairing any pool with a native resource.
+* [x] Append the four non-zero costs to build-item tooltip text.
+* [x] Parse Race-specific `Res`, `Tooltip`, `VerboseTooltip`, and `Icon` localization
+  keys for all ten resources and consume them for the added row/API; preserve
+  Armada's native officer customization.
+* [x] Consume the five remaining original-resource short and verbose tooltip
+  fields at targeted ResourceComponent entry points; cache added-row
+  presentation outside the frame loop.
+* [IMPLEMENTED, REQUIRES MANUAL VALIDATION] Apply native `Res` integration for
+  crew, dilithium, latinum, metal, and biomatter at the ten targeted ModeInfo
+  cost-localization calls. Resolve Team, Race, literal/key localization, and
+  tooltip strings only when the Race cache changes; the palette-hot route now
+  performs only canonical-key comparisons and returns the cached string. The
+  native top resource panel itself renders numeric values only.
+* [x] Trace Fleet Operations' high-byte font glyphs and apply canonical compact
+  icons to all ten resources. Preserve full Race-specific names in verbose
+  costs and reuse only the historical icon artwork for the four independent
+  pools.
+* [ ] Extend mining end-to-end: resource-node selection, freighter sidecar
+  cargo/capacity, collection and delivery, processors, AI targeting, and cargo
+  UI. Native `resourcesCanHandle` and freighter storage only cover indices
+  `0..5`.
+* [ ] Extend direct and route trading: buy/sell commands, route-completion
+  revenue, affordability, AI decisions, and trade UI. Native `BUY_RESOURCE`
+  parameters only identify resources `0..5`.
+* [ ] Add independent `ResourceWeapon` income fields and native-extension or
+  script bindings for grants, drains, mission rewards, and cheats.
+* [ ] Add four unique icon assets and icon-aware rendering for the resource
+  panel, build/research/evolve/trade tooltips, and shortage feedback. The
+  current added-cost tooltip layout is text-only.
+* [ ] Extend resource gifting/transfers and every selected-object cargo display.
+* [ ] Include the new costs in AI economic planning and define how the game's
+  resource-cost slider scales them.
+* [ ] Add versioned save/load persistence and validate deterministic two-peer
+  multiplayer synchronization.
 
 ### Expanded Construction Queues
 
@@ -716,22 +780,14 @@ engine path is hardcoded around a maximum level of `3`. Investigate replacing
 that fixed check with a bounded, synchronized policy so mods can deliberately
 enable additional tiers without making arbitrary values valid.
 
-Lua should select the permitted maximum through a semantic API rather than
-receiving raw patch access. A possible startup-only interface is:
-
-```lua
-a2fo.configure_upgrade_pods({
-    maximum_tier = 6
-})
-```
-
-The native bridge imposes a hard safety ceiling of `16`, validates the
-requested value, hooks only the known supported binaries, and keeps the vanilla
-maximum of `3` when no script registers a policy. Higher declared levels are
+`upgradePodMaximumTier` in inherited `RTS_CFG.h` selects the permitted
+maximum. The native bridge imposes a hard safety ceiling of `16`, validates
+the requested value, hooks only the known supported binaries, and defaults to
+level `6` when no root supplies a setting. Higher declared levels are
 retained in A2FO sidecar state while the engine-facing value is projected onto
 tier 3, preventing Armada's hardcoded Team upgrade arrays from being indexed
 out of bounds. Because this affects simulation data, every multiplayer peer
-must load the same selected script and tier limit.
+must load the same `RTS_CFG.h` tier limit.
 
 #### Tiered Upgrade-Station Build Lists
 
@@ -768,7 +824,7 @@ Backward compatibility:
 * A `tier0BuildItem<N>` or `tier1BuildItem<N>` command replaces only index
   `N` with the explicit level-2 or level-3 item. Unspecified indices retain
   their legacy entries, so unrelated research is never compacted or moved.
-* Upgrade levels above 3 require both an enabled Lua tier limit and matching
+* Upgrade levels above 3 require both an enabled `RTS_CFG.h` tier limit and matching
   `tier<Tier>BuildItem<Index>` entries.
 * The item index identifies the same upgrade chain across every tier. A pod
   built from `tier2BuildItem4`, for example, replaces the pod previously built
@@ -793,8 +849,8 @@ Implemented native work:
   advance only the matching occupied system to its next configured tier after
   replacement, while copying every unrelated native/Fleet Ops research slot
   unchanged and preserving the native level-2 prerequisite relationship.
-* [x] Add the startup-only Lua configuration API with a default of 3 and a
-  hard maximum of 16.
+* [x] Read the inherited startup-only `upgradePodMaximumTier` setting from
+  `RTS_CFG.h`, with a default of 6 and hard maximum of 16.
 
 Manual validation remaining:
 
@@ -808,7 +864,7 @@ Manual validation remaining:
   destroy pods after loading and confirm the next-highest multiplier returns.
 * [ ] Verify unmodified stations and old saves retain vanilla behaviour.
 * [ ] Complete a two-peer multiplayer synchronization test with identical
-  scripts and ODFs.
+  `RTS_CFG.h` and ODF files.
 
 ### Borg Features
 
@@ -1282,7 +1338,8 @@ Station host     → temporary nest or breeder
 Technical questions:
 
 * How infection state should be attached to and removed from engine objects.
-* Whether infection timers should run through Lua, native modules, or a generic status-effect dispatcher.
+* Whether infection timers should run through a dedicated native module or a
+  generic status-effect dispatcher.
 * How host size or class maps to burst results.
 * What happens when an infected target is destroyed before incubation completes.
 * How cleansing, repair-yard treatment, or immunity should work.
@@ -1304,9 +1361,9 @@ The shared framework should consider:
 * ownership and team handling;
 * save-game persistence;
 * multiplayer synchronisation;
-* generic callbacks for Lua and native modules.
+* generic callbacks for native modules.
 
-A generic API could allow feature scripts or modules to define:
+A generic API could allow feature modules to define:
 
 ```text
 target type

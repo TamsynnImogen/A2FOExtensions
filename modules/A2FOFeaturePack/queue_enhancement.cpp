@@ -56,6 +56,10 @@ constexpr std::size_t kQueueHeadOffset = 0x270;
 constexpr std::size_t kQueueCountOffset = 0x274;
 constexpr std::size_t kCurrentQueueIdOffset = 0x2a0;
 constexpr std::size_t kNextQueueIdOffset = 0x2a8;
+constexpr std::size_t kCurrentBuildClassOffset = 0x254;
+constexpr std::size_t kObjectClassOffset = 0x40;
+constexpr std::size_t kProducerConfigOffset = 0x450;
+constexpr std::size_t kChargeAtQueueOffset = 0xe4;
 constexpr std::size_t kQueueItemNextOffset = 0x08;
 constexpr std::size_t kQueueItemIdOffset = 0x0c;
 
@@ -184,6 +188,37 @@ void* queue_head_target_class(void* producer) {
     void* item = *reinterpret_cast<void**>(
         bytes(producer) + kQueueHeadOffset);
     return item ? *reinterpret_cast<void**>(item) : nullptr;
+}
+
+void* current_build_target_class(void* producer) {
+    return producer ? *reinterpret_cast<void**>(
+        bytes(producer) + kCurrentBuildClassOffset) : nullptr;
+}
+
+void* queued_target_class(void* producer, std::uint32_t queue_id) {
+    if (!producer) return nullptr;
+    void* item = *reinterpret_cast<void**>(
+        bytes(producer) + kQueueHeadOffset);
+    while (item) {
+        if (*reinterpret_cast<std::uint32_t*>(
+                bytes(item) + kQueueItemIdOffset) == queue_id) {
+            return *reinterpret_cast<void**>(item);
+        }
+        item = *reinterpret_cast<void**>(
+            bytes(item) + kQueueItemNextOffset);
+    }
+    return nullptr;
+}
+
+bool charges_resources_when_queued(void* producer) {
+    if (!producer) return false;
+    void* object_class = *reinterpret_cast<void**>(
+        bytes(producer) + kObjectClassOffset);
+    if (!object_class) return false;
+    void* config = *reinterpret_cast<void**>(
+        bytes(object_class) + kProducerConfigOffset);
+    return config && *reinterpret_cast<const std::uint8_t*>(
+        bytes(config) + kChargeAtQueueOffset) != 0;
 }
 
 void stop_continuous(void* producer) {
@@ -475,18 +510,53 @@ std::uintptr_t __attribute__((fastcall)) producer_finish_hook(
 std::uintptr_t __attribute__((fastcall)) producer_cancel_hook(
     void* producer, void*) {
     stop_continuous(producer);
+    if (void* target_class = current_build_target_class(producer)) {
+        dispatch_producer_event(
+            A2FO_PRODUCER_EVENT_CANCELLED, producer, target_class);
+    }
     return a2fo_call_thiscall_0(g_fo_cancel_hook.gateway, producer);
 }
 
 void __attribute__((fastcall)) producer_act_delete_hook(
     void* producer, void*, std::uint32_t queue_id) {
     stop_continuous(producer);
+    const std::uint32_t current_id = producer
+        ? *reinterpret_cast<std::uint32_t*>(
+              bytes(producer) + kCurrentQueueIdOffset)
+        : 0;
+    if (queue_id != current_id &&
+        charges_resources_when_queued(producer)) {
+        if (void* target_class = queued_target_class(producer, queue_id)) {
+            dispatch_producer_event(
+                A2FO_PRODUCER_EVENT_DELETED, producer, target_class);
+        }
+    }
     a2fo_call_thiscall_1(g_fo_act_delete_hook.gateway, producer, queue_id);
     discard_hybrid_construct_placement(producer, queue_id);
 }
 
 void __attribute__((fastcall)) producer_clear_hook(void* producer, void*) {
     stop_continuous(producer);
+    if (charges_resources_when_queued(producer)) {
+        void* item = producer ? *reinterpret_cast<void**>(
+            bytes(producer) + kQueueHeadOffset) : nullptr;
+        while (item) {
+            void* target_class = *reinterpret_cast<void**>(item);
+            if (target_class) {
+                dispatch_producer_event(
+                    A2FO_PRODUCER_EVENT_CLEARED,
+                    producer, target_class);
+            }
+            item = *reinterpret_cast<void**>(
+                bytes(item) + kQueueItemNextOffset);
+        }
+    } else if (void* target_class =
+                   current_build_target_class(producer)) {
+        // Fleet Operations' non-queue-charge branch refunds only the active
+        // class directly; it does not route through its Cancel callback.
+        dispatch_producer_event(
+            A2FO_PRODUCER_EVENT_CLEARED, producer, target_class);
+    }
     a2fo_call_thiscall_0(g_fo_clear_hook.gateway, producer);
     clear_hybrid_construct_placements(producer);
 }
