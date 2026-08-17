@@ -946,14 +946,14 @@ until the first DOT3 compilation finds the controller DLL and all assets.
 | --- | ---: | --- | ---: | --- | --- |
 | Armada | `0x32b580` | DATA | 32 | padded `shaders\\dot3_directional.nvv` | replace the native DOT3 vertex-shader source with `shaders\\dx8\\vertex\\vs.nvv` |
 | Armada | `0x226e50` | inline | 10 | `55 8b ec 6a ff 68 cb ba 6a 00` | `compile_dot3_mesh_hook`; preserve native DOT3 mesh/vertex compilation and assemble the paired pixel shader |
-| Armada | `0x2279af` | inline | 6 | `ff 92 1c 01 00 00` | `a2fo_nebula_dot3_draw_hook`; while the primary DOT3 indexed draw's streams and shader are live, accumulate the current craft's ODF emissive composite into the frame mask, restore all state, and replay the original draw |
-| Armada | `0x223ce4` | inline | 7 | `8b 10 51 50 ff 52 38` | `a2fo_nebula_device_reset_hook`; release the three default-pool bloom targets immediately before Armada calls `IDirect3DDevice8::Reset`, allowing native device-lost recovery to proceed |
-| Armada | `0x223ee9` | inline | 9 | `56 8b 06 ff 90 8c 00 00 00` | `a2fo_nebula_frame_bloom_hook`; before Armada's native `IDirect3DDevice8::EndScene`, downsample and separably blur the accumulated emissive mask, add it over the completed render target, restore all state, and replay the native call |
+| Armada | `0x2279af` | inline | 6 | `ff 92 1c 01 00 00` | Reserved experimental `a2fo_nebula_dot3_draw_hook` site. It is not installed while `kNativeFramebufferBloomEnabled` is false because replaying the live DOT3 draw into a private mask is unstable through the supported wrapper chain. |
+| Armada | `0x223ce4` | inline | 7 | `8b 10 51 50 ff 52 38` | Reserved experimental `a2fo_nebula_device_reset_hook` site. It is not installed while native framebuffer bloom is disabled, so no private default-pool bloom targets exist to release. |
+| Armada | `0x223ee9` | inline | 9 | `56 8b 06 ff 90 8c 00 00 00` | Reserved experimental `a2fo_nebula_frame_bloom_hook` site. The pre-`EndScene` compositor is not installed while `kNativeFramebufferBloomEnabled` is false. |
 | Armada | `0x23e4ea` | inline | 8 | `8b 16 8b 0d 08 d5 7a 00` | `a2fo_nebula_standard_pre_hook`; after `ST3D_Standard_MeshVB::Render` configures its native material, save texture stage 1 and add the active craft's emissive composite without replacing the fixed-function lighting path |
-| Armada | `0x23e5aa` | inline | 5 | `5f 5e 85 c0 5b` | `a2fo_nebula_standard_post_hook`; immediately after the standard indexed draw, resubmit its emissive geometry to the frame mask, restore the previous stage-1 texture and all modified combiner/sampler states, then replay the native epilogue |
+| Armada | `0x23e5aa` | inline | 5 | `5f 5e 85 c0 5b` | `a2fo_nebula_standard_post_hook`; immediately after the standard indexed draw, restore the previous stage-1 texture and all modified combiner/sampler states, then replay the native epilogue. Optional mask resubmission remains behind the disabled native-framebuffer flag. |
 | Armada | `0x232585` | inline | 7 | `8b 03 8b cb ff 50 18` | `a2fo_nebula_nonvb_pre_hook`; after the current texture-material pass is configured, activate the scoped emissive stage immediately before the selected DX8 workspace's virtual `Submit` issues its Direct3D draw |
-| Armada | `0x23258c` | inline | 6 | `8b 45 fc 46 3b f0` | `a2fo_nebula_nonvb_post_hook`; identify `ST3D_WorkspaceDirectX8` versus `ST3D_WorkspaceDirectX8NonVB` by its checked vtable, replay the second class's CPU arrays into the frame mask, restore the complete preceding texture-stage state, and continue the material-pass loop; the GPU-buffer class is captured at its exact inner draw site below |
-| Armada | `0x248bfb` | inline | 6 | `ff 92 1c 01 00 00` | `a2fo_nebula_workspace_dx8_draw_hook`; immediately before `ST3D_WorkspaceDirectX8::Submit` issues its indexed draw, accumulate the same exact still-bound rolling GPU-buffer batch into the emissive mask, restore state, and replay the native call with its already-pushed arguments |
+| Armada | `0x23258c` | inline | 6 | `8b 45 fc 46 3b f0` | `a2fo_nebula_nonvb_post_hook`; restore the complete preceding texture-stage state and continue the material-pass loop. Optional CPU-array mask replay remains behind the disabled native-framebuffer flag. |
+| Armada | `0x248bfb` | inline | 6 | `ff 92 1c 01 00 00` | Reserved experimental `a2fo_nebula_workspace_dx8_draw_hook` site. The rolling GPU-buffer mask-capture hook is not installed while `kNativeFramebufferBloomEnabled` is false. |
 | Fleet Ops | `0x210bb4` | PTR | 4 | slot equals Armada base + `0x22c270` | route Fleet Ops' DOT3 `ArmadaFunctions.ST3D_GraphicsEngine_GetShaderHandle` call to `a2fo_nebula_set_pixel_shader_hook` at first DOT3 compilation, after early Fleet Ops initialisation; retain native custom-vertex-shader lookup/creation, resolve its selected live DX8 device, create the paired pixel shader, upload transform/camera constants, and select it |
 | Fleet Ops | `0x1e67d1` | inline | 13 | `8b 40 0c f7 80 2c 01 00 00 04 00 00 00` | `a2fo_nebula_alpha_hook`; disable the pixel shader at the fixed-pipeline transition, replay both displaced instructions, and resume at `0x1e67de` |
 
@@ -1314,22 +1314,17 @@ is retained as an explicit class-wide wildcard.
 Loaded emissive sources retain their authored RGB values before subsystem
 composites are cached, supplying the sharp self-lit material centre. Complete
 generated mip chains and trilinear sampling stabilise thin UV regions. DOT3,
-standard MeshVB, GPU-buffer workspace, and CPU-buffer workspace draws then
-accumulate only that emissive geometry into a full-resolution D3D8
-render-target texture. Immediately before native `EndScene`, four bilinear
-samples preserve thin lights while reducing the mask to half resolution, and
-two horizontal/vertical iterations of a dense, bilinearly paired 13-sample
-Gaussian create the broad halo without quarter-resolution grid aliasing. The
-result is screen-blended three times to recover strong light energy on DX8's
-fixed-point target while avoiding additive white clipping and unstable
-sharp-mask subtraction, without an HDR/D3D9 replacement. The mask is cleared
-lazily before the next emissive
-draw, and all render targets, viewport, shaders, streams, textures, and render
-states are restored through a full state block.
-Default-pool bloom targets are released before native device reset. This
-produces a real silhouette halo without replacing Fleet Operations' device
-with a D3D8-to-D3D9 chain, and it does not bloom unrelated UI or bright map
-pixels.
+standard MeshVB, GPU-buffer workspace, and CPU-buffer workspace material paths
+apply those selective emissive composites directly and restore their scoped
+shader or texture-stage state after each draw.
+
+The experimental private render-target mask and pre-`EndScene` blur compositor
+remain in the source for further research but are disabled by
+`kNativeFramebufferBloomEnabled = false`. Replaying Armada's opaque draw state
+proved unstable through dxwrapper/d3d8to9/ReShade, including UI and edit-mode
+transitions. ReShade may provide the external bloom halo from the stable native
+emissive pixels without the extension rebinding render targets or replaying
+geometry.
 
 The D3DX functions are resolved dynamically from Fleet Operations' existing
 DLL. The core retains the compiled buffer for its full hook lifetime. Native

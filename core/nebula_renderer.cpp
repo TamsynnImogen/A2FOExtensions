@@ -184,6 +184,12 @@ constexpr std::uintptr_t kWorkspaceDirectX8NonVbVtableRva = 0x002bcdb4;
 // sprite-like intensity that a floating-point post-process would otherwise
 // provide, without replacing Fleet Operations' D3D8 device.
 constexpr std::size_t kHaloCompositePasses = 3;
+// Rebinding render targets around individual Armada draws and compositing at
+// EndScene is not stable through the supported dxwrapper -> d3d8to9 -> ReShade
+// stack, especially across edit-mode/UI shader transitions. ODF emissive maps
+// remain active in the native material passes; ReShade can bloom those pixels
+// without this experimental framebuffer path.
+constexpr bool kNativeFramebufferBloomEnabled = false;
 
 constexpr std::array<std::uint8_t, 32> kExpectedVertexShaderPath{
     0x73, 0x68, 0x61, 0x64, 0x65, 0x72, 0x73, 0x5c,
@@ -1181,18 +1187,19 @@ bool preflight_signatures() noexcept {
         !signature_matches(g_armada, kNonVbPostDrawRva,
                            kExpectedNonVbPostDraw.data(),
                            kExpectedNonVbPostDraw.size()) ||
-        !signature_matches(g_armada, kWorkspaceDx8DrawRva,
-                           kExpectedWorkspaceDx8Draw.data(),
-                           kExpectedWorkspaceDx8Draw.size()) ||
-        !signature_matches(g_armada, kFrameBloomRva,
-                           kExpectedFrameBloom.data(),
-                           kExpectedFrameBloom.size()) ||
-        !signature_matches(g_armada, kDeviceResetRva,
-                           kExpectedDeviceReset.data(),
-                           kExpectedDeviceReset.size()) ||
-        !signature_matches(g_armada, kDot3DrawRva,
-                           kExpectedDot3Draw.data(),
-                           kExpectedDot3Draw.size()) ||
+        (kNativeFramebufferBloomEnabled &&
+         (!signature_matches(g_armada, kWorkspaceDx8DrawRva,
+                            kExpectedWorkspaceDx8Draw.data(),
+                            kExpectedWorkspaceDx8Draw.size()) ||
+          !signature_matches(g_armada, kFrameBloomRva,
+                            kExpectedFrameBloom.data(),
+                            kExpectedFrameBloom.size()) ||
+          !signature_matches(g_armada, kDeviceResetRva,
+                            kExpectedDeviceReset.data(),
+                            kExpectedDeviceReset.size()) ||
+          !signature_matches(g_armada, kDot3DrawRva,
+                            kExpectedDot3Draw.data(),
+                            kExpectedDot3Draw.size()))) ||
         !signature_matches(g_fleet_ops, kAlphaTransitionRva,
                            kExpectedAlphaTransition.data(),
                            kExpectedAlphaTransition.size())) {
@@ -2921,41 +2928,48 @@ bool install_hooks_early() noexcept {
         g_a2fo_nebula_nonvb_post_gateway = g_nonvb_post_hook.gateway;
     }
 
-    installed = installed && a2fo::install_inline_hook(
-        at(g_armada, kWorkspaceDx8DrawRva),
-        function_address(&a2fo_nebula_workspace_dx8_draw_hook),
-        kExpectedWorkspaceDx8Draw.size(),
-        kExpectedWorkspaceDx8Draw.data(), g_workspace_dx8_draw_hook);
-    if (installed) {
-        g_a2fo_nebula_workspace_dx8_draw_gateway =
-            g_workspace_dx8_draw_hook.gateway;
-    }
+    if (kNativeFramebufferBloomEnabled) {
+        installed = installed && a2fo::install_inline_hook(
+            at(g_armada, kWorkspaceDx8DrawRva),
+            function_address(&a2fo_nebula_workspace_dx8_draw_hook),
+            kExpectedWorkspaceDx8Draw.size(),
+            kExpectedWorkspaceDx8Draw.data(), g_workspace_dx8_draw_hook);
+        if (installed) {
+            g_a2fo_nebula_workspace_dx8_draw_gateway =
+                g_workspace_dx8_draw_hook.gateway;
+        }
 
-    installed = installed && a2fo::install_inline_hook(
-        at(g_armada, kFrameBloomRva),
-        function_address(&a2fo_nebula_frame_bloom_hook),
-        kExpectedFrameBloom.size(), kExpectedFrameBloom.data(),
-        g_frame_bloom_hook);
-    if (installed) {
-        g_a2fo_nebula_frame_bloom_gateway = g_frame_bloom_hook.gateway;
-    }
+        installed = installed && a2fo::install_inline_hook(
+            at(g_armada, kFrameBloomRva),
+            function_address(&a2fo_nebula_frame_bloom_hook),
+            kExpectedFrameBloom.size(), kExpectedFrameBloom.data(),
+            g_frame_bloom_hook);
+        if (installed) {
+            g_a2fo_nebula_frame_bloom_gateway =
+                g_frame_bloom_hook.gateway;
+        }
 
-    installed = installed && a2fo::install_inline_hook(
-        at(g_armada, kDeviceResetRva),
-        function_address(&a2fo_nebula_device_reset_hook),
-        kExpectedDeviceReset.size(), kExpectedDeviceReset.data(),
-        g_device_reset_hook);
-    if (installed) {
-        g_a2fo_nebula_device_reset_gateway = g_device_reset_hook.gateway;
-    }
+        installed = installed && a2fo::install_inline_hook(
+            at(g_armada, kDeviceResetRva),
+            function_address(&a2fo_nebula_device_reset_hook),
+            kExpectedDeviceReset.size(), kExpectedDeviceReset.data(),
+            g_device_reset_hook);
+        if (installed) {
+            g_a2fo_nebula_device_reset_gateway =
+                g_device_reset_hook.gateway;
+        }
 
-    installed = installed && a2fo::install_inline_hook(
-        at(g_armada, kDot3DrawRva),
-        function_address(&a2fo_nebula_dot3_draw_hook),
-        kExpectedDot3Draw.size(), kExpectedDot3Draw.data(),
-        g_dot3_draw_hook);
-    if (installed) {
-        g_a2fo_nebula_dot3_draw_gateway = g_dot3_draw_hook.gateway;
+        installed = installed && a2fo::install_inline_hook(
+            at(g_armada, kDot3DrawRva),
+            function_address(&a2fo_nebula_dot3_draw_hook),
+            kExpectedDot3Draw.size(), kExpectedDot3Draw.data(),
+            g_dot3_draw_hook);
+        if (installed) {
+            g_a2fo_nebula_dot3_draw_gateway = g_dot3_draw_hook.gateway;
+        }
+    } else {
+        log_line("Native framebuffer bloom disabled for wrapper stability; "
+                 "ODF emissive material rendering remains active");
     }
 
     if (!installed) {
@@ -2988,7 +3002,9 @@ extern "C" void __cdecl a2fo_nebula_standard_pre() {
 }
 
 extern "C" void __cdecl a2fo_nebula_standard_post(void* mesh_stream) {
-    standard_emissive_mask_draw(mesh_stream);
+    if (kNativeFramebufferBloomEnabled) {
+        standard_emissive_mask_draw(mesh_stream);
+    }
     standard_emissive_post_draw();
 }
 
@@ -3001,20 +3017,25 @@ extern "C" void __cdecl a2fo_nebula_nonvb_pre() {
 }
 
 extern "C" void __cdecl a2fo_nebula_nonvb_post(void* workspace) {
-    nonvb_emissive_mask_draw(workspace);
+    if (kNativeFramebufferBloomEnabled) {
+        nonvb_emissive_mask_draw(workspace);
+    }
     standard_emissive_post_draw();
 }
 
 extern "C" void __cdecl a2fo_nebula_workspace_dx8_draw(
     IDirect3DDevice8* device, void* workspace, UINT vertex_count,
     UINT start_index, UINT primitive_count) {
-    workspace_dx8_emissive_mask_draw(
-        device, workspace, vertex_count, start_index, primitive_count);
+    if (kNativeFramebufferBloomEnabled) {
+        workspace_dx8_emissive_mask_draw(
+            device, workspace, vertex_count, start_index, primitive_count);
+    }
 }
 
 extern "C" void __cdecl a2fo_nebula_frame_bloom(
     IDirect3DDevice8* device) {
-    if (InterlockedCompareExchange(&g_runtime_enabled, 0, 0) != 0) {
+    if (kNativeFramebufferBloomEnabled &&
+        InterlockedCompareExchange(&g_runtime_enabled, 0, 0) != 0) {
         composite_native_bloom(device);
     }
 }
@@ -3027,7 +3048,9 @@ extern "C" void __cdecl a2fo_nebula_before_device_reset(
 extern "C" void __cdecl a2fo_nebula_dot3_draw(
     IDirect3DDevice8* device, const void* mesh_stream,
     UINT primitive_count) {
-    dot3_emissive_mask_draw(device, mesh_stream, primitive_count);
+    if (kNativeFramebufferBloomEnabled) {
+        dot3_emissive_mask_draw(device, mesh_stream, primitive_count);
+    }
 }
 
 namespace a2fo {

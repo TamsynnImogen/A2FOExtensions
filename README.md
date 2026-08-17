@@ -24,9 +24,10 @@ hooks, reusable semantic dispatch, and optional native feature modules.
   and animated ancestors.
 - Optional DX8 per-pixel ship lighting derived from armadaNebulaPatch, with
   the remaining Fleet Operations alpha-render path preserved and per-diffuse
-  ODF-driven, subsystem-aware emissive texture channels plus native soft
-  material-space and silhouette glow that does not require a D3D8-to-D3D9
-  wrapper.
+  ODF-driven, subsystem-aware emissive texture channels. The stable material
+  glow remains native DX8; external framebuffer bloom is currently delegated
+  to ReShade because render-target replay is unsafe through the supported
+  dxwrapper/d3d8to9 stack.
 - Optional recursive map-editor menus: a `buildItemX` target containing its own
   `buildItemX` rows opens as another submenu, with native Back navigation.
 - Experimental indexed hull-mounted turrets through matching `turretX` and

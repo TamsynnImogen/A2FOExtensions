@@ -80,16 +80,15 @@ The built-in native modules separate optional policy:
   GPU/CPU workspace fixed-function combiner sites instead of the DOT3 pixel
   shader. Loose
   emissive maps retain their authored RGB and sharp self-lit centres, while all
-  mesh paths accumulate the ODF emissive geometry into a private frame mask. A
-  multi-tap half-resolution reduction and two dense horizontal/vertical
-  Gaussian iterations are screen-blended before `EndScene`, creating a stable
-  external halo without additive white clipping or blooming the UI. Checked
+  mesh paths bind the matching composite directly during their native material
+  draw. The experimental private-mask/`EndScene` framebuffer compositor is
+  disabled: repeated render-target and shader-state replay is unstable through
+  dxwrapper/d3d8to9/ReShade, particularly during edit-mode transitions.
+  External halo bloom can instead be supplied by ReShade. Checked
   CraftSystem state reads keep operational maps lit, flicker control-disabled
   maps, and switch destroyed/repairing maps off. Full generated mip chains and
-  trilinear sampling suppress UV shimmer during movement. Checked
-  reset integration releases its default-pool targets before Fleet Operations
-  resets the device. This avoids an incompatible whole-device D3D8-to-D3D9
-  replacement. It composes with A2FOCraftIdentity's completed CraftClass boundary and
+  trilinear sampling suppress UV shimmer during movement. It composes with
+  A2FOCraftIdentity's completed CraftClass boundary and
   A2FOHybridBuild's common Craft render boundary rather than claiming duplicate
   hooks;
 - `A2FOPointDefenseCycles.dll`: per-instance, saveable numbered shot-delay
