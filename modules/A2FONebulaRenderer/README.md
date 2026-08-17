@@ -67,11 +67,9 @@ The runtime:
 - applies the same composite to classic/non-DOT3 SODs as a scoped additive
   fixed-function texture stage on MeshVB and both observed workspace classes,
   restoring the complete preceding state after each draw;
-- accumulates DOT3, MeshVB, GPU-buffer workspace, and CPU-buffer workspace
-  emissive geometry into a private
-  full-resolution render target, blurs a half-resolution copy horizontally
-  and vertically, and screen-blends the result before native EndScene;
-- releases all default-pool bloom targets before Armada resets a lost device;
+- leaves the experimental private-mask framebuffer compositor disabled because
+  its render-target and shader-state replay is unstable through
+  dxwrapper/d3d8to9/ReShade, especially across edit-mode transitions;
 - disables the pixel shader at Fleet Operations' fixed-pipeline transition,
   then resumes the displaced code and all remaining alpha draws.
 
@@ -170,43 +168,29 @@ regime and to 200% only in the native steady at-warp state. While a ship is
 actually moving at impulse, impulse emission rises to 150% and warp emission
 retains its 125% gravity-well level. Warp-in and warp-out use the lower warp
 profile so the full change coincides with the engine's own at-warp state.
-Channels saturate at 255, so very bright source artwork may show most of the
-extra energy in the framebuffer halo rather than its already-white centre.
+Channels saturate at 255, so very bright source artwork may show less motion
+variation once its material centre is already white.
 
 Composite textures are created lazily for only the active subsystem and motion
 profiles actually encountered by each material and are cached afterward; no
 texture is rebuilt every frame.
 
 The shader makes these pixels self-lit and independent of map lighting. The
-runtime preserves that sharp material centre and also renders only the active
-ODF emissive geometry into a private full-resolution mask. Before Armada ends
-the scene, a four-tap half-resolution reduction preserves thin illuminated
-geometry, two dense bilinear Gaussian iterations create the broad colour blur,
-and the result is screen-blended over the completed frame. Screen blending
-avoids additive white clipping without the sub-pixel instability caused by
-subtracting a sharp mask. The halo is submitted three times to recover strong
-sprite-like energy on DX8's fixed-point render target without requiring an HDR
-or D3D9 device replacement.
-This creates a genuine soft halo beyond the ship silhouette without ReShade or
-an unstable D3D8-to-D3D9 renderer replacement. Because the source mask contains
-only registered emissive geometry, bright UI and map objects do not bloom.
+runtime preserves that sharp material centre. A former experimental path also
+replayed every emissive mesh into private render targets and composited a soft
+halo before `EndScene`; it is disabled because dxwrapper/d3d8to9/ReShade cannot
+reliably restore Armada's opaque shader and stream state across UI/edit-mode
+transitions. ReShade bloom may be used for the external halo while the native
+ODF emissive material remains the selective bright source.
 
 All observed render families are covered. Bump/DOT3 meshes consume the
 composite in the custom pixel shader; ordinary MeshVB and classic workspace
 meshes receive it after their native material setup through Direct3D 8 texture
-stage 1. The workspace hook handles both `ST3D_WorkspaceDirectX8`, which keeps
-the submitted vertex/index buffers selected on the device, and
-`ST3D_WorkspaceDirectX8NonVB`, which submits CPU arrays. Ships such as the
-classic `fbattle.sod` use the first of those two layouts even though Armada
-reaches it through its `RenderInternalNonVB` path. The GPU-buffer mask is
-captured at `Submit`'s exact native indexed-draw instruction, before its rolling
-workspace can move on to another batch. The exact hook selects the enclosing
-emissive Craft directly when a hull submission occurs outside Armada's narrower
-material-pass scope; this prevents a Team-colour child group from becoming the
-only captured geometry. The CPU-array layout remains captured immediately after
-its UP draw. The isolated fixed-function mask keeps a neutral stage 0 and
-samples the emissive map through stage 1, matching the visible emissive layer's
-proven UV route on classic mirrored meshes.
+stage 1. The scoped pre/post material hooks cover both observed workspace
+classes without installing the inactive mask-capture hooks. Ships such as the
+classic `fbattle.sod` therefore retain the visible additive emissive layer.
+Stage 1 samples the emissive map through the proven UV route on classic
+mirrored meshes and is then restored to the preceding material state.
 
 ## Subsystem and hull damage decals
 
