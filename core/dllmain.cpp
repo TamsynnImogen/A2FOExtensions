@@ -7,7 +7,6 @@
 
 #include "extension_roots.hpp"
 #include "hook.hpp"
-#include "lua_host.hpp"
 #include "module_loader.hpp"
 #include "module_menu.hpp"
 #include "nebula_renderer.hpp"
@@ -23,12 +22,27 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace {
+
+using OdfSnapshot = std::map<std::string, std::string>;
+
+enum class ReplacementOwner {
+    neutral,
+    original,
+};
+
+struct ObjectReplacement {
+    std::string odf;
+    bool inherit_position = true;
+    bool inherit_rotation = true;
+    ReplacementOwner owner = ReplacementOwner::neutral;
+};
 
 // This file bridges two different binaries and ABIs:
 //   * ArmadaL.exe owns the gameplay classes and SOD database (MSVC thiscall).
@@ -58,6 +72,11 @@ constexpr std::uintptr_t kGameObjectClassFindRva = 0x0cd370;
 constexpr std::uintptr_t kGameObjectClassConstructRva = 0x0cd390;
 constexpr std::uintptr_t kGameObjectClassGetOdfNameRva = 0x0ce370;
 constexpr std::uintptr_t kGameObjectGetTransformRva = 0x0cfd50;
+constexpr std::uintptr_t kCraftCleanupRva = 0x0c1fd0;
+constexpr std::uintptr_t kCraftPostLoadRva = 0x0c2870;
+constexpr std::uintptr_t kCraftSimulateRva = 0x0c6530;
+constexpr std::uintptr_t kWeaponClassConstructorRva = 0x264e30;
+constexpr std::uintptr_t kWeaponTriggerObjectRva = 0x271290;
 constexpr std::uintptr_t kDefaultUserProfileGameSpeedRva = 0x13c8a0;
 constexpr std::uintptr_t kLoadSodRva = 0x22cf10;
 constexpr std::uintptr_t kSodDatabaseRva = 0x3ad508;
@@ -78,6 +97,10 @@ constexpr std::uintptr_t kFoSettingsSaveRva = 0x13e824;
 constexpr std::uintptr_t kGameConfigurationNewRva = 0x13e93c;
 constexpr std::uintptr_t kGameConfigurationLoadProfileRva = 0x13ea8c;
 constexpr std::uintptr_t kDelphiLStrAsgRva = 0x00570c;
+constexpr std::uintptr_t kRaceParameterDbDestructorCallRva = 0x10b98b;
+constexpr std::uintptr_t kParameterDbDestructorRva = 0x1e2c28;
+constexpr std::uintptr_t kFoCraftSimulateHandlerRva = 0x1dcebc;
+constexpr std::uintptr_t kFoWeaponClassConstructorHandlerRva = 0x10ef74;
 
 constexpr std::size_t kMaximumPathLength = 32767;
 // Temporarily leave Fleet Ops/Armada in control of shell and menu sizing.
@@ -117,6 +140,20 @@ const std::uint8_t kExpectedGameObjectClassGetOdfName[] = {
     0xe9, 0x25, 0xb0, 0x18, 0x00};
 const std::uint8_t kExpectedGameObjectGetTransform[] = {
     0x8b, 0x41, 0x04, 0x83, 0xc0, 0x44, 0xc3};
+const std::uint8_t kExpectedCraftCleanup[] = {
+    0x56, 0x8b, 0xf1, 0x8b, 0x8e, 0x34, 0x02, 0x00, 0x00};
+const std::uint8_t kExpectedCraftPostLoad[] = {
+    0x53, 0x56, 0x57, 0x8b, 0xf1};
+const std::uint8_t kExpectedCraftSimulate[] = {
+    0x55, 0x8b, 0xec, 0x53, 0x8b, 0x5d, 0x08};
+const std::uint8_t kExpectedWeaponClassConstructor[] = {
+    0x55, 0x8b, 0xec, 0x6a, 0xff};
+const std::uint8_t kExpectedWeaponTriggerObject[] = {
+    0x55, 0x8b, 0xec, 0x8b, 0x45, 0x08};
+const std::uint8_t kExpectedFoCraftSimulateHandler[] = {
+    0x55, 0x8b, 0xec, 0x51, 0x53, 0x89, 0x4d};
+const std::uint8_t kExpectedFoWeaponClassConstructorHandler[] = {
+    0x55, 0x8b, 0xec, 0x83, 0xc4, 0xdc, 0x53};
 const std::uint8_t kExpectedDefaultUserProfileGameSpeed[] = {
     0xb8, 0x05, 0x00, 0x00, 0x00, 0xc3};
 const std::uint8_t kExpectedFofsItemGetHashLookupCall[] = {
@@ -135,6 +172,10 @@ const std::uint8_t kExpectedGameConfigurationNew[] = {
     0x55, 0x8b, 0xec, 0x51, 0x53};
 const std::uint8_t kExpectedGameConfigurationLoadProfile[] = {
     0x55, 0x8b, 0xec, 0x51, 0x53};
+const std::uint8_t kExpectedRaceParameterDbDestructorCall[] = {
+    0xe8, 0x98, 0x72, 0x0d, 0x00};
+const std::uint8_t kExpectedParameterDbDestructor[] = {
+    0x55, 0x8b, 0xec, 0x51, 0x89, 0x45, 0xfc};
 
 // Implemented in delphi_bridge.S. Normal C++ calls cannot express all of the
 // Delphi register ABI and Armada's 32-bit thiscall ABI reliably, so these
@@ -162,15 +203,25 @@ extern "C" void* a2fo_call_game_object_construct(
     int team, int parent, char* label);
 extern "C" void a2fo_call_game_object_argument(
     void* function, void* self, void* argument);
+extern "C" std::uintptr_t a2fo_call_thiscall_1(
+    void* function, void* self, std::uintptr_t argument1);
+extern "C" std::uintptr_t a2fo_call_thiscall_2(
+    void* function, void* self, std::uintptr_t argument1,
+    std::uintptr_t argument2);
 extern "C" void* a2fo_call_delphi_one_register(
     void* function, void* eax_argument);
 extern "C" void* a2fo_call_delphi_two_registers(
     void* function, void* eax_argument, void* edx_argument);
 extern "C" void a2fo_cocoon_selector_hook();
 extern "C" void a2fo_cocoon_update_selector_hook();
+extern "C" void a2fo_race_parameter_db_dispatch_bridge();
+extern "C" void* g_a2fo_race_parameter_db_destructor;
 
 HMODULE g_armada = nullptr;
 HMODULE g_fleet_ops = nullptr;
+extern "C" {
+void* g_a2fo_race_parameter_db_destructor = nullptr;
+}
 HANDLE g_log = INVALID_HANDLE_VALUE;
 CRITICAL_SECTION g_state_lock;
 bool g_state_lock_ready = false;
@@ -182,6 +233,11 @@ bool g_default_game_speed_hook_ready = false;
 bool g_runtime_game_speed_hook_ready = false;
 bool g_user_profile_game_speed_hook_ready = false;
 bool g_object_destroyed_hook_ready = false;
+bool g_game_object_class_loaded_hook_ready = false;
+bool g_race_loaded_hook_ready = false;
+bool g_weapon_class_loaded_hook_ready = false;
+bool g_weapon_trigger_hook_ready = false;
+bool g_craft_event_hooks_ready = false;
 bool g_module_menu_hook_ready = false;
 a2fo::InlineHook g_build_class_hook;
 a2fo::InlineHook g_dtor_hook;
@@ -194,6 +250,13 @@ a2fo::InlineHook g_parameter_db_get_owned_string_hook;
 a2fo::InlineHook g_parameter_db_get_string_vector_hook;
 a2fo::InlineHook g_craft_explode_hook;
 a2fo::InlineHook g_game_object_class_find_project_id_hook;
+a2fo::InlineHook g_weapon_class_constructor_hook;
+a2fo::InlineHook g_weapon_trigger_object_hook;
+a2fo::InlineHook g_craft_cleanup_hook;
+a2fo::InlineHook g_craft_post_load_hook;
+a2fo::InlineHook g_craft_simulate_hook;
+void* g_weapon_class_constructor_original = nullptr;
+void* g_craft_simulate_original = nullptr;
 a2fo::InlineHook g_mod_user_directory_hook;
 a2fo::InlineHook g_fo_settings_get_instance_hook;
 a2fo::InlineHook g_game_configuration_new_hook;
@@ -205,7 +268,6 @@ std::set<void*> g_logged_cocoon_classes;
 std::string g_root_directory;
 std::vector<std::string> g_extension_roots;
 std::vector<a2fo::LoadedModule> g_loaded_modules;
-a2fo::LuaHost g_lua_host;
 A2FO_ModuleApi g_module_api{};
 volatile LONG g_initialize_state = 0;
 volatile LONG g_deferred_initialization_finished = 0;
@@ -256,25 +318,69 @@ struct NativeProducerEventRegistration {
     void* user_data = nullptr;
 };
 
+struct NativeGameObjectClassLoadedRegistration {
+    std::string owner;
+    std::vector<std::string> required_odf_fields;
+    A2FO_GameObjectClassLoadedHandler handler = nullptr;
+    void* user_data = nullptr;
+};
+
+struct NativeRaceLoadedRegistration {
+    std::string owner;
+    std::vector<std::string> required_odf_fields;
+    A2FO_RaceLoadedHandler handler = nullptr;
+    void* user_data = nullptr;
+};
+
+struct NativeWeaponClassLoadedRegistration {
+    std::string owner;
+    std::vector<std::string> required_odf_fields;
+    A2FO_WeaponClassLoadedHandler handler = nullptr;
+    void* user_data = nullptr;
+};
+
+struct NativeWeaponTriggerRegistration {
+    std::string owner;
+    A2FO_WeaponTriggerHandler handler = nullptr;
+    void* user_data = nullptr;
+};
+
+struct NativeCraftEventRegistration {
+    std::string owner;
+    A2FO_CraftEventHandler handler = nullptr;
+    void* user_data = nullptr;
+};
+
 std::unordered_map<std::string, ClasslabelAliasPolicy> g_classlabel_aliases;
 std::unordered_map<std::string, ClasslabelOdfDefaultsPolicy>
     g_classlabel_odf_defaults;
 std::vector<OdfOverlayDirectoryPolicy> g_odf_overlay_directories;
 std::unordered_map<void*, std::string> g_original_classlabels;
-std::unordered_map<std::string, a2fo::LuaOdfSnapshot> g_odf_snapshots;
+std::unordered_map<std::string, OdfSnapshot> g_odf_snapshots;
 
-struct DestroyedOdfLoadContext {
-    a2fo::LuaOdfSnapshot fields;
+struct GameObjectClassOdfLoadContext {
+    OdfSnapshot fields;
+    bool parameter_db_observed = false;
 };
 
-thread_local DestroyedOdfLoadContext* g_destroyed_odf_load_context = nullptr;
+thread_local GameObjectClassOdfLoadContext*
+    g_game_object_class_odf_load_context = nullptr;
 
 std::string g_evolver_cocoon_command;
 std::string g_evolver_cocoon_owner;
 std::vector<NativeObjectDestroyedRegistration>
     g_object_destroyed_handlers;
 std::vector<NativeProducerEventRegistration> g_producer_event_handlers;
-std::set<std::string> g_destroyed_odf_fields{"basename"};
+std::vector<NativeGameObjectClassLoadedRegistration>
+    g_game_object_class_loaded_handlers;
+std::vector<NativeRaceLoadedRegistration> g_race_loaded_handlers;
+std::vector<NativeWeaponClassLoadedRegistration>
+    g_weapon_class_loaded_handlers;
+std::vector<NativeWeaponTriggerRegistration> g_weapon_trigger_handlers;
+std::vector<NativeCraftEventRegistration> g_craft_event_handlers;
+std::set<std::string> g_game_object_class_odf_fields{"basename"};
+std::set<std::string> g_race_odf_fields;
+std::set<std::string> g_weapon_class_odf_fields;
 bool g_policy_registration_open = true;
 
 struct RegistrationTransaction {
@@ -295,7 +401,16 @@ struct RegistrationTransaction {
     std::vector<NativeObjectDestroyedRegistration>
         object_destroyed_handlers;
     std::vector<NativeProducerEventRegistration> producer_event_handlers;
-    std::set<std::string> destroyed_odf_fields;
+    std::vector<NativeGameObjectClassLoadedRegistration>
+        game_object_class_loaded_handlers;
+    std::vector<NativeRaceLoadedRegistration> race_loaded_handlers;
+    std::vector<NativeWeaponClassLoadedRegistration>
+        weapon_class_loaded_handlers;
+    std::vector<NativeWeaponTriggerRegistration> weapon_trigger_handlers;
+    std::vector<NativeCraftEventRegistration> craft_event_handlers;
+    std::set<std::string> game_object_class_odf_fields;
+    std::set<std::string> race_odf_fields;
+    std::set<std::string> weapon_class_odf_fields;
 };
 
 RegistrationTransaction g_registration_transaction;
@@ -497,6 +612,22 @@ bool query_info_ini_defaults(const char* normal_directory,
         log_line("Fleet Ops info.ini defaults provider failed");
         return false;
     }
+}
+
+bool A2FO_CALL api_get_settings_directory(
+    char* output, std::uint32_t output_size) {
+    if (!output || output_size == 0) return false;
+    output[0] = '\0';
+    const char* directory = nullptr;
+    {
+        StateLockGuard lock;
+        directory = g_delphi_settings_directory;
+    }
+    if (!directory) return false;
+    const std::size_t length = std::strlen(directory);
+    if (length + 1 > output_size) return false;
+    std::memcpy(output, directory, length + 1);
+    return true;
 }
 
 void ensure_fleet_ops_info_defaults() {
@@ -1356,7 +1487,17 @@ void begin_module_registration(const std::string& path) {
         snapshot.cocoon_owner = g_evolver_cocoon_owner;
         snapshot.object_destroyed_handlers = g_object_destroyed_handlers;
         snapshot.producer_event_handlers = g_producer_event_handlers;
-        snapshot.destroyed_odf_fields = g_destroyed_odf_fields;
+        snapshot.game_object_class_loaded_handlers =
+            g_game_object_class_loaded_handlers;
+        snapshot.race_loaded_handlers = g_race_loaded_handlers;
+        snapshot.weapon_class_loaded_handlers =
+            g_weapon_class_loaded_handlers;
+        snapshot.weapon_trigger_handlers = g_weapon_trigger_handlers;
+        snapshot.craft_event_handlers = g_craft_event_handlers;
+        snapshot.game_object_class_odf_fields =
+            g_game_object_class_odf_fields;
+        snapshot.race_odf_fields = g_race_odf_fields;
+        snapshot.weapon_class_odf_fields = g_weapon_class_odf_fields;
         g_registration_transaction = std::move(snapshot);
     } catch (...) {
         // An empty/inactive transaction still lets the loader fail the module
@@ -1401,8 +1542,22 @@ void finish_module_registration(const std::string& path, bool initialized) {
                 g_registration_transaction.object_destroyed_handlers);
             g_producer_event_handlers = std::move(
                 g_registration_transaction.producer_event_handlers);
-            g_destroyed_odf_fields = std::move(
-                g_registration_transaction.destroyed_odf_fields);
+            g_game_object_class_loaded_handlers = std::move(
+                g_registration_transaction.game_object_class_loaded_handlers);
+            g_race_loaded_handlers = std::move(
+                g_registration_transaction.race_loaded_handlers);
+            g_weapon_class_loaded_handlers = std::move(
+                g_registration_transaction.weapon_class_loaded_handlers);
+            g_weapon_trigger_handlers = std::move(
+                g_registration_transaction.weapon_trigger_handlers);
+            g_craft_event_handlers = std::move(
+                g_registration_transaction.craft_event_handlers);
+            g_game_object_class_odf_fields = std::move(
+                g_registration_transaction.game_object_class_odf_fields);
+            g_race_odf_fields = std::move(
+                g_registration_transaction.race_odf_fields);
+            g_weapon_class_odf_fields = std::move(
+                g_registration_transaction.weapon_class_odf_fields);
             rolled_back = true;
         }
         g_registration_transaction = RegistrationTransaction{};
@@ -1697,17 +1852,6 @@ bool __attribute__((fastcall)) parameter_db_get_string_vector_hook(
         parameter_db_pointer_bits(default_value));
 }
 
-bool lua_parameter_db_get_string(void* parameter_db,
-                                 const char* key,
-                                 char* output,
-                                 std::uint32_t output_size,
-                                 const char* default_value) {
-    if (!parameter_db || !key || !output || output_size == 0) return false;
-    return a2fo_parameter_db_get_string(
-        original_parameter_db_get_string(), parameter_db, key, output,
-        output_size, default_value ? default_value : "");
-}
-
 std::string normalize_odf_basename(std::string value) {
     const std::size_t first = value.find_first_not_of(" \t\r\n");
     if (first == std::string::npos) return {};
@@ -1727,19 +1871,58 @@ std::string normalize_odf_basename(std::string value) {
 bool read_odf_snapshot_value(void* parameter_db, const char* key,
                              std::string& value) {
     std::array<char, 4096> output{};
-    const bool found = a2fo_parameter_db_get_string(
+    const bool string_found = a2fo_parameter_db_get_string(
         original_parameter_db_get_string(), parameter_db, key,
         output.data(), static_cast<std::uint32_t>(output.size()), "");
     output.back() = '\0';
     const char* end = static_cast<const char*>(
         std::memchr(output.data(), '\0', output.size()));
     if (!end) return false;
-    value.assign(output.data(), static_cast<std::size_t>(end - output.data()));
-    return found;
+    if (string_found) {
+        value.assign(output.data(),
+                     static_cast<std::size_t>(end - output.data()));
+        return true;
+    }
+
+    // ParameterDB keeps numeric ODF entries in a separate typed store; its
+    // string overload deliberately reports those entries as absent. Revision
+    // 13 callbacks still expose field values as text, so query the native
+    // float overload before the integer fallback. Querying only Get(int)
+    // silently truncated fractional commands such as a recharge rate of 0.25
+    // to zero. Nine significant digits preserve every finite IEEE-754 float
+    // while still producing text accepted by module parsers.
+    float float_value = 0.0f;
+    if (g_parameter_db_get_float_hook.gateway &&
+        a2fo_parameter_db_get_scalar(
+            g_parameter_db_get_float_hook.gateway, parameter_db, key,
+            &float_value, 0)) {
+        std::array<char, 48> numeric{};
+        const int length = std::snprintf(
+            numeric.data(), numeric.size(), "%.9g",
+            static_cast<double>(float_value));
+        if (length > 0 &&
+            static_cast<std::size_t>(length) < numeric.size()) {
+            value.assign(numeric.data(), static_cast<std::size_t>(length));
+            return true;
+        }
+    }
+
+    // Retain the integer lookup for commands the native float overload does
+    // not accept (including integral policy fields and boolean-like values).
+    int integer_value = 0;
+    if (g_parameter_db_get_int_hook.gateway &&
+        a2fo_parameter_db_get_scalar(
+            g_parameter_db_get_int_hook.gateway, parameter_db, key,
+            &integer_value, 0)) {
+        value = std::to_string(integer_value);
+        return true;
+    }
+    return false;
 }
 
-void capture_destroyed_object_odf_fields(void* parameter_db) {
-    if (!parameter_db || !g_destroyed_odf_load_context) return;
+void capture_game_object_class_odf_fields(void* parameter_db) {
+    if (!parameter_db || !g_game_object_class_odf_load_context) return;
+    g_game_object_class_odf_load_context->parameter_db_observed = true;
 
     // `basename` is not an ODF command. Capture only the fields requested by
     // active handlers here; the surrounding GameObjectClass load hook supplies
@@ -1747,14 +1930,15 @@ void capture_destroyed_object_odf_fields(void* parameter_db) {
     std::vector<std::string> fields;
     {
         StateLockGuard lock;
-        fields.assign(g_destroyed_odf_fields.begin(),
-                      g_destroyed_odf_fields.end());
+        fields.assign(g_game_object_class_odf_fields.begin(),
+                      g_game_object_class_odf_fields.end());
     }
     for (const std::string& command : fields) {
         if (command == "basename") continue;
         std::string value;
         if (read_odf_snapshot_value(parameter_db, command.c_str(), value)) {
-            g_destroyed_odf_load_context->fields[command] = std::move(value);
+            g_game_object_class_odf_load_context->fields[command] =
+                std::move(value);
         }
     }
 }
@@ -1787,7 +1971,7 @@ bool __attribute__((fastcall)) parameter_db_get_string_hook(
                 ? true
                 : found;
         }
-        capture_destroyed_object_odf_fields(self);
+        capture_game_object_class_odf_fields(self);
         const char* output_end = static_cast<const char*>(
             std::memchr(output, '\0', output_size));
         if (!output_end) return found;
@@ -1798,12 +1982,9 @@ bool __attribute__((fastcall)) parameter_db_get_string_hook(
         {
             StateLockGuard lock;
             g_original_classlabels[self] = source;
-            if (!a2fo::transform_classlabel(
-                    g_lua_host, self, source, replacement)) {
-                const auto alias = g_classlabel_aliases.find(source);
-                if (alias != g_classlabel_aliases.end()) {
-                    replacement = alias->second.target;
-                }
+            const auto alias = g_classlabel_aliases.find(source);
+            if (alias != g_classlabel_aliases.end()) {
+                replacement = alias->second.target;
             }
         }
 
@@ -1822,18 +2003,18 @@ bool __attribute__((fastcall)) parameter_db_get_string_hook(
 
 void* A2FO_CALL game_object_class_find_project_id_hook(
     const std::uint32_t* project_id) {
-    DestroyedOdfLoadContext context;
-    DestroyedOdfLoadContext* previous_context =
-        g_destroyed_odf_load_context;
-    g_destroyed_odf_load_context = &context;
+    GameObjectClassOdfLoadContext context;
+    GameObjectClassOdfLoadContext* previous_context =
+        g_game_object_class_odf_load_context;
+    g_game_object_class_odf_load_context = &context;
 
     using FindProjectIdFunction = void* (A2FO_CALL*)(const std::uint32_t*);
     const auto original = reinterpret_cast<FindProjectIdFunction>(
         g_game_object_class_find_project_id_hook.gateway);
     void* object_class = original(project_id);
 
-    g_destroyed_odf_load_context = previous_context;
-    if (!object_class || context.fields.empty()) return object_class;
+    g_game_object_class_odf_load_context = previous_context;
+    if (!object_class || !context.parameter_db_observed) return object_class;
 
     const char* odf_name = static_cast<const char*>(
         a2fo_call_game_object_method(
@@ -1854,13 +2035,240 @@ void* A2FO_CALL game_object_class_find_project_id_hook(
         field_names += field.first;
     }
     context.fields["basename"] = basename;
+    OdfSnapshot snapshot = context.fields;
     {
         StateLockGuard lock;
         g_odf_snapshots[key] = std::move(context.fields);
     }
-    log_line("Destroyed-object ODF fields cached: " + basename +
+
+    std::vector<NativeGameObjectClassLoadedRegistration> handlers;
+    {
+        StateLockGuard lock;
+        handlers = g_game_object_class_loaded_handlers;
+    }
+    if (!handlers.empty()) {
+        std::vector<A2FO_OdfFieldView> fields;
+        fields.reserve(snapshot.size());
+        for (const auto& field : snapshot) {
+            fields.push_back(A2FO_OdfFieldView{
+                A2FO_StringView{field.first.data(),
+                                static_cast<std::uint32_t>(field.first.size())},
+                A2FO_StringView{field.second.data(),
+                                static_cast<std::uint32_t>(field.second.size())}});
+        }
+        A2FO_GameObjectClassLoadedEvent event{};
+        event.struct_size = sizeof(event);
+        event.object_class = object_class;
+        event.source_odf = A2FO_StringView{
+            basename.data(), static_cast<std::uint32_t>(basename.size())};
+        event.odf_fields = fields.data();
+        event.odf_field_count = static_cast<std::uint32_t>(fields.size());
+        for (const auto& registration : handlers) {
+            if (!registration.handler) continue;
+            try {
+                registration.handler(&event, registration.user_data);
+            } catch (...) {
+                log_line("GameObjectClass-loaded handler failed for " +
+                         registration.owner);
+            }
+        }
+    }
+    log_line("GameObjectClass ODF fields cached: " + basename +
              " (" + field_names + ")");
     return object_class;
+}
+
+extern "C" void __cdecl a2fo_dispatch_race_odf_loaded(
+    void* race, void* parameter_db) noexcept {
+    if (!race || !parameter_db || !g_state_lock_ready) return;
+    try {
+        std::vector<std::string> requested_fields;
+        std::vector<NativeRaceLoadedRegistration> handlers;
+        {
+            StateLockGuard lock;
+            requested_fields.assign(
+                g_race_odf_fields.begin(), g_race_odf_fields.end());
+            handlers = g_race_loaded_handlers;
+        }
+        if (handlers.empty()) return;
+
+        OdfSnapshot snapshot;
+        for (const std::string& command : requested_fields) {
+            std::string value;
+            if (read_odf_snapshot_value(
+                    parameter_db, command.c_str(), value)) {
+                snapshot[command] = std::move(value);
+            }
+        }
+        std::vector<A2FO_OdfFieldView> fields;
+        fields.reserve(snapshot.size());
+        for (const auto& field : snapshot) {
+            fields.push_back(A2FO_OdfFieldView{
+                A2FO_StringView{field.first.data(),
+                                static_cast<std::uint32_t>(field.first.size())},
+                A2FO_StringView{field.second.data(),
+                                static_cast<std::uint32_t>(field.second.size())}});
+        }
+        A2FO_RaceLoadedEvent event{};
+        event.struct_size = sizeof(event);
+        event.race = race;
+        event.odf_fields = fields.data();
+        event.odf_field_count = static_cast<std::uint32_t>(fields.size());
+        for (const auto& registration : handlers) {
+            if (!registration.handler) continue;
+            try {
+                registration.handler(&event, registration.user_data);
+            } catch (...) {
+                log_line("Race-loaded handler failed for " +
+                         registration.owner);
+            }
+        }
+    } catch (...) {
+        log_line("Race-loaded dispatch skipped after an unexpected C++ "
+                 "exception");
+    }
+}
+
+void dispatch_weapon_class_loaded(
+    void* weapon_class, void* parent_class, void* parameter_db) noexcept {
+    if (!weapon_class || !parameter_db ||
+        g_weapon_class_loaded_handlers.empty()) {
+        return;
+    }
+    try {
+        OdfSnapshot snapshot;
+        for (const std::string& command : g_weapon_class_odf_fields) {
+            std::string value;
+            if (read_odf_snapshot_value(
+                    parameter_db, command.c_str(), value)) {
+                snapshot[command] = std::move(value);
+            }
+        }
+        std::vector<A2FO_OdfFieldView> fields;
+        fields.reserve(snapshot.size());
+        for (const auto& field : snapshot) {
+            fields.push_back(A2FO_OdfFieldView{
+                A2FO_StringView{field.first.data(),
+                    static_cast<std::uint32_t>(field.first.size())},
+                A2FO_StringView{field.second.data(),
+                    static_cast<std::uint32_t>(field.second.size())}});
+        }
+        A2FO_WeaponClassLoadedEvent event{};
+        event.struct_size = sizeof(event);
+        event.weapon_class = weapon_class;
+        event.parent_class = parent_class;
+        event.parameter_db = parameter_db;
+        event.odf_fields = fields.empty() ? nullptr : fields.data();
+        event.odf_field_count = static_cast<std::uint32_t>(fields.size());
+        for (const auto& registration : g_weapon_class_loaded_handlers) {
+            if (!registration.handler) continue;
+            try {
+                registration.handler(&event, registration.user_data);
+            } catch (...) {
+                log_line("WeaponClass-loaded handler failed for " +
+                         registration.owner);
+            }
+        }
+    } catch (...) {
+        log_line("WeaponClass-loaded dispatch skipped after an unexpected "
+                 "C++ exception");
+    }
+}
+
+std::uintptr_t __attribute__((fastcall)) weapon_class_constructor_hook(
+    void* self, void*, void* parent_class, void* parameter_db) noexcept {
+    const std::uintptr_t result = a2fo_call_thiscall_2(
+        g_weapon_class_constructor_original, self,
+        reinterpret_cast<std::uintptr_t>(parent_class),
+        reinterpret_cast<std::uintptr_t>(parameter_db));
+    void* completed = result ? reinterpret_cast<void*>(result) : self;
+    dispatch_weapon_class_loaded(completed, parent_class, parameter_db);
+    return result;
+}
+
+bool dispatch_weapon_trigger(
+    std::uint32_t kind, void* weapon, const void* target) noexcept {
+    A2FO_WeaponTriggerEvent event{};
+    event.struct_size = sizeof(event);
+    event.kind = kind;
+    event.weapon = weapon;
+    event.target = target;
+    for (const auto& registration : g_weapon_trigger_handlers) {
+        if (!registration.handler) continue;
+        try {
+            const bool accepted = registration.handler(
+                &event, registration.user_data);
+            if (kind == A2FO_WEAPON_TRIGGER_PRECHECK && !accepted) {
+                return false;
+            }
+        } catch (...) {
+            log_line("Weapon-trigger handler failed for " +
+                     registration.owner);
+            if (kind == A2FO_WEAPON_TRIGGER_PRECHECK) return false;
+        }
+    }
+    return true;
+}
+
+void __attribute__((fastcall)) weapon_trigger_object_hook(
+    void* weapon, void*, const void* target) noexcept {
+    if (!dispatch_weapon_trigger(
+            A2FO_WEAPON_TRIGGER_PRECHECK, weapon, target)) {
+        return;
+    }
+    a2fo_call_thiscall_1(
+        g_weapon_trigger_object_hook.gateway, weapon,
+        reinterpret_cast<std::uintptr_t>(target));
+    dispatch_weapon_trigger(
+        A2FO_WEAPON_TRIGGER_COMMITTED, weapon, target);
+}
+
+void dispatch_craft_event(std::uint32_t kind, void* craft,
+                          float elapsed_seconds) noexcept {
+    A2FO_CraftEvent event{};
+    event.struct_size = sizeof(event);
+    event.kind = kind;
+    event.craft = craft;
+    event.elapsed_seconds = elapsed_seconds;
+    for (const auto& registration : g_craft_event_handlers) {
+        if (!registration.handler) continue;
+        try {
+            registration.handler(&event, registration.user_data);
+        } catch (...) {
+            log_line("Craft-event handler failed for " +
+                     registration.owner);
+        }
+    }
+}
+
+void __attribute__((fastcall)) craft_simulate_event_hook(
+    void* craft, void*, float elapsed_seconds) noexcept {
+    dispatch_craft_event(
+        A2FO_CRAFT_EVENT_SIMULATE_PRE, craft, elapsed_seconds);
+    std::uint32_t elapsed_bits = 0;
+    static_assert(sizeof(elapsed_bits) == sizeof(elapsed_seconds),
+                  "Armada float arguments must occupy four bytes");
+    std::memcpy(&elapsed_bits, &elapsed_seconds, sizeof(elapsed_bits));
+    a2fo_call_thiscall_1(
+        g_craft_simulate_original, craft, elapsed_bits);
+    dispatch_craft_event(
+        A2FO_CRAFT_EVENT_SIMULATE_POST, craft, elapsed_seconds);
+}
+
+void __attribute__((fastcall)) craft_cleanup_event_hook(
+    void* craft, void*) noexcept {
+    dispatch_craft_event(A2FO_CRAFT_EVENT_CLEANUP, craft, 0.0f);
+    a2fo_call_game_object_method(g_craft_cleanup_hook.gateway, craft);
+}
+
+std::uintptr_t __attribute__((fastcall)) craft_post_load_event_hook(
+    void* craft, void*) noexcept {
+    const std::uintptr_t loaded = reinterpret_cast<std::uintptr_t>(
+        a2fo_call_game_object_method(g_craft_post_load_hook.gateway, craft));
+    if ((loaded & 0xffu) != 0) {
+        dispatch_craft_event(A2FO_CRAFT_EVENT_POST_LOAD, craft, 0.0f);
+    }
+    return loaded;
 }
 
 struct Matrix34Snapshot {
@@ -1873,7 +2281,8 @@ struct DestroyedObjectSnapshot {
     Matrix34Snapshot transform;
     int source_team = 0;
     std::uint32_t source_handle = 0;
-    a2fo::LuaObjectDestroyedEvent lua_event;
+    OdfSnapshot odf;
+    std::uint32_t random_seed = 0;
 };
 
 std::uint32_t hash_destroyed_object(const std::string& odf,
@@ -1952,28 +2361,28 @@ DestroyedObjectSnapshot snapshot_destroyed_object(void* self) {
     snapshot.source_handle =
         *reinterpret_cast<const std::uint32_t*>(bytes + 0x28);
 
-    snapshot.lua_event.odf["basename"] = snapshot.source_odf;
+    snapshot.odf["basename"] = snapshot.source_odf;
     {
         StateLockGuard lock;
         const auto cached = g_odf_snapshots.find(normalized_odf);
         if (cached != g_odf_snapshots.end()) {
-            snapshot.lua_event.odf = cached->second;
+            snapshot.odf = cached->second;
         }
     }
-    snapshot.lua_event.random_seed = hash_destroyed_object(
+    snapshot.random_seed = hash_destroyed_object(
         normalized_odf, snapshot.source_handle, snapshot.source_team,
         snapshot.transform);
     snapshot.valid = true;
     log_line("Object-destroyed snapshot ready: " + snapshot.source_odf +
-             " (" + std::to_string(snapshot.lua_event.odf.size()) +
+             " (" + std::to_string(snapshot.odf.size()) +
              " ODF field" +
-             (snapshot.lua_event.odf.size() == 1 ? "" : "s") + ")");
+             (snapshot.odf.size() == 1 ? "" : "s") + ")");
     return snapshot;
 }
 
 bool resolve_native_object_destroyed(
     const DestroyedObjectSnapshot& source,
-    a2fo::LuaObjectReplacement& selected_replacement) {
+    ObjectReplacement& selected_replacement) {
     std::vector<NativeObjectDestroyedRegistration> handlers;
     {
         StateLockGuard lock;
@@ -1982,8 +2391,8 @@ bool resolve_native_object_destroyed(
     if (handlers.empty()) return false;
 
     std::vector<A2FO_OdfFieldView> fields;
-    fields.reserve(source.lua_event.odf.size());
-    for (const auto& field : source.lua_event.odf) {
+    fields.reserve(source.odf.size());
+    for (const auto& field : source.odf) {
         fields.push_back({
             {field.first.data(), static_cast<std::uint32_t>(field.first.size())},
             {field.second.data(), static_cast<std::uint32_t>(field.second.size())},
@@ -2001,7 +2410,7 @@ bool resolve_native_object_destroyed(
               event.transform);
     event.source_team = source.source_team;
     event.source_handle = source.source_handle;
-    event.random_seed = source.lua_event.random_seed;
+    event.random_seed = source.random_seed;
 
     for (std::size_t index = 0; index < handlers.size(); ++index) {
         const NativeObjectDestroyedRegistration& registration = handlers[index];
@@ -2053,15 +2462,15 @@ bool resolve_native_object_destroyed(
             (replacement.flags & A2FO_REPLACEMENT_INHERIT_ROTATION) != 0;
         selected_replacement.owner =
             replacement.owner == A2FO_REPLACEMENT_OWNER_ORIGINAL
-                ? a2fo::LuaReplacementOwner::Original
-                : a2fo::LuaReplacementOwner::Neutral;
+                ? ReplacementOwner::original
+                : ReplacementOwner::neutral;
         return true;
     }
     return false;
 }
 
 void spawn_object_replacement(const DestroyedObjectSnapshot& source,
-                              const a2fo::LuaObjectReplacement& replacement) {
+                              const ObjectReplacement& replacement) {
     using FindFunction = void* (A2FO_CALL*)(const char*);
     const auto find_object_class = reinterpret_cast<FindFunction>(
         at(g_armada, kGameObjectClassFindRva));
@@ -2085,7 +2494,7 @@ void spawn_object_replacement(const DestroyedObjectSnapshot& source,
                     transform.values.begin() + 9);
     }
 
-    const int team = replacement.owner == a2fo::LuaReplacementOwner::Original
+    const int team = replacement.owner == ReplacementOwner::original
         ? source.source_team : 0;
     void* object = a2fo_call_game_object_construct(
         at(g_armada, kGameObjectClassConstructRva), object_class,
@@ -2130,18 +2539,14 @@ void __attribute__((fastcall)) craft_explode_hook(void* self, void*) {
     if (!source.valid) return;
 
     try {
-        a2fo::LuaObjectReplacement replacement;
-        bool replace = resolve_native_object_destroyed(source, replacement);
-        if (!replace) {
-            StateLockGuard lock;
-            replace = a2fo::resolve_object_destroyed(
-                g_lua_host, source.lua_event, replacement);
-        }
+        ObjectReplacement replacement;
+        const bool replace = resolve_native_object_destroyed(
+            source, replacement);
         if (replace) {
             log_line("Object-destroyed event claimed: " +
                      source.source_odf + " -> " + replacement.odf);
             spawn_object_replacement(source, replacement);
-        } else if (source.lua_event.odf.size() > 1) {
+        } else if (source.odf.size() > 1) {
             log_line("Object-destroyed event was not claimed for configured "
                      "ODF: " + source.source_odf);
         }
@@ -2149,6 +2554,177 @@ void __attribute__((fastcall)) craft_explode_hook(void* self, void*) {
         log_line("Object-destroyed callback skipped after an unexpected "
                  "C++ exception");
     }
+}
+
+void* existing_entry_detour(void* site, std::size_t* patch_length) noexcept {
+    if (patch_length) *patch_length = 0;
+    if (!site) return nullptr;
+    const auto* bytes = static_cast<const std::uint8_t*>(site);
+    if (bytes[0] == 0xe9) {
+        std::int32_t displacement = 0;
+        std::memcpy(&displacement, bytes + 1, sizeof(displacement));
+        if (patch_length) *patch_length = 5;
+        return const_cast<std::uint8_t*>(bytes + 5 + displacement);
+    }
+    if (bytes[0] == 0x68 && bytes[5] == 0xc3) {
+        std::uint32_t destination = 0;
+        std::memcpy(&destination, bytes + 1, sizeof(destination));
+        if (patch_length) *patch_length = 6;
+        return reinterpret_cast<void*>(
+            static_cast<std::uintptr_t>(destination));
+    }
+    return nullptr;
+}
+
+bool install_weapon_class_loaded_hook() {
+    void* site = at(g_armada, kWeaponClassConstructorRva);
+    if (std::memcmp(site, kExpectedWeaponClassConstructor,
+                    sizeof(kExpectedWeaponClassConstructor)) == 0) {
+        if (!a2fo::install_inline_hook(
+                site, reinterpret_cast<void*>(&weapon_class_constructor_hook),
+                sizeof(kExpectedWeaponClassConstructor),
+                kExpectedWeaponClassConstructor,
+                g_weapon_class_constructor_hook)) {
+            log_line("Could not install WeaponClass-loaded dispatcher");
+            return false;
+        }
+        g_weapon_class_constructor_original =
+            g_weapon_class_constructor_hook.gateway;
+    } else {
+        std::size_t patch_length = 0;
+        void* destination = existing_entry_detour(site, &patch_length);
+        void* expected = at(
+            g_fleet_ops, kFoWeaponClassConstructorHandlerRva);
+        if (destination != expected || patch_length > 6 ||
+            std::memcmp(expected, kExpectedFoWeaponClassConstructorHandler,
+                        sizeof(kExpectedFoWeaponClassConstructorHandler)) != 0) {
+            log_line("WeaponClass-loaded hook signature mismatch; weapon ODF "
+                     "dispatch disabled");
+            return false;
+        }
+        std::uint8_t expected_detour[6]{};
+        std::memcpy(expected_detour, site, patch_length);
+        if (!a2fo::patch_jump(
+                site, reinterpret_cast<void*>(&weapon_class_constructor_hook),
+                expected_detour, patch_length)) {
+            log_line("Could not chain WeaponClass-loaded dispatcher");
+            return false;
+        }
+        g_weapon_class_constructor_original = destination;
+    }
+    log_line("WeaponClass-loaded ODF dispatcher enabled");
+    return g_weapon_class_constructor_original != nullptr;
+}
+
+bool install_weapon_trigger_hook() {
+    if (!g_armada ||
+        std::memcmp(at(g_armada, kWeaponTriggerObjectRva),
+                    kExpectedWeaponTriggerObject,
+                    sizeof(kExpectedWeaponTriggerObject)) != 0) {
+        log_line("Weapon-trigger hook signature mismatch; shared trigger "
+                 "dispatch disabled");
+        return false;
+    }
+    if (!a2fo::install_inline_hook(
+            at(g_armada, kWeaponTriggerObjectRva),
+            reinterpret_cast<void*>(&weapon_trigger_object_hook),
+            sizeof(kExpectedWeaponTriggerObject),
+            kExpectedWeaponTriggerObject,
+            g_weapon_trigger_object_hook)) {
+        log_line("Could not install shared weapon-trigger dispatcher");
+        return false;
+    }
+    log_line("Shared weapon-trigger dispatcher enabled");
+    return true;
+}
+
+bool install_craft_event_hooks() {
+    void* simulate_site = at(g_armada, kCraftSimulateRva);
+    const bool stock_simulate =
+        std::memcmp(simulate_site, kExpectedCraftSimulate,
+                    sizeof(kExpectedCraftSimulate)) == 0;
+    std::size_t simulate_patch_length = 0;
+    void* simulate_destination = stock_simulate
+        ? nullptr
+        : existing_entry_detour(simulate_site, &simulate_patch_length);
+    void* expected_fo_simulate = at(
+        g_fleet_ops, kFoCraftSimulateHandlerRva);
+    const bool fleet_ops_simulate = !stock_simulate &&
+        simulate_destination == expected_fo_simulate &&
+        simulate_patch_length <= 6 &&
+        std::memcmp(expected_fo_simulate, kExpectedFoCraftSimulateHandler,
+                    sizeof(kExpectedFoCraftSimulateHandler)) == 0;
+    if ((!stock_simulate && !fleet_ops_simulate) ||
+        std::memcmp(at(g_armada, kCraftCleanupRva), kExpectedCraftCleanup,
+                    sizeof(kExpectedCraftCleanup)) != 0 ||
+        std::memcmp(at(g_armada, kCraftPostLoadRva), kExpectedCraftPostLoad,
+                    sizeof(kExpectedCraftPostLoad)) != 0) {
+        log_line("Craft-event hook signature mismatch; shared Craft dispatch "
+                 "disabled");
+        return false;
+    }
+
+    if (stock_simulate) {
+        if (!a2fo::install_inline_hook(
+                simulate_site,
+                reinterpret_cast<void*>(&craft_simulate_event_hook),
+                sizeof(kExpectedCraftSimulate), kExpectedCraftSimulate,
+                g_craft_simulate_hook)) {
+            return false;
+        }
+        g_craft_simulate_original = g_craft_simulate_hook.gateway;
+    } else {
+        std::uint8_t expected_detour[6]{};
+        std::memcpy(expected_detour, simulate_site, simulate_patch_length);
+        if (!a2fo::patch_jump(
+                simulate_site,
+                reinterpret_cast<void*>(&craft_simulate_event_hook),
+                expected_detour, simulate_patch_length)) {
+            return false;
+        }
+        g_craft_simulate_original = simulate_destination;
+    }
+    const bool installed = a2fo::install_inline_hook(
+            at(g_armada, kCraftCleanupRva),
+            reinterpret_cast<void*>(&craft_cleanup_event_hook),
+            sizeof(kExpectedCraftCleanup), kExpectedCraftCleanup,
+            g_craft_cleanup_hook) &&
+        a2fo::install_inline_hook(
+            at(g_armada, kCraftPostLoadRva),
+            reinterpret_cast<void*>(&craft_post_load_event_hook),
+            sizeof(kExpectedCraftPostLoad), kExpectedCraftPostLoad,
+            g_craft_post_load_hook);
+    if (!installed) {
+        log_line("Could not install every shared Craft-event hook");
+        return false;
+    }
+    log_line("Shared Craft simulation, cleanup, and post-load dispatcher enabled");
+    return g_craft_simulate_original != nullptr;
+}
+
+bool install_game_object_class_loaded_hook() {
+    if (!g_armada ||
+        std::memcmp(at(g_armada, kGameObjectClassFindProjectIdRva),
+                    kExpectedGameObjectClassFindProjectId,
+                    sizeof(kExpectedGameObjectClassFindProjectId)) != 0 ||
+        std::memcmp(at(g_armada, kGameObjectClassGetOdfNameRva),
+                    kExpectedGameObjectClassGetOdfName,
+                    sizeof(kExpectedGameObjectClassGetOdfName)) != 0) {
+        log_line("GameObjectClass-loaded hook signature mismatch; class ODF "
+                 "dispatch disabled");
+        return false;
+    }
+    if (!a2fo::install_inline_hook(
+            at(g_armada, kGameObjectClassFindProjectIdRva),
+            reinterpret_cast<void*>(&game_object_class_find_project_id_hook),
+            sizeof(kExpectedGameObjectClassFindProjectId),
+            kExpectedGameObjectClassFindProjectId,
+            g_game_object_class_find_project_id_hook)) {
+        log_line("Could not install GameObjectClass ODF field capture hook");
+        return false;
+    }
+    log_line("GameObjectClass-loaded ODF dispatcher enabled");
+    return true;
 }
 
 bool install_object_destroyed_hook() {
@@ -2159,9 +2735,6 @@ bool install_object_destroyed_hook() {
         std::memcmp(at(g_armada, kCraftExplodeRva),
                     kExpectedCraftExplode,
                     sizeof(kExpectedCraftExplode)) != 0 ||
-        std::memcmp(at(g_armada, kGameObjectClassFindProjectIdRva),
-                    kExpectedGameObjectClassFindProjectId,
-                    sizeof(kExpectedGameObjectClassFindProjectId)) != 0 ||
         std::memcmp(at(g_armada, kGameObjectClassFindRva),
                     kExpectedGameObjectClassFind,
                     sizeof(kExpectedGameObjectClassFind)) != 0 ||
@@ -2179,15 +2752,6 @@ bool install_object_destroyed_hook() {
         return false;
     }
     if (!a2fo::install_inline_hook(
-            at(g_armada, kGameObjectClassFindProjectIdRva),
-            reinterpret_cast<void*>(&game_object_class_find_project_id_hook),
-            sizeof(kExpectedGameObjectClassFindProjectId),
-            kExpectedGameObjectClassFindProjectId,
-            g_game_object_class_find_project_id_hook)) {
-        log_line("Could not install destroyed-object ODF field capture hook");
-        return false;
-    }
-    if (!a2fo::install_inline_hook(
             at(g_armada, kCraftExplodeRva),
             reinterpret_cast<void*>(&craft_explode_hook),
             sizeof(kExpectedCraftExplode), kExpectedCraftExplode,
@@ -2195,7 +2759,34 @@ bool install_object_destroyed_hook() {
         log_line("Could not install object-destroyed hook");
         return false;
     }
-    log_line("Object-destroyed dispatcher and ODF field capture enabled");
+    log_line("Object-destroyed dispatcher enabled");
+    return true;
+}
+
+bool install_race_loaded_hook() {
+    if (!g_fleet_ops ||
+        std::memcmp(at(g_fleet_ops, kRaceParameterDbDestructorCallRva),
+                    kExpectedRaceParameterDbDestructorCall,
+                    sizeof(kExpectedRaceParameterDbDestructorCall)) != 0 ||
+        std::memcmp(at(g_fleet_ops, kParameterDbDestructorRva),
+                    kExpectedParameterDbDestructor,
+                    sizeof(kExpectedParameterDbDestructor)) != 0) {
+        log_line("Race-loaded hook signature mismatch; Race ODF dispatch "
+                 "disabled");
+        return false;
+    }
+    g_a2fo_race_parameter_db_destructor =
+        at(g_fleet_ops, kParameterDbDestructorRva);
+    if (!a2fo::patch_call(
+            at(g_fleet_ops, kRaceParameterDbDestructorCallRva),
+            reinterpret_cast<void*>(&a2fo_race_parameter_db_dispatch_bridge),
+            kExpectedRaceParameterDbDestructorCall,
+            sizeof(kExpectedRaceParameterDbDestructorCall))) {
+        g_a2fo_race_parameter_db_destructor = nullptr;
+        log_line("Could not install Race-loaded ODF dispatcher");
+        return false;
+    }
+    log_line("Race-loaded ODF dispatcher enabled");
     return true;
 }
 
@@ -2224,14 +2815,12 @@ bool associate_evolver_cocoon_class(void* class_object,
     std::string command;
     try {
         StateLockGuard lock;
-        a2fo::resolve_evolver_cocoon(
-            g_lua_host, parameter_db, value);
         command = g_evolver_cocoon_command;
     } catch (...) {
         log_line("Evolver cocoon policy lookup failed; using Fleet Ops default");
     }
 
-    if (parameter_db && value.empty() && !command.empty()) {
+    if (parameter_db && !command.empty()) {
         char native_value[MAX_PATH]{};
         a2fo_parameter_db_get_string(original_parameter_db_get_string(),
                                      parameter_db, command.c_str(), native_value,
@@ -2801,7 +3390,7 @@ bool A2FO_CALL api_register_object_destroyed_handler(
             g_object_destroyed_handlers.size() < 64) {
             for (const std::string& field :
                  registration.required_odf_fields) {
-                g_destroyed_odf_fields.insert(field);
+                g_game_object_class_odf_fields.insert(field);
             }
             g_object_destroyed_handlers.push_back(std::move(registration));
             registered = true;
@@ -2842,12 +3431,212 @@ bool A2FO_CALL api_register_producer_event_handler(
     return registered;
 }
 
+bool A2FO_CALL api_register_game_object_class_loaded_handler(
+    const char* module_name,
+    const char* const* required_odf_fields,
+    std::uint32_t required_odf_field_count,
+    A2FO_GameObjectClassLoadedHandler handler,
+    void* user_data) {
+    const std::string owner = policy_owner(module_name);
+    if (!handler || required_odf_field_count > 64 ||
+        (required_odf_field_count != 0 && !required_odf_fields)) {
+        log_line("GameObjectClass-loaded handler rejected for " + owner +
+                 "; invalid callback or field list");
+        return false;
+    }
+    NativeGameObjectClassLoadedRegistration registration;
+    registration.owner = owner;
+    registration.handler = handler;
+    registration.user_data = user_data;
+    try {
+        std::set<std::string> unique_fields;
+        for (std::uint32_t index = 0;
+             index < required_odf_field_count; ++index) {
+            const char* field = required_odf_fields[index];
+            if (!valid_odf_field_name(field)) {
+                log_line("GameObjectClass-loaded handler rejected for " +
+                         owner + "; invalid ODF field name");
+                return false;
+            }
+            unique_fields.insert(lower_ascii(field));
+        }
+        registration.required_odf_fields.assign(
+            unique_fields.begin(), unique_fields.end());
+    } catch (...) {
+        return false;
+    }
+    bool registered = false;
+    {
+        StateLockGuard lock;
+        if (g_policy_registration_open &&
+            g_registration_transaction.active &&
+            g_game_object_class_loaded_handlers.size() < 64) {
+            for (const auto& field : registration.required_odf_fields) {
+                g_game_object_class_odf_fields.insert(field);
+            }
+            g_game_object_class_loaded_handlers.push_back(
+                std::move(registration));
+            registered = true;
+        }
+    }
+    log_line(std::string("GameObjectClass-loaded handler ") +
+             (registered ? "registered by " : "rejected for ") + owner);
+    return registered;
+}
+
+bool A2FO_CALL api_register_race_loaded_handler(
+    const char* module_name,
+    const char* const* required_odf_fields,
+    std::uint32_t required_odf_field_count,
+    A2FO_RaceLoadedHandler handler,
+    void* user_data) {
+    const std::string owner = policy_owner(module_name);
+    if (!handler || required_odf_field_count > 64 ||
+        (required_odf_field_count != 0 && !required_odf_fields)) {
+        log_line("Race-loaded handler rejected for " + owner +
+                 "; invalid callback or field list");
+        return false;
+    }
+    NativeRaceLoadedRegistration registration;
+    registration.owner = owner;
+    registration.handler = handler;
+    registration.user_data = user_data;
+    try {
+        std::set<std::string> unique_fields;
+        for (std::uint32_t index = 0;
+             index < required_odf_field_count; ++index) {
+            const char* field = required_odf_fields[index];
+            if (!valid_odf_field_name(field)) {
+                log_line("Race-loaded handler rejected for " + owner +
+                         "; invalid ODF field name");
+                return false;
+            }
+            unique_fields.insert(lower_ascii(field));
+        }
+        registration.required_odf_fields.assign(
+            unique_fields.begin(), unique_fields.end());
+    } catch (...) {
+        return false;
+    }
+    bool registered = false;
+    {
+        StateLockGuard lock;
+        if (g_policy_registration_open &&
+            g_registration_transaction.active &&
+            g_race_loaded_handlers.size() < 64) {
+            for (const auto& field : registration.required_odf_fields) {
+                g_race_odf_fields.insert(field);
+            }
+            g_race_loaded_handlers.push_back(std::move(registration));
+            registered = true;
+        }
+    }
+    log_line(std::string("Race-loaded handler ") +
+             (registered ? "registered by " : "rejected for ") + owner);
+    return registered;
+}
+
+bool A2FO_CALL api_register_weapon_class_loaded_handler(
+    const char* module_name,
+    const char* const* required_odf_fields,
+    std::uint32_t required_odf_field_count,
+    A2FO_WeaponClassLoadedHandler handler,
+    void* user_data) {
+    const std::string owner = policy_owner(module_name);
+    if (!handler || required_odf_field_count > 64 ||
+        (required_odf_field_count != 0 && !required_odf_fields)) {
+        log_line("WeaponClass-loaded handler rejected for " + owner +
+                 "; invalid callback or field list");
+        return false;
+    }
+    NativeWeaponClassLoadedRegistration registration;
+    registration.owner = owner;
+    registration.handler = handler;
+    registration.user_data = user_data;
+    try {
+        std::set<std::string> unique_fields;
+        for (std::uint32_t index = 0;
+             index < required_odf_field_count; ++index) {
+            const char* field = required_odf_fields[index];
+            if (!valid_odf_field_name(field)) {
+                log_line("WeaponClass-loaded handler rejected for " + owner +
+                         "; invalid ODF field name");
+                return false;
+            }
+            unique_fields.insert(lower_ascii(field));
+        }
+        registration.required_odf_fields.assign(
+            unique_fields.begin(), unique_fields.end());
+    } catch (...) {
+        return false;
+    }
+    bool registered = false;
+    {
+        StateLockGuard lock;
+        if (g_policy_registration_open &&
+            g_registration_transaction.active &&
+            g_weapon_class_loaded_handlers.size() < 64) {
+            for (const auto& field : registration.required_odf_fields) {
+                g_weapon_class_odf_fields.insert(field);
+            }
+            g_weapon_class_loaded_handlers.push_back(
+                std::move(registration));
+            registered = true;
+        }
+    }
+    log_line(std::string("WeaponClass-loaded handler ") +
+             (registered ? "registered by " : "rejected for ") + owner);
+    return registered;
+}
+
+bool A2FO_CALL api_register_weapon_trigger_handler(
+    const char* module_name, A2FO_WeaponTriggerHandler handler,
+    void* user_data) {
+    const std::string owner = policy_owner(module_name);
+    if (!handler || !g_state_lock_ready) return false;
+    bool registered = false;
+    {
+        StateLockGuard lock;
+        if (g_policy_registration_open &&
+            g_registration_transaction.active &&
+            g_weapon_trigger_handlers.size() < 64) {
+            g_weapon_trigger_handlers.push_back(
+                NativeWeaponTriggerRegistration{owner, handler, user_data});
+            registered = true;
+        }
+    }
+    log_line(std::string("Weapon-trigger handler ") +
+             (registered ? "registered by " : "rejected for ") + owner);
+    return registered;
+}
+
+bool A2FO_CALL api_register_craft_event_handler(
+    const char* module_name, A2FO_CraftEventHandler handler,
+    void* user_data) {
+    const std::string owner = policy_owner(module_name);
+    if (!handler || !g_state_lock_ready) return false;
+    bool registered = false;
+    {
+        StateLockGuard lock;
+        if (g_policy_registration_open &&
+            g_registration_transaction.active &&
+            g_craft_event_handlers.size() < 64) {
+            g_craft_event_handlers.push_back(
+                NativeCraftEventRegistration{owner, handler, user_data});
+            registered = true;
+        }
+    }
+    log_line(std::string("Craft-event handler ") +
+             (registered ? "registered by " : "rejected for ") + owner);
+    return registered;
+}
+
 bool A2FO_CALL api_dispatch_producer_event(
     const A2FO_ProducerEvent* event) {
     if (!event ||
         event->struct_size < sizeof(A2FO_ProducerEvent) ||
         !event->producer ||
-        event->kind > A2FO_PRODUCER_EVENT_STARTING_EFFECT ||
+        event->kind > A2FO_PRODUCER_EVENT_CLEARED ||
         (event->kind != A2FO_PRODUCER_EVENT_DESTROYING &&
          !event->target_class) ||
         !g_state_lock_ready) {
@@ -2889,7 +3678,9 @@ const char* A2FO_CALL api_extension_root(std::uint32_t index) {
 }
 
 std::uint32_t A2FO_CALL api_upgrade_pod_maximum_tier() {
-    return g_lua_host.upgrade_pod_maximum_tier;
+    // Retained for binary compatibility with older third-party modules.
+    // Current FeaturePack builds read upgradePodMaximumTier from RTS_CFG.h.
+    return 6;
 }
 
 bool A2FO_CALL api_get_original_classlabel(
@@ -2955,6 +3746,11 @@ A2FO_ModuleApi make_module_api() {
     api.capabilities |= A2FO_CAP_INFO_INI_DEFAULTS;
     api.capabilities |= A2FO_CAP_ODF_OVERLAY_DIRECTORIES;
     api.capabilities |= A2FO_CAP_PRODUCER_EVENTS;
+    api.capabilities |= A2FO_CAP_GAME_OBJECT_CLASS_LOADED;
+    api.capabilities |= A2FO_CAP_RACE_LOADED;
+    api.capabilities |= A2FO_CAP_WEAPON_CLASS_LOADED;
+    api.capabilities |= A2FO_CAP_WEAPON_TRIGGER_EVENTS;
+    api.capabilities |= A2FO_CAP_CRAFT_EVENTS;
     if (g_classlabel_alias_hook_ready) {
         api.capabilities |= A2FO_CAP_CLASSLABEL_ODF_DEFAULTS;
     }
@@ -2978,6 +3774,15 @@ A2FO_ModuleApi make_module_api() {
     api.register_classlabel_odf_defaults =
         &api_register_classlabel_odf_defaults;
     api.patch_bytes = &api_patch_bytes;
+    api.get_settings_directory = &api_get_settings_directory;
+    api.register_game_object_class_loaded_handler =
+        &api_register_game_object_class_loaded_handler;
+    api.register_race_loaded_handler = &api_register_race_loaded_handler;
+    api.register_weapon_class_loaded_handler =
+        &api_register_weapon_class_loaded_handler;
+    api.register_weapon_trigger_handler =
+        &api_register_weapon_trigger_handler;
+    api.register_craft_event_handler = &api_register_craft_event_handler;
     return api;
 }
 
@@ -3090,22 +3895,29 @@ DWORD WINAPI initialize(void*) {
       a2fo::load_native_modules_from_roots(
           g_extension_roots, g_module_api, g_loaded_modules, &log_line,
           registration_observer);
-      a2fo::LuaEngineApi lua_engine;
-      lua_engine.parameter_db_get_string = &lua_parameter_db_get_string;
-      if (!a2fo::initialize_lua_host(
-              g_extension_roots, g_lua_host, &log_line, lua_engine)) {
-          log_line("Lua host: initialization completed with script errors");
+      const bool object_destroyed_dispatch_requested =
+          !g_object_destroyed_handlers.empty();
+      if (object_destroyed_dispatch_requested ||
+          !g_game_object_class_loaded_handlers.empty()) {
+          g_game_object_class_loaded_hook_ready =
+              install_game_object_class_loaded_hook();
       }
-      {
-          StateLockGuard lock;
-          const std::vector<std::string> lua_fields =
-              a2fo::object_destroyed_odf_fields(g_lua_host);
-          g_destroyed_odf_fields.insert(
-              lua_fields.begin(), lua_fields.end());
-      }
-      if (!g_object_destroyed_handlers.empty() ||
-          !g_lua_host.object_destroyed_callbacks.empty()) {
+      if (object_destroyed_dispatch_requested &&
+          g_game_object_class_loaded_hook_ready) {
           g_object_destroyed_hook_ready = install_object_destroyed_hook();
+      }
+      if (!g_race_loaded_handlers.empty()) {
+          g_race_loaded_hook_ready = install_race_loaded_hook();
+      }
+      if (!g_weapon_class_loaded_handlers.empty()) {
+          g_weapon_class_loaded_hook_ready =
+              install_weapon_class_loaded_hook();
+      }
+      if (!g_weapon_trigger_handlers.empty()) {
+          g_weapon_trigger_hook_ready = install_weapon_trigger_hook();
+      }
+      if (!g_craft_event_handlers.empty()) {
+          g_craft_event_hooks_ready = install_craft_event_hooks();
       }
 
       std::size_t alias_count = 0;
@@ -3126,16 +3938,9 @@ DWORD WINAPI initialize(void*) {
                (classlabel_default_count == 1 ? "" : "s") +
                ", Evolver cocoon command: " +
                (cocoon_command.empty() ? "<none>" : cocoon_command));
-      log_line("Lua callbacks ready: " +
-               std::to_string(g_lua_host.classlabel_callbacks.size()) +
-               " classlabel, Evolver cocoon: " +
-               (g_lua_host.evolver_cocoon_callback.reference == -2
-                    ? "<none>" : "registered") +
-               ", " +
-               std::to_string(g_lua_host.object_destroyed_callbacks.size()) +
-               " Lua object-destroyed, " +
+      log_line("Native callbacks ready: " +
                std::to_string(g_object_destroyed_handlers.size()) +
-               " native object-destroyed");
+               " object-destroyed");
     } catch (...) {
         log_line("Initialization aborted by an unexpected C++ exception");
         return 1;

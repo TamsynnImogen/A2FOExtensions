@@ -7,10 +7,11 @@ browser. The four stock campaign sections deliberately retain native
 loading paths. Additional INI-defined campaigns reuse one native launch-table
 cell temporarily, without enlarging or writing beyond Armada's fixed table.
 
-The first version uses a dark modal Win32 dialog over the shell. If its native
-tables or window cannot be created, it falls back to Armada's original Single
-Player screen rather than blocking access to missions. Back, Escape, and the
-window close button all return to Armada's main menu.
+The selector uses a campaign-specific background image when one is configured,
+falling back to the active mod's `bitmaps/single/singleplay.png` and then a dark
+fill. If its native tables or window cannot be created, it falls back to
+Armada's original Single Player screen rather than blocking access to missions.
+Back, Escape, and the window close button all return to Armada's main menu.
 
 ## Optional metadata
 
@@ -21,6 +22,7 @@ Higher-precedence mods override parent values:
 [campaign1]
 title = Federation Campaign
 overview = Command Starfleet through the opening campaign.
+background = bitmaps/MissionSelector/federation.png
 
 [campaign1.mission0]
 title = Invasion
@@ -31,8 +33,11 @@ thumbnail = bzn/a2_fed01.png
 
 Sections are `campaign0` through `campaign3`; mission sections append
 `.mission0` through `.mission9`. Missing values fall back to native filenames
-and built-in campaign labels. Mission thumbnails also auto-resolve beside the
-corresponding BZN as PNG, BMP, JPEG, or JPG files.
+and built-in campaign labels. `background` accepts a PNG, BMP, JPEG, or JPG
+path. It is aspect-filled behind the selector and changes as soon as another
+campaign is selected; a subtle dark overlay preserves text readability.
+Mission thumbnails also auto-resolve beside the corresponding BZN in the same
+image formats.
 
 ## Custom campaigns and missions
 
@@ -43,6 +48,7 @@ corresponding BZN as PNG, BMP, JPEG, or JPG files.
 [campaign4]
 title = Bonus Missions
 overview = Standalone stories outside the stock campaign progression.
+background = bitmaps/MissionSelector/bonus.png
 unlocked = 1
 
 [campaign4.mission0]
@@ -60,7 +66,7 @@ campaigns and missions default to unlocked; `unlocked = 0` can hide their Start
 button, but there is not yet independent saveable custom-campaign progression.
 The supported display fields are:
 
-- campaign: `title`, `overview`, `unlocked`;
+- campaign: `title`, `overview`, `background`, `unlocked`;
 - mission: `file`, `title`, `description`, `objectives`, `thumbnail`,
   `unlocked`.
 

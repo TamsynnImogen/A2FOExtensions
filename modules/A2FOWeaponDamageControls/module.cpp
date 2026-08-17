@@ -8,6 +8,7 @@
  */
 
 #include "../../sdk/include/a2fo_module_api.h"
+#include "../A2FODirectionalShields/api.hpp"
 #include "damage_controls.hpp"
 
 #include <windows.h>
@@ -49,14 +50,12 @@ using a2fo::weapon_damage_controls::hull_spillover_scale;
 constexpr char kModuleName[] = "A2FOWeaponDamageControls";
 
 // ArmadaL.exe 1.1 / Fleet Operations Roots RVAs.
-constexpr std::uintptr_t kCraftDamageRva = 0x000c4bb0;
+constexpr std::uintptr_t kCraftDamageRva = 0x000c5bb0;
 constexpr std::uintptr_t kParameterDbGetBoolRva = 0x00134f50;
 constexpr std::uintptr_t kParameterDbGetLookupRva = 0x00135630;
 constexpr std::uintptr_t kLookupConstructorRva = 0x0025cfb0;
 constexpr std::uintptr_t kLookupDestructorRva = 0x0025cfd0;
 constexpr std::uintptr_t kLookupFindRva = 0x0025d170;
-constexpr std::uintptr_t kWeaponClassConstructorRva = 0x00264e30;
-constexpr std::uintptr_t kFoWeaponClassConstructorHandlerRva = 0x0010ef74;
 constexpr std::uintptr_t kCraftDamageHullAmountRva = 0x000c5f08;
 constexpr std::uintptr_t kCraftDamageHullAmountResumeRva = 0x000c5f12;
 
@@ -78,10 +77,6 @@ constexpr std::uint8_t kExpectedCraftDamage[] = {
     0x55, 0x8b, 0xec, 0x83, 0xec, 0x10};
 constexpr std::uint8_t kExpectedCraftDamageHullAmount[] = {
     0x8b, 0x43, 0x04, 0xc7, 0x45, 0xfc, 0x00, 0x00, 0x00, 0x00};
-constexpr std::uint8_t kExpectedWeaponClassConstructor[] = {
-    0x55, 0x8b, 0xec, 0x6a, 0xff};
-constexpr std::uint8_t kExpectedFoWeaponClassConstructorHandler[] = {
-    0x55, 0x8b, 0xec, 0x83, 0xc4, 0xdc, 0x53};
 constexpr std::uint8_t kExpectedParameterDbGetBool[] = {
     0x55, 0x8b, 0xec, 0x81, 0xec, 0x00, 0x01, 0x00, 0x00};
 constexpr std::uint8_t kExpectedParameterDbGetLookup[] = {
@@ -95,16 +90,14 @@ constexpr std::uint8_t kExpectedLookupFind[] = {
 
 const A2FO_ModuleApi* g_api = nullptr;
 HMODULE g_armada = nullptr;
-HMODULE g_fleet_ops = nullptr;
 bool g_runtime_ready = false;
 bool g_state_lock_ready = false;
-bool g_chained_constructor = false;
-void* g_weapon_class_constructor_original = nullptr;
-A2FO_InlineHook g_weapon_class_constructor_hook{};
 A2FO_InlineHook g_craft_damage_hook{};
 CRITICAL_SECTION g_state_lock{};
 thread_local bool g_hull_amount_scale_active = false;
 thread_local float g_hull_amount_scale = 1.0f;
+A2FO_DirectionalShieldsBeginDamageFn g_directional_begin_damage = nullptr;
+A2FO_DirectionalShieldsEndDamageFn g_directional_end_damage = nullptr;
 
 void log_line(const std::string& message) noexcept {
     if (g_api && g_api->log) g_api->log(kModuleName, message.c_str());
@@ -242,57 +235,6 @@ bool signature_matches(HMODULE module, std::uintptr_t rva,
     const void* address = at(module, rva);
     return readable_range(address, Size) &&
         std::memcmp(address, expected, Size) == 0;
-}
-
-void* existing_detour_destination(const void* site,
-                                  std::size_t* patch_length) noexcept {
-    if (patch_length) *patch_length = 0;
-    if (!site || !readable_range(site, 5)) return nullptr;
-    const auto* bytes = static_cast<const std::uint8_t*>(site);
-    if (bytes[0] == 0xe9) {
-        std::int32_t displacement = 0;
-        std::memcpy(&displacement, bytes + 1, sizeof(displacement));
-        if (patch_length) *patch_length = 5;
-        return const_cast<std::uint8_t*>(bytes + 5 + displacement);
-    }
-    if (readable_range(site, 6) && bytes[0] == 0x68 &&
-        bytes[5] == 0xc3) {
-        std::uint32_t destination = 0;
-        std::memcpy(&destination, bytes + 1, sizeof(destination));
-        if (patch_length) *patch_length = 6;
-        return reinterpret_cast<void*>(
-            static_cast<std::uintptr_t>(destination));
-    }
-    return nullptr;
-}
-
-bool address_belongs_to_module(const void* address,
-                               HMODULE module) noexcept {
-    if (!address || !module) return false;
-    MEMORY_BASIC_INFORMATION information{};
-    return VirtualQuery(address, &information, sizeof(information)) != 0 &&
-        information.AllocationBase == module;
-}
-
-bool supported_constructor_detour(void** destination,
-                                  std::size_t* patch_length) noexcept {
-    void* resolved = existing_detour_destination(
-        at(g_armada, kWeaponClassConstructorRva), patch_length);
-    bool supported = resolved == at(
-        g_fleet_ops, kFoWeaponClassConstructorHandlerRva) &&
-        signature_matches(
-            g_fleet_ops, kFoWeaponClassConstructorHandlerRva,
-            kExpectedFoWeaponClassConstructorHandler);
-
-    // A2FO modules are loaded alphabetically.  FireArcs owns this constructor
-    // first when enabled, so chain its exact live near jump rather than
-    // replacing its class-policy capture.
-    if (!supported) {
-        const HMODULE fire_arcs = GetModuleHandleA("A2FOFireArcs.dll");
-        supported = address_belongs_to_module(resolved, fire_arcs);
-    }
-    if (destination) *destination = supported ? resolved : nullptr;
-    return supported;
 }
 
 bool read_optional_bool(void* parameter_db, const char* key,
@@ -451,14 +393,40 @@ bool policy_for_damage_info(const void* damage_info, const void* target_craft,
     return found;
 }
 
-std::uintptr_t __attribute__((fastcall)) weapon_class_constructor_hook(
-    void* self, void*, void* parent_class, void* parameter_db) noexcept {
-    const std::uintptr_t result = a2fo_weapon_damage_call_thiscall_2(
-        g_weapon_class_constructor_original, self,
-        reinterpret_cast<std::uintptr_t>(parent_class),
-        reinterpret_cast<std::uintptr_t>(parameter_db));
-    register_class_policy(self, parent_class, parameter_db);
-    return result;
+void A2FO_CALL weapon_class_loaded_handler(
+    const A2FO_WeaponClassLoadedEvent* event, void*) {
+    if (!event || event->struct_size < sizeof(*event)) return;
+    register_class_policy(
+        event->weapon_class, event->parent_class, event->parameter_db);
+}
+
+template <typename Function>
+Function exported_function(HMODULE module, const char* name) noexcept {
+    FARPROC exported = module && name ? GetProcAddress(module, name) : nullptr;
+    Function function = nullptr;
+    static_assert(sizeof(function) == sizeof(exported),
+                  "unexpected function-pointer size");
+    std::memcpy(&function, &exported, sizeof(function));
+    return function;
+}
+
+bool connect_directional_shields() noexcept {
+    if (g_directional_begin_damage && g_directional_end_damage) return true;
+    HMODULE module = GetModuleHandleA("A2FODirectionalShields.dll");
+    if (!module) return false;
+    const auto connect = exported_function<
+        A2FO_DirectionalShieldsConnectDamageBridgeFn>(
+            module, "A2FODirectionalShields_ConnectDamageBridge");
+    const auto begin = exported_function<
+        A2FO_DirectionalShieldsBeginDamageFn>(
+            module, "A2FODirectionalShields_BeginDamage");
+    const auto end = exported_function<
+        A2FO_DirectionalShieldsEndDamageFn>(
+            module, "A2FODirectionalShields_EndDamage");
+    if (!connect || !begin || !end || !connect()) return false;
+    g_directional_begin_damage = begin;
+    g_directional_end_damage = end;
+    return true;
 }
 
 std::uintptr_t __attribute__((fastcall)) craft_damage_hook(
@@ -473,50 +441,56 @@ std::uintptr_t __attribute__((fastcall)) craft_damage_hook(
             reinterpret_cast<std::uintptr_t>(argument3), argument4);
     }
 
+    A2FO_DirectionalShieldDamageScope directional_scope{};
+    directional_scope.struct_size = sizeof(directional_scope);
+    const bool directional_active = g_directional_begin_damage &&
+        g_directional_begin_damage(
+            craft, damage_info, &directional_scope);
+
     DamagePolicy policy{};
-    if (!policy_for_damage_info(damage_info, craft, &policy)) {
-        return a2fo_weapon_damage_call_thiscall_4(
-            g_craft_damage_hook.gateway, craft,
-            reinterpret_cast<std::uintptr_t>(damage_info),
-            reinterpret_cast<std::uintptr_t>(argument2),
-            reinterpret_cast<std::uintptr_t>(argument3), argument4);
-    }
-
+    const bool has_policy = policy_for_damage_info(
+        damage_info, craft, &policy);
     std::array<std::uint8_t, kDamageInfoSize> local_damage{};
-    std::memcpy(local_damage.data(), damage_info, local_damage.size());
-    std::uint32_t flags = 0;
-    std::memcpy(
-        &flags, local_damage.data() + kDamageInfoFlagsOffset,
-        sizeof(flags));
-    const float current_shields = read_at<float>(
-        craft, kCurrentShieldsOnCraftOffset, 0.0f);
-    const bool shields_up = current_shields > 0.0f;
-    flags = apply_policy_to_flags(
-        flags, policy, shields_up);
-    std::memcpy(
-        local_damage.data() + kDamageInfoFlagsOffset, &flags,
-        sizeof(flags));
-
-    float damage = 0.0f;
-    std::memcpy(
-        &damage, local_damage.data() + kDamageInfoDamageOffset,
-        sizeof(damage));
-    damage *= damage_scale_for_hit(policy, shields_up);
-    std::memcpy(
-        local_damage.data() + kDamageInfoDamageOffset, &damage,
-        sizeof(damage));
+    void* native_damage_info = damage_info;
 
     const bool previous_scale_active = g_hull_amount_scale_active;
     const float previous_scale = g_hull_amount_scale;
-    g_hull_amount_scale = hull_spillover_scale(policy, shields_up);
-    g_hull_amount_scale_active = true;
+    if (has_policy) {
+        std::memcpy(local_damage.data(), damage_info, local_damage.size());
+        std::uint32_t flags = 0;
+        std::memcpy(
+            &flags, local_damage.data() + kDamageInfoFlagsOffset,
+            sizeof(flags));
+        const float current_shields = read_at<float>(
+            craft, kCurrentShieldsOnCraftOffset, 0.0f);
+        const bool shields_up = current_shields > 0.0f;
+        flags = apply_policy_to_flags(flags, policy, shields_up);
+        std::memcpy(
+            local_damage.data() + kDamageInfoFlagsOffset, &flags,
+            sizeof(flags));
+
+        float damage = 0.0f;
+        std::memcpy(
+            &damage, local_damage.data() + kDamageInfoDamageOffset,
+            sizeof(damage));
+        damage *= damage_scale_for_hit(policy, shields_up);
+        std::memcpy(
+            local_damage.data() + kDamageInfoDamageOffset, &damage,
+            sizeof(damage));
+        native_damage_info = local_damage.data();
+        g_hull_amount_scale = hull_spillover_scale(policy, shields_up);
+        g_hull_amount_scale_active = true;
+    }
     const std::uintptr_t result = a2fo_weapon_damage_call_thiscall_4(
         g_craft_damage_hook.gateway, craft,
-        reinterpret_cast<std::uintptr_t>(local_damage.data()),
+        reinterpret_cast<std::uintptr_t>(native_damage_info),
         reinterpret_cast<std::uintptr_t>(argument2),
         reinterpret_cast<std::uintptr_t>(argument3), argument4);
     g_hull_amount_scale = previous_scale;
     g_hull_amount_scale_active = previous_scale_active;
+    if (directional_active && g_directional_end_damage) {
+        g_directional_end_damage(&directional_scope);
+    }
     return result;
 }
 
@@ -572,59 +546,12 @@ bool preflight_signatures() noexcept {
         supported = false;
     }
 
-    if (!signature_matches(
-            g_armada, kWeaponClassConstructorRva,
-            kExpectedWeaponClassConstructor)) {
-        void* destination = nullptr;
-        std::size_t patch_length = 0;
-        if (!supported_constructor_detour(&destination, &patch_length)) {
-            log_line("WeaponClass constructor detour is unsupported");
-            supported = false;
-        }
-    }
     return supported;
-}
-
-bool install_constructor_hook(const A2FO_ModuleApi* api) noexcept {
-    void* site = at(g_armada, kWeaponClassConstructorRva);
-    if (signature_matches(
-            g_armada, kWeaponClassConstructorRva,
-            kExpectedWeaponClassConstructor)) {
-        if (!api->install_inline_hook(
-                site,
-                reinterpret_cast<void*>(&weapon_class_constructor_hook),
-                sizeof(kExpectedWeaponClassConstructor),
-                kExpectedWeaponClassConstructor,
-                &g_weapon_class_constructor_hook)) {
-            return false;
-        }
-        g_weapon_class_constructor_original =
-            g_weapon_class_constructor_hook.gateway;
-        g_chained_constructor = false;
-        return g_weapon_class_constructor_original != nullptr;
-    }
-
-    void* destination = nullptr;
-    std::size_t patch_length = 0;
-    if (!supported_constructor_detour(&destination, &patch_length) ||
-        patch_length > 6) {
-        return false;
-    }
-    std::uint8_t expected[6]{};
-    std::memcpy(expected, site, patch_length);
-    if (!api->patch_jump(
-            site, reinterpret_cast<void*>(&weapon_class_constructor_hook),
-            expected, patch_length)) {
-        return false;
-    }
-    g_weapon_class_constructor_original = destination;
-    g_chained_constructor = true;
-    return true;
 }
 
 bool install_runtime_hooks(const A2FO_ModuleApi* api) noexcept {
     if (!api || !api->install_inline_hook || !api->patch_jump ||
-        !g_armada || !g_fleet_ops || !preflight_signatures()) {
+        !g_armada || !preflight_signatures()) {
         return false;
     }
     a2fo_weapon_damage_hull_amount_continue = at(
@@ -637,15 +564,12 @@ bool install_runtime_hooks(const A2FO_ModuleApi* api) noexcept {
             sizeof(kExpectedCraftDamageHullAmount))) {
         return false;
     }
-    if (!api->install_inline_hook(
+    return api->install_inline_hook(
             at(g_armada, kCraftDamageRva),
             reinterpret_cast<void*>(&craft_damage_hook),
             sizeof(kExpectedCraftDamage), kExpectedCraftDamage,
-            &g_craft_damage_hook) ||
-        !g_craft_damage_hook.gateway) {
-        return false;
-    }
-    return install_constructor_hook(api);
+            &g_craft_damage_hook) &&
+        g_craft_damage_hook.gateway != nullptr;
 }
 
 }  // namespace
@@ -664,22 +588,36 @@ extern "C" __declspec(dllexport)
 bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     if (!api || api->struct_size < A2FO_MODULE_API_V4_BASE_SIZE ||
         api->api_version != A2FO_MODULE_API_VERSION || !api->log ||
-        !api->armada_module || !api->fleetops_module ||
-        !api->install_inline_hook || !api->patch_jump) {
+        !api->armada_module || !api->install_inline_hook ||
+        !api->patch_jump ||
+        !A2FO_MODULE_API_HAS(api, register_weapon_class_loaded_handler) ||
+        !api->register_weapon_class_loaded_handler ||
+        (api->capabilities & A2FO_CAP_WEAPON_CLASS_LOADED) == 0) {
         return false;
     }
     g_api = api;
     g_armada = static_cast<HMODULE>(api->armada_module());
-    g_fleet_ops = static_cast<HMODULE>(api->fleetops_module());
-    if (!g_armada || !g_fleet_ops) return false;
+    if (!g_armada) return false;
 
     InitializeCriticalSection(&g_state_lock);
     g_state_lock_ready = true;
     g_runtime_ready = install_runtime_hooks(api);
+    constexpr const char* fields[]{
+        "canDamageShields", "canDamageHull",
+        "shieldDamageModifier", "hullDamageModifier"};
+    if (g_runtime_ready &&
+        !api->register_weapon_class_loaded_handler(
+            kModuleName, fields,
+            static_cast<std::uint32_t>(std::size(fields)),
+            &weapon_class_loaded_handler, nullptr)) {
+        g_runtime_ready = false;
+    }
     if (g_runtime_ready) {
-        log_line(g_chained_constructor
-            ? "Weapon damage controls initialized and chained through the live WeaponClass constructor"
-            : "Weapon damage controls initialized");
+        const bool directional_connected = connect_directional_shields();
+        log_line("Weapon damage controls initialized through the shared WeaponClass dispatcher");
+        if (directional_connected) {
+            log_line("Directional shields connected to the shared Craft::Damage hook");
+        }
     } else {
         log_line("Weapon damage controls loaded with runtime disabled");
     }
@@ -691,4 +629,13 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
 extern "C" __declspec(dllexport)
 void A2FO_CALL A2FO_ModuleShutdown() {
     // Process-lifetime inline hooks and their sidecars intentionally remain.
+}
+
+// DirectionalShields calls this when it loads after WeaponDamageControls.
+// The ordinary ModuleInit lookup covers the opposite order, making the
+// optional bridge independent of info.ini module ordering.
+extern "C" __declspec(dllexport)
+bool A2FO_CALL
+A2FOWeaponDamageControls_RefreshDirectionalShieldsBridge() {
+    return g_runtime_ready && connect_directional_shields();
 }

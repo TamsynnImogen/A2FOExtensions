@@ -79,19 +79,3 @@ _a2fo_texture_variants_render_swap_hook:
 	popfl
 	leave
 	ret $4
-
-	# Replaces the ParameterDB destructor CALL at the end of Fleet Operations'
-	# Race loader. EBX is the Race and EAX is the still-live ParameterDB. The
-	# original Delphi wrapper also expects its ParameterDB in EAX.
-	.globl _a2fo_texture_variants_race_parameter_db_hook
-_a2fo_texture_variants_race_parameter_db_hook:
-	pushfl
-	pushal
-	pushl %eax
-	pushl %ebx
-	call _a2fo_texture_variants_capture_race_suffix
-	addl $8, %esp
-	popal
-	popfl
-	call *_g_a2fo_texture_variants_parameter_db_destructor
-	ret

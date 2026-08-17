@@ -46,12 +46,8 @@ using a2fo::turrets::AimAngles;
 using a2fo::turrets::AimLimits;
 using a2fo::turrets::Matrix34;
 
-using WeaponTriggerFilter = bool (A2FO_CALL *)(
-    void* weapon, const void* target);
 using ShieldClassObserver = void (A2FO_CALL *)(
     void* object_class, void* parameter_db);
-using ShieldCraftObserver = void (A2FO_CALL *)(void* craft);
-using ShieldCraftCleanupObserver = void (A2FO_CALL *)(void* craft);
 
 constexpr const char* kModuleName = "A2FOTurrets";
 constexpr std::size_t kMaximumTurrets = 64;
@@ -60,30 +56,14 @@ constexpr char kAlwaysShowShieldsModuleName[] =
     "A2FOAlwaysShowShields.dll";
 constexpr char kShieldClassObserverExport[] =
     "A2FOAlwaysShowShields_RegisterClass";
-constexpr char kShieldCraftObserverExport[] =
-    "A2FOAlwaysShowShields_UpdateCraft";
-constexpr char kShieldCraftCleanupObserverExport[] =
-    "A2FOAlwaysShowShields_CleanupCraft";
-constexpr char kFireArcModuleName[] = "A2FOFireArcs.dll";
-constexpr char kFireArcTriggerFilterExport[] =
-    "A2FOFireArcs_AllowWeaponTrigger";
-constexpr char kNormalWeaponTechModuleName[] =
-    "A2FONormalWeaponTech.dll";
-constexpr char kNormalWeaponTechTriggerFilterExport[] =
-    "A2FONormalWeaponTech_AllowWeaponTrigger";
 
 // ArmadaL.exe 1.1 / Fleet Operations Roots RVAs. These are checked before a
 // single hook is installed so an unsupported executable cannot leave a
 // partially active runtime.
 constexpr std::uintptr_t kGameObjectClassConstructorRva = 0x000cc480;
-constexpr std::uintptr_t kCraftCleanupRva = 0x000c1fd0;
-constexpr std::uintptr_t kCraftPostLoadRva = 0x000c2870;
-constexpr std::uintptr_t kCraftSimulateRva = 0x000c6530;
-constexpr std::uintptr_t kWeaponTriggerObjectRva = 0x00271290;
 constexpr std::uintptr_t kWeaponSetTargetRva = 0x00271340;
 constexpr std::uintptr_t kFoGameObjectClassConstructorHandlerRva =
     0x0010bd80;
-constexpr std::uintptr_t kFoCraftSimulateHandlerRva = 0x001dcebc;
 
 constexpr std::uintptr_t kParameterDbGetStringRva = 0x00135350;
 constexpr std::uintptr_t kGameObjectClassFindRva = 0x000cd370;
@@ -122,14 +102,6 @@ constexpr std::size_t kCommandFlagsOffset = 0x28;
 
 constexpr std::uint8_t kExpectedGameObjectClassConstructor[] = {
     0x55, 0x8b, 0xec, 0x6a, 0xff};
-constexpr std::uint8_t kExpectedCraftCleanup[] = {
-    0x56, 0x8b, 0xf1, 0x8b, 0x8e, 0x34, 0x02, 0x00, 0x00};
-constexpr std::uint8_t kExpectedCraftPostLoad[] = {
-    0x53, 0x56, 0x57, 0x8b, 0xf1};
-constexpr std::uint8_t kExpectedCraftSimulate[] = {
-    0x55, 0x8b, 0xec, 0x53, 0x8b, 0x5d, 0x08};
-constexpr std::uint8_t kExpectedWeaponTriggerObject[] = {
-    0x55, 0x8b, 0xec, 0x8b, 0x45, 0x08};
 constexpr std::uint8_t kExpectedWeaponSetTarget[] = {
     0x55, 0x8b, 0xec, 0x8b, 0x45, 0x08};
 constexpr std::uint8_t kExpectedCraftGetAlertStatus[] = {
@@ -148,8 +120,6 @@ constexpr std::uint8_t kExpectedGameObjectSetObjectCommand[] = {
     0x55, 0x8b, 0xec, 0x8b, 0x45, 0x14};
 constexpr std::uint8_t kExpectedFoGameObjectClassConstructorHandler[] = {
     0x55, 0x8b, 0xec, 0x83, 0xc4, 0xe8, 0x53};
-constexpr std::uint8_t kExpectedFoCraftSimulateHandler[] = {
-    0x55, 0x8b, 0xec, 0x51, 0x53, 0x89, 0x4d};
 
 constexpr std::array<A2FO_ClasslabelOdfDefault, 7> kTurretDefaults{{
     {"ignoreInterface", "1"},
@@ -218,21 +188,11 @@ struct AttackOrder {
 const A2FO_ModuleApi* g_api = nullptr;
 HMODULE g_armada = nullptr;
 HMODULE g_fleet_ops = nullptr;
-WeaponTriggerFilter g_fire_arc_trigger_filter = nullptr;
-WeaponTriggerFilter g_normal_weapon_tech_trigger_filter = nullptr;
 ShieldClassObserver g_shield_class_observer = nullptr;
-ShieldCraftObserver g_shield_craft_observer = nullptr;
-ShieldCraftCleanupObserver g_shield_craft_cleanup_observer = nullptr;
 bool g_runtime_ready = false;
 bool g_chained_fo_class_constructor = false;
-bool g_chained_fo_craft_simulate = false;
 void* g_class_constructor_original = nullptr;
-void* g_craft_simulate_original = nullptr;
 A2FO_InlineHook g_class_constructor_hook{};
-A2FO_InlineHook g_craft_cleanup_hook{};
-A2FO_InlineHook g_craft_post_load_hook{};
-A2FO_InlineHook g_craft_simulate_hook{};
-A2FO_InlineHook g_weapon_trigger_object_hook{};
 A2FO_InlineHook g_weapon_set_target_hook{};
 
 std::unordered_map<void*, ParentClassConfig> g_parent_classes;
@@ -241,7 +201,8 @@ std::unordered_map<std::uint32_t, ParentRuntime> g_parents;
 std::unordered_map<std::uint32_t, ChildRuntime> g_children;
 std::unordered_map<std::uint32_t, std::uint32_t> g_targets;
 
-void prepare_linked_turret_for_simulation(void* child) noexcept;
+void prepare_linked_turret_for_simulation(
+    void* child, std::uint32_t child_handle) noexcept;
 
 void log_line(const std::string& message) noexcept {
     if (g_api && g_api->log) g_api->log(kModuleName, message.c_str());
@@ -252,67 +213,17 @@ void resolve_shield_observers() noexcept {
     FARPROC class_export = shields
         ? GetProcAddress(shields, kShieldClassObserverExport)
         : nullptr;
-    FARPROC craft_export = shields
-        ? GetProcAddress(shields, kShieldCraftObserverExport)
-        : nullptr;
-    FARPROC cleanup_export = shields
-        ? GetProcAddress(shields, kShieldCraftCleanupObserverExport)
-        : nullptr;
     static_assert(sizeof(class_export) == sizeof(g_shield_class_observer),
                   "unexpected function-pointer size");
-    static_assert(sizeof(craft_export) == sizeof(g_shield_craft_observer),
-                  "unexpected function-pointer size");
-    static_assert(
-        sizeof(cleanup_export) == sizeof(g_shield_craft_cleanup_observer),
-        "unexpected function-pointer size");
     std::memcpy(&g_shield_class_observer, &class_export,
                 sizeof(g_shield_class_observer));
-    std::memcpy(&g_shield_craft_observer, &craft_export,
-                sizeof(g_shield_craft_observer));
-    std::memcpy(&g_shield_craft_cleanup_observer, &cleanup_export,
-                sizeof(g_shield_craft_cleanup_observer));
-    if (!g_shield_class_observer || !g_shield_craft_observer ||
-        !g_shield_craft_cleanup_observer) {
+    if (!g_shield_class_observer) {
         g_shield_class_observer = nullptr;
-        g_shield_craft_observer = nullptr;
-        g_shield_craft_cleanup_observer = nullptr;
         return;
     }
     log_line(
         "Shield visibility callbacks linked through "
         "A2FOAlwaysShowShields");
-}
-
-void resolve_fire_arc_trigger_filter() noexcept {
-    HMODULE fire_arcs = GetModuleHandleA(kFireArcModuleName);
-    FARPROC exported = fire_arcs
-        ? GetProcAddress(fire_arcs, kFireArcTriggerFilterExport)
-        : nullptr;
-    static_assert(sizeof(exported) == sizeof(g_fire_arc_trigger_filter),
-                  "unexpected function-pointer size");
-    std::memcpy(&g_fire_arc_trigger_filter, &exported,
-                sizeof(g_fire_arc_trigger_filter));
-    if (g_fire_arc_trigger_filter) {
-        log_line("Full 3D weapon-trigger filtering linked through A2FOFireArcs");
-    }
-}
-
-void resolve_normal_weapon_tech_trigger_filter() noexcept {
-    HMODULE normal_weapon_tech = GetModuleHandleA(
-        kNormalWeaponTechModuleName);
-    FARPROC exported = normal_weapon_tech
-        ? GetProcAddress(
-              normal_weapon_tech,
-              kNormalWeaponTechTriggerFilterExport)
-        : nullptr;
-    static_assert(
-        sizeof(exported) == sizeof(g_normal_weapon_tech_trigger_filter),
-        "unexpected function-pointer size");
-    std::memcpy(&g_normal_weapon_tech_trigger_filter, &exported,
-                sizeof(g_normal_weapon_tech_trigger_filter));
-    if (g_normal_weapon_tech_trigger_filter) {
-        log_line("Normal-weapon trigger filtering linked through A2FONormalWeaponTech");
-    }
 }
 
 void* at(HMODULE module, std::uintptr_t rva) noexcept {
@@ -343,6 +254,17 @@ T read_at(const void* object, std::size_t offset, T fallback = T{}) noexcept {
             sizeof(T))) {
         return fallback;
     }
+    T value{};
+    std::memcpy(&value,
+                static_cast<const std::uint8_t*>(object) + offset,
+                sizeof(value));
+    return value;
+}
+
+template <typename T>
+T read_live_at(const void* object, std::size_t offset,
+               T fallback = T{}) noexcept {
+    if (!object) return fallback;
     T value{};
     std::memcpy(&value,
                 static_cast<const std::uint8_t*>(object) + offset,
@@ -826,7 +748,7 @@ void spawn_pending_turrets(void* parent) noexcept {
         }
 
         // Do not allow a newly constructed child one independent combat tick.
-        prepare_linked_turret_for_simulation(child);
+        prepare_linked_turret_for_simulation(child, child_handle);
 
         const Matrix34 initial = a2fo::turrets::compose_turret_transform(
             transform, child_runtime.current);
@@ -1049,8 +971,8 @@ void update_inherited_order_target(
     }
 }
 
-void prepare_linked_turret_for_simulation(void* child) noexcept {
-    const std::uint32_t child_handle = object_handle(child);
+void prepare_linked_turret_for_simulation(
+    void* child, std::uint32_t child_handle) noexcept {
     const auto child_found = g_children.find(child_handle);
     if (child_found == g_children.end()) return;
     void* parent = find_entity(child_found->second.parent_handle);
@@ -1061,8 +983,8 @@ void prepare_linked_turret_for_simulation(void* child) noexcept {
         child, child_handle, &child_found->second, parent);
 }
 
-void update_linked_turret(void* child, float elapsed_seconds) noexcept {
-    const std::uint32_t child_handle = object_handle(child);
+void update_linked_turret(void* child, std::uint32_t child_handle,
+                          float elapsed_seconds) noexcept {
     const auto child_found = g_children.find(child_handle);
     if (child_found == g_children.end()) return;
     ChildRuntime& child_runtime = child_found->second;
@@ -1092,7 +1014,8 @@ void update_linked_turret(void* child, float elapsed_seconds) noexcept {
     }
     sync_child_ownership(child, parent);
 
-    const auto turret_config = g_turret_classes.find(object_class(child));
+    const auto turret_config = g_turret_classes.find(
+        read_live_at<void*>(child, kObjectClassOffset, nullptr));
     if (turret_config == g_turret_classes.end()) return;
     const TurretClassConfig& config = turret_config->second;
     AimAngles desired = child_runtime.current;
@@ -1125,52 +1048,6 @@ void update_linked_turret(void* child, float elapsed_seconds) noexcept {
     a2fo_turret_call_thiscall_1(
         at(g_armada, kGameObjectSetTransformRva), child,
         reinterpret_cast<std::uintptr_t>(&transform));
-}
-
-void __attribute__((fastcall)) craft_simulate_hook(
-    void* craft, void*, float elapsed_seconds) noexcept {
-    // Combat policy must be present before native Craft simulation: that is
-    // where alert/autonomy rules select targets and where weapons may fire.
-    if (g_runtime_ready && craft && !object_expired(craft) &&
-        g_children.find(object_handle(craft)) != g_children.end()) {
-        prepare_linked_turret_for_simulation(craft);
-    }
-    std::uint32_t elapsed_bits = 0;
-    static_assert(sizeof(elapsed_bits) == sizeof(elapsed_seconds),
-                  "Armada float arguments must occupy four bytes");
-    std::memcpy(&elapsed_bits, &elapsed_seconds, sizeof(elapsed_bits));
-    a2fo_turret_call_thiscall_1(
-        g_craft_simulate_original, craft, elapsed_bits);
-    // Apply the linked transform after native Craft simulation so the child
-    // physics pass cannot move it away from the mount during this frame. The
-    // same native pass may also have selected a fresh weapon target.
-    if (g_runtime_ready && craft && !object_expired(craft)) {
-        // A2FOAlwaysShowShields owns the visual policy and native effect
-        // calls. This module only supplies its already-owned per-Craft
-        // observation point so the two features never compete for the same
-        // simulation detour.
-        if (g_shield_craft_observer) {
-            g_shield_craft_observer(craft);
-        }
-        const std::uint32_t handle = object_handle(craft);
-        if (g_children.find(handle) != g_children.end()) {
-            update_linked_turret(craft, elapsed_seconds);
-        }
-        if (g_parent_classes.find(object_class(craft)) !=
-            g_parent_classes.end()) {
-            spawn_pending_turrets(craft);
-        }
-    }
-}
-
-std::uintptr_t __attribute__((fastcall)) craft_post_load_hook(
-    void* craft, void*) noexcept {
-    const std::uintptr_t loaded = a2fo_turret_call_thiscall_0(
-        g_craft_post_load_hook.gateway, craft);
-    if (g_runtime_ready && (loaded & 0xffu) != 0) {
-        attach_loaded_turret(craft);
-    }
-    return loaded;
 }
 
 void unlink_child(std::uint32_t child_handle) noexcept {
@@ -1212,19 +1089,49 @@ void cleanup_parent(std::uint32_t parent_handle) noexcept {
     }
 }
 
-void __attribute__((fastcall)) craft_cleanup_hook(
-    void* craft, void*) noexcept {
-    if (g_runtime_ready && craft) {
-        // Release the separately tracked continuous shield effect before
-        // native Craft cleanup invalidates the object it references.
-        if (g_shield_craft_cleanup_observer) {
-            g_shield_craft_cleanup_observer(craft);
-        }
+void A2FO_CALL craft_event_handler(
+    const A2FO_CraftEvent* event, void*) {
+    if (!event || event->struct_size < sizeof(*event) ||
+        !g_runtime_ready || !event->craft) {
+        return;
+    }
+    void* craft = event->craft;
+    if (event->kind == A2FO_CRAFT_EVENT_CLEANUP) {
         const std::uint32_t handle = object_handle(craft);
         cleanup_parent(handle);
         unlink_child(handle);
+        return;
     }
-    a2fo_turret_call_thiscall_0(g_craft_cleanup_hook.gateway, craft);
+    if (event->kind == A2FO_CRAFT_EVENT_POST_LOAD) {
+        attach_loaded_turret(craft);
+        return;
+    }
+
+    const bool active =
+        read_live_at<std::uint8_t>(craft, kObjectExpiredOffset, 1) == 0;
+    if (!active) return;
+    const std::uint32_t handle =
+        read_live_at<std::uint32_t>(craft, kObjectHandleOffset, 0);
+    if (event->kind == A2FO_CRAFT_EVENT_SIMULATE_PRE) {
+        // Combat policy must be present before native Craft simulation: that
+        // is where alert/autonomy rules select targets and weapons may fire.
+        if (g_children.find(handle) != g_children.end()) {
+            prepare_linked_turret_for_simulation(craft, handle);
+        }
+        return;
+    }
+    if (event->kind != A2FO_CRAFT_EVENT_SIMULATE_POST) return;
+
+    // Apply the linked transform after native simulation so the child physics
+    // pass cannot move it away from the mount during this frame.
+    if (g_children.find(handle) != g_children.end()) {
+        update_linked_turret(craft, handle, event->elapsed_seconds);
+    }
+    if (g_parent_classes.find(
+            read_live_at<void*>(craft, kObjectClassOffset, nullptr)) !=
+        g_parent_classes.end()) {
+        spawn_pending_turrets(craft);
+    }
 }
 
 void* weapon_owner(void* weapon) noexcept {
@@ -1264,8 +1171,13 @@ const void* inherited_order_target_for_owner(void* owner) noexcept {
     return target && !object_expired(target) ? target : nullptr;
 }
 
-void __attribute__((fastcall)) weapon_trigger_object_hook(
-    void* weapon, void*, const void* target) noexcept {
+bool A2FO_CALL weapon_trigger_handler(
+    const A2FO_WeaponTriggerEvent* event, void*) {
+    if (!event || event->struct_size < sizeof(*event)) return false;
+    if (event->kind == A2FO_WEAPON_TRIGGER_COMMITTED) return true;
+    if (event->kind != A2FO_WEAPON_TRIGGER_PRECHECK) return false;
+    void* weapon = event->weapon;
+    const void* target = event->target;
     void* owner = weapon_owner(weapon);
     const void* ordered_target = inherited_order_target_for_owner(owner);
     // Trigger is Armada's last weapon boundary. Reject a shot selected for a
@@ -1274,20 +1186,10 @@ void __attribute__((fastcall)) weapon_trigger_object_hook(
     if (ordered_target &&
         object_handle(target) != object_handle(ordered_target)) {
         track_weapon_target_for_owner(owner, ordered_target);
-        return;
+        return false;
     }
     track_weapon_target_for_owner(owner, target);
-    if (g_fire_arc_trigger_filter &&
-        !g_fire_arc_trigger_filter(weapon, target)) {
-        return;
-    }
-    if (g_normal_weapon_tech_trigger_filter &&
-        !g_normal_weapon_tech_trigger_filter(weapon, target)) {
-        return;
-    }
-    a2fo_turret_call_thiscall_1(
-        g_weapon_trigger_object_hook.gateway, weapon,
-        reinterpret_cast<std::uintptr_t>(target));
+    return true;
 }
 
 void __attribute__((fastcall)) weapon_set_target_hook(
@@ -1403,43 +1305,9 @@ bool class_constructor_site_supported() noexcept {
     return false;
 }
 
-bool craft_simulate_site_supported() noexcept {
-    if (signature_matches(kCraftSimulateRva, kExpectedCraftSimulate)) {
-        return true;
-    }
-    void* site = at(g_armada, kCraftSimulateRva);
-    void* destination = nullptr;
-    std::size_t patch_length = 0;
-    if (supported_fleet_ops_detour(
-            kCraftSimulateRva, kFoCraftSimulateHandlerRva,
-            kExpectedFoCraftSimulateHandler,
-            &destination, &patch_length)) {
-        return true;
-    }
-    char message[320]{};
-    std::snprintf(
-        message, sizeof(message),
-        "Craft::Simulate has neither the stock prologue nor Fleet Ops' "
-        "supported detour (destination=%p, expected=%p)",
-        existing_detour_destination(site, nullptr),
-        at(g_fleet_ops, kFoCraftSimulateHandlerRva));
-    log_line(message);
-    return false;
-}
-
 bool preflight_signatures() noexcept {
     bool supported = true;
     supported = class_constructor_site_supported() && supported;
-    supported = checked_signature(
-        "Craft::Cleanup", kCraftCleanupRva,
-        kExpectedCraftCleanup) && supported;
-    supported = checked_signature(
-        "Craft::PostLoad", kCraftPostLoadRva,
-        kExpectedCraftPostLoad) && supported;
-    supported = craft_simulate_site_supported() && supported;
-    supported = checked_signature(
-        "Weapon::Trigger(GameObject)", kWeaponTriggerObjectRva,
-        kExpectedWeaponTriggerObject) && supported;
     supported = checked_signature(
         "Weapon::SetTarget", kWeaponSetTargetRva,
         kExpectedWeaponSetTarget) && supported;
@@ -1513,41 +1381,6 @@ bool install_class_constructor_hook(const A2FO_ModuleApi* api) noexcept {
     return true;
 }
 
-bool install_craft_simulate_hook(const A2FO_ModuleApi* api) noexcept {
-    void* site = at(g_armada, kCraftSimulateRva);
-    if (signature_matches(kCraftSimulateRva, kExpectedCraftSimulate)) {
-        if (!api->install_inline_hook(
-                site, reinterpret_cast<void*>(&craft_simulate_hook),
-                sizeof(kExpectedCraftSimulate), kExpectedCraftSimulate,
-                &g_craft_simulate_hook)) {
-            return false;
-        }
-        g_craft_simulate_original = g_craft_simulate_hook.gateway;
-        g_chained_fo_craft_simulate = false;
-        return g_craft_simulate_original != nullptr;
-    }
-
-    void* destination = nullptr;
-    std::size_t patch_length = 0;
-    if (!supported_fleet_ops_detour(
-            kCraftSimulateRva, kFoCraftSimulateHandlerRva,
-            kExpectedFoCraftSimulateHandler,
-            &destination, &patch_length) ||
-        patch_length > 6) {
-        return false;
-    }
-    std::uint8_t expected_detour[6]{};
-    std::memcpy(expected_detour, site, patch_length);
-    if (!api->patch_jump(
-            site, reinterpret_cast<void*>(&craft_simulate_hook),
-            expected_detour, patch_length)) {
-        return false;
-    }
-    g_craft_simulate_original = destination;
-    g_chained_fo_craft_simulate = true;
-    return true;
-}
-
 bool install_runtime_hooks(const A2FO_ModuleApi* api) noexcept {
     if (!api || !api->install_inline_hook || !g_armada) return false;
     if (!preflight_signatures()) {
@@ -1556,22 +1389,6 @@ bool install_runtime_hooks(const A2FO_ModuleApi* api) noexcept {
     }
     bool installed = true;
     installed = install_class_constructor_hook(api) && installed;
-    installed = api->install_inline_hook(
-        at(g_armada, kCraftCleanupRva),
-        reinterpret_cast<void*>(&craft_cleanup_hook),
-        sizeof(kExpectedCraftCleanup), kExpectedCraftCleanup,
-        &g_craft_cleanup_hook) && installed;
-    installed = api->install_inline_hook(
-        at(g_armada, kCraftPostLoadRva),
-        reinterpret_cast<void*>(&craft_post_load_hook),
-        sizeof(kExpectedCraftPostLoad), kExpectedCraftPostLoad,
-        &g_craft_post_load_hook) && installed;
-    installed = install_craft_simulate_hook(api) && installed;
-    installed = api->install_inline_hook(
-        at(g_armada, kWeaponTriggerObjectRva),
-        reinterpret_cast<void*>(&weapon_trigger_object_hook),
-        sizeof(kExpectedWeaponTriggerObject), kExpectedWeaponTriggerObject,
-        &g_weapon_trigger_object_hook) && installed;
     installed = api->install_inline_hook(
         at(g_armada, kWeaponSetTargetRva),
         reinterpret_cast<void*>(&weapon_set_target_hook),
@@ -1597,7 +1414,13 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
         !A2FO_MODULE_API_HAS(api, register_classlabel_odf_defaults) ||
         !api->register_classlabel_odf_defaults ||
         (api->capabilities & A2FO_CAP_ORIGINAL_CLASSLABEL) == 0 ||
-        (api->capabilities & A2FO_CAP_CLASSLABEL_ODF_DEFAULTS) == 0) {
+        (api->capabilities & A2FO_CAP_CLASSLABEL_ODF_DEFAULTS) == 0 ||
+        !A2FO_MODULE_API_HAS(api, register_weapon_trigger_handler) ||
+        !api->register_weapon_trigger_handler ||
+        !A2FO_MODULE_API_HAS(api, register_craft_event_handler) ||
+        !api->register_craft_event_handler ||
+        (api->capabilities & A2FO_CAP_WEAPON_TRIGGER_EVENTS) == 0 ||
+        (api->capabilities & A2FO_CAP_CRAFT_EVENTS) == 0) {
         return false;
     }
     g_api = api;
@@ -1605,27 +1428,29 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     g_fleet_ops = static_cast<HMODULE>(api->fleetops_module());
     if (!g_armada || !g_fleet_ops) return false;
     resolve_shield_observers();
-    resolve_fire_arc_trigger_filter();
-    resolve_normal_weapon_tech_trigger_filter();
 
     const bool alias_registered = api->register_classlabel_alias(
         kModuleName, "turret", "sensor");
     const bool defaults_registered = api->register_classlabel_odf_defaults(
         kModuleName, "turret", kTurretDefaults.data(),
         static_cast<std::uint32_t>(kTurretDefaults.size()));
-    if (!alias_registered || !defaults_registered) {
+    const bool trigger_registered = api->register_weapon_trigger_handler(
+        kModuleName, &weapon_trigger_handler, nullptr);
+    const bool craft_events_registered = api->register_craft_event_handler(
+        kModuleName, &craft_event_handler, nullptr);
+    if (!alias_registered || !defaults_registered || !trigger_registered ||
+        !craft_events_registered) {
         log_line("Turret semantic policy registration failed");
         return false;
     }
 
     g_runtime_ready = install_runtime_hooks(api);
     if (g_runtime_ready) {
-        if (g_chained_fo_class_constructor &&
-            g_chained_fo_craft_simulate) {
+        if (g_chained_fo_class_constructor) {
             log_line(
                 "Indexed hull-mounted turret runtime initialized and chained "
-                "through Fleet Operations class construction and "
-                "Craft::Simulate");
+                "through Fleet Operations class construction; shared Craft "
+                "and weapon events active");
         } else {
             log_line("Indexed hull-mounted turret runtime initialized");
         }

@@ -23,7 +23,7 @@
 #endif
 
 #define A2FO_MODULE_API_VERSION 4u
-#define A2FO_MODULE_API_REVISION 11u
+#define A2FO_MODULE_API_REVISION 14u
 
 // The major version remains 4 so DLLs compiled against the original v4 ABI
 // continue to load. Revisions append fields to A2FO_ModuleApi; never insert or
@@ -38,6 +38,11 @@ enum A2FO_ModuleCapability : std::uint64_t {
     A2FO_CAP_ODF_OVERLAY_DIRECTORIES = 1ull << 5,
     A2FO_CAP_PRODUCER_EVENTS = 1ull << 6,
     A2FO_CAP_CLASSLABEL_ODF_DEFAULTS = 1ull << 7,
+    A2FO_CAP_GAME_OBJECT_CLASS_LOADED = 1ull << 8,
+    A2FO_CAP_RACE_LOADED = 1ull << 9,
+    A2FO_CAP_WEAPON_CLASS_LOADED = 1ull << 10,
+    A2FO_CAP_WEAPON_TRIGGER_EVENTS = 1ull << 11,
+    A2FO_CAP_CRAFT_EVENTS = 1ull << 12,
 };
 
 enum A2FO_ProducerEventKind : std::uint32_t {
@@ -65,6 +70,18 @@ enum A2FO_ProducerEventKind : std::uint32_t {
     // and continues normally. This is required by legacy non-object build
     // classes which cannot safely back a Craft construction renderer.
     A2FO_PRODUCER_EVENT_STARTING_EFFECT = 4,
+
+    // Notification sent immediately before the current construction is
+    // cancelled and its native costs are refunded.
+    A2FO_PRODUCER_EVENT_CANCELLED = 5,
+
+    // Notification sent immediately before one queued item is deleted and
+    // its native costs are refunded.
+    A2FO_PRODUCER_EVENT_DELETED = 6,
+
+    // One notification per queued item, sent immediately before a queue is
+    // cleared and its native costs are refunded.
+    A2FO_PRODUCER_EVENT_CLEARED = 7,
 };
 
 enum A2FO_OdfOverlayPrecedence : std::uint32_t {
@@ -158,10 +175,98 @@ struct A2FO_ProducerEvent {
 };
 
 // ADMIT, FINISHING, and STARTING_EFFECT continue only when every registered
-// handler returns true. FINISHED and DESTROYING are notification-only. Event
-// pointers expire when the callback returns.
+// handler returns true. FINISHED, DESTROYING, CANCELLED, DELETED, and CLEARED
+// are notification-only. Event pointers expire when the callback returns.
 using A2FO_ProducerEventHandler = bool (A2FO_CALL*)(
     const A2FO_ProducerEvent* event,
+    void* user_data);
+
+struct A2FO_GameObjectClassLoadedEvent {
+    std::uint32_t struct_size;
+    void* object_class;
+    A2FO_StringView source_odf;
+    const A2FO_OdfFieldView* odf_fields;
+    std::uint32_t odf_field_count;
+};
+
+// Called once after Armada has constructed a GameObjectClass. Required ODF
+// fields include inherited values and are copied by the core before dispatch.
+// Event pointers expire when the callback returns.
+using A2FO_GameObjectClassLoadedHandler = void (A2FO_CALL*)(
+    const A2FO_GameObjectClassLoadedEvent* event,
+    void* user_data);
+
+struct A2FO_RaceLoadedEvent {
+    std::uint32_t struct_size;
+    void* race;
+    const A2FO_OdfFieldView* odf_fields;
+    std::uint32_t odf_field_count;
+};
+
+// Called at the end of Fleet Operations' Race ODF loader while the resolved
+// ParameterDB is still alive. Event pointers expire when the callback returns.
+using A2FO_RaceLoadedHandler = void (A2FO_CALL*)(
+    const A2FO_RaceLoadedEvent* event,
+    void* user_data);
+
+struct A2FO_WeaponClassLoadedEvent {
+    std::uint32_t struct_size;
+    void* weapon_class;
+    void* parent_class;
+    // The completed ParameterDB remains valid only for this callback. Prefer
+    // odf_fields unless a native typed getter is required.
+    void* parameter_db;
+    const A2FO_OdfFieldView* odf_fields;
+    std::uint32_t odf_field_count;
+};
+
+// Called after Armada and Fleet Operations have completed a WeaponClass.
+// Required fields include inherited ODF values and remain valid only for the
+// duration of the callback.
+using A2FO_WeaponClassLoadedHandler = void (A2FO_CALL*)(
+    const A2FO_WeaponClassLoadedEvent* event,
+    void* user_data);
+
+enum A2FO_WeaponTriggerEventKind : std::uint32_t {
+    // Every handler may reject the trigger request. Handlers must not consume
+    // state yet because this boundary does not prove projectile creation.
+    A2FO_WEAPON_TRIGGER_PRECHECK = 0,
+
+    // Sent after all prechecks accepted and native TriggerObject returned.
+    // Return values are ignored at this completed-request notification stage.
+    A2FO_WEAPON_TRIGGER_COMMITTED = 1,
+};
+
+struct A2FO_WeaponTriggerEvent {
+    std::uint32_t struct_size;
+    std::uint32_t kind;
+    void* weapon;
+    const void* target;
+};
+
+using A2FO_WeaponTriggerHandler = bool (A2FO_CALL*)(
+    const A2FO_WeaponTriggerEvent* event,
+    void* user_data);
+
+enum A2FO_CraftEventKind : std::uint32_t {
+    A2FO_CRAFT_EVENT_SIMULATE_PRE = 0,
+    A2FO_CRAFT_EVENT_SIMULATE_POST = 1,
+    A2FO_CRAFT_EVENT_CLEANUP = 2,
+    A2FO_CRAFT_EVENT_POST_LOAD = 3,
+};
+
+struct A2FO_CraftEvent {
+    std::uint32_t struct_size;
+    std::uint32_t kind;
+    void* craft;
+    float elapsed_seconds;
+};
+
+// Simulation events bracket the complete native Craft::Simulate call.
+// CLEANUP is sent before native cleanup and POST_LOAD after a successful
+// native PostLoad. Handlers are notifications and cannot suppress Armada.
+using A2FO_CraftEventHandler = void (A2FO_CALL*)(
+    const A2FO_CraftEvent* event,
     void* user_data);
 
 struct A2FO_InlineHook {
@@ -235,8 +340,9 @@ struct A2FO_ModuleApi {
         A2FO_ObjectDestroyedHandler handler,
         void* user_data);
 
-    // Revision 2 addition. Returns the Lua-configured maximum upgrade-pod
-    // tier. The value is dynamic because native modules load before scripts.
+    // Revision 2 legacy compatibility slot. Current FeaturePack builds read
+    // upgradePodMaximumTier from each extension root's RTS_CFG.h directly.
+    // Cores without a legacy policy return the historical default of 6.
     std::uint32_t (A2FO_CALL* upgrade_pod_maximum_tier)();
 
     // Revision 3 addition. Classlabel aliases replace ParameterDB's public
@@ -307,6 +413,46 @@ struct A2FO_ModuleApi {
         const std::uint8_t* replacement,
         const std::uint8_t* expected,
         std::size_t length);
+
+    // Revision 12 addition. Copies Fleet Operations' resolved per-mod
+    // settings directory after the info.ini provider has run. Runtime
+    // modules use this instead of duplicating SettingsDirectory policy.
+    bool (A2FO_CALL* get_settings_directory)(
+        char* output,
+        std::uint32_t output_size);
+
+    // Revision 13 additions. The core owns the shared class and Race loader
+    // hooks; modules declare only the inherited ODF fields they consume.
+    bool (A2FO_CALL* register_game_object_class_loaded_handler)(
+        const char* module_name,
+        const char* const* required_odf_fields,
+        std::uint32_t required_odf_field_count,
+        A2FO_GameObjectClassLoadedHandler handler,
+        void* user_data);
+    bool (A2FO_CALL* register_race_loaded_handler)(
+        const char* module_name,
+        const char* const* required_odf_fields,
+        std::uint32_t required_odf_field_count,
+        A2FO_RaceLoadedHandler handler,
+        void* user_data);
+
+    // Revision 14 additions. Shared weapon and Craft boundaries have one core
+    // hook owner so optional modules compose without load-order detours.
+    bool (A2FO_CALL* register_weapon_class_loaded_handler)(
+        const char* module_name,
+        const char* const* required_odf_fields,
+        std::uint32_t required_odf_field_count,
+        A2FO_WeaponClassLoadedHandler handler,
+        void* user_data);
+    bool (A2FO_CALL* register_weapon_trigger_handler)(
+        const char* module_name,
+        A2FO_WeaponTriggerHandler handler,
+        void* user_data);
+    bool (A2FO_CALL* register_craft_event_handler)(
+        const char* module_name,
+        A2FO_CraftEventHandler handler,
+        void* user_data);
+
 };
 
 #define A2FO_MODULE_API_V4_BASE_SIZE \

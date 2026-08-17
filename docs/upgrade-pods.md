@@ -7,16 +7,25 @@ levels and the wider save/load and multiplayer matrix still require validation.
 
 ## Enable a bounded maximum
 
-The selected `scripts\UpgradePods.lua` controls the maximum tier:
+Set the maximum tier in the mod's `RTS_CFG.h`:
 
-```lua
-a2fo.require_api(1, 2)
-a2fo.configure_upgrade_pods({ maximum_tier = 6 })
+```cpp
+int upgradePodMaximumTier = 6;
 ```
 
-The allowed range is 3–16 and the default is 3. A child mod can override the
-shared policy by supplying its own `UpgradePods.lua`; only the highest
-precedence copy executes.
+The allowed range is 3–16 and the default is 6. A2FO reads `RTS_CFG.h` from
+each extension root in parent-to-child order, so a child mod's valid setting
+overrides its parent's setting. Missing or invalid settings leave the last
+valid inherited value unchanged.
+
+> **Child-mod warning:** Fleet Operations does not merge a child's
+> `RTS_CFG.h` into the native parent file. If the child supplies this file, it
+> replaces the parent's complete native configuration. Copy the full parent
+> `RTS_CFG.h` into the child and add the assignment there; do not create a
+> minimal file containing only `upgradePodMaximumTier`. A minimal replacement
+> also removes native includes such as `ART_CFG.h` and can alter camera,
+> rendering, map-background, interface, and gameplay behaviour even though
+> A2FO reads the new command successfully.
 
 Higher-tier pod ODFs continue to use the ordinary Armada command:
 
@@ -83,4 +92,4 @@ its physical pod positions.
 - save/load with several native and extended tiers attached, then remove them
   in descending order and verify multiplier restoration;
 - load unmodified stations and older saves;
-- run a two-peer synchronized match using identical Lua and ODF files.
+- run a two-peer synchronized match using identical `RTS_CFG.h` and ODF files.

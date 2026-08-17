@@ -49,6 +49,9 @@ bool addon_odf_overlay_registered = false;
 bool producer_event_handler_registered = false;
 A2FO_ProducerEventHandler producer_event_handler = nullptr;
 void* producer_event_user_data = nullptr;
+bool wreckage_handler_registered = false;
+A2FO_ObjectDestroyedHandler wreckage_handler = nullptr;
+void* wreckage_handler_user_data = nullptr;
 unsigned a1_officer_system_hook_count = 0;
 bool hybridbuild_alias_registered = false;
 bool info_ini_handler_registered = false;
@@ -63,32 +66,57 @@ bool cheats_rts_config_loaded = false;
 bool edit_menu_update_hooked = false;
 bool mission_selector_single_hooked = false;
 bool mission_selector_accept_hooked = false;
+bool build_tooltips_text_hooked = false;
+bool build_tooltips_verbose_hooked = false;
+unsigned build_tooltips_end_extra_patch_count = 0;
+bool resources_class_handler_registered = false;
+bool resources_race_handler_registered = false;
+bool energy_class_handler_registered = false;
+bool energy_weapon_class_handler_registered = false;
+bool energy_craft_handler_registered = false;
+unsigned energy_ammunition_shot_hook_count = 0;
+bool directional_shields_class_handler_registered = false;
+bool directional_shields_craft_handler_registered = false;
+bool directional_shields_damage_bridge_connected = false;
+unsigned directional_shields_effect_hook_count = 0;
+A2FO_GameObjectClassLoadedHandler directional_shields_class_handler = nullptr;
+void* directional_shields_class_user_data = nullptr;
+unsigned energy_persistence_hook_count = 0;
+bool resources_team_constructor_hooked = false;
+bool resources_team_destructor_hooked = false;
+bool resources_deduct_hooked = false;
+bool resources_panel_hooked = false;
+bool resources_tooltip_hooked = false;
+bool resources_verbose_tooltip_hooked = false;
+unsigned resources_res_call_patch_count = 0;
+bool resources_officer_icon_patched = false;
 bool always_show_shields_starbase_hooked = false;
 bool always_show_shields_publish_hooked = false;
 bool always_show_shields_render_list_hooked = false;
 bool texture_variants_update_hooked = false;
 bool texture_variants_borg_call_patched = false;
 bool texture_variants_race_call_patched = false;
+bool texture_variants_race_handler_registered = false;
 bool texture_variants_render_call_patched = false;
 bool texture_variants_scoped_render_call_patched = false;
 bool texture_variants_constructor_chained = false;
 bool turret_alias_registered = false;
 bool turret_odf_defaults_registered = false;
 unsigned turret_hook_count = 0;
-bool turret_craft_simulate_chained = false;
 bool turret_class_constructor_chained = false;
 bool turret_shield_visibility_linked = false;
-bool turret_fire_arc_trigger_filter_linked = false;
-bool turret_normal_weapon_tech_trigger_filter_linked = false;
 bool normal_weapon_tech_initialized = false;
+bool normal_weapon_trigger_handler_registered = false;
 unsigned fire_arc_hook_count = 0;
-bool fire_arc_class_constructor_chained = false;
+bool fire_arc_weapon_class_handler_registered = false;
+bool fire_arc_trigger_handler_registered = false;
 bool fire_arc_target_check_chained = false;
 bool fire_arc_icon_hover_hooked = false;
 bool fire_arc_rts_config_loaded = false;
 unsigned weapon_damage_hook_count = 0;
-bool weapon_damage_constructor_chained = false;
-bool initializing_weapon_damage = false;
+bool weapon_damage_class_handler_registered = false;
+bool turret_trigger_handler_registered = false;
+bool turret_craft_handler_registered = false;
 char extension_root_path[MAX_PATH] = ".";
 char parent_extension_root_path[MAX_PATH] = ".";
 
@@ -125,6 +153,10 @@ bool write_fixture_file(const std::string& path, const void* contents,
     return ok && written == size;
 }
 
+void* __cdecl fixture_insert_c_string(void* stream, const char*) {
+    return stream;
+}
+
 std::uint32_t A2FO_CALL upgrade_pod_maximum_tier() { return 6; }
 bool A2FO_CALL get_original_classlabel(
     void*, char* output, std::uint32_t output_size) {
@@ -143,10 +175,190 @@ bool A2FO_CALL register_producer_event_handler(
     producer_event_user_data = user_data;
     return producer_event_handler_registered;
 }
+bool A2FO_CALL register_object_destroyed_handler(
+    const char* module_name, const char* const* fields,
+    std::uint32_t field_count, A2FO_ObjectDestroyedHandler handler,
+    void* user_data) {
+    wreckage_handler_registered =
+        module_name && std::strcmp(module_name, "A2FOWreckage") == 0 &&
+        fields && field_count == 2 && fields[0] && fields[1] && handler &&
+        std::strcmp(fields[0], "wreckage") == 0 &&
+        std::strcmp(fields[1], "wreckageChance") == 0;
+    if (wreckage_handler_registered) {
+        wreckage_handler = handler;
+        wreckage_handler_user_data = user_data;
+    }
+    return wreckage_handler_registered;
+}
 bool A2FO_CALL dispatch_producer_event(const A2FO_ProducerEvent* event) {
     return producer_event_handler
         ? producer_event_handler(event, producer_event_user_data)
         : true;
+}
+bool A2FO_CALL register_game_object_class_loaded_handler(
+    const char* module_name, const char* const* fields,
+    std::uint32_t field_count, A2FO_GameObjectClassLoadedHandler handler,
+    void* user_data) {
+    if (module_name && std::strcmp(
+            module_name, "A2FOEnergySystems") == 0) {
+        constexpr const char* energy_expected[] = {
+            "maxPhotonTorpedoes", "photonTorpedoRate",
+            "photonTorpedoRechargeMode", "maxQuantumTorpedoes",
+            "quantumTorpedoRate", "quantumTorpedoRechargeMode",
+            "torpedoResupply", "torpedoResupplyRange", "classLabel"};
+        energy_class_handler_registered = handler && fields &&
+            field_count == static_cast<std::uint32_t>(
+                sizeof(energy_expected) / sizeof(energy_expected[0]));
+        for (std::uint32_t index = 0;
+             energy_class_handler_registered && index < field_count;
+             ++index) {
+            energy_class_handler_registered = fields[index] &&
+                std::strcmp(fields[index], energy_expected[index]) == 0;
+        }
+        return energy_class_handler_registered;
+    }
+    if (module_name && std::strcmp(
+            module_name, "A2FODirectionalShields") == 0) {
+        constexpr const char* expected[] = {
+            "directionalShields", "forwardShieldStrength",
+            "aftShieldStrength", "portShieldStrength",
+            "starboardShieldStrength", "maxShields"};
+        directional_shields_class_handler_registered = handler && fields &&
+            field_count == static_cast<std::uint32_t>(
+                sizeof(expected) / sizeof(expected[0]));
+        for (std::uint32_t index = 0;
+             directional_shields_class_handler_registered &&
+             index < field_count; ++index) {
+            directional_shields_class_handler_registered = fields[index] &&
+                std::strcmp(fields[index], expected[index]) == 0;
+        }
+        if (directional_shields_class_handler_registered) {
+            directional_shields_class_handler = handler;
+            directional_shields_class_user_data = user_data;
+        }
+        return directional_shields_class_handler_registered;
+    }
+    constexpr const char* expected[] = {
+        "tritaniumCost", "supplyCost", "creditsCost",
+        "collectiveconnectionsCost"};
+    resources_class_handler_registered =
+        module_name && std::strcmp(module_name, "A2FOResources") == 0 &&
+        handler && fields && field_count == 4;
+    for (std::uint32_t index = 0;
+         resources_class_handler_registered && index < field_count; ++index) {
+        resources_class_handler_registered = fields[index] &&
+            std::strcmp(fields[index], expected[index]) == 0;
+    }
+    return resources_class_handler_registered;
+}
+bool A2FO_CALL register_weapon_class_loaded_handler(
+    const char* module_name, const char* const* fields,
+    std::uint32_t field_count, A2FO_WeaponClassLoadedHandler handler,
+    void*) {
+    if (!module_name || !handler) return false;
+    if (std::strcmp(module_name, "A2FOFireArcs") == 0) {
+        fire_arc_weapon_class_handler_registered =
+            fields == nullptr && field_count == 0;
+        return fire_arc_weapon_class_handler_registered;
+    }
+    if (std::strcmp(module_name, "A2FOEnergySystems") == 0) {
+        constexpr const char* expected[]{
+            "photonTorpedoCost", "quantumTorpedoCost"};
+        energy_weapon_class_handler_registered = fields &&
+            field_count == 2 && fields[0] && fields[1] &&
+            std::strcmp(fields[0], expected[0]) == 0 &&
+            std::strcmp(fields[1], expected[1]) == 0;
+        return energy_weapon_class_handler_registered;
+    }
+    if (std::strcmp(module_name, "A2FOWeaponDamageControls") == 0) {
+        constexpr const char* expected[]{
+            "canDamageShields", "canDamageHull",
+            "shieldDamageModifier", "hullDamageModifier"};
+        weapon_damage_class_handler_registered = fields &&
+            field_count == 4;
+        for (std::uint32_t index = 0;
+             weapon_damage_class_handler_registered && index < field_count;
+             ++index) {
+            weapon_damage_class_handler_registered = fields[index] &&
+                std::strcmp(fields[index], expected[index]) == 0;
+        }
+        return weapon_damage_class_handler_registered;
+    }
+    return false;
+}
+bool A2FO_CALL register_weapon_trigger_handler(
+    const char* module_name, A2FO_WeaponTriggerHandler handler, void*) {
+    if (!module_name || !handler) return false;
+    if (std::strcmp(module_name, "A2FOFireArcs") == 0) {
+        return fire_arc_trigger_handler_registered = true;
+    }
+    if (std::strcmp(module_name, "A2FONormalWeaponTech") == 0) {
+        return normal_weapon_trigger_handler_registered = true;
+    }
+    if (std::strcmp(module_name, "A2FOTurrets") == 0) {
+        return turret_trigger_handler_registered = true;
+    }
+    return false;
+}
+bool A2FO_CALL register_craft_event_handler(
+    const char* module_name, A2FO_CraftEventHandler handler, void*) {
+    if (!module_name || !handler) return false;
+    if (std::strcmp(module_name, "A2FOTurrets") == 0) {
+        return turret_craft_handler_registered = true;
+    }
+    if (std::strcmp(module_name, "A2FOEnergySystems") == 0) {
+        return energy_craft_handler_registered = true;
+    }
+    if (std::strcmp(module_name, "A2FODirectionalShields") == 0) {
+        return directional_shields_craft_handler_registered = true;
+    }
+    return false;
+}
+bool A2FO_CALL register_race_loaded_handler(
+    const char* module_name, const char* const* fields,
+    std::uint32_t field_count,
+    A2FO_RaceLoadedHandler handler, void*) {
+    if (module_name &&
+        std::strcmp(module_name, "A2FOTextureVariants") == 0) {
+        texture_variants_race_handler_registered =
+            handler && fields && field_count == 2 && fields[0] && fields[1] &&
+            std::strcmp(fields[0], "name") == 0 &&
+            std::strcmp(fields[1], "factionTextureSuffix") == 0;
+        return texture_variants_race_handler_registered;
+    }
+    constexpr const char* expected[] = {
+        "normalTritanium", "normalSupply", "normalCredits",
+        "normalCollectiveConnections", "lotsTritanium", "lotsSupply",
+        "lotsCredits", "lotsCollectiveConnections",
+        "crewRes", "crewTooltip", "crewVerboseTooltip", "crewIcon",
+        "officerRes", "officerTooltip", "officerVerboseTooltip",
+        "officerIcon",
+        "dilithiumRes", "dilithiumTooltip", "dilithiumVerboseTooltip",
+        "dilithiumIcon",
+        "latinumRes", "latinumTooltip", "latinumVerboseTooltip",
+        "latinumIcon",
+        "metalRes", "metalTooltip", "metalVerboseTooltip", "metalIcon",
+        "biomatterRes", "biomatterTooltip", "biomatterVerboseTooltip",
+        "biomatterIcon",
+        "tritaniumRes", "tritaniumTooltip", "tritaniumVerboseTooltip",
+        "tritaniumIcon",
+        "supplyRes", "supplyTooltip", "supplyVerboseTooltip",
+        "supplyIcon",
+        "creditsRes", "creditsTooltip", "creditsVerboseTooltip",
+        "creditsIcon",
+        "collectiveconnectionsRes", "collectiveconnectionsTooltip",
+        "collectiveconnectionsVerboseTooltip", "collectiveconnectionsIcon",
+        "name"};
+    resources_race_handler_registered = module_name &&
+        std::strcmp(module_name, "A2FOResources") == 0 && handler && fields &&
+        field_count == static_cast<std::uint32_t>(
+            sizeof(expected) / sizeof(expected[0]));
+    for (std::uint32_t index = 0;
+         resources_race_handler_registered && index < field_count; ++index) {
+        resources_race_handler_registered = fields[index] &&
+            std::strcmp(fields[index], expected[index]) == 0;
+    }
+    return resources_race_handler_registered;
 }
 
 template <std::size_t Size>
@@ -188,8 +400,9 @@ void prepare_armada_signatures() {
         {0x55, 0x8b, 0xec, 0x56, 0x57, 0x8b, 0x7d, 0x08};
     const std::uint8_t station_destructor[] =
         {0x55, 0x8b, 0xec, 0x6a, 0xff};
-    const std::uint8_t team_manager[] =
-        {0x55, 0x8b, 0xec, 0x8b, 0x45, 0x08};
+    const std::uint8_t team_manager[] = {
+        0x55, 0x8b, 0xec, 0x8b, 0x45, 0x08, 0x8b, 0x04,
+        0x85, 0xb0, 0x8d, 0x73, 0x00, 0x5d, 0xc3};
     const std::uint8_t set_multiplier[] =
         {0x55, 0x8b, 0xec, 0x8b, 0x55, 0x08, 0x8b, 0x45, 0x0c};
     const std::uint8_t find_by_name[] =
@@ -404,6 +617,19 @@ void prepare_armada_signatures() {
         {0x8b, 0x49, 0x38, 0x51, 0xe8};
     const std::uint8_t normal_weapon_tech_get_owner[] =
         {0x8b, 0x49, 0x18, 0x51, 0xe8};
+    const std::uint8_t energy_weapon_select_target_ordnance[] =
+        {0x55, 0x8b, 0xec, 0x83, 0xec, 0x0c, 0x8b, 0x45, 0x08, 0x57};
+    const std::uint8_t energy_weapon_select_position_ordnance[] =
+        {0x55, 0x8b, 0xec, 0x83, 0xec, 0x14,
+         0x53, 0x56, 0x8b, 0xf1, 0x57};
+    const std::uint8_t energy_weapon_commit_shot[] =
+        {0x55, 0x8b, 0xec, 0x51, 0x56, 0x8b, 0xf1};
+    const std::uint8_t energy_weapon_launch_position_ordnance[] =
+        {0x55, 0x8b, 0xec, 0x83, 0xec, 0x48};
+    const std::uint8_t energy_craft_load[] =
+        {0x55, 0x8b, 0xec, 0x81, 0xec, 0xbc, 0x00, 0x00, 0x00};
+    const std::uint8_t energy_craft_save[] =
+        {0x55, 0x8b, 0xec, 0x81, 0xec, 0x84, 0x00, 0x00, 0x00};
     const std::uint8_t edit_menu_update[] =
         {0x55, 0x8b, 0xec, 0x81, 0xec, 0xc4, 0x00, 0x00, 0x00};
     const std::uint8_t mission_selector_do_single[] =
@@ -414,11 +640,65 @@ void prepare_armada_signatures() {
         {0x55, 0x8b, 0xec, 0x8b, 0x45, 0x08};
     const std::uint8_t mission_selector_setup[] =
         {0x55, 0x8b, 0xec, 0x6a, 0xff, 0x68};
+    const std::uint8_t build_tooltips_text[] =
+        {0x55, 0x8b, 0xec, 0x6a, 0xff,
+         0x68, 0x5b, 0xed, 0x69, 0x00};
+    const std::uint8_t build_tooltips_verbose[] =
+        {0x55, 0x8b, 0xec, 0x6a, 0xff,
+         0x68, 0x80, 0xed, 0x69, 0x00};
+    const std::uint8_t build_tooltips_text_end_extra[] =
+        {0xe8, 0x71, 0xab, 0xf9, 0xff};
+    const std::uint8_t build_tooltips_verbose_end_extra[] =
+        {0xe8, 0x61, 0xa5, 0xf9, 0xff};
+    const std::uint8_t build_tooltips_get_build_time[] =
+        {0x55, 0x8b, 0xec, 0x51, 0x53, 0x56, 0x57, 0x8b, 0xf9};
+    const std::uint8_t build_tooltips_local_team[] =
+        {0x8b, 0x0d, 0xd4, 0xb8, 0x76,
+         0x00, 0xe9, 0x45, 0x78, 0x08};
+    const std::uint8_t build_tooltips_get_game_setup[] =
+        {0x8b, 0x41, 0x30, 0xc3};
+    const std::uint8_t build_tooltips_get_modifier[] =
+        {0x8b, 0x41, 0x10, 0xd9, 0x80,
+         0x2c, 0x03, 0x00, 0x00, 0xc3};
+    const std::uint8_t resources_team_constructor[] = {
+        0x55, 0x8b, 0xec, 0x6a, 0xff,
+        0x68, 0x1d, 0xca, 0x69, 0x00};
+    const std::uint8_t resources_team_destructor[] =
+        {0x55, 0x8b, 0xec, 0x51, 0x53, 0x56, 0x57};
+    const std::uint8_t resources_panel_render[] = {
+        0xa1, 0xcc, 0x43, 0x76, 0x00, 0x56, 0x8b, 0xf1, 0x57};
+    const std::uint8_t resources_parameter_rectangle[] =
+        {0x55, 0x8b, 0xec, 0x81, 0xec, 0x04, 0x01, 0x00, 0x00};
+    const std::uint8_t resources_draw_text[] =
+        {0x55, 0x8b, 0xec, 0x83, 0xec, 0x10};
+    const std::uint8_t resources_set_tooltip_text[] =
+        {0x55, 0x8b, 0xec, 0x56, 0x8b, 0xf1, 0x8b, 0x46};
+    const std::uint8_t resources_component_tooltip[] = {
+        0x55, 0x8b, 0xec, 0x81, 0xec,
+        0x04, 0x04, 0x00, 0x00, 0x56};
+    struct ResourceResCallSignature {
+        std::uintptr_t rva;
+        std::uint8_t bytes[5];
+    };
+    const ResourceResCallSignature resources_res_calls[] = {
+        {0x0e6e1d, {0xe8, 0x6e, 0xae, 0xf9, 0xff}},
+        {0x0e6ea1, {0xe8, 0xea, 0xad, 0xf9, 0xff}},
+        {0x0e6f25, {0xe8, 0x66, 0xad, 0xf9, 0xff}},
+        {0x0e6fa9, {0xe8, 0xe2, 0xac, 0xf9, 0xff}},
+        {0x0e7029, {0xe8, 0x62, 0xac, 0xf9, 0xff}},
+        {0x0e7462, {0xe8, 0x29, 0xa8, 0xf9, 0xff}},
+        {0x0e74de, {0xe8, 0xad, 0xa7, 0xf9, 0xff}},
+        {0x0e755a, {0xe8, 0x31, 0xa7, 0xf9, 0xff}},
+        {0x0e75d6, {0xe8, 0xb5, 0xa6, 0xf9, 0xff}},
+        {0x0e764e, {0xe8, 0x3d, 0xa6, 0xf9, 0xff}},
+    };
+    const std::uint8_t resources_officer_icon_call[] =
+        {0xe8, 0xb3, 0xab, 0xf9, 0xff};
     const std::uint8_t create_shield_hit[] =
         {0x55, 0x8b, 0xec, 0x6a, 0xff,
          0x68, 0x87, 0xb5, 0x69, 0x00};
     const std::uint8_t stop_shield_effect[] =
-        {0x55, 0x8b, 0xec, 0x83, 0xec, 0x08, 0x8d, 0x45};
+        {0x55, 0x8b, 0xec, 0x83, 0xec, 0x08, 0x8d, 0x45, 0x08};
     const std::uint8_t texture_variants_borg_call[] =
         {0xe8, 0x3d, 0xf3, 0x00, 0x00};
     const std::uint8_t texture_variants_render_call[] =
@@ -470,8 +750,31 @@ void prepare_armada_signatures() {
     set_signature(0x1d6d50, mission_selector_accept);
     set_signature(0x1dbd60, mission_selector_campaign_available);
     set_signature(0x1dcc00, mission_selector_setup);
+    set_signature(0x0e6ca0, build_tooltips_text);
+    set_signature(0x0e72b0, build_tooltips_verbose);
+    set_signature(0x0e711a, build_tooltips_text_end_extra);
+    set_signature(0x0e772a, build_tooltips_verbose_end_extra);
+    set_signature(0x0ce290, build_tooltips_get_build_time);
+    set_signature(0x0d0060, build_tooltips_local_team);
+    set_signature(0x157940, build_tooltips_get_game_setup);
+    set_signature(0x146360, build_tooltips_get_modifier);
+    set_signature(0x095670, resources_team_constructor);
+    set_signature(0x095850, resources_team_destructor);
+    set_signature(0x0ffa40, resources_panel_render);
+    set_signature(0x1358f0, resources_parameter_rectangle);
+    set_signature(0x11b160, resources_draw_text);
+    set_signature(0x10c040, resources_set_tooltip_text);
+    set_signature(0x10c080, resources_set_tooltip_text);
+    set_signature(0x10a350, resources_component_tooltip);
+    set_signature(0x10a500, resources_component_tooltip);
+    for (const ResourceResCallSignature& call : resources_res_calls) {
+        std::memcpy(static_cast<std::uint8_t*>(fake_armada) + call.rva,
+                    call.bytes, sizeof(call.bytes));
+    }
+    set_signature(0x0e70d8, resources_officer_icon_call);
     set_signature(0x0743b0, create_shield_hit);
     set_signature(0x074770, stop_shield_effect);
+    set_signature(0x0747d0, stop_shield_effect);
     set_signature(0x23307e, texture_variants_borg_call);
     set_signature(0x0cb2ab, texture_variants_render_call);
     set_signature(0x0cb318, texture_variants_scoped_render_call);
@@ -587,10 +890,16 @@ void prepare_armada_signatures() {
     set_signature(0x0025cfb0, weapon_damage_lookup_constructor);
     set_signature(0x0025cfd0, weapon_damage_lookup_destructor);
     set_signature(0x0025d170, weapon_damage_lookup_find);
-    set_signature(0x000c4bb0, weapon_damage_craft_damage);
+    set_signature(0x000c5bb0, weapon_damage_craft_damage);
     set_signature(0x000c5f08, weapon_damage_hull_amount);
     set_signature(0x00271300, fire_arc_get_target);
     set_signature(0x00271050, normal_weapon_tech_get_owner);
+    set_signature(0x0026fd40, energy_weapon_select_target_ordnance);
+    set_signature(0x0026fde0, energy_weapon_select_position_ordnance);
+    set_signature(0x00270dd0, energy_weapon_commit_shot);
+    set_signature(0x002679f0, energy_weapon_launch_position_ordnance);
+    set_signature(0x000c2340, energy_craft_load);
+    set_signature(0x000c2980, energy_craft_save);
     constexpr char rgb_literal[] = "Textures\\RGB\\";
     std::memcpy(static_cast<std::uint8_t*>(fake_armada) + 0x32d178,
                 rgb_literal, sizeof(rgb_literal));
@@ -604,9 +913,26 @@ void prepare_armada_signatures() {
     *reinterpret_cast<void**>(
         static_cast<std::uint8_t*>(fake_armada) + 0x3b7f8c) =
         original_armada_fopen;
+    using FixtureInsertCString = void* (__cdecl*)(void*, const char*);
+    FixtureInsertCString insert_c_string = &fixture_insert_c_string;
+    void* insert_c_string_address = nullptr;
+    static_assert(sizeof(insert_c_string) == sizeof(insert_c_string_address),
+                  "32-bit function and object pointers must match");
+    std::memcpy(&insert_c_string_address, &insert_c_string,
+                sizeof(insert_c_string_address));
+    *reinterpret_cast<void**>(
+        static_cast<std::uint8_t*>(fake_armada) + 0x3b7dec) =
+        insert_c_string_address;
 }
 
 void A2FO_CALL log_line(const char* module, const char* message) {
+    if (module && message &&
+        std::strcmp(module, "A2FODirectionalShields") == 0 &&
+        std::strcmp(
+            message,
+            "Four-facing damage routing connected to Craft::Damage") == 0) {
+        directional_shields_damage_bridge_connected = true;
+    }
     if (module && message && std::strcmp(module, "A2FOCheats") == 0 &&
         std::strcmp(
             message,
@@ -633,18 +959,6 @@ void A2FO_CALL log_line(const char* module, const char* message) {
             "Shield visibility observer linked through the Fleet Ops "
             "Craft render boundary") == 0) {
         hybrid_shield_render_observer_linked = true;
-    }
-    if (module && message && std::strcmp(module, "A2FOTurrets") == 0 &&
-        std::strcmp(
-            message,
-            "Full 3D weapon-trigger filtering linked through A2FOFireArcs") == 0) {
-        turret_fire_arc_trigger_filter_linked = true;
-    }
-    if (module && message && std::strcmp(module, "A2FOTurrets") == 0 &&
-        std::strcmp(
-            message,
-            "Normal-weapon trigger filtering linked through A2FONormalWeaponTech") == 0) {
-        turret_normal_weapon_tech_trigger_filter_linked = true;
     }
     if (module && message &&
         std::strcmp(module, "A2FONormalWeaponTech") == 0 &&
@@ -826,6 +1140,37 @@ bool A2FO_CALL install_hook(void* target, void* replacement,
         hybrid_research_start_hooked = true;
     }
     if (fake_armada && target == static_cast<std::uint8_t*>(fake_armada) +
+            0x00095670) {
+        resources_team_constructor_hooked = true;
+    }
+    if (fake_armada && target == static_cast<std::uint8_t*>(fake_armada) +
+            0x00095850) {
+        resources_team_destructor_hooked = true;
+    }
+    if (fake_armada && target == static_cast<std::uint8_t*>(fake_armada) +
+            0x000ffa40) {
+        resources_panel_hooked = true;
+    }
+    if (fake_armada && target == static_cast<std::uint8_t*>(fake_armada) +
+            0x0010a350) {
+        resources_tooltip_hooked = true;
+    }
+    if (fake_armada && target == static_cast<std::uint8_t*>(fake_armada) +
+            0x0010a500) {
+        resources_verbose_tooltip_hooked = true;
+    }
+    if (fake_armada &&
+        (target == static_cast<std::uint8_t*>(fake_armada) + 0x000743b0 ||
+         target == static_cast<std::uint8_t*>(fake_armada) + 0x00074770 ||
+         target == static_cast<std::uint8_t*>(fake_armada) + 0x000747d0)) {
+        ++directional_shields_effect_hook_count;
+    }
+    if (fleet_ops && target ==
+            static_cast<std::uint8_t*>(static_cast<void*>(fleet_ops)) +
+                0x001226ec) {
+        resources_deduct_hooked = true;
+    }
+    if (fake_armada && target == static_cast<std::uint8_t*>(fake_armada) +
             0x0b80f0) {
         hybrid_producer_get_action_hooked = true;
     }
@@ -928,6 +1273,14 @@ bool A2FO_CALL install_hook(void* target, void* replacement,
         mission_selector_accept_hooked = true;
     }
     if (fake_armada && target == static_cast<std::uint8_t*>(fake_armada) +
+            0x0e6ca0) {
+        build_tooltips_text_hooked = true;
+    }
+    if (fake_armada && target == static_cast<std::uint8_t*>(fake_armada) +
+            0x0e72b0) {
+        build_tooltips_verbose_hooked = true;
+    }
+    if (fake_armada && target == static_cast<std::uint8_t*>(fake_armada) +
             0x242780) {
         rgb_lock_surface_hooked = true;
     }
@@ -984,8 +1337,29 @@ bool A2FO_CALL install_hook(void* target, void* replacement,
         ++fire_arc_hook_count;
     }
     if (fake_armada && target ==
-            static_cast<std::uint8_t*>(fake_armada) + 0x000c4bb0) {
+            static_cast<std::uint8_t*>(fake_armada) + 0x000c5bb0) {
         ++weapon_damage_hook_count;
+    }
+    if (fake_armada &&
+        (target == static_cast<std::uint8_t*>(fake_armada) + 0x000c2340 ||
+         target == static_cast<std::uint8_t*>(fake_armada) + 0x000c2980)) {
+        ++energy_persistence_hook_count;
+    }
+    if (fake_armada &&
+        (target == static_cast<std::uint8_t*>(fake_armada) + 0x0026fd40 ||
+         target == static_cast<std::uint8_t*>(fake_armada) + 0x0026fde0 ||
+         target == static_cast<std::uint8_t*>(fake_armada) + 0x00270dd0 ||
+         target == static_cast<std::uint8_t*>(fake_armada) + 0x002679f0)) {
+        ++energy_ammunition_shot_hook_count;
+    }
+    if (fleet_ops &&
+        (target ==
+             static_cast<std::uint8_t*>(static_cast<void*>(fleet_ops)) +
+                 0x001392cc ||
+         target ==
+             static_cast<std::uint8_t*>(static_cast<void*>(fleet_ops)) +
+                 0x0013a550)) {
+        ++energy_ammunition_shot_hook_count;
     }
     if (fake_armada &&
         (target == static_cast<std::uint8_t*>(fake_armada) + 0x000ab710 ||
@@ -1044,6 +1418,25 @@ bool A2FO_CALL patch_call(void* target, void* replacement,
     } else if (fake_armada && target ==
             static_cast<std::uint8_t*>(fake_armada) + 0x0cb318) {
         texture_variants_scoped_render_call_patched = true;
+    } else if (fake_armada &&
+        (target == static_cast<std::uint8_t*>(fake_armada) + 0x0e711a ||
+         target == static_cast<std::uint8_t*>(fake_armada) + 0x0e772a)) {
+        ++build_tooltips_end_extra_patch_count;
+    } else if (fake_armada &&
+        (target == static_cast<std::uint8_t*>(fake_armada) + 0x0e6e1d ||
+         target == static_cast<std::uint8_t*>(fake_armada) + 0x0e6ea1 ||
+         target == static_cast<std::uint8_t*>(fake_armada) + 0x0e6f25 ||
+         target == static_cast<std::uint8_t*>(fake_armada) + 0x0e6fa9 ||
+         target == static_cast<std::uint8_t*>(fake_armada) + 0x0e7029 ||
+         target == static_cast<std::uint8_t*>(fake_armada) + 0x0e7462 ||
+         target == static_cast<std::uint8_t*>(fake_armada) + 0x0e74de ||
+         target == static_cast<std::uint8_t*>(fake_armada) + 0x0e755a ||
+         target == static_cast<std::uint8_t*>(fake_armada) + 0x0e75d6 ||
+         target == static_cast<std::uint8_t*>(fake_armada) + 0x0e764e)) {
+        ++resources_res_call_patch_count;
+    } else if (fake_armada && target ==
+            static_cast<std::uint8_t*>(fake_armada) + 0x0e70d8) {
+        resources_officer_icon_patched = true;
     } else {
         ++bink_call_patch_count;
     }
@@ -1057,24 +1450,13 @@ bool A2FO_CALL patch_jump(void* target, void* replacement,
         return false;
     }
     if (fake_armada && target ==
-            static_cast<std::uint8_t*>(fake_armada) + 0x000c6530) {
-        turret_craft_simulate_chained = true;
-        ++turret_hook_count;
-    }
-    if (fake_armada && target ==
             static_cast<std::uint8_t*>(fake_armada) + 0x000cc480) {
         turret_class_constructor_chained = true;
         ++turret_hook_count;
     }
     if (fake_armada && target ==
             static_cast<std::uint8_t*>(fake_armada) + 0x00264e30) {
-        if (initializing_weapon_damage) {
-            weapon_damage_constructor_chained = true;
-            ++weapon_damage_hook_count;
-        } else {
-            fire_arc_class_constructor_chained = true;
-            ++fire_arc_hook_count;
-        }
+        ++fire_arc_hook_count;
     }
     if (fake_armada && target ==
             static_cast<std::uint8_t*>(fake_armada) + 0x0026f8c0) {
@@ -1175,7 +1557,12 @@ int main() {
         A2FO_CAP_INFO_INI_DEFAULTS |
         A2FO_CAP_ODF_OVERLAY_DIRECTORIES |
         A2FO_CAP_PRODUCER_EVENTS |
-        A2FO_CAP_CLASSLABEL_ODF_DEFAULTS;
+        A2FO_CAP_CLASSLABEL_ODF_DEFAULTS |
+        A2FO_CAP_GAME_OBJECT_CLASS_LOADED |
+        A2FO_CAP_RACE_LOADED |
+        A2FO_CAP_WEAPON_CLASS_LOADED |
+        A2FO_CAP_WEAPON_TRIGGER_EVENTS |
+        A2FO_CAP_CRAFT_EVENTS;
     api.upgrade_pod_maximum_tier = &upgrade_pod_maximum_tier;
     api.get_original_classlabel = &get_original_classlabel;
     api.associate_evolver_cocoon_class =
@@ -1190,6 +1577,15 @@ int main() {
     api.dispatch_producer_event = &dispatch_producer_event;
     api.register_classlabel_odf_defaults =
         &register_classlabel_odf_defaults;
+    api.register_game_object_class_loaded_handler =
+        &register_game_object_class_loaded_handler;
+    api.register_race_loaded_handler = &register_race_loaded_handler;
+    api.register_weapon_class_loaded_handler =
+        &register_weapon_class_loaded_handler;
+    api.register_weapon_trigger_handler = &register_weapon_trigger_handler;
+    api.register_craft_event_handler = &register_craft_event_handler;
+    api.register_object_destroyed_handler =
+        &register_object_destroyed_handler;
 
     const auto initialize_module = [&api](const char* path) -> HMODULE {
         HMODULE module = LoadLibraryA(path);
@@ -1229,6 +1625,39 @@ int main() {
     HMODULE feature = initialize_module(
         "modules\\A2FOFeaturePack.dll");
     if (!feature) return 3;
+    HMODULE wreckage = initialize_module(
+        "modules\\A2FOWreckage.dll");
+    if (!wreckage || !wreckage_handler_registered || !wreckage_handler) {
+        return 126;
+    }
+    const auto wreckage_string_view = [](const char* value) {
+        return A2FO_StringView{
+            value, static_cast<std::uint32_t>(std::strlen(value))};
+    };
+    const A2FO_OdfFieldView wreckage_fields[] = {
+        {wreckage_string_view("wreckage"),
+         wreckage_string_view("test_wreckage")},
+        {wreckage_string_view("wreckageChance"),
+         wreckage_string_view("100")},
+    };
+    A2FO_ObjectDestroyedEvent wreckage_event{};
+    wreckage_event.struct_size = sizeof(wreckage_event);
+    wreckage_event.odf_fields = wreckage_fields;
+    wreckage_event.odf_field_count = 2;
+    wreckage_event.random_seed = 42;
+    A2FO_ObjectReplacement wreckage_replacement{};
+    wreckage_replacement.struct_size = sizeof(wreckage_replacement);
+    if (!wreckage_handler(
+            &wreckage_event, &wreckage_replacement,
+            wreckage_handler_user_data) ||
+        !wreckage_replacement.odf ||
+        std::strcmp(wreckage_replacement.odf, "test_wreckage") != 0 ||
+        wreckage_replacement.flags !=
+            (A2FO_REPLACEMENT_INHERIT_POSITION |
+             A2FO_REPLACEMENT_INHERIT_ROTATION) ||
+        wreckage_replacement.owner != A2FO_REPLACEMENT_OWNER_NEUTRAL) {
+        return 127;
+    }
     HMODULE cheats = initialize_module(
         "modules\\A2FOCheats.dll");
     if (!cheats || !cheats_show_me_the_money_hooked ||
@@ -1255,6 +1684,150 @@ int main() {
         !mission_selector_accept_hooked) {
         return 119;
     }
+    HMODULE build_tooltips = initialize_module(
+        "modules\\A2FOBuildTooltips.dll");
+    if (!build_tooltips || !build_tooltips_text_hooked ||
+        !build_tooltips_verbose_hooked ||
+        build_tooltips_end_extra_patch_count != 2) {
+        return 120;
+    }
+    HMODULE resources = initialize_module("modules\\A2FOResources.dll");
+    if (!resources || !resources_class_handler_registered ||
+        !resources_race_handler_registered ||
+        !resources_team_constructor_hooked ||
+        !resources_team_destructor_hooked || !resources_deduct_hooked ||
+        !resources_panel_hooked || !resources_tooltip_hooked ||
+        !resources_verbose_tooltip_hooked ||
+        resources_res_call_patch_count != 10 ||
+        !resources_officer_icon_patched ||
+        !GetProcAddress(resources, "A2FOResources_Get") ||
+        !GetProcAddress(resources, "A2FOResources_Set") ||
+        !GetProcAddress(resources, "A2FOResources_Add") ||
+        !GetProcAddress(resources, "A2FOResources_GetCost") ||
+        !GetProcAddress(
+            resources, "A2FOResources_GetPresentationText")) {
+        std::fprintf(
+            stderr,
+            "Resources checkpoint: module=%d class=%d race=%d ctor=%d "
+            "dtor=%d deduct=%d panel=%d tooltip=%d verbose=%d calls=%u\n",
+            resources != nullptr, resources_class_handler_registered,
+            resources_race_handler_registered,
+            resources_team_constructor_hooked,
+            resources_team_destructor_hooked, resources_deduct_hooked,
+            resources_panel_hooked, resources_tooltip_hooked,
+            resources_verbose_tooltip_hooked,
+            resources_res_call_patch_count);
+        return 121;
+    }
+    HMODULE energy_systems = initialize_module(
+        "modules\\A2FOEnergySystems.dll");
+    if (!energy_systems || !energy_class_handler_registered ||
+        !energy_weapon_class_handler_registered ||
+        !energy_craft_handler_registered ||
+        energy_ammunition_shot_hook_count != 6 ||
+        energy_persistence_hook_count != 2 ||
+        !GetProcAddress(
+            energy_systems, "A2FOEnergySystems_GetPhotonTorpedoes") ||
+        !GetProcAddress(
+            energy_systems, "A2FOEnergySystems_GetQuantumTorpedoes") ||
+        !GetProcAddress(
+            energy_systems, "A2FOEnergySystems_SetPhotonTorpedoes") ||
+        !GetProcAddress(
+            energy_systems, "A2FOEnergySystems_SetQuantumTorpedoes")) {
+        return 122;
+    }
+    // Exercise the same order as the active test mod: damage controls first,
+    // then directional shields. DirectionalShields must request the late
+    // reverse handshake when it becomes resident.
+    HMODULE weapon_damage_controls = initialize_module(
+        "modules\\A2FOWeaponDamageControls.dll");
+    if (!weapon_damage_controls || weapon_damage_hook_count != 2 ||
+        !weapon_damage_class_handler_registered ||
+        !GetProcAddress(
+            weapon_damage_controls,
+            "A2FOWeaponDamageControls_RefreshDirectionalShieldsBridge")) {
+        std::fprintf(
+            stderr,
+            "A2FOWeaponDamageControls smoke state: module=%p hooks=%u classHandler=%d\n",
+            static_cast<void*>(weapon_damage_controls),
+            weapon_damage_hook_count,
+            weapon_damage_class_handler_registered ? 1 : 0);
+        return 117;
+    }
+
+    HMODULE directional_shields = initialize_module(
+        "modules\\A2FODirectionalShields.dll");
+    if (!directional_shields ||
+        !directional_shields_class_handler_registered ||
+        !directional_shields_craft_handler_registered ||
+        !directional_shields_damage_bridge_connected ||
+        directional_shields_effect_hook_count != 3 ||
+        !GetProcAddress(directional_shields,
+                        "A2FODirectionalShields_ConnectDamageBridge") ||
+        !GetProcAddress(directional_shields,
+                        "A2FODirectionalShields_BeginDamage") ||
+        !GetProcAddress(directional_shields,
+                        "A2FODirectionalShields_EndDamage") ||
+        !GetProcAddress(directional_shields,
+                        "A2FODirectionalShields_GetCurrent") ||
+        !GetProcAddress(directional_shields,
+                        "A2FODirectionalShields_GetMaximum")) {
+        return 123;
+    }
+
+    const auto string_view = [](const char* value) {
+        return A2FO_StringView{
+            value, static_cast<std::uint32_t>(std::strlen(value))};
+    };
+    const A2FO_OdfFieldView a1_directional_fields[] = {
+        {string_view("directionalShields"), string_view("1")},
+        {string_view("forwardShieldStrength"), string_view("250")},
+        {string_view("aftShieldStrength"), string_view("250")},
+        {string_view("portShieldStrength"), string_view("250")},
+        {string_view("starboardShieldStrength"), string_view("250")},
+    };
+    alignas(float) std::uint8_t a1_craft_class[0x300]{};
+    float a1_native_maximum = 650.0f;
+    std::memcpy(a1_craft_class + 0x208, &a1_native_maximum,
+                sizeof(a1_native_maximum));
+    A2FO_GameObjectClassLoadedEvent a1_event{};
+    a1_event.struct_size = sizeof(a1_event);
+    a1_event.object_class = a1_craft_class;
+    a1_event.source_odf = string_view("a1_directional_test");
+    a1_event.odf_fields = a1_directional_fields;
+    a1_event.odf_field_count = static_cast<std::uint32_t>(
+        sizeof(a1_directional_fields) / sizeof(a1_directional_fields[0]));
+    directional_shields_class_handler(
+        &a1_event, directional_shields_class_user_data);
+    std::memcpy(&a1_native_maximum, a1_craft_class + 0x208,
+                sizeof(a1_native_maximum));
+    if (a1_native_maximum != 1000.0f) return 124;
+
+    const A2FO_OdfFieldView mismatched_a2_fields[] = {
+        {string_view("directionalShields"), string_view("1")},
+        {string_view("forwardShieldStrength"), string_view("250")},
+        {string_view("aftShieldStrength"), string_view("250")},
+        {string_view("portShieldStrength"), string_view("250")},
+        {string_view("starboardShieldStrength"), string_view("250")},
+        {string_view("maxShields"), string_view("800")},
+    };
+    alignas(float) std::uint8_t a2_craft_class[0x300]{};
+    float a2_native_maximum = 800.0f;
+    std::memcpy(a2_craft_class + 0x208, &a2_native_maximum,
+                sizeof(a2_native_maximum));
+    A2FO_GameObjectClassLoadedEvent a2_event{};
+    a2_event.struct_size = sizeof(a2_event);
+    a2_event.object_class = a2_craft_class;
+    a2_event.source_odf = string_view("a2_directional_mismatch_test");
+    a2_event.odf_fields = mismatched_a2_fields;
+    a2_event.odf_field_count = static_cast<std::uint32_t>(
+        sizeof(mismatched_a2_fields) / sizeof(mismatched_a2_fields[0]));
+    directional_shields_class_handler(
+        &a2_event, directional_shields_class_user_data);
+    std::memcpy(&a2_native_maximum, a2_craft_class + 0x208,
+                sizeof(a2_native_maximum));
+    if (a2_native_maximum != 800.0f) return 125;
+
     HMODULE always_show_shields = initialize_module(
         "modules\\A2FOAlwaysShowShields.dll");
     if (!always_show_shields || !always_show_shields_starbase_hooked ||
@@ -1289,7 +1862,8 @@ int main() {
     HMODULE texture_variants = initialize_module(
         "modules\\A2FOTextureVariants.dll");
     if (!texture_variants || !texture_variants_borg_call_patched ||
-        !texture_variants_race_call_patched ||
+        texture_variants_race_call_patched ||
+        !texture_variants_race_handler_registered ||
         !texture_variants_update_hooked ||
         !texture_variants_render_call_patched ||
         !texture_variants_scoped_render_call_patched ||
@@ -1330,8 +1904,9 @@ int main() {
 
     HMODULE fire_arcs = initialize_module(
         "modules\\A2FOFireArcs.dll");
-    if (!fire_arcs || fire_arc_hook_count != 3 ||
-        !fire_arc_class_constructor_chained ||
+    if (!fire_arcs || fire_arc_hook_count != 2 ||
+        !fire_arc_weapon_class_handler_registered ||
+        !fire_arc_trigger_handler_registered ||
         !fire_arc_target_check_chained ||
         !fire_arc_icon_hover_hooked ||
         !fire_arc_rts_config_loaded ||
@@ -1339,48 +1914,20 @@ int main() {
             fire_arcs, "A2FOFireArcs_AllowWeaponTrigger")) {
         std::fprintf(
             stderr,
-            "A2FOFireArcs smoke state: module=%p hooks=%u constructorChained=%d targetCheckChained=%d iconHover=%d rtsConfig=%d\n",
+            "A2FOFireArcs smoke state: module=%p hooks=%u classHandler=%d triggerHandler=%d targetCheckChained=%d iconHover=%d rtsConfig=%d\n",
             static_cast<void*>(fire_arcs), fire_arc_hook_count,
-            fire_arc_class_constructor_chained ? 1 : 0,
+            fire_arc_weapon_class_handler_registered ? 1 : 0,
+            fire_arc_trigger_handler_registered ? 1 : 0,
             fire_arc_target_check_chained ? 1 : 0,
             fire_arc_icon_hover_hooked ? 1 : 0,
             fire_arc_rts_config_loaded ? 1 : 0);
         return 107;
     }
 
-    // The fixture patch callback validates chaining but intentionally does not
-    // rewrite code bytes. Recreate FireArcs' real five-byte near jump so the
-    // damage-controls smoke exercises its live A2FO-to-A2FO chain, rather than
-    // seeing Fleet Operations' original push/ret detour a second time.
-    auto* weapon_class_site =
-        static_cast<std::uint8_t*>(fake_armada) + 0x00264e30;
-    FARPROC fire_arc_chain_target = GetProcAddress(
-        fire_arcs, "A2FOFireArcs_AllowWeaponTrigger");
-    if (!fire_arc_chain_target) return 118;
-    const auto displacement = static_cast<std::int32_t>(
-        reinterpret_cast<std::uintptr_t>(fire_arc_chain_target) -
-        (reinterpret_cast<std::uintptr_t>(weapon_class_site) + 5u));
-    weapon_class_site[0] = 0xe9;
-    std::memcpy(weapon_class_site + 1, &displacement, sizeof(displacement));
-
-    initializing_weapon_damage = true;
-    HMODULE weapon_damage_controls = initialize_module(
-        "modules\\A2FOWeaponDamageControls.dll");
-    initializing_weapon_damage = false;
-    if (!weapon_damage_controls || weapon_damage_hook_count != 3 ||
-        !weapon_damage_constructor_chained) {
-        std::fprintf(
-            stderr,
-            "A2FOWeaponDamageControls smoke state: module=%p hooks=%u constructorChained=%d\n",
-            static_cast<void*>(weapon_damage_controls),
-            weapon_damage_hook_count,
-            weapon_damage_constructor_chained ? 1 : 0);
-        return 117;
-    }
-
     HMODULE normal_weapon_tech = initialize_module(
         "modules\\A2FONormalWeaponTech.dll");
     if (!normal_weapon_tech || !normal_weapon_tech_initialized ||
+        !normal_weapon_trigger_handler_registered ||
         !GetProcAddress(
             normal_weapon_tech,
             "A2FONormalWeaponTech_AllowWeaponTrigger")) {
@@ -1395,22 +1942,22 @@ int main() {
     HMODULE turrets = initialize_module(
         "modules\\A2FOTurrets.dll");
     if (!turrets || !turret_alias_registered ||
-        !turret_odf_defaults_registered || turret_hook_count != 6 ||
-        !turret_craft_simulate_chained ||
+        !turret_odf_defaults_registered || turret_hook_count != 2 ||
         !turret_class_constructor_chained ||
         !turret_shield_visibility_linked ||
-        !turret_fire_arc_trigger_filter_linked ||
-        !turret_normal_weapon_tech_trigger_filter_linked) {
+        !turret_trigger_handler_registered ||
+        !turret_craft_handler_registered) {
         std::fprintf(
             stderr,
             "A2FOTurrets smoke state: module=%p alias=%d defaults=%d "
-            "hooks=%u constructorChained=%d simulateChained=%d\n",
+            "hooks=%u constructorChained=%d triggerHandler=%d craftHandler=%d\n",
             static_cast<void*>(turrets),
             turret_alias_registered ? 1 : 0,
             turret_odf_defaults_registered ? 1 : 0,
             turret_hook_count,
             turret_class_constructor_chained ? 1 : 0,
-            turret_craft_simulate_chained ? 1 : 0);
+            turret_trigger_handler_registered ? 1 : 0,
+            turret_craft_handler_registered ? 1 : 0);
         return 106;
     }
     HMODULE inactive_a1 = initialize_module(
@@ -1763,11 +2310,19 @@ int main() {
     FreeLibrary(fire_arcs);
     shutdown_module(mission_selector);
     FreeLibrary(mission_selector);
+    shutdown_module(build_tooltips);
+    FreeLibrary(build_tooltips);
+    shutdown_module(resources);
+    FreeLibrary(resources);
+    shutdown_module(energy_systems);
+    FreeLibrary(energy_systems);
     FreeLibrary(edit_menu);
     FreeLibrary(cheats);
     shutdown_module(a1_compat);
     FreeLibrary(a1_compat);
     FreeLibrary(feature);
+    shutdown_module(wreckage);
+    FreeLibrary(wreckage);
     FreeLibrary(fleet_ops);
     VirtualFree(fake_armada, 0, MEM_RELEASE);
     DeleteFileA(rgb_file_path.c_str());

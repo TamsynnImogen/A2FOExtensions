@@ -1,7 +1,7 @@
 # A2FOExtensions modular runtime
 
 This package preserves the proven startup chain while separating checked engine
-hooks, reusable dispatch, optional native features, and mod-authored Lua logic.
+hooks, reusable semantic dispatch, and optional native feature modules.
 
 ## User-facing features
 
@@ -15,6 +15,8 @@ hooks, reusable dispatch, optional native features, and mod-authored Lua logic.
 - Optional ODF-driven captain names and ship registries, row-aligned with the
   native `possibleCraftNames` choice and displayed only for the selected craft
   through `infoSingleCaptainTextArea` and `infoSingleRegistryTextArea`.
+- Optional selected-craft rank XP bar, plus the missing native shield-bar
+  tooltip with per-Craft short and verbose text overrides.
 - Optional always-visible native shield geometry while a configured object's
   current shield strength remains above zero.
 - Optional per-instance SOD matrix animation for hardpoint/null nodes, so
@@ -42,7 +44,7 @@ hooks, reusable dispatch, optional native features, and mod-authored Lua logic.
   menus, one shared ten-slot queue, queued station placement previews, and
   protected native construction/evolution sidecars.
 - Per-Evolver and HybridBuild `cocoon` ODF command for custom cocoon models.
-- Lua-driven wreckage or replacement objects when units are destroyed.
+- Native ODF-driven wreckage or replacement objects when units are destroyed.
 - Deterministic `wreckageChance` support suitable for synchronized games.
 - Ctrl-click to fill all ten native construction-queue slots.
 - Ctrl+Alt-click for continuous production and automatic queue refilling.
@@ -60,8 +62,8 @@ hooks, reusable dispatch, optional native features, and mod-authored Lua logic.
 - Absolute, relative, shared, and per-mod settings-directory layouts.
 - Data-level shared settings roots with active-mod folders stored below
   `mods\<folder>`.
-- Configurable ship-system upgrade pods through level 16, with the included
-  Lua policy enabling levels through 6.
+- Configurable ship-system upgrade pods through level 16, with an inherited
+  `RTS_CFG.h` maximum of level 6 by default.
 - Tier-indexed upgrade-station lists which preserve unrelated research and
   progress level 2 → level 3 → higher levels independently for each system.
 - Upgrade-pod progression is independent of the order in which systems are
@@ -73,27 +75,23 @@ hooks, reusable dispatch, optional native features, and mod-authored Lua logic.
 - Automatic deterministic loading of globally installed `Data\modules\*.dll`.
 - Per-mod module selection through the Mods-screen **Modules** button and
   `[modules]` policy; mod-local native DLL folders are ignored.
-- Data, `ParentMod`, and active-mod script overlay.
+- Data, `ParentMod`, and active-mod configuration and asset precedence.
 - Optional direct Armada 1/2 legacy texture bridge for `Textures\RGB`,
   `Textures\Index8`, and `Textures\Compressed` across the same mod roots,
   including bounded expansion of RLE-compressed TGA types 9, 10, and 11.
-- Embedded Lua 5.4.8 runtime.
-- Restricted Lua environment with memory, file-size, and instruction limits.
-- Lua classlabel, Evolver-cocoon, and object-destroyed callbacks.
-- Bounded temporary ODF views exposed safely to Lua.
 - Native destroyed-object event dispatcher.
 - Native Producer admission/completion/destruction event dispatcher.
-- Transactional module and Lua registration with rollback after failed
+- Transactional native-module registration with rollback after failed
   initialization.
 - SDK header and example native module.
-- Central logging for the core, modules, and Lua scripts.
+- Central logging for the core and native modules.
 - Checked hook signatures and supported-binary validation.
 
 ## Current modding commands
 
 The exhaustive index is
 [`docs/modder-command-reference.md`](docs/modder-command-reference.md). It
-lists every extension-owned ODF, INI, CFG, Lua, asset, SOD, control, and
+lists every extension-owned ODF, INI, CFG, asset, SOD, control, and
 authoring convention, including features which require no new command. The
 sections below provide the most commonly used examples and explanations.
 
@@ -167,11 +165,73 @@ returns one level at a time. See
 Mission Select dialogs with one scrollable campaign/mission browser. The four
 stock campaigns retain native availability, progression, filenames, and
 launch. Optional `mission_selector.ini` metadata supplies campaign text,
-mission descriptions/objectives, preview images, replacement BZNs, and
-additional custom campaign sections; missing metadata falls back safely to
-native filenames. Custom campaigns use static unlock policy until independent
-saveable progression is implemented. See
+switchable campaign backgrounds, mission descriptions/objectives, preview
+images, replacement BZNs, and additional custom campaign sections; missing
+metadata falls back safely to native filenames. Custom campaigns use static
+unlock policy until independent saveable progression is implemented. See
 [`modules/A2FOMissionSelector/README.md`](modules/A2FOMissionSelector/README.md).
+
+`A2FOInstantActionSettings.dll` restores the Instant Action **Load Settings**
+control while retaining Armada's native host checks and validation. It supplies
+a guarded click fallback when Fleet Operations' replacement Load button misses
+the original route and corrects the byte alignment of Fleet Operations' spaced
+`setupDetails` profile payload. See
+[`modules/A2FOInstantActionSettings/README.md`](modules/A2FOInstantActionSettings/README.md).
+
+`A2FOBuildTooltips.dll` inserts build time in the native parenthesised cost row
+as compact `N [build-time icon]` in normal tooltips and expanded `N seconds` in verbose
+tooltips. It calls Armada's native adjusted
+build-time query, so the value follows the Instant Action build-time setting
+and the same local-team modifiers used by construction. With
+`A2FOResources.dll`, it inserts every non-zero additional-resource cost into
+the same row before the build-time token. See
+[`modules/A2FOBuildTooltips/README.md`](modules/A2FOBuildTooltips/README.md).
+
+`A2FOResources.dll` increases the usable resource total from six to ten by
+adding independent tritanium, supply, credits, and collective-connections
+balances. Object ODF costs, Race starting values, Producer deductions/refunds,
+a second resource-panel row, and native get/set/add accessors are included.
+Race ODF presentation fields are parsed for all ten resources; values may be
+localization keys or literal text. The added four use them in the second panel
+row, tooltips, build-cost text, and native API. Short/verbose hover overrides
+are also supported for the six native resources. Compact costs and the added
+row use Fleet Operations font-icon glyphs, while verbose costs retain the
+Race-specific `Res` names. Native presentation integration is applied at
+Armada's targeted cost-text sites through a Race-localized cache;
+the top resource panel itself renders numbers without a native label. These
+pools do not alias latinum, metal, officers, or biomatter. See
+[`modules/A2FOResources/README.md`](modules/A2FOResources/README.md).
+
+`A2FOEnergySystems.dll` adds independent Photon and Quantum Torpedo capacity
+to Craft ODFs. Each store has its own maximum, fractional recharge rate, and
+mode: disabled recharge, automatic recharge, or resupply-only recharge near a
+same-team shipyard, `RepairShip`, or explicit provider. Weapon ODF costs are
+charged once per successfully launched projectile, including every shot in a
+multi-projectile volley; an exhausted store blocks only the launcher which
+uses it. New stores start full and their current values persist in new save
+games.
+
+`A2FOCraftIdentity.dll` can present each capacity independently as percent,
+integer `current/maximum`, localized ready/reload status, or a capacity bar.
+Each row supports a per-Craft label or texture-atlas icon, short and verbose
+tooltips, explicit GUI placement, and green/yellow/red capacity colours. See
+[`modules/A2FOEnergySystems/README.md`](modules/A2FOEnergySystems/README.md).
+
+`A2FODirectionalShields.dll` adds strictly opt-in forward, aft, port, and
+starboard shield stores while retaining Armada's aggregate shield display and
+native shield recharge. Hits select a facing from the attacker's target-local
+position; a depleted facing passes later damage to the ordinary hull/system
+path even while another facing is charged. Shield-hit effects follow the
+struck facing's percentage, are suppressed on exposed facings, and stop when
+their facing collapses. It composes through the checked
+`A2FOWeaponDamageControls` damage hook.
+
+The selected-panel UI supports a four-sprite arc ring with per-Craft segment
+placement, proportional-drain or colour-only display, configurable compass
+mapping, green/orange/red/black states, and localized per-facing tooltips with
+live strength. Numeric F/A and P/S rows remain available when the sprite ring
+cannot be drawn. See
+[`modules/A2FODirectionalShields/README.md`](modules/A2FODirectionalShields/README.md).
 
 ### `RTS_CFG.h` cheat amounts
 
@@ -463,8 +523,9 @@ wreckage = "my_ship_wreck"
 wreckageChance = 50
 ```
 
-`wreckage` is the replacement ODF basename. `wreckageChance` accepts 0–100,
-defaults to 100, and requires the included `scripts\Wreckage.lua`.
+`wreckage` is the replacement ODF basename. `wreckageChance` accepts 0–100
+and defaults to 100. Select `A2FOWreckage.dll` for the mod to enable this
+native policy.
 
 Higher ship-system upgrade pods continue to use Armada's existing field:
 
@@ -473,7 +534,21 @@ upgradeLevel = 4
 ```
 
 A2FO safely retains levels above 3 in sidecar state rather than indexing past
-Armada's fixed Team arrays.
+Armada's fixed Team arrays. Select the permitted maximum in inherited
+`RTS_CFG.h`:
+
+```cpp
+int upgradePodMaximumTier = 6;
+```
+
+Valid values are 3–16. The default is 6, and a valid child-mod assignment
+overrides its parent's assignment.
+
+Fleet Operations treats a child `RTS_CFG.h` as a complete native replacement,
+not a partial overlay. Copy the full parent file into the child before adding
+the assignment, retaining includes such as `ART_CFG.h`; a minimal child file
+will discard the parent's native camera, renderer, map, interface, and gameplay
+settings.
 
 ### Upgrade-station ODF commands
 
@@ -495,27 +570,6 @@ the command tier plus 2. See
 [`docs/upgrade-pods.md`](docs/upgrade-pods.md) for validation and fallback
 rules.
 
-### Lua API commands
-
-The principal public entry points are:
-
-```lua
-a2fo.require_api(1, 2)
-a2fo.has_capability("configurable_upgrade_pods")
-a2fo.log("message")
-
-a2fo.configure_upgrade_pods({ maximum_tier = 6 })
-a2fo.on_classlabel(function(classlabel, odf) end)
-a2fo.on_evolver_cocoon(function(odf) end)
-a2fo.on_object_destroyed({"fieldName"}, function(event) end)
-```
-
-The upgrade-pod maximum accepts 3–16 and defaults to the native maximum of 3
-when no selected script claims the policy. Callback ODF views provide bounded
-`odf:get_string()` access, while destroyed-object events provide deterministic
-`event:roll_percent()`. See [`docs/lua-api.md`](docs/lua-api.md) for callback
-contracts and return values.
-
 ### Construction controls
 
 - **Ctrl + click:** fill every remaining position in the ten-slot native
@@ -534,13 +588,13 @@ game; higher levels, save/load, and multiplayer still need validation. Button
 overlays, configurable hotkeys, and the proposed Noxter mechanics are not yet
 implemented.
 
-## Core/module/script boundary
+## Core/module boundary
 
 The core owns shared call sites, dispatch ordering, engine-object lifetimes, and
 registration rollback. Native modules handle features that need deeper
 engine/filesystem access, such as recursive ODF discovery, cocoon SOD selection,
-and Producer integration. Lua scripts supply optional logic through narrow
-semantic APIs when conditions and composition make scripting worthwhile. See
+and Producer integration. Optional gameplay policies are isolated in native
+modules which register against narrow semantic APIs. See
 [`docs/architecture.md`](docs/architecture.md) for the ownership map and
 hook-maintenance rules.
 
@@ -558,16 +612,28 @@ Legacy texture-folder activation and precedence are documented in
 Faction-owned model texture suffixes, Race-name SOD nodes, and the Borg DDS
 alternate repair are documented in
 [`modules/A2FOTextureVariants/README.md`](modules/A2FOTextureVariants/README.md).
-Captain/registry ODF lists and GUI fields are documented in
+Captain/registry ODF lists, selected shield/XP tooltips, and the ranked-craft
+XP bar are documented in
 [`modules/A2FOCraftIdentity/README.md`](modules/A2FOCraftIdentity/README.md).
 Persistent shield visibility is documented in
 [modules/A2FOAlwaysShowShields/README.md](modules/A2FOAlwaysShowShields/README.md).
 Recursive editor-menu ODF nesting is documented in
 [`modules/A2FOEditMenu/README.md`](modules/A2FOEditMenu/README.md).
+The Instant Action Load Settings repair is documented in
+[`modules/A2FOInstantActionSettings/README.md`](modules/A2FOInstantActionSettings/README.md).
+Build-button time text and modifier behaviour are documented in
+[`modules/A2FOBuildTooltips/README.md`](modules/A2FOBuildTooltips/README.md).
+The four additional independent resources and their ODF/GUI commands are
+documented in
+[`modules/A2FOResources/README.md`](modules/A2FOResources/README.md).
 The combined campaign and mission browser is documented in
 [`modules/A2FOMissionSelector/README.md`](modules/A2FOMissionSelector/README.md).
 Three-dimensional weapon firing volumes are documented in
 [`modules/A2FOFireArcs/README.md`](modules/A2FOFireArcs/README.md).
+Photon and Quantum Torpedo ammunition is documented in
+[`modules/A2FOEnergySystems/README.md`](modules/A2FOEnergySystems/README.md).
+Native destroyed-craft wreckage replacement is documented in
+[`modules/A2FOWreckage/README.md`](modules/A2FOWreckage/README.md).
 Independent weapon shield/hull damage controls are documented in
 [`modules/A2FOWeaponDamageControls/README.md`](modules/A2FOWeaponDamageControls/README.md).
 Normal-weapon technology-tree enforcement is documented in
@@ -597,9 +663,13 @@ Armada II/
 ├── modules/
 │   ├── A2FOAlwaysShowShields.dll
 │   ├── A2FOAnimatedHardpoints.dll
+│   ├── A2FOBuildTooltips.dll
 │   ├── A2FOCheats.dll
 │   ├── A2FOCraftIdentity.dll
 │   ├── A2FOEditMenu.dll
+│   ├── A2FODirectionalShields.dll
+│   ├── A2FOEnergySystems.dll
+│   ├── A2FOInstantActionSettings.dll
 │   ├── A2FOMissionSelector.dll
 │   ├── A2FOFireArcs.dll
 │   ├── A2FOFeaturePack.dll
@@ -608,11 +678,13 @@ Armada II/
 │   ├── A2FONebulaRenderer.dll
 │   ├── A2FONormalWeaponTech.dll
 │   ├── A2FOPointDefenseCycles.dll
+│   ├── A2FOResources.dll
 │   ├── A2FORGBTextures.dll
 │   ├── A2FOSwarmSystem.dll
 │   ├── A2FOTextureVariants.dll
 │   ├── A2FOTurrets.dll
 │   ├── A2FOWeaponDamageControls.dll
+│   ├── A2FOWreckage.dll
 │   └── A1Compat.dll
 ├── Shaders/
 │   └── dx8/
@@ -622,8 +694,7 @@ Armada II/
 │       └── vertex/
 │           ├── vs.nvv
 │           └── vs_1.3.nvv
-├── scripts/
-│   └── UpgradePods.lua      (bounded tier policy; mod-overridable)
+├── RTS_CFG.h                (`upgradePodMaximumTier`; mod-overridable)
 └── A2FOExtensions.log
 ```
 
@@ -664,6 +735,7 @@ build/A2FOExtensions.dll
 build/Win2kDisableTaskSwitch.dll
 build/modules/A2FOAlwaysShowShields.dll
 build/modules/A2FOAnimatedHardpoints.dll
+build/modules/A2FOBuildTooltips.dll
 build/modules/A1Compat.dll
 build/modules/A2FOCheats.dll
 build/modules/A2FOFeaturePack.dll
@@ -671,16 +743,21 @@ build/modules/A2FOHybridBuild.dll
 build/modules/A2FOInfoIni.dll
 build/modules/A2FOCraftIdentity.dll
 build/modules/A2FOEditMenu.dll
+build/modules/A2FODirectionalShields.dll
+build/modules/A2FOEnergySystems.dll
+build/modules/A2FOInstantActionSettings.dll
 build/modules/A2FOMissionSelector.dll
 build/modules/A2FOFireArcs.dll
 build/modules/A2FONebulaRenderer.dll
 build/modules/A2FONormalWeaponTech.dll
 build/modules/A2FOPointDefenseCycles.dll
+build/modules/A2FOResources.dll
 build/modules/A2FORGBTextures.dll
 build/modules/A2FOSwarmSystem.dll
 build/modules/A2FOTextureVariants.dll
 build/modules/A2FOTurrets.dll
 build/modules/A2FOWeaponDamageControls.dll
+build/modules/A2FOWreckage.dll
 build/Shaders/dx8/vertex/vs.nvv
 build/Shaders/dx8/vertex/vs_1.3.nvv
 build/Shaders/dx8/pixel/ps.nvv

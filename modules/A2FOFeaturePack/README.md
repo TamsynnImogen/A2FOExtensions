@@ -7,11 +7,17 @@ features behind the core's versioned semantic dispatchers:
 - Ctrl-click ten-slot queue fill;
 - Ctrl+Alt continuous production, using synchronized build orders and a
   save/load marker.
-- bounded ship-system upgrade tiers selected by Lua;
+- bounded ship-system upgrade tiers selected by `upgradePodMaximumTier` in
+  `RTS_CFG.h`;
 - `tier<Tier>BuildItem<Index>` parsing for upgrade stations;
 - automatic aspect-correct scaling of Fleet Operations' D3D9 intro, Armada's
   GDI movie window, and Armada's menu/campaign texture movie path to the live
   viewport.
+
+When setting `upgradePodMaximumTier` in a child mod, retain a complete copy of
+the parent's `RTS_CFG.h`. Fleet Operations shadows rather than merges this
+native file, so a minimal child file would remove all other parent settings and
+includes even though FeaturePack can read the new command.
 
 Movie scaling has no mod command. It activates with the feature pack and
 preserves each movie's aspect ratio while fitting and centring it in the
@@ -37,8 +43,8 @@ HybridBuild's implementation and validation notes now live with
 
 The core owns and signature-checks shared injected call sites, object lifetime
 tracking, and semantic dispatch. The feature pack registers only the behaviours
-listed above. This avoids tiny Lua files that merely toggle native mechanics
-while keeping the core itself policy-neutral.
+listed above and reads its upgrade-pod setting directly from the inherited
+extension roots.
 
 The module contains:
 

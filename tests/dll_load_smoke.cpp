@@ -56,6 +56,70 @@ int main() {
         return 7;
     }
 
+    HMODULE instant_action_settings = LoadLibraryA(
+        "modules\\A2FOInstantActionSettings.dll");
+    if (!instant_action_settings ||
+        !GetProcAddress(instant_action_settings, "A2FO_ModuleInit") ||
+        !GetProcAddress(instant_action_settings, "A2FO_ModuleShutdown")) {
+        return 8;
+    }
+
+    HMODULE build_tooltips = LoadLibraryA(
+        "modules\\A2FOBuildTooltips.dll");
+    if (!build_tooltips ||
+        !GetProcAddress(build_tooltips, "A2FO_ModuleInit") ||
+        !GetProcAddress(build_tooltips, "A2FO_ModuleShutdown")) {
+        return 9;
+    }
+
+    HMODULE resources = LoadLibraryA("modules\\A2FOResources.dll");
+    if (!resources || !GetProcAddress(resources, "A2FO_ModuleInit") ||
+        !GetProcAddress(resources, "A2FO_ModuleShutdown") ||
+        !GetProcAddress(resources, "A2FOResources_Get") ||
+        !GetProcAddress(resources, "A2FOResources_Set") ||
+        !GetProcAddress(resources, "A2FOResources_Add") ||
+        !GetProcAddress(resources, "A2FOResources_GetCost") ||
+        !GetProcAddress(
+            resources, "A2FOResources_GetPresentationText")) {
+        return 10;
+    }
+
+    HMODULE energy_systems = LoadLibraryA(
+        "modules\\A2FOEnergySystems.dll");
+    if (!energy_systems ||
+        !GetProcAddress(energy_systems, "A2FO_ModuleInit") ||
+        !GetProcAddress(energy_systems, "A2FO_ModuleShutdown") ||
+        !GetProcAddress(
+            energy_systems, "A2FOEnergySystems_GetPhotonTorpedoes") ||
+        !GetProcAddress(
+            energy_systems, "A2FOEnergySystems_GetQuantumTorpedoes") ||
+        !GetProcAddress(
+            energy_systems, "A2FOEnergySystems_SetPhotonTorpedoes") ||
+        !GetProcAddress(
+            energy_systems, "A2FOEnergySystems_SetQuantumTorpedoes")) {
+        return 11;
+    }
+
+    HMODULE directional_shields = LoadLibraryA(
+        "modules\\A2FODirectionalShields.dll");
+    if (!directional_shields ||
+        !GetProcAddress(directional_shields, "A2FO_ModuleInit") ||
+        !GetProcAddress(directional_shields, "A2FO_ModuleShutdown") ||
+        !GetProcAddress(directional_shields,
+                        "A2FODirectionalShields_ConnectDamageBridge") ||
+        !GetProcAddress(directional_shields,
+                        "A2FODirectionalShields_BeginDamage") ||
+        !GetProcAddress(directional_shields,
+                        "A2FODirectionalShields_EndDamage") ||
+        !GetProcAddress(directional_shields,
+                        "A2FODirectionalShields_IsEnabled") ||
+        !GetProcAddress(directional_shields,
+                        "A2FODirectionalShields_GetCurrent") ||
+        !GetProcAddress(directional_shields,
+                        "A2FODirectionalShields_GetMaximum")) {
+        return 12;
+    }
+
     // The proxy intentionally refuses to attach without the shipped renamed
     // Win2kDisableTaskSwitch.original.dll. Its exports are checked by
     // `make verify`; this standalone smoke test covers the self-contained core.

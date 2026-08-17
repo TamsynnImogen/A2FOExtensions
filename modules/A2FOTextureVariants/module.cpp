@@ -41,20 +41,17 @@ std::uintptr_t __cdecl a2fo_texture_variants_call_thiscall_4(
     std::uintptr_t argument4);
 
 void a2fo_texture_variants_render_swap_hook();
-void a2fo_texture_variants_race_parameter_db_hook();
 int __cdecl a2fo_texture_variants_borg_filename_hook(
     void* generated_filename, const char* texture_name) noexcept;
-void __cdecl a2fo_texture_variants_capture_race_suffix(
-    void* race, void* parameter_db) noexcept;
 void __cdecl a2fo_texture_variants_apply_render_textures(
     void* craft_instance, void* object_class,
     std::uint32_t use_borg_textures) noexcept;
-
-void* g_a2fo_texture_variants_parameter_db_destructor = nullptr;
 }
 
 void __attribute__((fastcall)) craft_instance_update_hook(
     void* craft_instance, void*, void* object) noexcept;
+void A2FO_CALL race_loaded_handler(
+    const A2FO_RaceLoadedEvent* event, void* user_data);
 
 namespace {
 
@@ -103,8 +100,6 @@ constexpr std::uintptr_t kPositionParticleAddRva = 0x000734c0;
 
 // FleetOpsHook.dll RVAs. The map offsets omit the PE .text section's 0x1000
 // RVA, so these constants are resolved from the verified runtime VAs.
-constexpr std::uintptr_t kRaceParameterDbDestructorCallRva = 0x0010b98b;
-constexpr std::uintptr_t kParameterDbDestructorRva = 0x001e2c28;
 constexpr std::uintptr_t kCraftInstanceUpdateCallbackRva = 0x001fb250;
 constexpr std::uintptr_t kFoCraftClassConstructorHandlerRva = 0x0010d6e4;
 
@@ -140,8 +135,6 @@ constexpr std::array<std::uint8_t, 5> kExpectedCraftRenderInstanceCall{
     0xe8, 0x93, 0xa6, 0x00, 0x00};
 constexpr std::array<std::uint8_t, 6> kExpectedCraftInstanceRender{
     0x55, 0x8b, 0xec, 0x51, 0x8b, 0x81};
-constexpr std::array<std::uint8_t, 5> kExpectedRaceParameterDbDestructorCall{
-    0xe8, 0x98, 0x72, 0x0d, 0x00};
 constexpr std::array<std::uint8_t, 7> kExpectedCraftInstanceUpdateCallback{
     0x55, 0x8b, 0xec, 0x51, 0x53, 0x56, 0x57};
 constexpr std::array<std::uint8_t, 7> kExpectedGenerateTextureFilename{
@@ -159,8 +152,6 @@ constexpr std::array<std::uint8_t, 7> kExpectedMeshSetTexture{
     0x55, 0x8b, 0xec, 0x83, 0xec, 0x10, 0x53};
 constexpr std::array<std::uint8_t, 6> kExpectedTextureFind{
     0x55, 0x8b, 0xec, 0x64, 0xa1, 0x00};
-constexpr std::array<std::uint8_t, 7> kExpectedParameterDbDestructor{
-    0x55, 0x8b, 0xec, 0x51, 0x89, 0x45, 0xfc};
 constexpr std::array<std::uint8_t, 9> kExpectedParameterDbGetProjectId{
     0x55, 0x8b, 0xec, 0x81, 0xec, 0x40, 0x01, 0x00, 0x00};
 constexpr std::array<std::uint8_t, 9> kExpectedExplosionClassFind{
@@ -184,6 +175,7 @@ using ExplosionClassFind = void* (__cdecl*)(const std::uint32_t*);
 struct Matrix34 {
     float values[12]{};
 };
+
 static_assert(sizeof(Matrix34) == 48,
               "Storm3D Matrix34 must contain twelve floats");
 
@@ -895,10 +887,6 @@ bool faction_signatures_supported() noexcept {
                           kExpectedMeshSetTexture) &&
         signature_matches(g_armada, kTextureFindRva,
                           kExpectedTextureFind) &&
-        signature_matches(g_fleet_ops, kRaceParameterDbDestructorCallRva,
-                          kExpectedRaceParameterDbDestructorCall) &&
-        signature_matches(g_fleet_ops, kParameterDbDestructorRva,
-                          kExpectedParameterDbDestructor) &&
         signature_matches(g_fleet_ops, kCraftInstanceUpdateCallbackRva,
                           kExpectedCraftInstanceUpdateCallback);
 }
@@ -946,18 +934,20 @@ bool install_faction_variants(const A2FO_ModuleApi* api) noexcept {
         return false;
     }
 
-    g_a2fo_texture_variants_parameter_db_destructor =
-        at(g_fleet_ops, kParameterDbDestructorRva);
-    g_capture_enabled = true;
-    if (!api->patch_call(
-            at(g_fleet_ops, kRaceParameterDbDestructorCallRva),
-            reinterpret_cast<void*>(
-                &a2fo_texture_variants_race_parameter_db_hook),
-            kExpectedRaceParameterDbDestructorCall.data(),
-            kExpectedRaceParameterDbDestructorCall.size())) {
-        g_capture_enabled = false;
+    if (!A2FO_MODULE_API_HAS(api, register_race_loaded_handler) ||
+        (api->capabilities & A2FO_CAP_RACE_LOADED) == 0 ||
+        !api->register_race_loaded_handler) {
         return false;
     }
+    const char* race_fields[] = {
+        kFactionNameCommand, kFactionSuffixCommand};
+    if (!api->register_race_loaded_handler(
+            kModuleName, race_fields,
+            static_cast<std::uint32_t>(std::size(race_fields)),
+            &race_loaded_handler, nullptr)) {
+        return false;
+    }
+    g_capture_enabled = true;
     if (!api->install_inline_hook(
             at(g_fleet_ops, kCraftInstanceUpdateCallbackRva),
             reinterpret_cast<void*>(&craft_instance_update_hook),
@@ -1437,7 +1427,8 @@ void add_scorch_marker(void* craft, void* object_class,
         if (!node || !visited.insert(node).second) continue;
         void* child = read_at<void*>(node, kNodeChildOffset, nullptr);
         void* sibling = read_at<void*>(node, kNodeSiblingOffset, nullptr);
-        if (child) pending.push_back(child); if (sibling) pending.push_back(sibling);
+        if (child) pending.push_back(child);
+        if (sibling) pending.push_back(sibling);
         std::string name;
         if (copy_normalized_node_name(node, &name) && name == wanted) { target = node; break; }
     }
@@ -1695,16 +1686,10 @@ extern "C" int __cdecl a2fo_texture_variants_borg_filename_hook(
     }
 }
 
-extern "C" void __cdecl a2fo_texture_variants_capture_race_suffix(
-    void* race, void* parameter_db) noexcept {
-    if (!g_runtime_alive || !g_capture_enabled || !race || !parameter_db) {
-        return;
-    }
-    try {
-        std::string raw_name;
+void apply_race_rendering_policy(
+    void* race, bool name_found, const std::string& raw_name,
+    bool suffix_found, const std::string& raw_suffix) {
         std::string node_name;
-        const bool name_found = parameter_db_string(
-            parameter_db, kFactionNameCommand, &raw_name);
         if (name_found &&
             normalize_faction_node_name(raw_name, &node_name)) {
             set_race_node_name(race, node_name);
@@ -1726,9 +1711,7 @@ extern "C" void __cdecl a2fo_texture_variants_capture_race_suffix(
             }
         }
 
-        std::string raw_suffix;
-        if (!parameter_db_string(
-                parameter_db, kFactionSuffixCommand, &raw_suffix)) {
+        if (!suffix_found) {
             g_race_suffixes.erase(race);
             return;
         }
@@ -1755,6 +1738,44 @@ extern "C" void __cdecl a2fo_texture_variants_capture_race_suffix(
                       "Registered factionTextureSuffix '%s' on Race %p",
                       suffix.c_str(), race);
         log_line(message);
+}
+
+bool race_event_field(const A2FO_OdfFieldView* fields,
+                      std::uint32_t count, const char* name,
+                      std::string* value) {
+    if (!fields || !name || !value) return false;
+    const std::size_t name_size = std::strlen(name);
+    for (std::uint32_t index = 0; index < count; ++index) {
+        const A2FO_OdfFieldView& field = fields[index];
+        if (field.name.size != name_size || !field.name.data ||
+            _strnicmp(field.name.data, name, name_size) != 0 ||
+            (!field.value.data && field.value.size != 0)) {
+            continue;
+        }
+        value->assign(field.value.data ? field.value.data : "",
+                      field.value.size);
+        return true;
+    }
+    return false;
+}
+
+void A2FO_CALL race_loaded_handler(
+    const A2FO_RaceLoadedEvent* event, void*) {
+    if (!g_runtime_alive || !g_capture_enabled || !event ||
+        event->struct_size < sizeof(*event) || !event->race) {
+        return;
+    }
+    try {
+        std::string raw_name;
+        std::string raw_suffix;
+        const bool name_found = race_event_field(
+            event->odf_fields, event->odf_field_count,
+            kFactionNameCommand, &raw_name);
+        const bool suffix_found = race_event_field(
+            event->odf_fields, event->odf_field_count,
+            kFactionSuffixCommand, &raw_suffix);
+        apply_race_rendering_policy(
+            event->race, name_found, raw_name, suffix_found, raw_suffix);
     } catch (...) {
         log_line("Could not retain faction Race rendering policies");
     }

@@ -316,8 +316,8 @@ The complete volume is checked during target authorisation and again just
 before `Weapon::Trigger`. The second check prevents a shot if the owner or
 target moves across the boundary between those two engine stages.
 
-`A2FOTurrets.dll` owns the shared trigger hook used by this last check. It must
-be installed with `A2FOFireArcs.dll`. A linked hull turret is itself the weapon
+The core owns the shared trigger hook used by this last check, so FireArcs no
+longer depends on Turrets. A linked hull turret is itself the weapon
 owner, so its firing volume follows the turret's live yaw and pitch rather than
 the parent hull.
 

@@ -56,7 +56,6 @@ constexpr char kRtsConfigFileName[] = "RTS_CFG.h";
 constexpr std::streamoff kMaximumRtsConfigSize = 2 * 1024 * 1024;
 
 // ArmadaL.exe 1.1 / Fleet Operations Roots RVAs.
-constexpr std::uintptr_t kWeaponClassConstructorRva = 0x00264e30;
 constexpr std::uintptr_t kWeaponCanFireAtRva = 0x0026f8c0;
 constexpr std::uintptr_t kParameterDbGetFloatRva = 0x00134df0;
 constexpr std::uintptr_t kParameterDbGetStringRva = 0x00135350;
@@ -71,7 +70,6 @@ constexpr std::uintptr_t kStandardComponentIsMouseOverRva = 0x0010c140;
 
 // Fleet Operations detours both entries before extension modules load. The
 // new module chains only these exact supported handlers.
-constexpr std::uintptr_t kFoWeaponClassConstructorHandlerRva = 0x0010ef74;
 constexpr std::uintptr_t kFoWeaponCanFireAtHandlerRva = 0x001358ac;
 constexpr std::uintptr_t kFoShipSystemIconRenderRva = 0x001ed458;
 
@@ -87,10 +85,6 @@ constexpr std::size_t kCraftOnShipSystemIconOffset = 0x28;
 constexpr std::size_t kWeaponIndexOnShipSystemIconOffset = 0x30;
 constexpr std::size_t kHardpointOnWeaponListNodeOffset = 0x08;
 
-constexpr std::uint8_t kExpectedWeaponClassConstructor[] = {
-    0x55, 0x8b, 0xec, 0x6a, 0xff};
-constexpr std::uint8_t kExpectedFoWeaponClassConstructorHandler[] = {
-    0x55, 0x8b, 0xec, 0x83, 0xc4, 0xdc, 0x53};
 constexpr std::uint8_t kExpectedFoWeaponCanFireAtHandler[] = {
     0x55, 0x8b, 0xec, 0x83, 0xc4, 0xf4, 0x53};
 constexpr std::uint8_t kExpectedWeaponCanFireAt[] = {
@@ -132,12 +126,9 @@ bool g_ui_colour_reader_ready = false;
 bool g_ui_colours_loaded = false;
 void* g_ui_parameter_db = nullptr;
 ArcUiColours g_ui_colours{};
-bool g_chained_fo_weapon_class_constructor = false;
 bool g_chained_fo_weapon_can_fire_at = false;
-void* g_weapon_class_constructor_original = nullptr;
 void* g_weapon_can_fire_at_original = nullptr;
 void* g_ship_system_icon_render_original = nullptr;
-A2FO_InlineHook g_weapon_class_constructor_hook{};
 A2FO_InlineHook g_weapon_can_fire_at_hook{};
 A2FO_InlineHook g_ship_system_icon_render_hook{};
 std::unordered_map<void*, ArcConfig> g_class_arcs;
@@ -234,26 +225,6 @@ bool readable_range(const void* address, std::size_t size) noexcept {
     return start >= base && size <= information.RegionSize - (start - base);
 }
 
-bool writable_range(void* address, std::size_t size) noexcept {
-    if (!address || size == 0) return false;
-    MEMORY_BASIC_INFORMATION information{};
-    if (VirtualQuery(address, &information, sizeof(information)) == 0 ||
-        information.State != MEM_COMMIT ||
-        (information.Protect & (PAGE_NOACCESS | PAGE_GUARD)) != 0) {
-        return false;
-    }
-    const DWORD protection = information.Protect & 0xffu;
-    const bool writable = protection == PAGE_READWRITE ||
-        protection == PAGE_WRITECOPY ||
-        protection == PAGE_EXECUTE_READWRITE ||
-        protection == PAGE_EXECUTE_WRITECOPY;
-    if (!writable) return false;
-    const auto start = reinterpret_cast<std::uintptr_t>(address);
-    const auto base = reinterpret_cast<std::uintptr_t>(
-        information.BaseAddress);
-    return start >= base && size <= information.RegionSize - (start - base);
-}
-
 template <typename T>
 T read_at(const void* object, std::size_t offset,
           T fallback = T{}) noexcept {
@@ -262,6 +233,17 @@ T read_at(const void* object, std::size_t offset,
     if (!readable_range(address, sizeof(T))) return fallback;
     T value{};
     std::memcpy(&value, address, sizeof(value));
+    return value;
+}
+
+template <typename T>
+T read_live_at(const void* object, std::size_t offset,
+               T fallback = T{}) noexcept {
+    if (!object) return fallback;
+    T value{};
+    std::memcpy(&value,
+                static_cast<const std::uint8_t*>(object) + offset,
+                sizeof(value));
     return value;
 }
 
@@ -567,14 +549,10 @@ void register_class_arc(void* weapon_class,
     log_line(message);
 }
 
-std::uintptr_t __attribute__((fastcall)) weapon_class_constructor_hook(
-    void* self, void*, void* parent_class, void* parameter_db) noexcept {
-    const std::uintptr_t result = a2fo_fire_arc_call_thiscall_2(
-        g_weapon_class_constructor_original, self,
-        reinterpret_cast<std::uintptr_t>(parent_class),
-        reinterpret_cast<std::uintptr_t>(parameter_db));
-    register_class_arc(self, parameter_db);
-    return result;
+void A2FO_CALL weapon_class_loaded_handler(
+    const A2FO_WeaponClassLoadedEvent* event, void*) {
+    if (!event || event->struct_size < sizeof(*event)) return;
+    register_class_arc(event->weapon_class, event->parameter_db);
 }
 
 bool call_native_can_fire_at(void* weapon, void* firing_context,
@@ -591,7 +569,7 @@ const ArcConfig* configured_arc(void* weapon,
                                 void** weapon_class_output) noexcept {
     if (weapon_class_output) *weapon_class_output = nullptr;
     if (!g_runtime_ready || !weapon) return nullptr;
-    void* weapon_class = read_at<void*>(
+    void* weapon_class = read_live_at<void*>(
         weapon, kWeaponClassOnWeaponOffset, nullptr);
     if (weapon_class_output) *weapon_class_output = weapon_class;
     const auto policy = g_class_arcs.find(weapon_class);
@@ -780,10 +758,9 @@ public:
             ? static_cast<std::uint8_t*>(weapon_class) +
                   kRestrictFireArcOnWeaponClassOffset
             : nullptr;
-        if (!writable_range(address_, sizeof(*address_))) {
-            address_ = nullptr;
-            return;
-        }
+        // Configured WeaponClasses are process-lifetime engine objects and
+        // this scope is entered only from their live CanFireAt callback.
+        if (!address_) return;
         original_ = *address_;
         if (original_ == 0) {
             // Most custom weapons already leave the native restriction off.
@@ -824,8 +801,7 @@ bool evaluate_arc_policy(void* weapon, const void* target,
         ? static_cast<const std::uint8_t*>(target) +
               kPositionOnGameObjectOffset
         : nullptr;
-    if (!readable_range(owner_transform, sizeof(Matrix34)) ||
-        !readable_range(target_position_address, sizeof(float) * 3)) {
+    if (!owner_transform || !target_position_address) {
         return true;
     }
 
@@ -849,6 +825,31 @@ bool evaluate_custom_arc(void* weapon, const void* target,
     if (!policy) return true;
     if (configured) *configured = true;
     return evaluate_arc_policy(weapon, target, *policy);
+}
+
+bool allow_weapon_trigger(void* weapon, const void* target) noexcept {
+    bool configured = false;
+    const bool allowed = evaluate_custom_arc(
+        weapon, target, &configured);
+    if (!configured) return true;
+
+    volatile LONG* logged_result = allowed
+        ? &g_logged_first_trigger_allowed_target
+        : &g_logged_first_trigger_rejected_target;
+    if (InterlockedCompareExchange(logged_result, 1, 0) == 0) {
+        log_line(allowed
+            ? "Full 3D fire arc allowed its first weapon trigger"
+            : "Full 3D fire arc suppressed its first weapon trigger");
+    }
+    return allowed;
+}
+
+bool A2FO_CALL weapon_trigger_handler(
+    const A2FO_WeaponTriggerEvent* event, void*) {
+    if (!event || event->struct_size < sizeof(*event)) return false;
+    if (event->kind == A2FO_WEAPON_TRIGGER_COMMITTED) return true;
+    if (event->kind != A2FO_WEAPON_TRIGGER_PRECHECK) return false;
+    return allow_weapon_trigger(event->weapon, event->target);
 }
 
 bool __attribute__((fastcall)) weapon_can_fire_at_hook(
@@ -924,20 +925,6 @@ void* existing_detour_destination(const void* site,
     return nullptr;
 }
 
-bool supported_fleet_ops_weapon_class_detour(
-    void** destination, std::size_t* patch_length) noexcept {
-    void* resolved = existing_detour_destination(
-        at(g_armada, kWeaponClassConstructorRva), patch_length);
-    void* expected = at(g_fleet_ops,
-                        kFoWeaponClassConstructorHandlerRva);
-    const bool supported = resolved == expected &&
-        signature_matches(
-            g_fleet_ops, kFoWeaponClassConstructorHandlerRva,
-            kExpectedFoWeaponClassConstructorHandler);
-    if (destination) *destination = supported ? resolved : nullptr;
-    return supported;
-}
-
 bool supported_fleet_ops_weapon_can_fire_at_detour(
     void** destination, std::size_t* patch_length) noexcept {
     void* resolved = existing_detour_destination(
@@ -950,30 +937,6 @@ bool supported_fleet_ops_weapon_can_fire_at_detour(
             kExpectedFoWeaponCanFireAtHandler);
     if (destination) *destination = supported ? resolved : nullptr;
     return supported;
-}
-
-bool weapon_class_constructor_supported() noexcept {
-    if (signature_matches(
-            g_armada, kWeaponClassConstructorRva,
-            kExpectedWeaponClassConstructor)) {
-        return true;
-    }
-    void* destination = nullptr;
-    std::size_t patch_length = 0;
-    if (supported_fleet_ops_weapon_class_detour(
-            &destination, &patch_length)) {
-        return true;
-    }
-    char message[360]{};
-    std::snprintf(
-        message, sizeof(message),
-        "WeaponClass constructor has neither the stock prologue nor Fleet "
-        "Ops' supported detour (destination=%p, expected=%p)",
-        existing_detour_destination(
-            at(g_armada, kWeaponClassConstructorRva), nullptr),
-        at(g_fleet_ops, kFoWeaponClassConstructorHandlerRva));
-    log_line(message);
-    return false;
 }
 
 bool weapon_can_fire_at_supported() noexcept {
@@ -1001,8 +964,7 @@ bool weapon_can_fire_at_supported() noexcept {
 }
 
 bool preflight_signatures() noexcept {
-    bool supported = weapon_class_constructor_supported();
-    supported = weapon_can_fire_at_supported() && supported;
+    bool supported = weapon_can_fire_at_supported();
     g_ui_colour_reader_ready = signature_matches(
             g_armada, kParameterDbGetColorRva,
             kExpectedParameterDbGetColor) &&
@@ -1077,46 +1039,6 @@ bool install_ship_system_icon_render_hook(
     return g_ship_system_icon_render_original != nullptr;
 }
 
-bool install_weapon_class_constructor_hook(
-    const A2FO_ModuleApi* api) noexcept {
-    void* site = at(g_armada, kWeaponClassConstructorRva);
-    if (signature_matches(
-            g_armada, kWeaponClassConstructorRva,
-            kExpectedWeaponClassConstructor)) {
-        if (!api->install_inline_hook(
-                site,
-                reinterpret_cast<void*>(
-                    &weapon_class_constructor_hook),
-                sizeof(kExpectedWeaponClassConstructor),
-                kExpectedWeaponClassConstructor,
-                &g_weapon_class_constructor_hook)) {
-            return false;
-        }
-        g_weapon_class_constructor_original =
-            g_weapon_class_constructor_hook.gateway;
-        g_chained_fo_weapon_class_constructor = false;
-        return g_weapon_class_constructor_original != nullptr;
-    }
-
-    void* destination = nullptr;
-    std::size_t patch_length = 0;
-    if (!supported_fleet_ops_weapon_class_detour(
-            &destination, &patch_length) || patch_length > 6) {
-        return false;
-    }
-    std::uint8_t expected_detour[6]{};
-    std::memcpy(expected_detour, site, patch_length);
-    if (!api->patch_jump(
-            site,
-            reinterpret_cast<void*>(&weapon_class_constructor_hook),
-            expected_detour, patch_length)) {
-        return false;
-    }
-    g_weapon_class_constructor_original = destination;
-    g_chained_fo_weapon_class_constructor = true;
-    return true;
-}
-
 bool install_weapon_can_fire_at_hook(
     const A2FO_ModuleApi* api) noexcept {
     void* site = at(g_armada, kWeaponCanFireAtRva);
@@ -1171,7 +1093,6 @@ bool install_runtime_hooks(const A2FO_ModuleApi* api) noexcept {
     // pass-through rather than exposing a partial visual/runtime feature.
     bool installed = install_ship_system_icon_render_hook(api);
     installed = install_weapon_can_fire_at_hook(api) && installed;
-    installed = install_weapon_class_constructor_hook(api) && installed;
     if (!installed) {
         log_line(
             "A fire-arc hook could not be installed; hooks fail closed");
@@ -1200,17 +1121,23 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
         return true;
     }
 
+    if (!A2FO_MODULE_API_HAS(api, register_weapon_class_loaded_handler) ||
+        !A2FO_MODULE_API_HAS(api, register_weapon_trigger_handler) ||
+        !api->register_weapon_class_loaded_handler ||
+        !api->register_weapon_trigger_handler ||
+        (api->capabilities & A2FO_CAP_WEAPON_CLASS_LOADED) == 0 ||
+        (api->capabilities & A2FO_CAP_WEAPON_TRIGGER_EVENTS) == 0 ||
+        !api->register_weapon_class_loaded_handler(
+            kModuleName, nullptr, 0, &weapon_class_loaded_handler, nullptr) ||
+        !api->register_weapon_trigger_handler(
+            kModuleName, &weapon_trigger_handler, nullptr)) {
+        log_line("Shared weapon event registration is unavailable");
+        return false;
+    }
+
     g_runtime_ready = install_runtime_hooks(api);
     if (g_runtime_ready) {
-        if (g_chained_fo_weapon_class_constructor &&
-            g_chained_fo_weapon_can_fire_at) {
-            log_line(
-                "3D fire-arc runtime initialized and chained through Fleet "
-                "Operations WeaponClass construction and target authorization; "
-                "weapon-icon hover visualization active");
-        } else if (g_chained_fo_weapon_class_constructor) {
-            log_line("3D fire-arc runtime initialized and chained through Fleet Operations WeaponClass construction");
-        } else if (g_chained_fo_weapon_can_fire_at) {
+        if (g_chained_fo_weapon_can_fire_at) {
             log_line("3D fire-arc runtime initialized and chained through Fleet Operations target authorization");
         } else {
             log_line("3D fire-arc runtime initialized");
@@ -1226,20 +1153,7 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
 extern "C" __declspec(dllexport)
 bool A2FO_CALL A2FOFireArcs_AllowWeaponTrigger(
     void* weapon, const void* target) {
-    bool configured = false;
-    const bool allowed = evaluate_custom_arc(
-        weapon, target, &configured);
-    if (!configured) return true;
-
-    volatile LONG* logged_result = allowed
-        ? &g_logged_first_trigger_allowed_target
-        : &g_logged_first_trigger_rejected_target;
-    if (InterlockedCompareExchange(logged_result, 1, 0) == 0) {
-        log_line(allowed
-            ? "Full 3D fire arc allowed its first weapon trigger"
-            : "Full 3D fire arc suppressed its first weapon trigger");
-    }
-    return allowed;
+    return allow_weapon_trigger(weapon, target);
 }
 
 extern "C" __declspec(dllexport)
