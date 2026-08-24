@@ -7,8 +7,11 @@
 #include "queue_enhancement.hpp"
 
 #include "hybrid_bridge_client.hpp"
+#include "refit_queue_bridge_api.hpp"
+#include "refit_queue_bridge_client.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
@@ -210,6 +213,70 @@ void* queued_target_class(void* producer, std::uint32_t queue_id) {
     return nullptr;
 }
 
+std::uint32_t current_queue_id(void* producer) {
+    return producer ? *reinterpret_cast<const std::uint32_t*>(
+        bytes(producer) + kCurrentQueueIdOffset) : 0;
+}
+
+std::uint32_t pushed_queue_id(
+    void* producer,
+    const std::array<std::uint32_t, kQueueCapacity>& previous_ids,
+    std::uint32_t previous_count) {
+    if (!producer) return 0;
+    void* item = *reinterpret_cast<void**>(
+        bytes(producer) + kQueueHeadOffset);
+    for (std::uint32_t visited = 0;
+         item && visited < kQueueCapacity; ++visited) {
+        const std::uint32_t id = *reinterpret_cast<const std::uint32_t*>(
+            bytes(item) + kQueueItemIdOffset);
+        bool existed = false;
+        for (std::uint32_t index = 0; index < previous_count; ++index) {
+            if (previous_ids[index] == id) {
+                existed = true;
+                break;
+            }
+        }
+        if (!existed) return id;
+        item = *reinterpret_cast<void**>(
+            bytes(item) + kQueueItemNextOffset);
+    }
+    return 0;
+}
+
+std::uint32_t push_refit_checked(
+    void* producer, void* target_class) noexcept {
+    if (!g_repeat_ready || !producer || !target_class ||
+        *reinterpret_cast<const std::uint32_t*>(
+            bytes(producer) + kQueueCountOffset) >= kQueueCapacity ||
+        hybrid_production_has_evolution_barrier(producer) ||
+        !dispatch_producer_event(
+            A2FO_PRODUCER_EVENT_ADMIT, producer, target_class)) {
+        return 0;
+    }
+
+    std::array<std::uint32_t, kQueueCapacity> previous_ids{};
+    std::uint32_t previous_count = 0;
+    void* item = *reinterpret_cast<void**>(
+        bytes(producer) + kQueueHeadOffset);
+    while (item && previous_count < kQueueCapacity) {
+        previous_ids[previous_count++] =
+            *reinterpret_cast<const std::uint32_t*>(
+                bytes(item) + kQueueItemIdOffset);
+        item = *reinterpret_cast<void**>(
+            bytes(item) + kQueueItemNextOffset);
+    }
+
+    const std::uint32_t before = *reinterpret_cast<const std::uint32_t*>(
+        bytes(producer) + kQueueCountOffset);
+    a2fo_call_thiscall_1(
+        at(g_fleet_ops, kFoProducerPushCheckedRva), producer,
+        reinterpret_cast<std::uintptr_t>(target_class));
+    const std::uint32_t after = *reinterpret_cast<const std::uint32_t*>(
+        bytes(producer) + kQueueCountOffset);
+    return after > before
+        ? pushed_queue_id(producer, previous_ids, previous_count) : 0;
+}
+
 bool charges_resources_when_queued(void* producer) {
     if (!producer) return false;
     void* object_class = *reinterpret_cast<void**>(
@@ -263,6 +330,19 @@ std::uint32_t fill_queue_checked(void* producer, void* target_class) {
 void __attribute__((fastcall)) game_object_dequeue_class_command_hook(
     void* game_object, void*, std::uint32_t command,
     void* target_class) {
+    if (command == A2FO_REFIT_CLASS_COMMAND) {
+        if (!consume_refit_synchronized_command(
+                game_object, target_class)) {
+            log_message("Synchronized refit request rejected");
+        }
+        return;
+    }
+    if (command == A2FO_REFIT_CANCEL_CLASS_COMMAND) {
+        if (!cancel_refit_synchronized_command(game_object)) {
+            log_message("Synchronized refit cancellation rejected");
+        }
+        return;
+    }
     const bool fill = command == kQueueFillMarkerCommand;
     const bool continuous = command == kContinuousMarkerCommand;
     if (!fill && !continuous) {
@@ -320,7 +400,7 @@ void try_refill(void* producer) {
         }
         LeaveCriticalSection(&g_queue_lock);
     }
-    if (!target_class) return;
+    if (!target_class || refit_has_waiting_job(producer)) return;
 
     if (hybrid_production_has_evolution_barrier(producer)) {
         stop_continuous(producer);
@@ -492,7 +572,9 @@ void __attribute__((fastcall)) producer_command_push_hook(
 
 std::uintptr_t __attribute__((fastcall)) producer_finish_hook(
     void* producer, void*) {
-    void* target_class = queue_head_target_class(producer);
+    void* target_class = current_build_target_class(producer);
+    if (!target_class) target_class = queue_head_target_class(producer);
+    const std::uint32_t queue_id = current_queue_id(producer);
     const bool use_native_completion = !producer || !target_class ||
         dispatch_producer_event(
             A2FO_PRODUCER_EVENT_FINISHING, producer, target_class);
@@ -502,6 +584,9 @@ std::uintptr_t __attribute__((fastcall)) producer_finish_hook(
     if (producer && target_class) {
         dispatch_producer_event(
             A2FO_PRODUCER_EVENT_FINISHED, producer, target_class);
+        notify_refit_job_finished(
+            producer, queue_id, target_class,
+            reinterpret_cast<void*>(result));
     }
     try_refill(producer);
     return result;
@@ -510,9 +595,16 @@ std::uintptr_t __attribute__((fastcall)) producer_finish_hook(
 std::uintptr_t __attribute__((fastcall)) producer_cancel_hook(
     void* producer, void*) {
     stop_continuous(producer);
-    if (void* target_class = current_build_target_class(producer)) {
+    const std::uint32_t queue_id = current_queue_id(producer);
+    void* target_class = current_build_target_class(producer);
+    if (target_class) {
         dispatch_producer_event(
             A2FO_PRODUCER_EVENT_CANCELLED, producer, target_class);
+    }
+    if (producer && queue_id != 0) {
+        notify_refit_job_removed(
+            producer, queue_id, target_class,
+            A2FO_REFIT_QUEUE_CANCELLED);
     }
     return a2fo_call_thiscall_0(g_fo_cancel_hook.gateway, producer);
 }
@@ -524,12 +616,23 @@ void __attribute__((fastcall)) producer_act_delete_hook(
         ? *reinterpret_cast<std::uint32_t*>(
               bytes(producer) + kCurrentQueueIdOffset)
         : 0;
+    void* removed_class = queued_target_class(producer, queue_id);
+    if (!removed_class && queue_id == current_id) {
+        removed_class = current_build_target_class(producer);
+    }
     if (queue_id != current_id &&
         charges_resources_when_queued(producer)) {
-        if (void* target_class = queued_target_class(producer, queue_id)) {
+        if (void* target_class = removed_class) {
             dispatch_producer_event(
                 A2FO_PRODUCER_EVENT_DELETED, producer, target_class);
         }
+    }
+    // queue_id is the authoritative refit sidecar key. Notify even when the
+    // native item/class lookup is transiently empty during active deletion.
+    if (producer && queue_id != 0) {
+        notify_refit_job_removed(
+            producer, queue_id, removed_class,
+            A2FO_REFIT_QUEUE_DELETED);
     }
     a2fo_call_thiscall_1(g_fo_act_delete_hook.gateway, producer, queue_id);
     discard_hybrid_construct_placement(producer, queue_id);
@@ -537,25 +640,52 @@ void __attribute__((fastcall)) producer_act_delete_hook(
 
 void __attribute__((fastcall)) producer_clear_hook(void* producer, void*) {
     stop_continuous(producer);
-    if (charges_resources_when_queued(producer)) {
-        void* item = producer ? *reinterpret_cast<void**>(
-            bytes(producer) + kQueueHeadOffset) : nullptr;
-        while (item) {
-            void* target_class = *reinterpret_cast<void**>(item);
-            if (target_class) {
+    const bool charge_at_queue = charges_resources_when_queued(producer);
+    const std::uint32_t active_id = current_queue_id(producer);
+    bool active_notified = false;
+    void* item = producer ? *reinterpret_cast<void**>(
+        bytes(producer) + kQueueHeadOffset) : nullptr;
+    while (item) {
+        void* target_class = *reinterpret_cast<void**>(item);
+        const std::uint32_t queue_id =
+            *reinterpret_cast<const std::uint32_t*>(
+                bytes(item) + kQueueItemIdOffset);
+        if (target_class) {
+            if (charge_at_queue) {
                 dispatch_producer_event(
                     A2FO_PRODUCER_EVENT_CLEARED,
                     producer, target_class);
             }
-            item = *reinterpret_cast<void**>(
-                bytes(item) + kQueueItemNextOffset);
+            notify_refit_job_removed(
+                producer, queue_id, target_class,
+                A2FO_REFIT_QUEUE_CLEARED);
+            if (queue_id == active_id) active_notified = true;
         }
-    } else if (void* target_class =
-                   current_build_target_class(producer)) {
+        item = *reinterpret_cast<void**>(
+            bytes(item) + kQueueItemNextOffset);
+    }
+    if (!charge_at_queue) {
         // Fleet Operations' non-queue-charge branch refunds only the active
         // class directly; it does not route through its Cancel callback.
-        dispatch_producer_event(
-            A2FO_PRODUCER_EVENT_CLEARED, producer, target_class);
+        if (void* target_class = current_build_target_class(producer)) {
+            dispatch_producer_event(
+                A2FO_PRODUCER_EVENT_CLEARED, producer, target_class);
+            if (!active_notified) {
+                notify_refit_job_removed(
+                    producer, active_id, target_class,
+                    A2FO_REFIT_QUEUE_CLEARED);
+                active_notified = true;
+            }
+        }
+    }
+    if (producer && active_id != 0 && !active_notified) {
+        // The active target pointer can be cleared before Clear reaches this
+        // hook. Preserve the queue-ID removal notification so optional refit
+        // state (including its collision restore) cannot be orphaned.
+        notify_refit_job_removed(
+            producer, active_id,
+            current_build_target_class(producer),
+            A2FO_REFIT_QUEUE_CLEARED);
     }
     a2fo_call_thiscall_0(g_fo_clear_hook.gateway, producer);
     clear_hybrid_construct_placements(producer);
@@ -592,6 +722,9 @@ std::uintptr_t __attribute__((fastcall)) producer_dtor_hook(
     if (producer) {
         dispatch_producer_event(
             A2FO_PRODUCER_EVENT_DESTROYING, producer, nullptr);
+        notify_refit_job_removed(
+            producer, 0, nullptr,
+            A2FO_REFIT_QUEUE_PRODUCER_DESTROYED);
     }
     stop_continuous(producer);
     return a2fo_call_thiscall_0(g_producer_dtor_hook.gateway, producer);
@@ -850,6 +983,12 @@ bool initialize_queue_enhancements(const A2FO_ModuleApi* api,
                     "synchronized orders and save markers");
     }
     return true;
+}
+
+extern "C" __declspec(dllexport)
+std::uint32_t __cdecl A2FO_ProducerPushRefit(
+    void* producer, void* target_class) {
+    return push_refit_checked(producer, target_class);
 }
 
 }  // namespace a2fo

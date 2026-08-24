@@ -21,6 +21,15 @@ StorePolicy normalize_policy(StorePolicy policy) noexcept {
     return policy;
 }
 
+bool store_enabled(const StorePolicy& policy) noexcept {
+    return std::isfinite(policy.maximum) && policy.maximum > 0.0f;
+}
+
+bool requires_resupply(const StorePolicy& policy) noexcept {
+    return store_enabled(policy) &&
+        policy.mode == RechargeMode::resupply_only;
+}
+
 float clamp_amount(float amount, const StorePolicy& unnormalized) noexcept {
     const StorePolicy policy = normalize_policy(unnormalized);
     if (!std::isfinite(amount)) return 0.0f;

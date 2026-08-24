@@ -10,6 +10,8 @@ features behind the core's versioned semantic dispatchers:
 - bounded ship-system upgrade tiers selected by `upgradePodMaximumTier` in
   `RTS_CFG.h`;
 - `tier<Tier>BuildItem<Index>` parsing for upgrade stations;
+- `moduleXPseudoTechnology` gates in BuildYard configuration ODFs, checked
+  alongside the native `moduleXRequiredTechnology` field;
 - automatic aspect-correct scaling of Fleet Operations' D3D9 intro, Armada's
   GDI movie window, and Armada's menu/campaign texture movie path to the live
   viewport.
@@ -58,6 +60,20 @@ The module contains:
 The Armada 1-specific `wingman -> craft` alias is owned by the optional
 `A1Compat.dll` packaged with `STA1 Classic`; it is deliberately not global
 FeaturePack policy.
+
+BuildYard configuration files referenced through a vessel's native
+`moduleConf` command may add a fake technology-tree gate to any module:
+
+```cpp
+module0PseudoTechnology = "fed_module_chassis_gate.odf"
+```
+
+The named item is resolved as a normal project ID and evaluated through Fleet
+Operations' native recursive team technology-tree check. Put the fake item in
+the selected `.tt` file and give it the real prerequisites that should control
+the module. It is never constructed. If the module also declares
+`module0RequiredTechnology`, both entries must be available. If the pseudo
+command is absent, the BuildYard retains its exact native behavior.
 
 Winner selection is calculated from explicit active/parent mod priority,
 registered within-root overlay priority, primary-root precedence, and

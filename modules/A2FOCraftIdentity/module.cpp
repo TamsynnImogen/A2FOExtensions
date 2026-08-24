@@ -13,6 +13,7 @@
 #include "directional_shield_display_config.hpp"
 #include "directional_shield_fill.hpp"
 #include "identity_selection.hpp"
+#include "system_icon_state.hpp"
 
 #include <windows.h>
 #include <d3d8.h>
@@ -59,6 +60,10 @@ void a2fo_identity_fo_sprite_set_colour(
 void a2fo_identity_fo_sprite_draw_scaled_2d(
     void* function, void* sprite, const void* position,
     float display_width, float display_height);
+void a2fo_identity_system_icon_set_colour_bridge();
+void a2fo_identity_system_text_set_colour_bridge();
+void a2fo_identity_value_text_draw_bridge();
+void* a2fo_identity_value_text_draw_original = nullptr;
 }
 
 namespace {
@@ -116,7 +121,9 @@ constexpr std::size_t kMaximumIdentityLength = 512;
 // ArmadaL.exe 1.1 / Fleet Operations Roots RVAs.
 constexpr std::uintptr_t kCraftClassConstructorRva = 0x000bf090;
 constexpr std::uintptr_t kSelectedInfoUpdateRva = 0x000f2ff0;
+constexpr std::uintptr_t kSelectedBuilderInfoRenderRva = 0x000f3560;
 constexpr std::uintptr_t kSelectedInfoRenderRva = 0x000f3770;
+constexpr std::uintptr_t kSpriteSetColourRva = 0x0023a4d0;
 constexpr std::uintptr_t kGameObjectClassGetOdfNameRva = 0x000ce370;
 constexpr std::uintptr_t kParameterDbGetRectangleRva = 0x001358f0;
 constexpr std::uintptr_t kParameterDbGetColorRva = 0x00135ba0;
@@ -151,6 +158,12 @@ constexpr std::uintptr_t kWireframeIconVtableRva = 0x002b4f18;
 constexpr std::uintptr_t kStandardComponentUpdateRva = 0x0010be60;
 constexpr std::uintptr_t kStandardComponentTooltipRva = 0x0010c0c0;
 constexpr std::uintptr_t kStandardComponentVerboseTooltipRva = 0x0010c100;
+constexpr std::uintptr_t kSystemValueVtableRva = 0x002b4c88;
+constexpr std::uintptr_t kCrewNumTextVtableRva = 0x002b4b18;
+constexpr std::uintptr_t kHullTextVtableRva = 0x002b4b88;
+constexpr std::uintptr_t kShieldTextVtableRva = 0x002b4b50;
+constexpr std::uintptr_t kEnergyTextVtableRva = 0x002b4adc;
+constexpr std::uintptr_t kOfficerTextAndSpriteVtableRva = 0x002b4c50;
 
 // FleetOpsHook's Delphi wrappers around Armada's ST3D sprite methods. These
 // are presentation-only and validated independently from the selected-panel
@@ -222,6 +235,14 @@ constexpr std::array<const char*, 2> kAmmunitionIconPositionCommands{{
     "quantumTorpedoIconPos",
 }};
 
+constexpr std::array<const char*, 5> kSystemIconColourCommands{{
+    "systemIconHealthyColor",
+    "systemIconLowColor",
+    "systemIconCriticalColor",
+    "systemIconDisabledColor",
+    "systemIconDestroyedColor",
+}};
+
 constexpr std::array<const char*, 4> kDirectionalShieldTooltipKeys{{
     "GUI_SD_DIRSHIELD_FORWARD_TOOLTIP",
     "GUI_SD_DIRSHIELD_AFT_TOOLTIP",
@@ -270,6 +291,13 @@ constexpr std::size_t kEnhancementCurrentXpOffset = 0x10;
 constexpr std::size_t kEnhancementNextRankXpOffset = 0xb0;
 constexpr std::size_t kCurrentShieldsOffset = 0x1c8;
 constexpr std::size_t kMaximumShieldsOffset = 0x1cc;
+constexpr std::size_t kCraftSystemsOffset = 0x1e0;
+constexpr std::size_t kCraftSystemSize = 0x30;
+constexpr std::size_t kCraftSystemOperationalOffset = 0x00;
+constexpr std::size_t kCraftSystemForcedDisabledOffset = 0x01;
+constexpr std::size_t kCraftSystemMaximumHitpointsOffset = 0x04;
+constexpr std::size_t kCraftSystemCurrentHitpointsOffset = 0x18;
+constexpr std::size_t kCraftSystemDisableTimeOffset = 0x28;
 constexpr std::size_t kInfoDisplaySelectedCraftOffset = 0x1e8;
 // WireframeIcon is a compact StandardComponent. Its base occupies +0x00..27,
 // followed by the selected craft at +0x28; InfoDisplay stores it at +0xac.
@@ -277,7 +305,22 @@ constexpr std::size_t kInfoDisplaySelectedCraftOffset = 0x1e8;
 // throughout the stock wireframe rectangle where our four arcs are drawn.
 constexpr std::size_t kInfoDisplayWireframeOffset = 0xac;
 constexpr std::size_t kInfoDisplayCaptainTextOffset = 0xbc;
+constexpr std::size_t kInfoDisplayClassTextOffset = 0x90;
+constexpr std::size_t kInfoDisplayBuilderClassTextOffset = 0x100;
+constexpr std::size_t kInfoDisplayBuilderNameTextOffset = 0x104;
 constexpr std::size_t kTextComponentLiveRectangleOffset = 0x58;
+// Fleet Operations applies nameTextColor to these two GUIText instances in
+// its SelectionDisplay enhancement. Armada's older shipNameColor only reaches
+// the narrow mouse-over bar, so bridge it to both selected-name variants while
+// leaving the neighbouring class components at +0x90/+0x100 untouched.
+constexpr std::array<std::size_t, 2> kInfoDisplayNameTextOffsets{{
+    0x94, 0x104}};
+constexpr std::size_t kTextComponentColourOffset = 0x70;
+constexpr std::size_t kSystemIconCraftOffset = 0x28;
+constexpr std::size_t kSystemIconIndexOffset = 0x2c;
+constexpr std::size_t kSystemTextCraftOffset = 0x2c;
+constexpr std::size_t kSystemTextIndexOffset = 0x12c;
+constexpr std::size_t kValuePercentageOffset = 0x108;
 
 constexpr std::uint8_t kExpectedCraftClassConstructor[] = {
     0x55, 0x8b, 0xec, 0x6a, 0xff};
@@ -286,6 +329,8 @@ constexpr std::uint8_t kExpectedSelectedInfoRender[] = {
 constexpr std::uint8_t kExpectedSelectedInfoUpdate[] = {
     0x55, 0x8b, 0xec, 0x83, 0xec, 0x08,
     0xa1, 0x38, 0x13, 0x76, 0x00};
+constexpr std::uint8_t kExpectedSpriteSetColour[] = {
+    0x55, 0x8b, 0xec, 0x8b, 0x45, 0x08, 0x83, 0xc1, 0x24};
 constexpr std::uint8_t kExpectedFoCraftClassConstructorHandler[] = {
     0x55, 0x8b, 0xec, 0x83, 0xc4, 0xf8, 0x53};
 constexpr std::uint8_t kExpectedParameterDbGetRectangle[] = {
@@ -310,6 +355,27 @@ constexpr std::uint8_t kExpectedSetTooltipText[] = {
     0x55, 0x8b, 0xec, 0x56, 0x8b, 0xf1, 0x8b, 0x46};
 constexpr std::uint8_t kExpectedStandardComponentUpdate[] = {
     0x55, 0x8b, 0xec, 0x83, 0xec, 0x08};
+
+struct CheckedCallSite {
+    std::uintptr_t rva;
+    std::array<std::uint8_t, 5> expected;
+};
+
+// SystemIcon::Render has five direct colour writes, and its repair/health
+// animation helper has one more. Redirect only these calls; every other ST3D
+// sprite in the game retains the untouched setter.
+constexpr std::array<CheckedCallSite, 6> kSystemIconColourCallSites{{
+    {0x000eed2e, {{0xe8, 0x9d, 0xb7, 0x14, 0x00}}},
+    {0x000eedd7, {{0xe8, 0xf4, 0xb6, 0x14, 0x00}}},
+    {0x000eee43, {{0xe8, 0x88, 0xb6, 0x14, 0x00}}},
+    {0x000eef00, {{0xe8, 0xcb, 0xb5, 0x14, 0x00}}},
+    {0x000eefd8, {{0xe8, 0xf3, 0xb4, 0x14, 0x00}}},
+    {0x000ef24e, {{0xe8, 0x7d, 0xb2, 0x14, 0x00}}},
+}};
+constexpr CheckedCallSite kSystemValueIconColourCallSite{
+    0x000ec748, {{0xe8, 0x83, 0xdd, 0x14, 0x00}}};
+constexpr CheckedCallSite kValueTextDrawCallSite{
+    0x0010c393, {{0xe8, 0xc8, 0xed, 0x00, 0x00}}};
 // TooltipManager::Show begins with three complete instructions occupying ten
 // bytes.  The inline-hook gateway copies this sequence verbatim, so the hook
 // length must include the full `push 0x0069feab` instruction.
@@ -477,6 +543,10 @@ static_assert(sizeof(Colour) == 12,
 struct UiConfiguration {
     void* parameter_db = nullptr;
     bool loaded = false;
+    bool single_name_rectangle_found = false;
+    bool single_class_rectangle_found = false;
+    bool builder_name_rectangle_found = false;
+    bool builder_class_rectangle_found = false;
     bool captain_rectangle_found = false;
     bool registry_rectangle_found = false;
     bool photon_rectangle_found = false;
@@ -486,6 +556,10 @@ struct UiConfiguration {
     bool directional_graphic_rectangle_found = false;
     bool shield_bar_rectangle_found = false;
     bool experience_bar_rectangle_found = false;
+    RawRectangle single_name_rectangle{};
+    RawRectangle single_class_rectangle{};
+    RawRectangle builder_name_rectangle{};
+    RawRectangle builder_class_rectangle{};
     RawRectangle captain_rectangle{};
     RawRectangle registry_rectangle{};
     RawRectangle photon_rectangle{};
@@ -495,6 +569,7 @@ struct UiConfiguration {
     RawRectangle directional_graphic_rectangle{};
     RawRectangle shield_bar_rectangle{};
     RawRectangle experience_bar_rectangle{};
+    bool shared_text_colour_found = false;
     bool ship_name_colour_found = false;
     bool captain_colour_found = false;
     bool registry_colour_found = false;
@@ -507,8 +582,12 @@ struct UiConfiguration {
     bool directional_shield_colour_found = false;
     bool directional_shield_low_colour_found = false;
     bool directional_shield_critical_colour_found = false;
+    std::array<bool, 5> system_icon_colour_found{};
+    bool special_energy_icon_colour_found = false;
+    bool officer_icon_colour_found = false;
     bool experience_bar_colour_found = false;
     bool experience_bar_background_colour_found = false;
+    Colour shared_text_colour{};
     Colour ship_name_colour{};
     Colour captain_colour{};
     Colour registry_colour{};
@@ -521,6 +600,9 @@ struct UiConfiguration {
     Colour directional_shield_colour{};
     Colour directional_shield_low_colour{};
     Colour directional_shield_critical_colour{};
+    std::array<Colour, 5> system_icon_colours{};
+    Colour special_energy_icon_colour{};
+    Colour officer_icon_colour{};
     Colour experience_bar_colour{};
     Colour experience_bar_background_colour{};
 };
@@ -553,6 +635,7 @@ void* g_craft_class_constructor_original = nullptr;
 void* g_wireframe_update_original = nullptr;
 A2FO_InlineHook g_craft_class_constructor_hook{};
 A2FO_InlineHook g_selected_info_update_hook{};
+A2FO_InlineHook g_selected_builder_info_render_hook{};
 A2FO_InlineHook g_selected_info_render_hook{};
 A2FO_InlineHook g_wireframe_tooltip_hook{};
 A2FO_InlineHook g_wireframe_verbose_tooltip_hook{};
@@ -571,6 +654,19 @@ a2fo::craft_identity::DirectionalShieldDisplayConfig
     g_directional_shield_display_config{};
 LONG g_assignment_report_count = 0;
 LONG g_draw_report_count = 0;
+LONG g_ship_name_colour_report_count = 0;
+LONG g_system_icon_colour_report_count = 0;
+LONG g_system_value_icon_colour_report_count = 0;
+LONG g_system_text_colour_report_count = 0;
+LONG g_crew_icon_colour_report_count = 0;
+LONG g_crew_text_colour_report_count = 0;
+LONG g_mouseover_status_icon_colour_report_count = 0;
+LONG g_mouseover_status_text_colour_report_count = 0;
+LONG g_special_energy_icon_colour_report_count = 0;
+LONG g_special_energy_text_colour_report_count = 0;
+LONG g_officer_icon_colour_report_count = 0;
+LONG g_officer_text_colour_report_count = 0;
+LONG g_builder_panel_anchor_report_count = 0;
 LONG g_ammunition_draw_report_count = 0;
 LONG g_ammunition_icon_failure_report_count = 0;
 LONG g_ammunition_bar_failure_report_count = 0;
@@ -1013,6 +1109,28 @@ bool readable_range(const void* address, std::size_t size) noexcept {
     const auto base = reinterpret_cast<std::uintptr_t>(
         information.BaseAddress);
     return start >= base && size <= information.RegionSize - (start - base);
+}
+
+bool executable_address_in_module(
+    HMODULE module, const void* address) noexcept {
+    if (!module || !address) return false;
+    MEMORY_BASIC_INFORMATION information{};
+    if (VirtualQuery(address, &information, sizeof(information)) !=
+            sizeof(information) ||
+        information.State != MEM_COMMIT ||
+        information.AllocationBase != module ||
+        (information.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0) {
+        return false;
+    }
+    switch (information.Protect & 0xffu) {
+        case PAGE_EXECUTE:
+        case PAGE_EXECUTE_READ:
+        case PAGE_EXECUTE_READWRITE:
+        case PAGE_EXECUTE_WRITECOPY:
+            return true;
+        default:
+            return false;
+    }
 }
 
 bool writable_range(void* address, std::size_t size) noexcept {
@@ -1585,6 +1703,28 @@ void refresh_ui_configuration(void* parameter_db) noexcept {
     loaded.parameter_db = parameter_db;
     loaded.loaded = true;
     if (parameter_db) {
+        loaded.single_name_rectangle_found = read_ui_rectangle(
+            parameter_db, "infoSingleNameTextArea",
+            &loaded.single_name_rectangle);
+        loaded.single_class_rectangle_found = read_ui_rectangle(
+            parameter_db, "infoSingleClassTextArea",
+            &loaded.single_class_rectangle);
+        loaded.builder_name_rectangle_found = read_ui_rectangle(
+            parameter_db, "infoBuildName",
+            &loaded.builder_name_rectangle);
+        if (!loaded.builder_name_rectangle_found) {
+            loaded.builder_name_rectangle_found = read_ui_rectangle(
+                parameter_db, "infoBuildNameTextArea",
+                &loaded.builder_name_rectangle);
+        }
+        loaded.builder_class_rectangle_found = read_ui_rectangle(
+            parameter_db, "infoBuildClass",
+            &loaded.builder_class_rectangle);
+        if (!loaded.builder_class_rectangle_found) {
+            loaded.builder_class_rectangle_found = read_ui_rectangle(
+                parameter_db, "infoBuildClassTextArea",
+                &loaded.builder_class_rectangle);
+        }
         loaded.captain_rectangle_found = read_ui_rectangle(
             parameter_db, "infoSingleCaptainTextArea",
             &loaded.captain_rectangle);
@@ -1623,12 +1763,10 @@ void refresh_ui_configuration(void* parameter_db) noexcept {
         loaded.experience_bar_rectangle_found = read_ui_rectangle(
             parameter_db, "infoSingleExperienceBarArea",
             &loaded.experience_bar_rectangle);
+        loaded.shared_text_colour_found = read_ui_colour(
+            parameter_db, "infoTextColor", &loaded.shared_text_colour);
         loaded.ship_name_colour_found = read_ui_colour(
-            parameter_db, "infoTextColor", &loaded.ship_name_colour);
-        if (!loaded.ship_name_colour_found) {
-            loaded.ship_name_colour_found = read_ui_colour(
-                parameter_db, "shipNameColor", &loaded.ship_name_colour);
-        }
+            parameter_db, "shipNameColor", &loaded.ship_name_colour);
         loaded.captain_colour_found = read_ui_colour(
             parameter_db, "captainNameColor", &loaded.captain_colour);
         loaded.registry_colour_found = read_ui_colour(
@@ -1658,6 +1796,18 @@ void refresh_ui_configuration(void* parameter_db) noexcept {
         loaded.directional_shield_critical_colour_found = read_ui_colour(
             parameter_db, "directionalShieldCriticalColor",
             &loaded.directional_shield_critical_colour);
+        for (std::size_t index = 0;
+             index < kSystemIconColourCommands.size(); ++index) {
+            loaded.system_icon_colour_found[index] = read_ui_colour(
+                parameter_db, kSystemIconColourCommands[index],
+                &loaded.system_icon_colours[index]);
+        }
+        loaded.special_energy_icon_colour_found = read_ui_colour(
+            parameter_db, "specialEnergyIconColor",
+            &loaded.special_energy_icon_colour);
+        loaded.officer_icon_colour_found = read_ui_colour(
+            parameter_db, "officerIconColor",
+            &loaded.officer_icon_colour);
         loaded.experience_bar_colour_found = read_ui_colour(
             parameter_db, "experienceBarColor",
             &loaded.experience_bar_colour);
@@ -1667,12 +1817,27 @@ void refresh_ui_configuration(void* parameter_db) noexcept {
     }
     g_ui_configuration = loaded;
 
-    char message[384]{};
+    const std::size_t system_icon_colour_count = static_cast<std::size_t>(
+        std::count(loaded.system_icon_colour_found.begin(),
+                   loaded.system_icon_colour_found.end(), true));
+    char system_icon_colours[24]{};
+    std::snprintf(system_icon_colours, sizeof(system_icon_colours),
+                  "%u/5",
+                  static_cast<unsigned>(system_icon_colour_count));
+    char message[560]{};
     std::snprintf(
         message, sizeof(message),
-        "Selected UI: captain=%s, registry=%s, Photon=%s, Quantum=%s, directional shields=%s/%s, shield graphic=%s, status bars=%s/%s",
+        "Selected UI: anchors=%s/%s, captain=%s, registry=%s, ship-name colour=%s, system-icon colours=%s, special-energy colour=%s, officer colour=%s, Photon=%s, Quantum=%s, directional shields=%s/%s, shield graphic=%s, status bars=%s/%s",
+        (loaded.single_name_rectangle_found ||
+         loaded.single_class_rectangle_found) ? "single" : "no-single",
+        (loaded.builder_name_rectangle_found ||
+         loaded.builder_class_rectangle_found) ? "builder" : "no-builder",
         loaded.captain_rectangle_found ? "configured" : "absent",
         loaded.registry_rectangle_found ? "configured" : "absent",
+        loaded.ship_name_colour_found ? "configured" : "native",
+        system_icon_colours,
+        loaded.special_energy_icon_colour_found ? "configured" : "native",
+        loaded.officer_icon_colour_found ? "configured" : "native",
         loaded.photon_rectangle_found ? "configured" : "automatic",
         loaded.quantum_rectangle_found ? "configured" : "automatic",
         loaded.directional_forward_aft_rectangle_found
@@ -1684,6 +1849,268 @@ void refresh_ui_configuration(void* parameter_db) noexcept {
         loaded.shield_bar_rectangle_found ? "shield" : "no-shield",
         loaded.experience_bar_rectangle_found ? "experience" : "no-experience");
     log_line(message);
+}
+
+bool configured_system_colour(
+    void* craft, std::int32_t system_index, Colour* output) noexcept {
+    if (!craft || !output) return false;
+    if (system_index < 0 || system_index >= 5) return false;
+
+    void* systems = read_at<void*>(craft, kCraftSystemsOffset, nullptr);
+    if (!systems) return false;
+    const auto* system = static_cast<const std::uint8_t*>(systems) +
+        static_cast<std::size_t>(system_index) * kCraftSystemSize;
+
+    a2fo::craft_identity::SystemIconState state{};
+    if (!a2fo::craft_identity::classify_system_icon_state(
+            read_at<std::uint8_t>(
+                system, kCraftSystemOperationalOffset, 1) != 0,
+            read_at<std::uint8_t>(
+                system, kCraftSystemForcedDisabledOffset, 0) != 0,
+            read_at<std::int32_t>(
+                system, kCraftSystemMaximumHitpointsOffset, 0),
+            read_at<double>(
+                system, kCraftSystemCurrentHitpointsOffset, 0.0),
+            read_at<float>(system, kCraftSystemDisableTimeOffset, 0.0f),
+            &state)) {
+        return false;
+    }
+
+    const std::size_t state_index = static_cast<std::size_t>(state);
+    if (state_index >= g_ui_configuration.system_icon_colours.size() ||
+        !g_ui_configuration.system_icon_colour_found[state_index]) {
+        return false;
+    }
+    *output = g_ui_configuration.system_icon_colours[state_index];
+    return true;
+}
+
+bool configured_percentage_colour(void* component, Colour* output) noexcept {
+    if (!component || !output ||
+        !read_at<void*>(component, kSystemTextCraftOffset, nullptr)) {
+        return false;
+    }
+    const float percentage = read_at<float>(
+        component, kValuePercentageOffset,
+        std::numeric_limits<float>::quiet_NaN());
+    a2fo::craft_identity::SystemIconState state{};
+    if (!a2fo::craft_identity::classify_system_icon_state(
+            true, false, 100, static_cast<double>(percentage), 0.0f,
+            &state)) {
+        return false;
+    }
+    const std::size_t state_index = static_cast<std::size_t>(state);
+    if (state_index >= g_ui_configuration.system_icon_colours.size() ||
+        !g_ui_configuration.system_icon_colour_found[state_index]) {
+        return false;
+    }
+    *output = g_ui_configuration.system_icon_colours[state_index];
+    return true;
+}
+
+enum class ValueComponentKind {
+    unrelated,
+    system,
+    crew,
+    mouseover_status,
+    special_energy,
+    officer,
+};
+
+ValueComponentKind value_component_kind(const void* component) noexcept {
+    const void* vtable = read_at<const void*>(component, 0, nullptr);
+    if (vtable == at(g_armada, kSystemValueVtableRva)) {
+        return ValueComponentKind::system;
+    }
+    if (vtable == at(g_armada, kCrewNumTextVtableRva)) {
+        return ValueComponentKind::crew;
+    }
+    if (vtable == at(g_armada, kHullTextVtableRva) ||
+        vtable == at(g_armada, kShieldTextVtableRva)) {
+        return ValueComponentKind::mouseover_status;
+    }
+    if (vtable == at(g_armada, kEnergyTextVtableRva)) {
+        return ValueComponentKind::special_energy;
+    }
+    if (vtable == at(g_armada, kOfficerTextAndSpriteVtableRva)) {
+        return ValueComponentKind::officer;
+    }
+    return ValueComponentKind::unrelated;
+}
+
+bool configured_value_colour(
+    void* component, Colour* output,
+    ValueComponentKind* kind_output = nullptr) noexcept {
+    const ValueComponentKind kind = value_component_kind(component);
+    if (kind_output) *kind_output = kind;
+    if (kind == ValueComponentKind::system) {
+        return configured_system_colour(
+            read_at<void*>(component, kSystemTextCraftOffset, nullptr),
+            read_at<std::int32_t>(
+                component, kSystemTextIndexOffset, -1),
+            output);
+    }
+    if (kind == ValueComponentKind::crew ||
+        kind == ValueComponentKind::mouseover_status) {
+        return configured_percentage_colour(component, output);
+    }
+    if (kind == ValueComponentKind::special_energy &&
+        g_ui_configuration.special_energy_icon_colour_found && output) {
+        *output = g_ui_configuration.special_energy_icon_colour;
+        return true;
+    }
+    if (kind == ValueComponentKind::officer &&
+        g_ui_configuration.officer_icon_colour_found && output) {
+        *output = g_ui_configuration.officer_icon_colour;
+        return true;
+    }
+    return false;
+}
+
+void system_colour_set_colour_from_context(
+    void* sprite, void* craft, std::int32_t system_index,
+    const Colour* native_colour, LONG* report_count,
+    const char* report_message) noexcept {
+    const Colour* applied_colour = native_colour;
+    Colour configured_colour{};
+    Colour tinted{};
+    bool applied = false;
+    if (g_runtime_ready && craft) {
+        void* parameter_db = gui_parameter_db();
+        if (!g_ui_configuration.loaded ||
+            g_ui_configuration.parameter_db != parameter_db) {
+            refresh_ui_configuration(parameter_db);
+        }
+        applied = configured_system_colour(
+            craft, system_index, &configured_colour);
+    }
+    if (applied && native_colour &&
+        readable_range(native_colour, sizeof(*native_colour))) {
+        Colour native{};
+        std::memcpy(&native, native_colour, sizeof(native));
+        const auto result = a2fo::craft_identity::tint_system_icon_colour(
+            {{native.red, native.green, native.blue}},
+            {{configured_colour.red, configured_colour.green,
+              configured_colour.blue}});
+        tinted = Colour{result[0], result[1], result[2]};
+        applied_colour = &tinted;
+    }
+    a2fo_identity_call_thiscall_1(
+        at(g_armada, kSpriteSetColourRva), sprite,
+        reinterpret_cast<std::uintptr_t>(applied_colour));
+    if (applied && report_count && report_message &&
+        InterlockedCompareExchange(report_count, 1, 0) == 0) {
+        log_line(report_message);
+    }
+}
+
+void system_icon_set_colour_from_context(
+    void* sprite, void* icon, const Colour* native_colour) noexcept {
+    system_colour_set_colour_from_context(
+        sprite,
+        read_at<void*>(icon, kSystemIconCraftOffset, nullptr),
+        read_at<std::int32_t>(icon, kSystemIconIndexOffset, -1),
+        native_colour, &g_system_icon_colour_report_count,
+        "Configured live-health colours applied to the native selected-panel system icons");
+}
+
+void system_text_set_colour_from_context(
+    void* sprite, void* text, const Colour* native_colour) noexcept {
+    const Colour* applied_colour = native_colour;
+    Colour configured_colour{};
+    Colour tinted{};
+    ValueComponentKind kind = ValueComponentKind::unrelated;
+    bool applied = false;
+    if (g_runtime_ready && text) {
+        void* parameter_db = gui_parameter_db();
+        if (!g_ui_configuration.loaded ||
+            g_ui_configuration.parameter_db != parameter_db) {
+            refresh_ui_configuration(parameter_db);
+        }
+        applied = configured_value_colour(
+            text, &configured_colour, &kind);
+    }
+    if (applied && native_colour &&
+        readable_range(native_colour, sizeof(*native_colour))) {
+        Colour native{};
+        std::memcpy(&native, native_colour, sizeof(native));
+        const auto result = a2fo::craft_identity::tint_system_icon_colour(
+            {{native.red, native.green, native.blue}},
+            {{configured_colour.red, configured_colour.green,
+              configured_colour.blue}});
+        tinted = Colour{result[0], result[1], result[2]};
+        applied_colour = &tinted;
+    }
+    a2fo_identity_call_thiscall_1(
+        at(g_armada, kSpriteSetColourRva), sprite,
+        reinterpret_cast<std::uintptr_t>(applied_colour));
+    LONG* report_count = &g_system_value_icon_colour_report_count;
+    const char* report_message =
+        "Configured live-health colours applied to the native selected-panel system value icons";
+    if (kind == ValueComponentKind::crew) {
+        report_count = &g_crew_icon_colour_report_count;
+        report_message =
+            "Configured live-health colour applied to the native crew icon";
+    } else if (kind == ValueComponentKind::mouseover_status) {
+        report_count = &g_mouseover_status_icon_colour_report_count;
+        report_message =
+            "Configured live-health colours applied to native mouse-over hull/shield icons";
+    } else if (kind == ValueComponentKind::special_energy) {
+        report_count = &g_special_energy_icon_colour_report_count;
+        report_message =
+            "specialEnergyIconColor applied to the native special-energy icon";
+    } else if (kind == ValueComponentKind::officer) {
+        report_count = &g_officer_icon_colour_report_count;
+        report_message =
+            "officerIconColor applied to the native officer icon";
+    }
+    if (applied && InterlockedCompareExchange(
+            report_count, 1, 0) == 0) {
+        log_line(report_message);
+    }
+}
+
+void value_text_colour_from_context(
+    void* component, void* text_record) noexcept {
+    if (!g_runtime_ready || !component ||
+        !writable_range(text_record, sizeof(Colour))) {
+        return;
+    }
+    void* parameter_db = gui_parameter_db();
+    if (!g_ui_configuration.loaded ||
+        g_ui_configuration.parameter_db != parameter_db) {
+        refresh_ui_configuration(parameter_db);
+    }
+    Colour configured_colour{};
+    ValueComponentKind kind = ValueComponentKind::unrelated;
+    if (!configured_value_colour(
+            component, &configured_colour, &kind)) {
+        return;
+    }
+    std::memcpy(text_record, &configured_colour, sizeof(configured_colour));
+    LONG* report_count = &g_system_text_colour_report_count;
+    const char* report_message =
+        "Configured live-health colours applied to the native selected-panel system value text";
+    if (kind == ValueComponentKind::crew) {
+        report_count = &g_crew_text_colour_report_count;
+        report_message =
+            "Configured live-health colour applied to the native crew value text";
+    } else if (kind == ValueComponentKind::mouseover_status) {
+        report_count = &g_mouseover_status_text_colour_report_count;
+        report_message =
+            "Configured live-health colours applied to native mouse-over hull/shield value text";
+    } else if (kind == ValueComponentKind::special_energy) {
+        report_count = &g_special_energy_text_colour_report_count;
+        report_message =
+            "specialEnergyIconColor applied to the native special-energy value text";
+    } else if (kind == ValueComponentKind::officer) {
+        report_count = &g_officer_text_colour_report_count;
+        report_message =
+            "officerIconColor applied to the native officer value text";
+    }
+    if (InterlockedCompareExchange(report_count, 1, 0) == 0) {
+        log_line(report_message);
+    }
 }
 
 bool usable_native_rectangle(const NativeRectangle& rectangle) noexcept {
@@ -1706,12 +2133,47 @@ NativeRectangle translated_rectangle(
 }
 
 Colour text_component_colour(const void* text_component) noexcept {
-    Colour colour = read_at<Colour>(text_component, 0x70, Colour{});
+    Colour colour = read_at<Colour>(
+        text_component, kTextComponentColourOffset, Colour{});
     if (!std::isfinite(colour.red) || !std::isfinite(colour.green) ||
         !std::isfinite(colour.blue)) {
         return Colour{};
     }
     return colour;
+}
+
+struct TextColourOverride {
+    void* address = nullptr;
+    Colour saved{};
+};
+
+TextColourOverride override_text_component_colour(
+    void* info_display, std::size_t component_offset,
+    const Colour& colour) noexcept {
+    TextColourOverride result{};
+    void* component = read_at<void*>(
+        info_display, component_offset, nullptr);
+    if (!component) return result;
+
+    void* address = static_cast<std::uint8_t*>(component) +
+        kTextComponentColourOffset;
+    if (!readable_range(address, sizeof(Colour)) ||
+        !writable_range(address, sizeof(Colour))) {
+        return result;
+    }
+    result.address = address;
+    std::memcpy(&result.saved, address, sizeof(result.saved));
+    std::memcpy(address, &colour, sizeof(colour));
+    return result;
+}
+
+void restore_text_component_colour(
+    const TextColourOverride& override) noexcept {
+    if (!override.address ||
+        !writable_range(override.address, sizeof(override.saved))) {
+        return;
+    }
+    std::memcpy(override.address, &override.saved, sizeof(override.saved));
 }
 
 bool draw_identity_text(const std::string& value,
@@ -2556,20 +3018,6 @@ bool directional_shield_sprite_cache_is_live(void* database) noexcept {
     return true;
 }
 
-void log_interface_sprite_probes(void* database) noexcept {
-    constexpr std::array<const char*, 4> names{{
-        "energy_amt", "fbattlew1", "fedpod1_s", "b_card_construct"}};
-    char message[256]{};
-    std::snprintf(
-        message, sizeof(message),
-        "Directional-shield interfaceDB probes: energy_amt=%s, fbattlew1=%s, fedpod1_s=%s, b_card_construct=%s",
-        find_interface_sprite(database, names[0]) ? "yes" : "no",
-        find_interface_sprite(database, names[1]) ? "yes" : "no",
-        find_interface_sprite(database, names[2]) ? "yes" : "no",
-        find_interface_sprite(database, names[3]) ? "yes" : "no");
-    log_line(message);
-}
-
 bool resolve_directional_shield_sprites() noexcept {
     if (!g_fleet_ops ||
         !readable_range(at(g_armada, kInterfaceSpriteDatabaseGetRva),
@@ -2655,7 +3103,6 @@ bool resolve_directional_shield_sprites() noexcept {
                     kDirectionalShieldSpriteNames[index], sprite,
                     frame_list, database);
                 log_line(message);
-                log_interface_sprite_probes(database);
             }
             g_directional_shield_sprite_retry_database = database;
             g_directional_shield_sprite_retry_after =
@@ -4343,12 +4790,117 @@ std::uintptr_t __attribute__((fastcall)) selected_info_update_hook(
 }
 
 void __attribute__((fastcall)) selected_info_render_hook(
-    void* info_display, void*) noexcept {
+    void* info_display, void*) noexcept;
+
+enum class SelectedPanelKind {
+    single,
+    builder,
+};
+
+struct SelectedPanelTextAnchor {
+    void* component = nullptr;
+    NativeRectangle captain_rectangle{};
+};
+
+SelectedPanelTextAnchor selected_panel_text_anchor(
+    void* info_display, SelectedPanelKind panel_kind) noexcept {
+    SelectedPanelTextAnchor anchor{};
+    if (!info_display) return anchor;
+
+    const auto try_component = [&anchor, info_display](
+            std::size_t component_offset, bool configured_rectangle_found,
+            const RawRectangle& configured_rectangle,
+            bool already_captain_aligned) noexcept {
+        void* component = read_at<void*>(
+            info_display, component_offset, nullptr);
+        if (!component) return false;
+        NativeRectangle live_rectangle = read_at<NativeRectangle>(
+            component, kTextComponentLiveRectangleOffset,
+            NativeRectangle{});
+        if (!usable_native_rectangle(live_rectangle)) return false;
+        if (!already_captain_aligned && configured_rectangle_found &&
+            g_ui_configuration.captain_rectangle_found) {
+            live_rectangle = translated_rectangle(
+                live_rectangle, configured_rectangle,
+                g_ui_configuration.captain_rectangle);
+        }
+        anchor.component = component;
+        anchor.captain_rectangle = live_rectangle;
+        return true;
+    };
+
+    if (panel_kind == SelectedPanelKind::builder) {
+        // Shipyards and other producers use InfoDisplay's separate tall-panel
+        // GUIText objects.  Rebase their live rectangle onto the configured
+        // single-panel captain row so all existing A2FO extension rectangles
+        // retain their exact configured coordinates.
+        if (try_component(
+                kInfoDisplayBuilderNameTextOffset,
+                g_ui_configuration.builder_name_rectangle_found,
+                g_ui_configuration.builder_name_rectangle, false) ||
+            try_component(
+                kInfoDisplayBuilderClassTextOffset,
+                g_ui_configuration.builder_class_rectangle_found,
+                g_ui_configuration.builder_class_rectangle, false)) {
+            return anchor;
+        }
+    } else {
+        if (try_component(
+                kInfoDisplayCaptainTextOffset, true,
+                g_ui_configuration.captain_rectangle, true) ||
+            try_component(
+                kInfoDisplayNameTextOffsets[0],
+                g_ui_configuration.single_name_rectangle_found,
+                g_ui_configuration.single_name_rectangle, false) ||
+            try_component(
+                kInfoDisplayClassTextOffset,
+                g_ui_configuration.single_class_rectangle_found,
+                g_ui_configuration.single_class_rectangle, false)) {
+            return anchor;
+        }
+    }
+    return {};
+}
+
+void render_selected_info_panel(
+    void* info_display, void* native_renderer,
+    SelectedPanelKind panel_kind) noexcept {
     g_directional_shield_tooltip = {};
     g_ammunition_tooltip = {};
     g_selected_status_tooltip = {};
-    a2fo_identity_call_thiscall_0(
-        g_selected_info_render_hook.gateway, info_display);
+
+    std::array<TextColourOverride, 2> ship_name_colour_overrides{};
+    if (g_runtime_ready && info_display) {
+        void* parameter_db = gui_parameter_db();
+        if (!g_ui_configuration.loaded ||
+            g_ui_configuration.parameter_db != parameter_db) {
+            refresh_ui_configuration(parameter_db);
+        }
+        if (g_ui_configuration.ship_name_colour_found) {
+            bool applied = false;
+            for (std::size_t index = 0;
+                 index < kInfoDisplayNameTextOffsets.size(); ++index) {
+                ship_name_colour_overrides[index] =
+                    override_text_component_colour(
+                        info_display, kInfoDisplayNameTextOffsets[index],
+                        g_ui_configuration.ship_name_colour);
+                applied = applied ||
+                    ship_name_colour_overrides[index].address != nullptr;
+            }
+            if (applied && InterlockedCompareExchange(
+                    &g_ship_name_colour_report_count, 1, 0) == 0) {
+                log_line(
+                    "shipNameColor applied to the native selected ship-name text components");
+            }
+        }
+    }
+    if (native_renderer) {
+        a2fo_identity_call_thiscall_0(native_renderer, info_display);
+    }
+    for (auto iterator = ship_name_colour_overrides.rbegin();
+         iterator != ship_name_colour_overrides.rend(); ++iterator) {
+        restore_text_component_colour(*iterator);
+    }
     if (!g_runtime_ready || !info_display) return;
 
     // The selected-info render pass resolves the one selected object into
@@ -4372,45 +4924,56 @@ void __attribute__((fastcall)) selected_info_render_hook(
         g_ui_configuration.parameter_db != parameter_db) {
         refresh_ui_configuration(parameter_db);
     }
-    const CraftIdentity* identity = ensure_craft_identity(craft);
 
-    void* captain_text = read_at<void*>(
-        info_display, kInfoDisplayCaptainTextOffset, nullptr);
-    if (!captain_text) {
+    const SelectedPanelTextAnchor anchor = selected_panel_text_anchor(
+        info_display, panel_kind);
+    if (!anchor.component ||
+        !usable_native_rectangle(anchor.captain_rectangle)) {
         update_directional_shield_hover_components(info_display);
         update_ammunition_hover_components(info_display);
         reset_selected_status_hover_components();
         update_directional_shield_component_tooltip(info_display);
         return;
     }
+
+    void* text_component = anchor.component;
     const NativeRectangle captain_native_rectangle =
-        read_at<NativeRectangle>(captain_text,
-                                 kTextComponentLiveRectangleOffset,
-                                 NativeRectangle{});
-    if (!usable_native_rectangle(captain_native_rectangle)) {
-        update_directional_shield_hover_components(info_display);
-        update_ammunition_hover_components(info_display);
-        reset_selected_status_hover_components();
-        update_directional_shield_component_tooltip(info_display);
-        return;
+        anchor.captain_rectangle;
+    if (panel_kind == SelectedPanelKind::builder &&
+        InterlockedCompareExchange(
+            &g_builder_panel_anchor_report_count, 1, 0) == 0) {
+        char message[288]{};
+        std::snprintf(
+            message, sizeof(message),
+            "Tall producer selected-panel extension anchor active: component=%p captain-relative rectangle=%ld,%ld,%ld,%ld",
+            text_component,
+            static_cast<long>(captain_native_rectangle.left),
+            static_cast<long>(captain_native_rectangle.top),
+            static_cast<long>(captain_native_rectangle.right),
+            static_cast<long>(captain_native_rectangle.bottom));
+        log_line(message);
     }
-
-    const Colour native_colour = text_component_colour(captain_text);
-    const Colour shared_colour = g_ui_configuration.ship_name_colour_found
-        ? g_ui_configuration.ship_name_colour : native_colour;
+    const Colour native_colour = text_component_colour(text_component);
+    const Colour shared_colour = g_ui_configuration.shared_text_colour_found
+        ? g_ui_configuration.shared_text_colour : native_colour;
     const Colour captain_colour = g_ui_configuration.captain_colour_found
         ? g_ui_configuration.captain_colour : shared_colour;
     const Colour registry_colour = g_ui_configuration.registry_colour_found
         ? g_ui_configuration.registry_colour : shared_colour;
 
     draw_ammunition_rows(
-        info_display, craft, captain_text,
+        info_display, craft, text_component,
         captain_native_rectangle, shared_colour);
     draw_directional_shield_rows(
-        info_display, craft, captain_text,
+        info_display, craft, text_component,
         captain_native_rectangle, shared_colour);
-    draw_selected_status_bars(
-        info_display, craft, captain_text, captain_native_rectangle);
+    if (panel_kind == SelectedPanelKind::single) {
+        draw_selected_status_bars(
+            info_display, craft, text_component,
+            captain_native_rectangle);
+    } else {
+        reset_selected_status_hover_components();
+    }
     // Fleet Operations' selected wireframe uses its own Update override and
     // therefore does not reliably pass through StandardComponent::Update.
     // The shield ring is finalised in this proven selected-panel render pass,
@@ -4421,9 +4984,17 @@ void __attribute__((fastcall)) selected_info_render_hook(
     update_selected_status_hover_components(info_display);
     update_directional_shield_hover_components(info_display);
     update_directional_shield_component_tooltip(info_display);
+    if (panel_kind == SelectedPanelKind::builder) {
+        draw_directional_shield_hover_tooltip(
+            info_display, craft, text_component,
+            captain_native_rectangle, shared_colour);
+        return;
+    }
+
+    const CraftIdentity* identity = ensure_craft_identity(craft);
     if (!identity) {
         draw_directional_shield_hover_tooltip(
-            info_display, craft, captain_text,
+            info_display, craft, text_component,
             captain_native_rectangle, shared_colour);
         return;
     }
@@ -4442,13 +5013,13 @@ void __attribute__((fastcall)) selected_info_render_hook(
     if (g_ui_configuration.captain_rectangle_found) {
         captain_drawn = draw_identity_text(
             identity->captain_name,
-            captain_native_rectangle, captain_colour, captain_text);
+            captain_native_rectangle, captain_colour, text_component);
     }
     if (g_ui_configuration.captain_rectangle_found &&
         g_ui_configuration.registry_rectangle_found) {
         registry_drawn = draw_identity_text(
-            identity->craft_registry,
-            registry_native_rectangle, registry_colour, captain_text);
+            identity->craft_registry, registry_native_rectangle,
+            registry_colour, text_component);
     }
     if ((captain_drawn || registry_drawn) &&
         InterlockedCompareExchange(&g_draw_report_count, 1, 0) == 0) {
@@ -4467,8 +5038,22 @@ void __attribute__((fastcall)) selected_info_render_hook(
         log_line(message);
     }
     draw_directional_shield_hover_tooltip(
-        info_display, craft, captain_text,
+        info_display, craft, text_component,
         captain_native_rectangle, shared_colour);
+}
+
+void __attribute__((fastcall)) selected_builder_info_render_hook(
+    void* info_display, void*) noexcept {
+    render_selected_info_panel(
+        info_display, g_selected_builder_info_render_hook.gateway,
+        SelectedPanelKind::builder);
+}
+
+void __attribute__((fastcall)) selected_info_render_hook(
+    void* info_display, void*) noexcept {
+    render_selected_info_panel(
+        info_display, g_selected_info_render_hook.gateway,
+        SelectedPanelKind::single);
 }
 
 template <std::size_t Size>
@@ -4511,6 +5096,52 @@ void* existing_detour_destination(const void* site,
             static_cast<std::uintptr_t>(destination));
     }
     return nullptr;
+}
+
+void* direct_call_destination(const void* site) noexcept {
+    if (!site || !readable_range(site, 5)) return nullptr;
+    const auto* bytes = static_cast<const std::uint8_t*>(site);
+    if (bytes[0] != 0xe8) return nullptr;
+    std::int32_t displacement = 0;
+    std::memcpy(&displacement, bytes + 1, sizeof(displacement));
+    return const_cast<std::uint8_t*>(bytes + 5 + displacement);
+}
+
+bool value_text_draw_call_supported() noexcept {
+    const void* site = at(g_armada, kValueTextDrawCallSite.rva);
+    void* destination = direct_call_destination(site);
+    const bool stock = readable_range(
+            site, kValueTextDrawCallSite.expected.size()) &&
+        std::memcmp(site, kValueTextDrawCallSite.expected.data(),
+                    kValueTextDrawCallSite.expected.size()) == 0 &&
+        destination == at(
+            g_armada, kDisplayInterfaceDrawTextInRectangleRva);
+    const bool fleet_ops = !stock &&
+        executable_address_in_module(g_fleet_ops, destination);
+    if (!stock && !fleet_ops) {
+        std::array<std::uint8_t, 5> actual{};
+        if (readable_range(site, actual.size())) {
+            std::memcpy(actual.data(), site, actual.size());
+        }
+        char message[320]{};
+        std::snprintf(
+            message, sizeof(message),
+            "Value text draw call at Armada RVA 0x0010C393 has unsupported bytes %02X %02X %02X %02X %02X (destination=%p)",
+            actual[0], actual[1], actual[2], actual[3], actual[4],
+            destination);
+        log_line(message);
+        return false;
+    }
+    a2fo_identity_value_text_draw_original = destination;
+    if (fleet_ops) {
+        char message[256]{};
+        std::snprintf(
+            message, sizeof(message),
+            "Value text colour bridge will preserve Fleet Operations' live draw handler at %p",
+            destination);
+        log_line(message);
+    }
+    return true;
 }
 
 bool supported_fleet_ops_craft_class_detour(
@@ -4557,8 +5188,41 @@ bool preflight_signatures() noexcept {
         "InfoDisplay::UpdateSelected", kSelectedInfoUpdateRva,
         kExpectedSelectedInfoUpdate) && supported;
     supported = checked_armada_signature(
+        "InfoDisplay::RenderSelectedBuilder",
+        kSelectedBuilderInfoRenderRva,
+        kExpectedSelectedInfoRender) && supported;
+    supported = checked_armada_signature(
         "InfoDisplay::RenderSelected", kSelectedInfoRenderRva,
         kExpectedSelectedInfoRender) && supported;
+    supported = checked_armada_signature(
+        "ST3D_Sprite::SetColour", kSpriteSetColourRva,
+        kExpectedSpriteSetColour) && supported;
+    for (const CheckedCallSite& site : kSystemIconColourCallSites) {
+        const void* address = at(g_armada, site.rva);
+        if (!readable_range(address, site.expected.size()) ||
+            std::memcmp(address, site.expected.data(),
+                        site.expected.size()) != 0) {
+            char message[256]{};
+            std::snprintf(
+                message, sizeof(message),
+                "SystemIcon colour call signature mismatch at Armada RVA 0x%08lX",
+                static_cast<unsigned long>(site.rva));
+            log_line(message);
+            supported = false;
+        }
+    }
+    {
+        const CheckedCallSite& site = kSystemValueIconColourCallSite;
+        const void* address = at(g_armada, site.rva);
+        if (!readable_range(address, site.expected.size()) ||
+            std::memcmp(address, site.expected.data(),
+                        site.expected.size()) != 0) {
+            log_line(
+                "System value-icon colour call signature mismatch at Armada RVA 0x000EC748");
+            supported = false;
+        }
+    }
+    supported = value_text_draw_call_supported() && supported;
     supported = checked_armada_signature(
         "ParameterDB::Get(DBRectangle)", kParameterDbGetRectangleRva,
         kExpectedParameterDbGetRectangle) && supported;
@@ -4621,6 +5285,40 @@ bool install_craft_class_constructor_hook(
     return true;
 }
 
+bool install_system_icon_colour_hooks(
+    const A2FO_ModuleApi* api) noexcept {
+    if (!api || !api->patch_call) return false;
+    bool installed = true;
+    for (const CheckedCallSite& site : kSystemIconColourCallSites) {
+        installed = api->patch_call(
+            at(g_armada, site.rva),
+            reinterpret_cast<void*>(
+                &a2fo_identity_system_icon_set_colour_bridge),
+            site.expected.data(), site.expected.size()) && installed;
+    }
+    installed = api->patch_call(
+        at(g_armada, kSystemValueIconColourCallSite.rva),
+        reinterpret_cast<void*>(
+            &a2fo_identity_system_text_set_colour_bridge),
+        kSystemValueIconColourCallSite.expected.data(),
+        kSystemValueIconColourCallSite.expected.size()) && installed;
+    std::array<std::uint8_t, 5> value_text_expected{};
+    const void* value_text_site = at(
+        g_armada, kValueTextDrawCallSite.rva);
+    if (!readable_range(value_text_site, value_text_expected.size()) ||
+        !a2fo_identity_value_text_draw_original) {
+        return false;
+    }
+    std::memcpy(value_text_expected.data(), value_text_site,
+                value_text_expected.size());
+    installed = api->patch_call(
+        const_cast<void*>(value_text_site),
+        reinterpret_cast<void*>(
+            &a2fo_identity_value_text_draw_bridge),
+        value_text_expected.data(), value_text_expected.size()) && installed;
+    return installed;
+}
+
 void install_directional_shield_tooltip_hooks(
     const A2FO_ModuleApi* api) noexcept {
     // The older setter, synthetic TooltipManager::Show, and direct-render
@@ -4664,6 +5362,7 @@ void install_directional_shield_tooltip_hooks(
 
 bool install_runtime_hooks(const A2FO_ModuleApi* api) noexcept {
     if (!api || !api->install_inline_hook || !api->patch_jump ||
+        !api->patch_call ||
         !g_armada || !g_fleet_ops) {
         return false;
     }
@@ -4672,11 +5371,17 @@ bool install_runtime_hooks(const A2FO_ModuleApi* api) noexcept {
         return false;
     }
     bool installed = install_craft_class_constructor_hook(api);
+    installed = install_system_icon_colour_hooks(api) && installed;
     installed = api->install_inline_hook(
         at(g_armada, kSelectedInfoUpdateRva),
         reinterpret_cast<void*>(&selected_info_update_hook),
         sizeof(kExpectedSelectedInfoUpdate), kExpectedSelectedInfoUpdate,
         &g_selected_info_update_hook) && installed;
+    installed = api->install_inline_hook(
+        at(g_armada, kSelectedBuilderInfoRenderRva),
+        reinterpret_cast<void*>(&selected_builder_info_render_hook),
+        sizeof(kExpectedSelectedInfoRender), kExpectedSelectedInfoRender,
+        &g_selected_builder_info_render_hook) && installed;
     installed = api->install_inline_hook(
         at(g_armada, kSelectedInfoRenderRva),
         reinterpret_cast<void*>(&selected_info_render_hook),
@@ -4691,12 +5396,29 @@ bool install_runtime_hooks(const A2FO_ModuleApi* api) noexcept {
 
 }  // namespace
 
+extern "C" void __cdecl a2fo_identity_system_icon_set_colour_hook_cpp(
+    void* sprite, void* icon, const void* native_colour) noexcept {
+    system_icon_set_colour_from_context(
+        sprite, icon, static_cast<const Colour*>(native_colour));
+}
+
+extern "C" void __cdecl a2fo_identity_system_text_set_colour_hook_cpp(
+    void* sprite, void* text, const void* native_colour) noexcept {
+    system_text_set_colour_from_context(
+        sprite, text, static_cast<const Colour*>(native_colour));
+}
+
+extern "C" void __cdecl a2fo_identity_value_text_colour_hook_cpp(
+    void* component, void* text_record) noexcept {
+    value_text_colour_from_context(component, text_record);
+}
+
 extern "C" __declspec(dllexport)
 bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     if (!api || api->struct_size < A2FO_MODULE_API_V4_BASE_SIZE ||
         api->api_version != A2FO_MODULE_API_VERSION || !api->log ||
         !api->armada_module || !api->fleetops_module ||
-        !api->install_inline_hook || !api->patch_jump ||
+        !api->install_inline_hook || !api->patch_jump || !api->patch_call ||
         !api->extension_root_count || !api->extension_root) {
         return false;
     }

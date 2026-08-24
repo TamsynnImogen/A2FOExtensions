@@ -1126,11 +1126,23 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
         !api->register_weapon_class_loaded_handler ||
         !api->register_weapon_trigger_handler ||
         (api->capabilities & A2FO_CAP_WEAPON_CLASS_LOADED) == 0 ||
-        (api->capabilities & A2FO_CAP_WEAPON_TRIGGER_EVENTS) == 0 ||
-        !api->register_weapon_class_loaded_handler(
+        (api->capabilities & A2FO_CAP_WEAPON_TRIGGER_EVENTS) == 0) {
+        log_line("Shared weapon event registration is unavailable");
+        return false;
+    }
+    const bool trigger_registered =
+        A2FO_MODULE_API_HAS(
+            api, register_weapon_trigger_handler_masked) &&
+        api->register_weapon_trigger_handler_masked
+            ? api->register_weapon_trigger_handler_masked(
+                  kModuleName,
+                  A2FO_WEAPON_TRIGGER_EVENT_MASK_PRECHECK,
+                  &weapon_trigger_handler, nullptr)
+            : api->register_weapon_trigger_handler(
+                  kModuleName, &weapon_trigger_handler, nullptr);
+    if (!api->register_weapon_class_loaded_handler(
             kModuleName, nullptr, 0, &weapon_class_loaded_handler, nullptr) ||
-        !api->register_weapon_trigger_handler(
-            kModuleName, &weapon_trigger_handler, nullptr)) {
+        !trigger_registered) {
         log_line("Shared weapon event registration is unavailable");
         return false;
     }

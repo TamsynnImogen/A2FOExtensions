@@ -127,8 +127,6 @@ HMODULE g_armada = nullptr;
 CRITICAL_SECTION g_upgrade_lock;
 bool g_upgrade_lock_ready = false;
 bool g_upgrade_hooks_ready = false;
-volatile LONG g_extended_compare_log_count = 0;
-volatile LONG g_chain_bridge_log_count = 0;
 volatile LONG g_station_progression_log_count = 0;
 std::uint32_t g_configured_maximum_tier = kDefaultMaximumTier;
 
@@ -923,17 +921,6 @@ std::uintptr_t __attribute__((fastcall)) same_type_hook(
             if (own_tier >= kNativeMaximumTier && other_tier == 2 &&
                 own_system == other_system &&
                 pod_belongs_to_extended_station(pod)) {
-                const LONG log_number = InterlockedIncrement(
-                    &g_chain_bridge_log_count);
-                if (log_number <= 12) {
-                    char message[176];
-                    std::snprintf(
-                        message, sizeof(message),
-                        "Extended pod chain: attached level %lu/system %lu satisfies native level-2 prerequisite",
-                        static_cast<unsigned long>(own_tier),
-                        static_cast<unsigned long>(own_system));
-                    log_message(message);
-                }
                 return 1;
             }
         }
@@ -951,24 +938,6 @@ std::uintptr_t __attribute__((fastcall)) same_type_hook(
                     bytes(other_class) + kPodUpgradeSystemOffset);
             const bool same = own_tier == other_tier &&
                               own_system == other_system;
-            // A small, process-lifetime diagnostic budget confirms whether
-            // the station's live button-selection pass actually reaches an
-            // extended candidate.  This is deliberately capped because the
-            // comparison runs while the research-station UI is refreshed.
-            const LONG log_number = InterlockedIncrement(
-                &g_extended_compare_log_count);
-            if (log_number <= 12) {
-                char message[192];
-                std::snprintf(
-                    message, sizeof(message),
-                    "Extended pod comparison: attached tier %lu/system %lu, candidate tier %lu/system %lu -> %s",
-                    static_cast<unsigned long>(own_tier),
-                    static_cast<unsigned long>(own_system),
-                    static_cast<unsigned long>(other_tier),
-                    static_cast<unsigned long>(other_system),
-                    same ? "same" : "different");
-                log_message(message);
-            }
             return same;
         }
     }

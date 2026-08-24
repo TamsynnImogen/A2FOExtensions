@@ -222,15 +222,11 @@ std::unordered_map<void*, CraftPolicy> g_craft_policies;
 std::unordered_map<void*, WeaponPolicy> g_weapon_policies;
 std::unordered_map<void*, Stores> g_craft_stores;
 std::unordered_set<void*> g_resupply_providers;
+bool g_store_policies_present = false;
+bool g_resupply_consumers_present = false;
 UiConfiguration g_ui_configuration{};
-LONG g_ui_draw_report_count = 0;
 void* g_pending_ammunition_weapon = nullptr;
 void* g_pending_cannon_imp_weapon = nullptr;
-LONG g_target_selector_report_count = 0;
-LONG g_position_selector_report_count = 0;
-LONG g_commit_report_count = 0;
-LONG g_cannon_imp_launch_report_count = 0;
-LONG g_photon_recharge_report_count = 0;
 
 void log_line(const char* message) noexcept {
     if (g_api && g_api->log && message) g_api->log(kModuleName, message);
@@ -553,18 +549,17 @@ void A2FO_CALL craft_class_loaded_handler(
         !policy.provider) {
         return;
     }
+    const bool has_store = a2fo::energy_systems::store_enabled(policy.photon) ||
+        a2fo::energy_systems::store_enabled(policy.quantum);
+    if (has_store) {
+        g_store_policies_present = true;
+        if (a2fo::energy_systems::requires_resupply(policy.photon) ||
+            a2fo::energy_systems::requires_resupply(policy.quantum)) {
+            g_resupply_consumers_present = true;
+        }
+    }
     try {
         g_craft_policies[event->object_class] = policy;
-        char message[256]{};
-        std::snprintf(
-            message, sizeof(message),
-            "Registered Craft ammunition stores on class %p: Photon max %.3f rate %.3f mode %d; Quantum max %.3f rate %.3f mode %d",
-            event->object_class,
-            policy.photon.maximum, policy.photon.recharge_per_second,
-            static_cast<int>(policy.photon.mode),
-            policy.quantum.maximum, policy.quantum.recharge_per_second,
-            static_cast<int>(policy.quantum.mode));
-        log_line(message);
     } catch (...) {
         log_line("Could not retain a Craft torpedo-store policy");
     }
@@ -669,52 +664,59 @@ void A2FO_CALL craft_event_handler(
         g_craft_stores.erase(craft);
         return;
     }
+    // Automatic shipyard/repair providers are inert when the active mod has
+    // no configured torpedo stores. This avoids a class read and hash lookup
+    // for every craft on both sides of every simulation tick in stock mods.
+    if ((event->kind == A2FO_CRAFT_EVENT_SIMULATE_PRE ||
+         event->kind == A2FO_CRAFT_EVENT_SIMULATE_POST) &&
+        !g_store_policies_present) {
+        return;
+    }
     const CraftPolicy* policy = policy_for_craft(craft);
     if (!policy) return;
     if (event->kind == A2FO_CRAFT_EVENT_SIMULATE_PRE) {
-        if (policy->provider) {
+        if (policy->provider && g_resupply_consumers_present) {
             try {
                 g_resupply_providers.insert(craft);
             } catch (...) {
             }
+        }
+        if (!a2fo::energy_systems::store_enabled(policy->photon) &&
+            !a2fo::energy_systems::store_enabled(policy->quantum)) {
+            return;
         }
         stores_for_craft(craft, true);
         return;
     }
     if (event->kind == A2FO_CRAFT_EVENT_POST_LOAD) {
-        if (policy->provider) {
+        if (policy->provider && g_resupply_consumers_present) {
             try {
                 g_resupply_providers.insert(craft);
             } catch (...) {
             }
         }
+        if (!a2fo::energy_systems::store_enabled(policy->photon) &&
+            !a2fo::energy_systems::store_enabled(policy->quantum)) {
+            return;
+        }
         stores_for_craft(craft, true);
         return;
     }
     if (event->kind != A2FO_CRAFT_EVENT_SIMULATE_POST) return;
+    if (!a2fo::energy_systems::store_enabled(policy->photon) &&
+        !a2fo::energy_systems::store_enabled(policy->quantum)) {
+        return;
+    }
     Stores* stores = stores_for_craft(craft, true);
     if (!stores) return;
     const bool requires_provider =
         policy->photon.mode == RechargeMode::resupply_only ||
         policy->quantum.mode == RechargeMode::resupply_only;
     const bool supplied = !requires_provider || in_resupply_range(craft);
-    const float photon_before = stores->photon;
     stores->photon = a2fo::energy_systems::recharge(
         stores->photon, policy->photon, event->elapsed_seconds, supplied);
     stores->quantum = a2fo::energy_systems::recharge(
         stores->quantum, policy->quantum, event->elapsed_seconds, supplied);
-    if (photon_before + 0.0001f < policy->photon.maximum &&
-        InterlockedCompareExchange(
-            &g_photon_recharge_report_count, 1, 0) == 0) {
-        char message[256]{};
-        std::snprintf(
-            message, sizeof(message),
-            "First under-full Photon recharge tick: %.6f -> %.6f, elapsed %.6f, rate %.6f, mode %d, resupply %s",
-            photon_before, stores->photon, event->elapsed_seconds,
-            policy->photon.recharge_per_second,
-            static_cast<int>(policy->photon.mode), supplied ? "yes" : "no");
-        log_line(message);
-    }
 }
 
 const WeaponPolicy* policy_for_weapon(const void* weapon) noexcept {
@@ -785,10 +787,6 @@ void __attribute__((fastcall)) cannon_imp_launch_target_ordnance_hook(
         g_pending_cannon_imp_weapon = nullptr;
     }
     commit_ammunition_shot(weapon);
-    if (InterlockedCompareExchange(
-            &g_cannon_imp_launch_report_count, 1, 0) == 0) {
-        log_line("CannonImp target launch consumed configured torpedo ammunition");
-    }
 }
 
 void __attribute__((fastcall)) weapon_launch_position_ordnance_hook(
@@ -807,10 +805,6 @@ void __attribute__((fastcall)) weapon_launch_position_ordnance_hook(
     if (!cannon_imp_shot) return;
     g_pending_cannon_imp_weapon = nullptr;
     commit_ammunition_shot(weapon);
-    if (InterlockedCompareExchange(
-            &g_cannon_imp_launch_report_count, 1, 0) == 0) {
-        log_line("CannonImp position launch consumed configured torpedo ammunition");
-    }
 }
 
 std::uintptr_t __attribute__((fastcall)) weapon_select_target_ordnance_hook(
@@ -824,10 +818,6 @@ std::uintptr_t __attribute__((fastcall)) weapon_select_target_ordnance_hook(
             g_weapon_select_target_ordnance_hook.gateway, weapon, target);
         if (ordnance != 0u && policy_for_weapon(weapon)) {
             g_pending_ammunition_weapon = weapon;
-            if (InterlockedCompareExchange(
-                    &g_target_selector_report_count, 1, 0) == 0) {
-                log_line("Configured weapon reached the target-ordnance selector");
-            }
         }
         return ordnance;
     }
@@ -844,10 +834,6 @@ std::uintptr_t __attribute__((fastcall)) weapon_select_position_ordnance_hook(
             x, y, z);
         if (ordnance != 0u && policy_for_weapon(weapon)) {
             g_pending_ammunition_weapon = weapon;
-            if (InterlockedCompareExchange(
-                    &g_position_selector_report_count, 1, 0) == 0) {
-                log_line("Configured weapon reached the position-ordnance selector");
-            }
         }
         return ordnance;
     }
@@ -857,20 +843,14 @@ std::uintptr_t __attribute__((fastcall)) weapon_select_position_ordnance_hook(
 void __attribute__((fastcall)) weapon_commit_shot_hook(
     void* weapon, void*) noexcept {
     if (g_runtime_ready && weapon && policy_for_weapon(weapon)) {
-        const bool selector_confirmed =
-            g_pending_ammunition_weapon == weapon;
-        if (selector_confirmed) g_pending_ammunition_weapon = nullptr;
+        if (g_pending_ammunition_weapon == weapon) {
+            g_pending_ammunition_weapon = nullptr;
+        }
         // Fleet Operations weapon classes such as CannonImp can select pooled
         // ordnance through an override rather than Armada's two base
         // selectors. This common post-fire method is still reached only after
         // the launch virtual succeeds, so it is the authoritative debit point.
         commit_ammunition_shot(weapon);
-        if (InterlockedCompareExchange(
-                &g_commit_report_count, 1, 0) == 0) {
-            log_line(selector_confirmed
-                ? "Configured weapon reached post-shot commit after the Armada selector"
-                : "Configured weapon reached post-shot commit through an overridden selector");
-        }
     }
     a2fo_energy_call_thiscall_0(
         g_weapon_commit_shot_hook.gateway, weapon);
@@ -1111,8 +1091,6 @@ void A2FO_CALL selected_info_render_handler(
         ? g_ui_configuration.quantum_colour : shared_colour;
     const bool supplied = in_resupply_range(craft);
 
-    bool photon_drawn = false;
-    bool quantum_drawn = false;
     char photon_text[128]{};
     char quantum_text[128]{};
     if (policy->photon.maximum > 0.0f) {
@@ -1122,7 +1100,7 @@ void A2FO_CALL selected_info_render_handler(
             whole_ammunition_amount(stores->photon),
             whole_ammunition_amount(policy->photon.maximum),
             recharge_status(policy->photon.mode, supplied));
-        photon_drawn = draw_ammunition_text(
+        draw_ammunition_text(
             photon_text, photon_rectangle, photon_colour, text_component);
     }
     if (policy->quantum.maximum > 0.0f) {
@@ -1132,20 +1110,8 @@ void A2FO_CALL selected_info_render_handler(
             whole_ammunition_amount(stores->quantum),
             whole_ammunition_amount(policy->quantum.maximum),
             recharge_status(policy->quantum.mode, supplied));
-        quantum_drawn = draw_ammunition_text(
+        draw_ammunition_text(
             quantum_text, quantum_rectangle, quantum_colour, text_component);
-    }
-
-    if ((photon_drawn || quantum_drawn) &&
-        InterlockedCompareExchange(&g_ui_draw_report_count, 1, 0) == 0) {
-        char message[256]{};
-        std::snprintf(
-            message, sizeof(message),
-            "First selected torpedo-store UI draw submitted: Photon=%s, "
-            "Quantum=%s",
-            photon_drawn ? "yes" : "no",
-            quantum_drawn ? "yes" : "no");
-        log_line(message);
     }
 }
 

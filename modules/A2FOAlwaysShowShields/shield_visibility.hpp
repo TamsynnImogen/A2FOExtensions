@@ -22,4 +22,11 @@ EffectAction choose_effect_action(bool configured,
                                   float current_shields,
                                   std::int32_t effect_id) noexcept;
 
+// Uses unsigned subtraction so the cadence remains correct when GetTickCount
+// wraps. A pass which has never scanned is always due immediately.
+bool global_scan_due(std::uint32_t now,
+                     std::uint32_t last_scan,
+                     bool has_scanned,
+                     std::uint32_t interval) noexcept;
+
 }  // namespace a2fo::shields

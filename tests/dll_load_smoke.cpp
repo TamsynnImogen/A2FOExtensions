@@ -4,8 +4,12 @@ int main() {
     HMODULE core = LoadLibraryA("A2FOExtensions.dll");
     if (!core || !GetProcAddress(core, "A2FO_Initialize") ||
         !GetProcAddress(core, "A2FO_NebulaRendererStatus") ||
+        !GetProcAddress(core, "A2FO_NebulaSetEmissiveBumpMultiplier") ||
+        !GetProcAddress(core, "A2FO_NebulaSetBumpLightBias") ||
+        !GetProcAddress(core, "A2FO_NebulaSetEmissiveDiffuseRestore") ||
         !GetProcAddress(core, "A2FO_NebulaRegisterEmissiveClass") ||
         !GetProcAddress(core, "A2FO_NebulaRegisterEmissiveMaterials") ||
+        !GetProcAddress(core, "A2FO_NebulaRegisterSpecularMaterials") ||
         !GetProcAddress(core, "A2FO_DecalRegisterClass") ||
         !GetProcAddress(core, "A2FO_LogoDecalRegisterClass") ||
         !GetProcAddress(core, "A2FO_NebulaBeginCraftRender") ||
@@ -118,6 +122,22 @@ int main() {
         !GetProcAddress(directional_shields,
                         "A2FODirectionalShields_GetMaximum")) {
         return 12;
+    }
+
+    HMODULE craft_identity = LoadLibraryA(
+        "modules\\A2FOCraftIdentity.dll");
+    if (!craft_identity ||
+        !GetProcAddress(craft_identity, "A2FO_ModuleInit") ||
+        !GetProcAddress(craft_identity, "A2FO_ModuleShutdown")) {
+        return 13;
+    }
+
+    HMODULE refit_yards = LoadLibraryA(
+        "modules\\A2FORefitYards.dll");
+    if (!refit_yards ||
+        !GetProcAddress(refit_yards, "A2FO_ModuleInit") ||
+        !GetProcAddress(refit_yards, "A2FO_ModuleShutdown")) {
+        return 14;
     }
 
     // The proxy intentionally refuses to attach without the shipped renamed

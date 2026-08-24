@@ -29,10 +29,11 @@ The built-in native modules separate optional policy:
   build-button tooltips, sourced from Armada's local-team adjusted construction
   time so game-setup and team modifiers remain authoritative, plus non-zero
   additional-resource costs when the resource module is active;
-- `A2FOFeaturePack.dll`: recursive ODF indexing, queue conveniences, upgrade
-  pods, and Bink scaling;
+- `A2FOFeaturePack.dll`: recursive ODF indexing, BuildYard pseudo-technology
+  gates, queue conveniences, upgrade pods, and Bink scaling;
 - `A2FOHybridBuild.dll`: `hybridbuild -> research`, the `cocoon` command, four
-  production palettes, execution sidecars, queued placements, and previews;
+  production palettes, execution sidecars, queued placements, previews, and
+  presentation-only `buildItemXRefitY` submenus for live Producer lists;
 - `A2FOInfoIni.dll`: `SettingsDirectory` and `DefaultGameSpeed` parsing and
   resolution;
 - `A2FOCheats.dll`: signature-checked Fleet Operations cheat-handler
@@ -42,12 +43,17 @@ The built-in native modules separate optional policy:
 - `A2FOCraftIdentity.dll`: captain and registry ODF rows aligned to Fleet
   Operations' native craft-name index, plus selected-object panel identity,
   ammunition, directional-shield graphics, the ranked-craft XP bar, and
-  native hover regions for selected shield and XP status bars;
+  native hover regions for selected shield and XP status bars, with optional
+  per-state colours for the five native subsystem icons/value text, the native
+  mouse-over hull/shield/crew icon-values, and the selected crew icon/value,
+  plus an independent fixed colour for the native officer icon/value;
 - `A2FOEditMenu.dll`: recursive `buildItemX` editor-menu navigation using the
   native visible menu buffer, renderer, object placement, and Back command;
 - `A2FOMissionSelector.dll`: a scrollable combined campaign/mission shell
-  dialog with moddable descriptions and previews, while Armada retains native
-  availability, progression, filename selection, and mission launch;
+  dialog hosted by Armada's native display window and borderless Single Player
+  resource, filling its client area with moddable descriptions and previews,
+  while Armada retains native availability, progression, filename selection,
+  and mission launch;
 - `A2FOFireArcs.dll`: optional owner-local box and cone weapon firing volumes,
   globally switchable through `RTS_CFG.h`, with checked Fleet Operations
   target-authorization and system-icon-render chains, UI-configurable
@@ -73,23 +79,30 @@ The built-in native modules separate optional policy:
 - `A2FONebulaRenderer.dll`: opt-in controller for DX8 per-pixel ship lighting
   derived from armadaNebulaPatch and per-diffuse `textureX` /
   `emissiveX<Subsystem>` map sets (with the original six unnumbered commands
-  retained as a single-material wildcard);
+  retained as a single-material wildcard), plus opt-in `ART_CFG.h` suffix
+  discovery from each loaded SOD material's actual diffuse texture. Explicit
+  emissive ODF rows and embedded SOD bump slots override the global convention;
+  derived bump maps use Armada's native texture slot 1 and DOT3 MeshVB rebuild,
+  while loose per-diffuse specular maps use the spare shader texture stage;
   the core owns its checked early pass-through hooks, shader resource cache,
   and Fleet Operations alpha-transition gateway because the shared DOT3 shader
-  predates deferred module loading. Classic SODs use scoped MeshVB and checked
-  GPU/CPU workspace fixed-function combiner sites instead of the DOT3 pixel
-  shader. Loose
+  predates deferred module loading. DOT3 materials preserve their native bump
+  sampler and use an exact single-draw stage-2 emissive fallback when a wrapper
+  rejects the optional pixel shader. Classic SODs use scoped MeshVB and checked
+  GPU/CPU workspace fixed-function combiner sites. Loose
   emissive maps retain their authored RGB and sharp self-lit centres, while all
-  mesh paths accumulate the ODF emissive geometry into a private frame mask. A
-  multi-tap half-resolution reduction and two dense horizontal/vertical
-  Gaussian iterations are screen-blended before `EndScene`, creating a stable
-  external halo without additive white clipping or blooming the UI. Checked
+  mesh paths bind the matching composite directly during their native material
+  draw. Mostly-black sources use an exact sparse CPU representation; generated
+  managed-D3D composites use a per-material and global bounded LRU so long
+  sessions cannot retain every damage/motion combination. The selective
+  private-mask/`EndScene` framebuffer compositor is enabled only for the
+  managed DXVK backend, producing native coloured halo bloom without exposing
+  the unstable dxwrapper/d3d8to9/ReShade system path to its render-target
+  replay. Checked
   CraftSystem state reads keep operational maps lit, flicker control-disabled
   maps, and switch destroyed/repairing maps off. Full generated mip chains and
-  trilinear sampling suppress UV shimmer during movement. Checked
-  reset integration releases its default-pool targets before Fleet Operations
-  resets the device. This avoids an incompatible whole-device D3D8-to-D3D9
-  replacement. It composes with A2FOCraftIdentity's completed CraftClass boundary and
+  trilinear sampling suppress UV shimmer during movement. It composes with
+  A2FOCraftIdentity's completed CraftClass boundary and
   A2FOHybridBuild's common Craft render boundary rather than claiming duplicate
   hooks;
 - `A2FOPointDefenseCycles.dll`: per-instance, saveable numbered shot-delay
@@ -130,6 +143,14 @@ and `a2freight.odf` defaults, Armada 1 `Addon` ODF precedence, the
 starbase officer-quarter system, and the signature-checked legacy nebula
 sprite-node guard. Its activation marker and required policy therefore enable
 it only when `STA1 Classic` or one of its children is selected.
+
+FeaturePack also owns the Fleet Operations BuildYard configuration parser's
+single `RequiredTechnology` project-ID call. It captures
+`moduleXPseudoTechnology` without detouring Armada's shared
+`ParameterDB::GetProjectId`, then composes the pseudo ID with Fleet Operations'
+native technology evaluator. Pseudo-only declarations reuse the native module
+field; dual declarations retain the second ID in a configuration-lifetime
+sidecar.
 
 FeaturePack owns the general Producer queue and ResearchStation class hooks.
 HybridBuild registers a private callback table with FeaturePack so those shared
@@ -257,8 +278,12 @@ per-mod settings directory so modules do not duplicate `SettingsDirectory`
 resolution policy.
 Revision 13 adds shared completed-object-class and completed-Race ODF
 dispatchers. Revision 14 adds shared WeaponClass, weapon-trigger, and Craft
-lifecycle dispatchers. Existing v4 modules continue to receive their original
-struct prefix.
+lifecycle dispatchers. Revision 15 adds event masks to Craft-handler
+registration so notification-only modules stay out of unrelated simulation
+paths. Revision 16 adds masked weapon-trigger registration. Revision 17 adds
+transactional missing-only Race ODF defaults, consumed by the shared
+completed-Race snapshot. Existing v4 modules continue to receive their
+original struct prefix.
 
 See [`../sdk/README.md`](../sdk/README.md) and
 [`addresses.md`](addresses.md).

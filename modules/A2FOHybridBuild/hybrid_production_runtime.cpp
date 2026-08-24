@@ -5,6 +5,7 @@
  */
 
 #include "hybrid_production_runtime.hpp"
+#include "refit_ui_bridge_api.hpp"
 
 #include <algorithm>
 #include <array>
@@ -20,6 +21,11 @@ void* a2fo_hybrid_build_position_load_continue = nullptr;
 void a2fo_hybrid_build_position_load_dispatch();
 void* __cdecl a2fo_hybrid_build_position_for_command(
     void* producer, void* command) noexcept;
+void* a2fo_hybrid_nebula_base_render_target = nullptr;
+void* a2fo_hybrid_nebula_base_render_return = nullptr;
+void a2fo_hybrid_nebula_base_render_dispatch();
+void* a2fo_hybrid_refit_pre_layout_continue = nullptr;
+void a2fo_hybrid_refit_pre_layout_dispatch();
 }
 
 namespace a2fo {
@@ -40,6 +46,7 @@ constexpr char kNebulaEndCraftRenderExport[] =
 constexpr std::uintptr_t kParameterDbGetProjectIdRva = 0x135200;
 constexpr std::uintptr_t kParameterDbGetStringRva = 0x135350;
 constexpr std::uintptr_t kGameObjectClassFindProjectIdRva = 0x0cd1f0;
+constexpr std::uintptr_t kGameObjectClassFindRva = 0x0cd370;
 constexpr std::uintptr_t kProducerIsBusyRva = 0x0b0210;
 constexpr std::uintptr_t kBuildCommandCleanupIsBusyQueryRva = 0x031194;
 constexpr std::uintptr_t kBuildCommandCleanupIsBusyReturnRva = 0x0311a1;
@@ -91,7 +98,10 @@ constexpr std::uintptr_t kEvolverRenderInternalRva = 0x0b1170;
 constexpr std::uintptr_t kDebriefingDestroyShipRva = 0x1f17b0;
 constexpr std::uintptr_t kDebriefingDataGlobalRva = 0x3a86b4;
 constexpr std::uintptr_t kControlButtonPressRva = 0x0e69e0;
+constexpr std::uintptr_t kControlButtonCopyRva = 0x0e6920;
+constexpr std::uintptr_t kControlButtonClearRva = 0x0e6ad0;
 constexpr std::uintptr_t kModeInfoBuildButtonNameRva = 0x0e7950;
+constexpr std::uintptr_t kModeInfoConstructorRva = 0x0fa600;
 constexpr std::uintptr_t kRaceIconRenderRva = 0x0ee530;
 constexpr std::uintptr_t kShipDisplaySingleObjectDisplayCallRva = 0x0f2c49;
 constexpr std::uintptr_t kShipDisplaySingleObjectSimulateCallRva = 0x0f29e4;
@@ -112,6 +122,12 @@ constexpr std::uintptr_t kFoSelectionDisplayDrawProducerWireframeRva =
 constexpr std::uintptr_t kFoSelectionDisplayDrawProducerWireframeCallRva =
     0x1e8572;
 constexpr std::uintptr_t kFoCraftRenderInternalCallbackRva = 0x1dc1bc;
+// The Fleet Ops callback first invokes Armada's actual Craft::RenderInternal,
+// then draws shields/reflections and other overlays. Scope mapped-lighting
+// context around only that base call so effect passes cannot enter the
+// selective emissive mask as a displaced duplicate ship.
+constexpr std::uintptr_t kFoCraftBaseRenderPreRva = 0x1dc1cb;
+constexpr std::uintptr_t kFoCraftBaseRenderTargetSlotRva = 0x247294;
 constexpr std::uintptr_t kFoSpriteDatabaseGlobalRva = 0x212e10;
 constexpr std::uintptr_t kFoScreenDimensionGlobalRva = 0x212350;
 constexpr std::uintptr_t kFoDatabaseFindElementRva = 0x1e32d4;
@@ -136,6 +152,7 @@ constexpr std::uintptr_t kFoPopupFallbackEvolveButtonPointerRva = 0x247f1c;
 constexpr std::uintptr_t kFoPopupConstructionButtonPointerRva = 0x247f18;
 constexpr std::uintptr_t kFoPopupHybridAiButtonPointerRva = 0x247f20;
 constexpr std::uintptr_t kFoPopupButtonPointerArrayRva = 0x247ef4;
+constexpr std::uintptr_t kFoPopupPreLayoutRva = 0x1e72f5;
 
 constexpr std::size_t kObjectClassOffset = 0x40;
 constexpr std::size_t kObjectFlagsOffset = 0x14;
@@ -153,14 +170,20 @@ constexpr std::size_t kProducerConstructionEffectOffset = 0x268;
 constexpr std::size_t kProducerBuildItemsOffset = 0x450;
 constexpr std::size_t kProducerButtonListOffset = 0x130;
 constexpr std::size_t kButtonListEnabledMaskOffset = 0x08;
+constexpr std::size_t kControlButtonVisibleOffset = 0x30;
 constexpr std::size_t kControlButtonStateOffset = 0x34;
 constexpr std::size_t kControlButtonModeInfoOffset = 0x84;
+constexpr std::size_t kControlButtonPressFunctionOffset = 0x88;
 constexpr std::size_t kModeInfoSize = 0x18;
 constexpr std::size_t kModeInfoTypeOffset = 0x04;
 constexpr std::size_t kModeInfoTargetClassOffset = 0x0c;
+constexpr std::size_t kModeInfoActionObjectOffset = 0x10;
 constexpr std::size_t kModeInfoActionIndexOffset = 0x14;
+constexpr std::size_t kActionAiCommandOffset = 0x1a0;
 constexpr std::size_t kUpdateBuildButtonsVtableOffset = 0xe8;
 constexpr std::size_t kPopupCurrentMenuOffset = 0x124;
+constexpr std::size_t kPopupBackModeInfoOffset = 0xe8;
+constexpr std::size_t kPopupBuildModeInfoOffset = 0xf0;
 constexpr std::size_t kShipDisplaySelectedObjectOffset = 0x1e8;
 constexpr std::size_t kShipDisplayBuildQueueOffset = 0x120;
 constexpr std::size_t kBuildWireframeObjectOffset = 0x28;
@@ -192,12 +215,21 @@ constexpr std::size_t kClassHasGeometryVtableOffset = 0x28;
 constexpr std::size_t kRuntimeBuildListCapacity = 57;
 constexpr std::size_t kNativeResearchButtonCount = 14;
 constexpr std::size_t kFoPopupButtonCount = 64;
+constexpr std::size_t kMaximumRefitButtons = 16;
+constexpr std::size_t kFirstRefitPaletteButtonIndex = 1;
+constexpr std::size_t kFoPopupBackButtonIndex = 62;
 constexpr std::uint32_t kNativeQueueCapacity = 10;
 constexpr unsigned kRetainResearchMenuRefreshLimit = 60;
 constexpr std::uint32_t kRootMenu = 0;
 constexpr std::uint32_t kBuildMenu = 2;
 constexpr std::uint32_t kResearchMenu = 3;
 constexpr std::uint32_t kEvolveMenu = 4;
+constexpr std::uint32_t kStopAiCommand = 3;
+// Fleet Ops has native dispatch entries only for menus 0..8. Refit uses 9 as
+// a persistent marker caught by our popup hook; the hook renders native root
+// mode internally and then overlays a safe Craft destination page.
+constexpr std::uint32_t kRefitMenu = 9;
+constexpr std::uint32_t kNoRefitLayoutMenu = 0xffffffffu;
 // PopupPalette treats either of these bits as permission to show its Build
 // button. 0x80 is the Producer/yard capability; 0x40 is the placement-based
 // constructor capability and must not be added to a ResearchStation.
@@ -225,6 +257,8 @@ const std::uint8_t kExpectedParameterDbGetProjectId[] =
     {0x55, 0x8b, 0xec, 0x81, 0xec, 0x40, 0x01, 0x00, 0x00};
 const std::uint8_t kExpectedGameObjectClassFindProjectId[] =
     {0x55, 0x8b, 0xec, 0x6a, 0xff, 0x68};
+const std::uint8_t kExpectedGameObjectClassFind[] =
+    {0x55, 0x8b, 0xec, 0x8b, 0x45, 0x08};
 const std::uint8_t kExpectedProducerGetAction[] =
     {0x55, 0x8b, 0xec, 0x56, 0x57};
 const std::uint8_t kExpectedConstructionRigGetAction[] =
@@ -299,13 +333,24 @@ const std::uint8_t kExpectedEvolverRenderInternal[] =
     {0x55, 0x8b, 0xec, 0x53, 0x56};
 const std::uint8_t kExpectedFoCraftRenderInternalCallback[] =
     {0x55, 0x8b, 0xec, 0x83, 0xc4, 0xf4, 0x53};
+const std::uint8_t kExpectedFoCraftBaseRender[] = {
+    0x56, 0xff, 0x15, 0x94, 0x72, 0xa4, 0x5a,
+    0x8b, 0x45, 0xfc, 0x8b, 0x98, 0xa4, 0x01, 0x00, 0x00};
 // Complete first three instructions: mov eax,ecx; push esi;
 // mov edx,[eax+0x88]. The nine-byte boundary is deliberate so the gateway
 // cannot begin in the middle of the final memory-load instruction.
 const std::uint8_t kExpectedControlButtonPress[] =
     {0x8b, 0xc1, 0x56, 0x8b, 0x90, 0x88, 0x00, 0x00, 0x00};
+const std::uint8_t kExpectedControlButtonCopy[] =
+    {0x55, 0x8b, 0xec, 0x53, 0x56, 0x8b, 0xf1, 0x57};
+const std::uint8_t kExpectedControlButtonClear[] =
+    {0x56, 0x8b, 0xf1, 0x8b, 0x8e, 0x84, 0x00, 0x00, 0x00};
+const std::uint8_t kExpectedFoPopupPreLayout[] =
+    {0x83, 0xcf, 0xff, 0x33, 0xf6};
 const std::uint8_t kExpectedModeInfoBuildButtonName[] =
     {0x55, 0x8b, 0xec, 0x83, 0xec, 0x48, 0x53};
+const std::uint8_t kExpectedModeInfoConstructor[] =
+    {0x8b, 0xc1, 0x33, 0xc9, 0x89, 0x48, 0x04};
 // Complete the first two instructions: push ebp; mov ebp,esp; push -1.
 const std::uint8_t kExpectedRaceIconRender[] =
     {0x55, 0x8b, 0xec, 0x6a, 0xff};
@@ -379,12 +424,14 @@ A2FO_InlineHook g_producer_cancel_effect_hook{};
 A2FO_InlineHook g_producer_update_effect_hook{};
 A2FO_InlineHook g_producer_stop_effect_hook{};
 A2FO_InlineHook g_craft_render_internal_hook{};
+A2FO_InlineHook g_nebula_base_render_hook{};
 A2FO_InlineHook g_control_button_press_hook{};
 A2FO_InlineHook g_mode_info_build_button_name_hook{};
 A2FO_InlineHook g_race_icon_render_hook{};
 A2FO_InlineHook g_producer_is_busy_hook{};
 A2FO_InlineHook g_fo_producer_pop_checked_hook{};
 A2FO_InlineHook g_popup_update_buttons_hook{};
+A2FO_InlineHook g_popup_pre_layout_hook{};
 std::unordered_map<void*, std::unique_ptr<HybridBuildLists>> g_class_lists;
 
 struct RuntimeClassLists {
@@ -401,6 +448,21 @@ struct RuntimeClassLists {
 
 std::unordered_map<void*, std::unique_ptr<RuntimeClassLists>>
     g_runtime_class_lists;
+
+struct LiveBuildSubmenuPage {
+    std::size_t parent_index = 0;
+    void* parent_class = nullptr;
+    std::array<void*, kRuntimeBuildListCapacity> children{};
+};
+
+struct LiveBuildSubmenuClass {
+    std::array<void*, kRuntimeBuildListCapacity> visible_root{};
+    std::array<void*, kRuntimeBuildListCapacity> effective_items{};
+    std::vector<LiveBuildSubmenuPage> pages;
+};
+
+std::unordered_map<void*, std::unique_ptr<LiveBuildSubmenuClass>>
+    g_live_build_submenus;
 
 struct HybridCocoonState {
     std::array<std::uint8_t, kEvolverTailSize> tail{};
@@ -474,6 +536,9 @@ bool g_logged_hybrid_construct_placement_press = false;
 bool g_logged_hybrid_construct_premature_order = false;
 bool g_logged_hybrid_root_button_rebase = false;
 bool g_logged_hybrid_construct_root_icon = false;
+bool g_logged_build_submenu_opened = false;
+bool g_logged_build_submenu_back = false;
+bool g_logged_build_submenu_menu_retained = false;
 // These flags span only one synchronous PopupPalette refresh on the game's UI
 // thread. They let the patched Build and Evolve bindings select independent
 // physical controls without changing ordinary native behavior globally.
@@ -494,6 +559,41 @@ void* g_last_hybrid_construct_root_button = nullptr;
 void* g_hybrid_root_build_mode_info = nullptr;
 alignas(void*) std::array<std::uint8_t, kModeInfoSize>
     g_hybrid_construct_mode_info{};
+alignas(void*) std::array<std::uint8_t, kModeInfoSize>
+    g_refit_menu_mode_info{};
+alignas(void*) std::array<
+    std::array<std::uint8_t, kModeInfoSize>, kMaximumRefitButtons>
+    g_refit_mode_info{};
+
+enum class RefitButtonKind : std::uint8_t {
+    menu,
+    destination,
+};
+
+struct RefitButtonBinding {
+    void* button = nullptr;
+    void* mode_info = nullptr;
+    void* source = nullptr;
+    void* target_class = nullptr;
+    RefitButtonKind kind = RefitButtonKind::destination;
+};
+
+std::array<RefitButtonBinding, kMaximumRefitButtons> g_refit_bindings{};
+std::size_t g_refit_binding_count = 0;
+A2FO_RefitUiBridge g_refit_ui_bridge{};
+volatile LONG g_refit_ui_bridge_ready = 0;
+bool g_refit_mode_info_ready = false;
+bool g_logged_refit_buttons = false;
+bool g_logged_refit_request = false;
+bool g_logged_refit_palette_opened = false;
+bool g_logged_refit_halt = false;
+bool g_logged_refit_no_free_root_button = false;
+bool g_refit_palette_open = false;
+void* g_refit_palette_source = nullptr;
+void* g_last_single_refit_source = nullptr;
+void* g_refit_back_button = nullptr;
+void* g_refit_back_mode_info = nullptr;
+std::uint32_t g_refit_pre_layout_menu = kNoRefitLayoutMenu;
 
 enum class HybridBuildPalette : std::uint8_t {
     yard,
@@ -503,6 +603,8 @@ enum class HybridBuildPalette : std::uint8_t {
 HybridBuildPalette g_hybrid_build_palette = HybridBuildPalette::yard;
 bool g_hybrid_build_palette_press_armed = false;
 void* g_last_single_hybrid_selection = nullptr;
+void* g_last_single_build_submenu_selection = nullptr;
+void* g_active_build_submenu_parent = nullptr;
 void* g_retain_research_menu_station = nullptr;
 unsigned g_retain_research_menu_refreshes = 0;
 bool g_retain_research_menu_saw_root = false;
@@ -521,6 +623,7 @@ thread_local unsigned g_craft_render_internal_depth = 0;
 
 using FindClassByProjectIdFunction = void* (__cdecl*)(
     const std::uint32_t* project_id);
+using FindClassFunction = void* (__cdecl*)(const char* name);
 using ControlButtonStateModeInfoFunction =
     std::uintptr_t (__attribute__((regparm(3))) *)(
         void* button, void* mode_info, std::uintptr_t enabled);
@@ -570,8 +673,8 @@ void resolve_nebula_craft_render_observers() noexcept {
                 sizeof(g_nebula_end_craft_render));
     if (g_nebula_begin_craft_render && g_nebula_end_craft_render) {
         log_message(
-            "Nebula emissive context linked through the Fleet Ops Craft "
-            "render boundary");
+            "Nebula emissive context linked to Fleet Ops' base Craft render "
+            "call; later effect passes remain isolated");
     } else {
         g_nebula_begin_craft_render = nullptr;
         g_nebula_end_craft_render = nullptr;
@@ -637,6 +740,28 @@ bool class_project_id(void* object_class,
     if (!readable_range(id, sizeof(*id))) return false;
     project_id = *id;
     return project_id != 0;
+}
+
+LiveBuildSubmenuClass* live_submenus_for_class(
+    void* producer_class) noexcept {
+    if (!producer_class || !g_registry_lock_ready) return nullptr;
+    LiveBuildSubmenuClass* result = nullptr;
+    EnterCriticalSection(&g_registry_lock);
+    const auto found = g_live_build_submenus.find(producer_class);
+    if (found != g_live_build_submenus.end()) result = found->second.get();
+    LeaveCriticalSection(&g_registry_lock);
+    return result;
+}
+
+LiveBuildSubmenuPage* submenu_page_for_parent(
+    LiveBuildSubmenuClass* menus, void* parent_class) noexcept {
+    if (!menus || !parent_class) return nullptr;
+    const auto found = std::find_if(
+        menus->pages.begin(), menus->pages.end(),
+        [parent_class](const LiveBuildSubmenuPage& page) {
+            return page.parent_class == parent_class;
+        });
+    return found == menus->pages.end() ? nullptr : &*found;
 }
 
 template <std::size_t Size>
@@ -1713,6 +1838,442 @@ bool selection_contains(void* craft_array, void* target) noexcept {
     return false;
 }
 
+void* single_build_submenu_producer(void* craft_array) noexcept {
+    if (!readable_range(craft_array, 12)) return nullptr;
+    void** selected = *reinterpret_cast<void***>(craft_array);
+    const std::int32_t count = *reinterpret_cast<const std::int32_t*>(
+        bytes(craft_array) + 8);
+    if (count != 1 || !readable_range(selected, sizeof(void*)) ||
+        !readable_range(selected[0], kObjectClassOffset + sizeof(void*))) {
+        return nullptr;
+    }
+    void* producer = selected[0];
+    void* producer_class = *reinterpret_cast<void**>(
+        bytes(producer) + kObjectClassOffset);
+    return live_submenus_for_class(producer_class) ? producer : nullptr;
+}
+
+const A2FO_RefitUiBridge* refit_ui_bridge() noexcept {
+    return InterlockedCompareExchange(
+               &g_refit_ui_bridge_ready, 0, 0) != 0
+        ? &g_refit_ui_bridge : nullptr;
+}
+
+void* single_refit_source(void* craft_array) noexcept {
+    if (!readable_range(craft_array, 12)) return nullptr;
+    void** selected = *reinterpret_cast<void***>(craft_array);
+    const std::int32_t count = *reinterpret_cast<const std::int32_t*>(
+        bytes(craft_array) + 8);
+    if (count != 1 || !readable_range(selected, sizeof(void*)) ||
+        !readable_range(selected[0], kObjectClassOffset + sizeof(void*))) {
+        return nullptr;
+    }
+    return selected[0];
+}
+
+void* free_refit_root_button(void** buttons) noexcept {
+    if (!buttons) return nullptr;
+    void* first_free = nullptr;
+    void* const refit_mode_info = g_refit_menu_mode_info.data();
+    for (std::size_t index = 0;
+         index < kFoPopupBackButtonIndex; ++index) {
+        void* button = buttons[index];
+        if (!button || button == g_refit_back_button || !readable_range(
+                bytes(button) + kControlButtonModeInfoOffset,
+                sizeof(void*)) || !readable_range(
+                bytes(button) + kControlButtonPressFunctionOffset,
+                sizeof(void*))) {
+            continue;
+        }
+        void* mode_info = *reinterpret_cast<void**>(
+            bytes(button) + kControlButtonModeInfoOffset);
+        void* press_function = *reinterpret_cast<void**>(
+            bytes(button) + kControlButtonPressFunctionOffset);
+        // Prefer reusing our surviving binding if Fleet Ops retained it
+        // across an incremental refresh. Every native or mod-provided action,
+        // including special-weapon/teleport callbacks, has either a ModeInfo
+        // or a press function and is therefore never selected as storage.
+        if (mode_info == refit_mode_info && !press_function) {
+            return button;
+        }
+        if (!first_free && !mode_info && !press_function) {
+            first_free = button;
+        }
+    }
+    return first_free;
+}
+
+void bind_refit_buttons(void* craft_array,
+                        std::uint32_t menu) noexcept {
+    g_refit_binding_count = 0;
+    g_refit_back_button = nullptr;
+    g_refit_back_mode_info = nullptr;
+    const A2FO_RefitUiBridge* bridge = refit_ui_bridge();
+    const bool refit_page = menu == kRefitMenu && g_refit_palette_open;
+    if (!bridge || (menu != kRootMenu && !refit_page) ||
+        !g_refit_mode_info_ready || !g_fleet_ops) {
+        if (menu != kRootMenu && menu != kRefitMenu) {
+            g_refit_palette_open = false;
+            g_refit_palette_source = nullptr;
+        }
+        return;
+    }
+    void* source = single_refit_source(craft_array);
+    if (!source) {
+        g_refit_palette_open = false;
+        g_refit_palette_source = nullptr;
+        return;
+    }
+    if (g_refit_palette_open && source != g_refit_palette_source) {
+        g_refit_palette_open = false;
+        g_refit_palette_source = nullptr;
+    }
+
+    std::array<A2FO_RefitUiItem, kMaximumRefitButtons> items{};
+    const std::size_t available = bridge->enumerate_items(
+        source, items.data(), items.size());
+    const std::size_t count = std::min(available, items.size());
+    if (count == 0) {
+        if (source == g_last_single_refit_source) {
+            g_last_single_refit_source = nullptr;
+        }
+        g_refit_palette_open = false;
+        g_refit_palette_source = nullptr;
+        return;
+    }
+    g_last_single_refit_source = source;
+
+    void** buttons = at<void*>(g_fleet_ops,
+                               kFoPopupButtonPointerArrayRva);
+    if (!readable_range(buttons,
+                        kFoPopupButtonCount * sizeof(void*))) {
+        return;
+    }
+    auto state_mode_info =
+        reinterpret_cast<ControlButtonStateModeInfoFunction>(at(
+            g_fleet_ops, kFoControlButtonStateModeInfoRva));
+    if (g_last_popup && readable_range(
+            bytes(g_last_popup) + kPopupBackModeInfoOffset,
+            sizeof(void*)) && buttons[kFoPopupBackButtonIndex]) {
+        g_refit_back_button = buttons[kFoPopupBackButtonIndex];
+        g_refit_back_mode_info = *reinterpret_cast<void**>(
+            bytes(g_last_popup) + kPopupBackModeInfoOffset);
+    }
+
+    if (!refit_page) {
+        // Clone Fleet Ops' native type-3 Build navigation ModeInfo for the
+        // root opener. Presenting the opener as a type-1 target-class item
+        // made ObjectControlButton enter a modal build/selection state before
+        // our press hook could open the page.
+        void* button = free_refit_root_button(buttons);
+        void* build_mode_info = g_last_popup && readable_range(
+                bytes(g_last_popup) + kPopupBuildModeInfoOffset,
+                sizeof(void*))
+            ? *reinterpret_cast<void**>(
+                  bytes(g_last_popup) + kPopupBuildModeInfoOffset)
+            : nullptr;
+        if (!button) {
+            if (!g_logged_refit_no_free_root_button) {
+                g_logged_refit_no_free_root_button = true;
+                log_message("Refit root button omitted because every popup "
+                            "control is already bound");
+            }
+            return;
+        }
+        if (!readable_range(build_mode_info, kModeInfoSize) ||
+            !writable_range(
+                bytes(button) + kControlButtonStateOffset,
+                sizeof(std::uint32_t)) || !writable_range(
+                bytes(button) + kControlButtonModeInfoOffset,
+                sizeof(void*))) {
+            return;
+        }
+        std::memcpy(g_refit_menu_mode_info.data(), build_mode_info,
+                    kModeInfoSize);
+        void* mode_info = g_refit_menu_mode_info.data();
+        state_mode_info(button, mode_info, 1u);
+        g_refit_bindings[g_refit_binding_count++] = {
+            button, mode_info, source, nullptr,
+            RefitButtonKind::menu};
+        if (!g_logged_refit_buttons) {
+            g_logged_refit_buttons = true;
+            log_message("Refit menu button added to the selected Craft "
+                        "root palette");
+        }
+        return;
+    }
+
+    // The popup hook renders native root controls under the private menu-9
+    // marker. Clear that backing page with ControlButton's native reset, then
+    // bind only destination choices and the native Back control. Offset 0x30
+    // is a transient UI flag, not the action/visibility state consumed by the
+    // final palette compactor. Menus 2-4 cannot be used because they
+    // dereference Producer state which an ordinary Craft does not own.
+    for (std::size_t index = 0; index < kFoPopupButtonCount; ++index) {
+        void* button = buttons[index];
+        if (button) {
+            a2fo_call_thiscall_0(
+                at(g_armada, kControlButtonClearRva), button);
+        }
+    }
+    for (std::size_t item_index = 0; item_index < count; ++item_index) {
+        const std::size_t button_index =
+            kFirstRefitPaletteButtonIndex + item_index;
+        if (button_index >= kFoPopupButtonCount ||
+            !items[item_index].target_class) {
+            break;
+        }
+        void* button = buttons[button_index];
+        if (!button || !writable_range(
+                bytes(button) + kControlButtonStateOffset,
+                sizeof(std::uint32_t)) || !writable_range(
+                bytes(button) + kControlButtonModeInfoOffset,
+                sizeof(void*))) {
+            continue;
+        }
+        void* mode_info = g_refit_mode_info[item_index].data();
+        *reinterpret_cast<std::uint32_t*>(
+            bytes(mode_info) + kModeInfoTypeOffset) = 1;
+        *reinterpret_cast<void**>(
+            bytes(mode_info) + kModeInfoTargetClassOffset) =
+            items[item_index].target_class;
+        *reinterpret_cast<std::uint32_t*>(
+            bytes(mode_info) + kModeInfoActionIndexOffset) = 0;
+        state_mode_info(
+            button, mode_info, items[item_index].enabled ? 1u : 0u);
+        g_refit_bindings[g_refit_binding_count++] = {
+            button, mode_info, source, items[item_index].target_class,
+            RefitButtonKind::destination};
+    }
+    if (g_refit_back_button && g_refit_back_mode_info) {
+        state_mode_info(
+            g_refit_back_button, g_refit_back_mode_info, 1u);
+    }
+}
+
+void rebase_refit_buttons_after_layout() noexcept {
+    if (!g_fleet_ops || g_refit_binding_count == 0) return;
+    void** buttons = at<void*>(g_fleet_ops,
+                               kFoPopupButtonPointerArrayRva);
+    if (!readable_range(
+            buttons, kFoPopupButtonCount * sizeof(void*))) {
+        return;
+    }
+    for (std::size_t binding_index = 0;
+         binding_index < g_refit_binding_count; ++binding_index) {
+        RefitButtonBinding& binding = g_refit_bindings[binding_index];
+        for (std::size_t button_index = 0;
+             button_index < kFoPopupButtonCount; ++button_index) {
+            void* button = buttons[button_index];
+            if (!button || !readable_range(
+                    bytes(button) + kControlButtonModeInfoOffset,
+                    sizeof(void*))) {
+                continue;
+            }
+            void* primary = *reinterpret_cast<void**>(
+                bytes(button) + kControlButtonModeInfoOffset);
+            // +0x88 is a callback pointer, not an alternate ModeInfo. Native
+            // palette compaction copies our ModeInfo into the primary slot.
+            if (primary == binding.mode_info) {
+                binding.button = button;
+                break;
+            }
+        }
+    }
+    if (g_refit_back_mode_info) {
+        for (std::size_t button_index = 0;
+             button_index < kFoPopupButtonCount; ++button_index) {
+            void* button = buttons[button_index];
+            if (!button || !readable_range(
+                    bytes(button) + kControlButtonModeInfoOffset,
+                    sizeof(void*))) {
+                continue;
+            }
+            void* primary = *reinterpret_cast<void**>(
+                bytes(button) + kControlButtonModeInfoOffset);
+            if (primary == g_refit_back_mode_info) {
+                g_refit_back_button = button;
+                break;
+            }
+        }
+    }
+
+    // Fleet Ops compacts controls by backing-array order. Rotate only the
+    // bound actions after layout so Refit appears immediately before Back;
+    // its pre-layout storage was selected dynamically from a genuinely blank
+    // control after all native and special-weapon actions were bound.
+    RefitButtonBinding* menu_binding = nullptr;
+    std::size_t refit_index = kFoPopupButtonCount;
+    std::size_t back_index = kFoPopupButtonCount;
+    for (std::size_t binding_index = 0;
+         binding_index < g_refit_binding_count; ++binding_index) {
+        if (g_refit_bindings[binding_index].kind ==
+                RefitButtonKind::menu) {
+            menu_binding = &g_refit_bindings[binding_index];
+            break;
+        }
+    }
+    if (!menu_binding) return;
+    for (std::size_t button_index = 0;
+         button_index < kFoPopupButtonCount; ++button_index) {
+        void* button = buttons[button_index];
+        if (!button || !readable_range(
+                bytes(button) + kControlButtonModeInfoOffset,
+                sizeof(void*))) {
+            continue;
+        }
+        void* mode_info = *reinterpret_cast<void**>(
+            bytes(button) + kControlButtonModeInfoOffset);
+        if (mode_info == menu_binding->mode_info) {
+            refit_index = button_index;
+        }
+        if (g_refit_back_mode_info &&
+            mode_info == g_refit_back_mode_info) {
+            back_index = button_index;
+        }
+    }
+    if (refit_index >= kFoPopupButtonCount || back_index == 0 ||
+        back_index >= kFoPopupButtonCount) {
+        return;
+    }
+    const std::size_t desired_index = back_index - 1;
+    if (desired_index == refit_index) return;
+    if (refit_index < desired_index) {
+        for (std::size_t index = refit_index;
+             index < desired_index; ++index) {
+            a2fo_call_thiscall_1(
+                at(g_armada, kControlButtonCopyRva), buttons[index],
+                reinterpret_cast<std::uintptr_t>(buttons[index + 1]));
+        }
+    } else {
+        for (std::size_t index = refit_index;
+             index > desired_index; --index) {
+            a2fo_call_thiscall_1(
+                at(g_armada, kControlButtonCopyRva), buttons[index],
+                reinterpret_cast<std::uintptr_t>(buttons[index - 1]));
+        }
+    }
+    auto state_mode_info =
+        reinterpret_cast<ControlButtonStateModeInfoFunction>(at(
+            g_fleet_ops, kFoControlButtonStateModeInfoRva));
+    state_mode_info(buttons[desired_index], menu_binding->mode_info, 1u);
+    menu_binding->button = buttons[desired_index];
+}
+
+extern "C" void __cdecl a2fo_hybrid_refit_pre_layout(
+    void* popup, void* craft_array) noexcept {
+    if (g_refit_pre_layout_menu == kNoRefitLayoutMenu) return;
+    if (popup) g_last_popup = popup;
+    bind_refit_buttons(craft_array, g_refit_pre_layout_menu);
+}
+
+bool update_live_build_buttons(void* producer) noexcept {
+    if (!producer || !readable_range(producer, sizeof(void*))) return false;
+    void** vtable = *reinterpret_cast<void***>(producer);
+    void** update_slot = vtable
+        ? reinterpret_cast<void**>(bytes(vtable) +
+                                   kUpdateBuildButtonsVtableOffset)
+        : nullptr;
+    if (!readable_range(update_slot, sizeof(*update_slot)) || !*update_slot) {
+        return false;
+    }
+    a2fo_call_thiscall_0(*update_slot, producer);
+    return true;
+}
+
+class LiveBuildSubmenuPaletteScope {
+public:
+    LiveBuildSubmenuPaletteScope(void* producer,
+                                 std::uint32_t menu) noexcept
+        : producer_(producer) {
+        if (!producer_ || menu != kBuildMenu || !readable_range(
+                bytes(producer_) + kObjectClassOffset, sizeof(void*)) ||
+            !writable_range(
+                bytes(producer_) + kCurrentBuildClassOffset - sizeof(void*),
+                sizeof(void*))) {
+            return;
+        }
+        void* producer_class = *reinterpret_cast<void**>(
+            bytes(producer_) + kObjectClassOffset);
+        menus_ = live_submenus_for_class(producer_class);
+        if (!menus_) return;
+        list_slot_ = reinterpret_cast<void***>(
+            bytes(producer_) + kCurrentBuildClassOffset - sizeof(void*));
+        previous_items_ = *list_slot_;
+        LiveBuildSubmenuPage* active_page = submenu_page_for_parent(
+            menus_, g_active_build_submenu_parent);
+        *list_slot_ = active_page
+            ? active_page->children.data() : menus_->visible_root.data();
+        active_ = update_live_build_buttons(producer_);
+    }
+
+    ~LiveBuildSubmenuPaletteScope() {
+        if (list_slot_) {
+            // Normal Producers begin on this effective child-only table.
+            // Preserve a non-null specialized pointer if another module had
+            // already selected one for this synchronous refresh.
+            *list_slot_ = previous_items_
+                ? previous_items_ : menus_->effective_items.data();
+        }
+    }
+
+    bool active() const noexcept { return active_; }
+
+    LiveBuildSubmenuPaletteScope(
+        const LiveBuildSubmenuPaletteScope&) = delete;
+    LiveBuildSubmenuPaletteScope& operator=(
+        const LiveBuildSubmenuPaletteScope&) = delete;
+
+private:
+    void* producer_ = nullptr;
+    LiveBuildSubmenuClass* menus_ = nullptr;
+    void*** list_slot_ = nullptr;
+    void** previous_items_ = nullptr;
+    bool active_ = false;
+};
+
+void apply_build_submenu_parent_states(void* producer) noexcept {
+    if (!producer || !g_fleet_ops || !readable_range(
+            bytes(producer) + kObjectClassOffset, sizeof(void*))) {
+        return;
+    }
+    void* producer_class = *reinterpret_cast<void**>(
+        bytes(producer) + kObjectClassOffset);
+    LiveBuildSubmenuClass* menus = live_submenus_for_class(producer_class);
+    if (!menus || g_active_build_submenu_parent) return;
+    void** popup_buttons = at<void*>(
+        g_fleet_ops, kFoPopupButtonPointerArrayRva);
+    if (!readable_range(
+            popup_buttons, kFoPopupButtonCount * sizeof(void*))) {
+        return;
+    }
+    for (LiveBuildSubmenuPage& page : menus->pages) {
+        for (std::size_t index = 0; index < kFoPopupButtonCount; ++index) {
+            void* button = popup_buttons[index];
+            if (!button || !readable_range(
+                    bytes(button) + kControlButtonModeInfoOffset,
+                    sizeof(void*))) {
+                continue;
+            }
+            void* mode_info = *reinterpret_cast<void**>(
+                bytes(button) + kControlButtonModeInfoOffset);
+            if (!mode_info || !readable_range(
+                    bytes(mode_info) + kModeInfoTargetClassOffset,
+                    sizeof(void*)) ||
+                *reinterpret_cast<void**>(
+                    bytes(mode_info) + kModeInfoTargetClassOffset) !=
+                    page.parent_class ||
+                !writable_range(
+                    bytes(button) + kControlButtonStateOffset,
+                    sizeof(std::uint32_t))) {
+                continue;
+            }
+            *reinterpret_cast<std::uint32_t*>(
+                bytes(button) + kControlButtonStateOffset) = 1u;
+        }
+    }
+}
+
 void update_research_buttons_with_queue(void* station) noexcept {
     if (!station || !readable_range(station, sizeof(void*))) return;
     void** vtable = *reinterpret_cast<void***>(station);
@@ -2247,6 +2808,57 @@ std::uintptr_t __attribute__((fastcall)) popup_update_buttons_hook(
         menu = *reinterpret_cast<const std::uint32_t*>(
             bytes(popup) + kPopupCurrentMenuOffset);
     }
+    void* refit_selection = single_refit_source(craft_array);
+    if (refit_selection != g_last_single_refit_source) {
+        g_last_single_refit_source = nullptr;
+    }
+    if (g_refit_palette_open &&
+        refit_selection != g_refit_palette_source) {
+        g_refit_palette_open = false;
+        g_refit_palette_source = nullptr;
+    }
+    const bool render_refit_page = have_menu &&
+        menu == kRefitMenu && g_refit_palette_open &&
+        refit_selection == g_refit_palette_source;
+    if (menu == kRefitMenu && !render_refit_page) {
+        menu = kRootMenu;
+        if (popup && writable_range(
+                bytes(popup) + kPopupCurrentMenuOffset, sizeof(menu))) {
+            *reinterpret_cast<std::uint32_t*>(
+                bytes(popup) + kPopupCurrentMenuOffset) = menu;
+        }
+    } else if (render_refit_page && popup && writable_range(
+                   bytes(popup) + kPopupCurrentMenuOffset,
+                   sizeof(menu))) {
+        // Never pass the private marker into Fleet Ops' 0..8 jump table.
+        // Root mode supplies a clean, fully native backing refresh.
+        menu = kRootMenu;
+        *reinterpret_cast<std::uint32_t*>(
+            bytes(popup) + kPopupCurrentMenuOffset) = menu;
+    }
+    void* submenu_producer = single_build_submenu_producer(craft_array);
+    if (submenu_producer != g_last_single_build_submenu_selection) {
+        g_last_single_build_submenu_selection = submenu_producer;
+        g_active_build_submenu_parent = nullptr;
+    }
+    if (!submenu_producer) {
+        g_active_build_submenu_parent = nullptr;
+    } else if (g_active_build_submenu_parent && menu != kBuildMenu &&
+               have_menu && writable_range(
+                   bytes(popup) + kPopupCurrentMenuOffset, sizeof(menu))) {
+        // Fleet Operations resets to root mode after an ordinary build-item
+        // press. A submenu parent is navigation rather than a build order, so
+        // keep its child page in menu 2 until the page's Back control clears
+        // the active parent explicitly.
+        menu = kBuildMenu;
+        *reinterpret_cast<std::uint32_t*>(
+            bytes(popup) + kPopupCurrentMenuOffset) = menu;
+        if (!g_logged_build_submenu_menu_retained) {
+            g_logged_build_submenu_menu_retained = true;
+            log_message("Live build submenu retained the Build palette "
+                        "after Fleet Ops requested root mode");
+        }
+    }
     if (menu == kRootMenu && g_control_button_press_depth == 0 &&
         !g_hybrid_build_palette_press_armed) {
         g_hybrid_build_palette = HybridBuildPalette::yard;
@@ -2352,9 +2964,27 @@ std::uintptr_t __attribute__((fastcall)) popup_update_buttons_hook(
                            menu == kEvolveMenu)) {
         g_queue_enabled_button_station = hybrid_station;
     }
-    const std::uintptr_t result = a2fo_call_thiscall_3(
-        g_popup_update_buttons_hook.gateway, popup,
-        reinterpret_cast<std::uintptr_t>(craft_array), argument2, argument3);
+    const std::uint32_t previous_refit_layout_menu =
+        g_refit_pre_layout_menu;
+    g_refit_pre_layout_menu = menu == kRootMenu
+        ? (render_refit_page ? kRefitMenu : kRootMenu)
+        : kNoRefitLayoutMenu;
+    std::uintptr_t result = 0;
+    {
+        LiveBuildSubmenuPaletteScope submenu_scope(
+            submenu_producer, menu);
+        result = a2fo_call_thiscall_3(
+            g_popup_update_buttons_hook.gateway, popup,
+            reinterpret_cast<std::uintptr_t>(craft_array), argument2,
+            argument3);
+    }
+    g_refit_pre_layout_menu = previous_refit_layout_menu;
+    if (menu == kRootMenu) {
+        rebase_refit_buttons_after_layout();
+    }
+    if (submenu_producer && menu == kBuildMenu) {
+        apply_build_submenu_parent_states(submenu_producer);
+    }
     if (g_split_hybrid_root_buttons) {
         rebase_hybrid_build_root_buttons_after_compaction(hybrid_lists);
     }
@@ -2418,6 +3048,18 @@ std::uintptr_t __attribute__((fastcall)) popup_update_buttons_hook(
     if (research_station && have_gateway_menu &&
         gateway_menu == kResearchMenu) {
         disable_queued_research_buttons(research_station);
+    }
+    if (render_refit_page && g_refit_palette_open &&
+        single_refit_source(craft_array) == g_refit_palette_source &&
+        popup && writable_range(
+            bytes(popup) + kPopupCurrentMenuOffset,
+            sizeof(gateway_menu))) {
+        *reinterpret_cast<std::uint32_t*>(
+            bytes(popup) + kPopupCurrentMenuOffset) = kRefitMenu;
+        gateway_menu = kRefitMenu;
+    }
+    if (menu != kRootMenu) {
+        bind_refit_buttons(craft_array, gateway_menu);
     }
     g_queue_enabled_button_station = previous_queue_station;
     g_split_hybrid_root_buttons = previous_split;
@@ -2524,6 +3166,267 @@ void* pressed_mode_info(void* button) noexcept {
         bytes(button) + kControlButtonModeInfoOffset);
 }
 
+void* refit_halt_source(void* button) noexcept {
+    void* source = g_last_single_refit_source;
+    void* mode_info = pressed_mode_info(button);
+    if (!source || !mode_info || !readable_range(
+            bytes(mode_info) + kModeInfoTypeOffset,
+            sizeof(std::uint32_t)) ||
+        *reinterpret_cast<const std::uint32_t*>(
+            bytes(mode_info) + kModeInfoTypeOffset) != 2u ||
+        !readable_range(
+            bytes(mode_info) + kModeInfoActionObjectOffset,
+            sizeof(void*))) {
+        return nullptr;
+    }
+    void* action = *reinterpret_cast<void**>(
+        bytes(mode_info) + kModeInfoActionObjectOffset);
+    if (!readable_range(
+            bytes(action) + kActionAiCommandOffset,
+            sizeof(std::uint32_t)) ||
+        *reinterpret_cast<const std::uint32_t*>(
+            bytes(action) + kActionAiCommandOffset) != kStopAiCommand) {
+        return nullptr;
+    }
+    return source;
+}
+
+bool dispatch_native_refit_back(void* button) noexcept {
+    if (!button || !g_refit_back_mode_info ||
+        !g_control_button_press_hook.gateway || !writable_range(
+            bytes(button) + kControlButtonModeInfoOffset,
+            sizeof(void*)) || !writable_range(
+            bytes(button) + kControlButtonPressFunctionOffset,
+            sizeof(void*))) {
+        return false;
+    }
+
+    // Refit choices borrow target-class ModeInfos for their native artwork,
+    // which also makes Fleet Ops treat the physical control as an object/build
+    // action. Dispatch the popup's own Back ModeInfo through the base
+    // ControlButton path before repainting our page. This clears the native
+    // object-control/input mode just as leaving Build or Research does.
+    auto** mode_slot = reinterpret_cast<void**>(
+        bytes(button) + kControlButtonModeInfoOffset);
+    auto** callback_slot = reinterpret_cast<void**>(
+        bytes(button) + kControlButtonPressFunctionOffset);
+    void* saved_mode = *mode_slot;
+    void* saved_callback = *callback_slot;
+    *mode_slot = g_refit_back_mode_info;
+    *callback_slot = nullptr;
+    a2fo_call_thiscall_0(g_control_button_press_hook.gateway, button);
+
+    // A native navigation refresh can rebind this physical control while the
+    // dispatch is active. Restore only fields still holding our temporary
+    // values, never a newer binding installed by Fleet Ops.
+    if (writable_range(mode_slot, sizeof(void*)) &&
+        *mode_slot == g_refit_back_mode_info) {
+        *mode_slot = saved_mode;
+    }
+    if (writable_range(callback_slot, sizeof(void*)) &&
+        *callback_slot == nullptr) {
+        *callback_slot = saved_callback;
+    }
+    return true;
+}
+
+bool refresh_refit_palette(void* source) noexcept {
+    if (!source || !g_last_popup ||
+        !g_popup_update_buttons_hook.gateway || !writable_range(
+            bytes(g_last_popup) + kPopupCurrentMenuOffset,
+            sizeof(std::uint32_t))) {
+        return false;
+    }
+
+    // PopupPalette's selection argument is a twelve-byte transient view. The
+    // object pointer saved from the preceding hook remains valid, but the view
+    // itself is stack-owned by Fleet Ops and cannot be reused after that call
+    // returns. Rebuild a single-selection view for this synchronous refresh.
+    struct SingleSelectionView {
+        void** objects = nullptr;
+        std::uint32_t capacity = 0;
+        std::int32_t count = 0;
+    };
+    static_assert(sizeof(SingleSelectionView) == 12,
+                  "Fleet Ops selection view must occupy twelve bytes");
+    void* selected[] = {source};
+    SingleSelectionView selection{selected, 1u, 1};
+    const std::uint32_t visible_menu = g_refit_palette_open &&
+            source == g_refit_palette_source
+        ? kRefitMenu : kRootMenu;
+
+    *reinterpret_cast<std::uint32_t*>(
+        bytes(g_last_popup) + kPopupCurrentMenuOffset) = kRootMenu;
+    const std::uint32_t previous_refit_layout_menu =
+        g_refit_pre_layout_menu;
+    g_refit_pre_layout_menu = visible_menu;
+    a2fo_call_thiscall_3(
+        g_popup_update_buttons_hook.gateway, g_last_popup,
+        reinterpret_cast<std::uintptr_t>(&selection),
+        g_last_popup_argument2, g_last_popup_argument3);
+    g_refit_pre_layout_menu = previous_refit_layout_menu;
+    *reinterpret_cast<std::uint32_t*>(
+        bytes(g_last_popup) + kPopupCurrentMenuOffset) = visible_menu;
+    rebase_refit_buttons_after_layout();
+    return true;
+}
+
+bool handle_refit_button_press(void* button) noexcept {
+    const A2FO_RefitUiBridge* bridge = refit_ui_bridge();
+    if (!bridge || !button) return false;
+    void* mode_info = pressed_mode_info(button);
+    if (g_refit_palette_open &&
+        (button == g_refit_back_button ||
+         (g_refit_back_mode_info &&
+          mode_info == g_refit_back_mode_info))) {
+        g_refit_palette_open = false;
+        g_refit_palette_source = nullptr;
+        if (g_last_popup && writable_range(
+                bytes(g_last_popup) + kPopupCurrentMenuOffset,
+                sizeof(std::uint32_t))) {
+            *reinterpret_cast<std::uint32_t*>(
+                bytes(g_last_popup) + kPopupCurrentMenuOffset) = kRootMenu;
+        }
+        // This is the genuine native Back button and ModeInfo. Let the normal
+        // ControlButton path execute it after clearing our private page state.
+        return false;
+    }
+    for (std::size_t index = 0;
+         index < g_refit_binding_count; ++index) {
+        const RefitButtonBinding& binding = g_refit_bindings[index];
+        if (button != binding.button && mode_info != binding.mode_info) {
+            continue;
+        }
+        if (binding.kind == RefitButtonKind::menu) {
+            g_refit_palette_open = true;
+            g_refit_palette_source = binding.source;
+            if (refresh_refit_palette(binding.source) &&
+                !g_logged_refit_palette_opened) {
+                g_logged_refit_palette_opened = true;
+                log_message("Refit destination palette opened");
+            }
+            return true;
+        }
+
+        const bool requested = binding.source && binding.target_class &&
+            bridge->request_refit(binding.source, binding.target_class);
+        if (requested && !g_logged_refit_request) {
+            g_logged_refit_request = true;
+            log_message("Refit button queued a synchronized request");
+        }
+        // Native production choices return to their root after an order. Use
+        // the same navigation action here, which also releases Fleet Ops'
+        // pressed-control/input capture state.
+        g_refit_palette_open = !requested;
+        if (requested) g_refit_palette_source = nullptr;
+        dispatch_native_refit_back(button);
+        refresh_refit_palette(binding.source);
+        // Refit ModeInfo deliberately resembles a native target-class build
+        // item for icons/tooltips. Always consume it here so a Craft can
+        // never execute that presentation-only ModeInfo as a build order.
+        return true;
+    }
+    return false;
+}
+
+void finish_refit_halt(void* source) noexcept {
+    const A2FO_RefitUiBridge* bridge = refit_ui_bridge();
+    if (!source || !bridge || !bridge->cancel_refit) return;
+    bridge->cancel_refit(source);
+    refresh_refit_palette(source);
+    if (!g_logged_refit_halt) {
+        g_logged_refit_halt = true;
+        log_message("Native Halt refreshed the Refit root button and queued "
+                    "synchronized cancellation");
+    }
+}
+
+void refresh_live_build_submenu_palette(void* producer) noexcept {
+    if (!producer || !g_last_popup || !g_last_popup_craft_array ||
+        !g_popup_update_buttons_hook.gateway || !writable_range(
+            bytes(g_last_popup) + kPopupCurrentMenuOffset,
+            sizeof(std::uint32_t))) {
+        return;
+    }
+    *reinterpret_cast<std::uint32_t*>(
+        bytes(g_last_popup) + kPopupCurrentMenuOffset) = kBuildMenu;
+    const auto render_page = [&]() {
+        LiveBuildSubmenuPaletteScope scope(producer, kBuildMenu);
+        a2fo_call_thiscall_3(
+            g_popup_update_buttons_hook.gateway, g_last_popup,
+            reinterpret_cast<std::uintptr_t>(g_last_popup_craft_array),
+            g_last_popup_argument2, g_last_popup_argument3);
+    };
+    render_page();
+
+    auto* menu = reinterpret_cast<std::uint32_t*>(
+        bytes(g_last_popup) + kPopupCurrentMenuOffset);
+    if (*menu != kBuildMenu) {
+        // The first refresh can inherit Fleet Operations' ordinary
+        // post-build root transition. Reassert menu 2 and bind the child page
+        // once more so both the stored mode and visible controls agree.
+        *menu = kBuildMenu;
+        render_page();
+    }
+    *menu = kBuildMenu;
+    apply_build_submenu_parent_states(producer);
+}
+
+bool handle_live_build_submenu_press(void* button) noexcept {
+    void* producer = g_last_single_build_submenu_selection;
+    if (!producer || !readable_range(
+            bytes(producer) + kObjectClassOffset, sizeof(void*))) {
+        return false;
+    }
+    void* producer_class = *reinterpret_cast<void**>(
+        bytes(producer) + kObjectClassOffset);
+    LiveBuildSubmenuClass* menus = live_submenus_for_class(producer_class);
+    if (!menus) return false;
+
+    void* mode_info = pressed_mode_info(button);
+    std::uint32_t type = 0;
+    void* target_class = nullptr;
+    if (mode_info && readable_range(
+            bytes(mode_info) + kModeInfoTargetClassOffset,
+            sizeof(void*))) {
+        type = *reinterpret_cast<const std::uint32_t*>(
+            bytes(mode_info) + kModeInfoTypeOffset);
+        target_class = *reinterpret_cast<void**>(
+            bytes(mode_info) + kModeInfoTargetClassOffset);
+    }
+
+    LiveBuildSubmenuPage* selected_page = type == 1
+        ? submenu_page_for_parent(menus, target_class) : nullptr;
+    if (selected_page) {
+        // Always consume the presentation parent. A disabled control should
+        // not normally dispatch, but this guard also prevents a direct or
+        // stale callback from ever constructing the dummy ODF.
+        g_active_build_submenu_parent = selected_page->parent_class;
+        refresh_live_build_submenu_palette(producer);
+        if (!g_logged_build_submenu_opened) {
+            g_logged_build_submenu_opened = true;
+            log_message("Live build parent opened its child palette; "
+                        "presentation ODF was not queued");
+        }
+        return true;
+    }
+
+    if (g_active_build_submenu_parent && type != 1) {
+        // The native Build palette's non-item control is Back. Keep menu 2
+        // active and replace the child page with the yard's main list; a
+        // second Back press then follows Fleet Ops to its ordinary root.
+        g_active_build_submenu_parent = nullptr;
+        refresh_live_build_submenu_palette(producer);
+        if (!g_logged_build_submenu_back) {
+            g_logged_build_submenu_back = true;
+            log_message("Live build submenu Back restored the yard's main "
+                        "build list");
+        }
+        return true;
+    }
+    return false;
+}
+
 // Native PopupPalette::CheckCanExecute distinguishes a constructor from a
 // yard by object flag 0x40. For ModeInfo type 1, constructors enter
 // mSetActiveMode and wait for a world click; other Producers immediately emit
@@ -2597,6 +3500,20 @@ private:
 void __attribute__((fastcall)) object_control_button_press_hook(
     void* button, void*) noexcept {
     const bool outermost = g_control_button_press_depth++ == 0;
+    void* halted_refit_source = outermost
+        ? refit_halt_source(button) : nullptr;
+    if (handle_refit_button_press(button)) {
+        --g_control_button_press_depth;
+        return;
+    }
+    if (handle_live_build_submenu_press(button)) {
+        --g_control_button_press_depth;
+        if (outermost) {
+            restore_research_palette_after_button_press();
+            g_post_press_research_menu_station = nullptr;
+        }
+        return;
+    }
     select_hybrid_build_palette(button);
     HybridConstructionPlacementPress placement(button);
     // Fleet Ops ObjectControlButton bypasses PopupPalette and emits its
@@ -2608,6 +3525,7 @@ void __attribute__((fastcall)) object_control_button_press_hook(
         button);
     --g_control_button_press_depth;
     if (outermost) {
+        finish_refit_halt(halted_refit_source);
         restore_research_palette_after_button_press();
         g_post_press_research_menu_station = nullptr;
     }
@@ -2616,11 +3534,26 @@ void __attribute__((fastcall)) object_control_button_press_hook(
 void __attribute__((fastcall)) control_button_press_hook(
     void* button, void*) noexcept {
     const bool outermost = g_control_button_press_depth++ == 0;
+    void* halted_refit_source = outermost
+        ? refit_halt_source(button) : nullptr;
+    if (handle_refit_button_press(button)) {
+        --g_control_button_press_depth;
+        return;
+    }
+    if (handle_live_build_submenu_press(button)) {
+        --g_control_button_press_depth;
+        if (outermost) {
+            restore_research_palette_after_button_press();
+            g_post_press_research_menu_station = nullptr;
+        }
+        return;
+    }
     select_hybrid_build_palette(button);
     HybridConstructionPlacementPress placement(button);
     a2fo_call_thiscall_0(g_control_button_press_hook.gateway, button);
     --g_control_button_press_depth;
     if (outermost) {
+        finish_refit_halt(halted_refit_source);
         restore_research_palette_after_button_press();
         g_post_press_research_menu_station = nullptr;
     }
@@ -2863,8 +3796,9 @@ std::uintptr_t __attribute__((fastcall)) craft_render_internal_hook(
         craft == g_last_single_hybrid_selection;
     if (g_craft_render_internal_depth != 0 ||
         (!render_cocoon && !render_construct_ghosts)) {
-        return render_craft_with_nebula_context(
-            g_craft_render_internal_hook.gateway, craft, render_context);
+        return a2fo_call_thiscall_1(
+            g_craft_render_internal_hook.gateway, craft,
+            reinterpret_cast<std::uintptr_t>(render_context));
     }
 
     ++g_craft_render_internal_depth;
@@ -2875,12 +3809,13 @@ std::uintptr_t __attribute__((fastcall)) craft_render_internal_hook(
             ? render_craft_with_nebula_context(
                   at(g_armada, kEvolverRenderInternalRva), craft,
                   render_context)
-            : render_craft_with_nebula_context(
+            : a2fo_call_thiscall_1(
                   g_craft_render_internal_hook.gateway, craft,
-                  render_context);
+                  reinterpret_cast<std::uintptr_t>(render_context));
     } else {
-        result = render_craft_with_nebula_context(
-            g_craft_render_internal_hook.gateway, craft, render_context);
+        result = a2fo_call_thiscall_1(
+            g_craft_render_internal_hook.gateway, craft,
+            reinterpret_cast<std::uintptr_t>(render_context));
     }
     if (render_construct_ghosts) {
         render_queued_construction_ghosts(craft);
@@ -3528,6 +4463,16 @@ extern "C" void __cdecl a2fo_hybrid_queue_post_dispatch(
     update_hybrid_build_queue_wireframes(ship_display, render != 0);
 }
 
+extern "C" void __cdecl a2fo_hybrid_nebula_base_render_begin(
+    void* craft) noexcept {
+    if (g_nebula_begin_craft_render) g_nebula_begin_craft_render(craft);
+}
+
+extern "C" void __cdecl a2fo_hybrid_nebula_base_render_end(
+    void* craft) noexcept {
+    if (g_nebula_end_craft_render) g_nebula_end_craft_render(craft);
+}
+
 extern "C" {
 void* a2fo_fo_single_object_display_target = nullptr;
 void* a2fo_fo_single_object_simulate_target = nullptr;
@@ -3576,6 +4521,9 @@ bool initialize_hybrid_production_registry(const A2FO_ModuleApi* api,
         "GameObjectClass::Find(cPrjID)", armada,
         kGameObjectClassFindProjectIdRva,
         kExpectedGameObjectClassFindProjectId);
+    signatures_match &= require_signature(
+        "GameObjectClass::Find(name)", armada,
+        kGameObjectClassFindRva, kExpectedGameObjectClassFind);
     signatures_match &= require_signature(
         "Producer::GetAction", armada, kProducerGetActionRva,
         kExpectedProducerGetAction);
@@ -3708,6 +4656,17 @@ bool initialize_hybrid_production_registry(const A2FO_ModuleApi* api,
         "FleetOps Craft::RenderInternal callback", fleet_ops,
         kFoCraftRenderInternalCallbackRva,
         kExpectedFoCraftRenderInternalCallback);
+    signatures_match &= require_signature(
+        "FleetOps Craft base-render call boundary", fleet_ops,
+        kFoCraftBaseRenderPreRva, kExpectedFoCraftBaseRender);
+    void** base_render_target_slot = at<void*>(
+        fleet_ops, kFoCraftBaseRenderTargetSlotRva);
+    if (!readable_range(base_render_target_slot, sizeof(void*)) ||
+        !executable_address(*base_render_target_slot)) {
+        signatures_match = false;
+        log_message("Hybrid production signature mismatch: FleetOps Craft "
+                    "base-render import target");
+    }
     // Fleet Ops detours DebriefingData::DestroyShip before native modules
     // load. Calling that public entry is intentional so its replacement keeps
     // Fleet Ops statistics/bookkeeping; unlike functions we hook ourselves,
@@ -3715,6 +4674,12 @@ bool initialize_hybrid_production_registry(const A2FO_ModuleApi* api,
     signatures_match &= require_signature(
         "ControlButton::mButtonPressFunction", armada,
         kControlButtonPressRva, kExpectedControlButtonPress);
+    signatures_match &= require_signature(
+        "ControlButton copy assignment", armada,
+        kControlButtonCopyRva, kExpectedControlButtonCopy);
+    signatures_match &= require_signature(
+        "ControlButton::ClearAction", armada,
+        kControlButtonClearRva, kExpectedControlButtonClear);
     signatures_match &= require_signature(
         "ModeInfo Build-button sprite-name builder", armada,
         kModeInfoBuildButtonNameRva,
@@ -3747,6 +4712,9 @@ bool initialize_hybrid_production_registry(const A2FO_ModuleApi* api,
     signatures_match &= require_signature(
         "FleetOps popup button update", fleet_ops,
         kFoPopupUpdateButtonsRva, kExpectedFoPopupUpdateButtons);
+    signatures_match &= require_signature(
+        "FleetOps popup pre-layout boundary", fleet_ops,
+        kFoPopupPreLayoutRva, kExpectedFoPopupPreLayout);
     signatures_match &= require_signature(
         "FleetOps Build palette bind call", fleet_ops,
         kFoPopupBuildButtonBindCallRva,
@@ -3784,6 +4752,7 @@ bool initialize_hybrid_production_registry(const A2FO_ModuleApi* api,
     try {
         g_class_lists.reserve(128);
         g_runtime_class_lists.reserve(128);
+        g_live_build_submenus.reserve(128);
         g_hybrid_cocoons.reserve(32);
         g_hybrid_construction.reserve(32);
         g_hybrid_get_action_originals.reserve(8);
@@ -3794,7 +4763,20 @@ bool initialize_hybrid_production_registry(const A2FO_ModuleApi* api,
 
     a2fo_hybrid_build_position_load_continue = at(
         armada, kBuildCommandPositionInterfaceContinueRva);
-    const bool installed = api->install_inline_hook(
+    a2fo_hybrid_nebula_base_render_target = *base_render_target_slot;
+    a2fo_hybrid_nebula_base_render_return = at(
+        fleet_ops,
+        kFoCraftBaseRenderPreRva + sizeof(kExpectedFoCraftBaseRender));
+    a2fo_hybrid_refit_pre_layout_continue = at(
+        fleet_ops,
+        kFoPopupPreLayoutRva + sizeof(kExpectedFoPopupPreLayout));
+    bool installed = api->install_inline_hook(
+        at(fleet_ops, kFoCraftBaseRenderPreRva),
+        reinterpret_cast<void*>(&a2fo_hybrid_nebula_base_render_dispatch),
+        sizeof(kExpectedFoCraftBaseRender),
+        kExpectedFoCraftBaseRender,
+        &g_nebula_base_render_hook);
+    installed = installed && api->install_inline_hook(
             at(armada, kProducerGetActionRva),
             reinterpret_cast<void*>(&producer_get_action_hook),
             sizeof(kExpectedProducerGetAction),
@@ -3903,6 +4885,12 @@ bool initialize_hybrid_production_registry(const A2FO_ModuleApi* api,
             reinterpret_cast<void*>(&popup_update_buttons_hook),
             sizeof(kExpectedFoPopupUpdateButtons),
             kExpectedFoPopupUpdateButtons, &g_popup_update_buttons_hook) &&
+        api->install_inline_hook(
+            at(fleet_ops, kFoPopupPreLayoutRva),
+            reinterpret_cast<void*>(
+                &a2fo_hybrid_refit_pre_layout_dispatch),
+            sizeof(kExpectedFoPopupPreLayout),
+            kExpectedFoPopupPreLayout, &g_popup_pre_layout_hook) &&
         api->patch_call(
             at(armada, kConstructionRigStartHardpointCallRva),
             reinterpret_cast<void*>(
@@ -3959,6 +4947,164 @@ bool initialize_hybrid_production_registry(const A2FO_ModuleApi* api,
                 "ten-slot queue polish, and research hover wireframes "
                 "enabled");
     return true;
+}
+
+bool register_refit_ui_bridge(
+    const A2FO_RefitUiBridge* bridge) noexcept {
+    if (!bridge || bridge->version != A2FO_REFIT_UI_BRIDGE_VERSION ||
+        bridge->struct_size < sizeof(A2FO_RefitUiBridge) ||
+        !bridge->enumerate_items || !bridge->request_refit ||
+        !bridge->cancel_refit ||
+        !g_armada || !g_fleet_ops ||
+        InterlockedCompareExchange(
+            &g_refit_ui_bridge_ready, 0, 0) != 0 ||
+        !signature_matches(
+            g_armada, kModeInfoConstructorRva,
+            kExpectedModeInfoConstructor)) {
+        return false;
+    }
+    for (auto& mode_info : g_refit_mode_info) {
+        a2fo_call_thiscall_0(
+            at(g_armada, kModeInfoConstructorRva), mode_info.data());
+    }
+    g_refit_mode_info_ready = true;
+    std::memcpy(&g_refit_ui_bridge, bridge,
+                sizeof(g_refit_ui_bridge));
+    InterlockedExchange(&g_refit_ui_bridge_ready, 1);
+    log_message("Optional RefitYards palette bridge registered");
+    return true;
+}
+
+bool register_live_build_submenus(
+    void* producer_class,
+    const build_submenu::Config& config,
+    const std::string& source_odf) noexcept {
+    if (!producer_class || config.empty() || !g_registry_lock_ready ||
+        !g_armada || !readable_range(
+            bytes(producer_class) + kProducerBuildItemsOffset,
+            sizeof(void*)) || !writable_range(
+            bytes(producer_class) + kProducerBuildItemsOffset,
+            sizeof(void*))) {
+        return false;
+    }
+    void** original_items = *reinterpret_cast<void***>(
+        bytes(producer_class) + kProducerBuildItemsOffset);
+    if (!readable_range(
+            original_items,
+            kRuntimeBuildListCapacity * sizeof(void*))) {
+        return false;
+    }
+
+    try {
+        auto menus = std::make_unique<LiveBuildSubmenuClass>();
+        std::copy_n(original_items, kRuntimeBuildListCapacity,
+                    menus->visible_root.begin());
+        auto find_class = reinterpret_cast<FindClassFunction>(
+            at(g_armada, kGameObjectClassFindRva));
+        if (!find_class) return false;
+
+        for (std::size_t parent_index = 0;
+             parent_index < kRuntimeBuildListCapacity; ++parent_index) {
+            const build_submenu::Page& configured =
+                config.pages[parent_index];
+            if (configured.empty()) continue;
+            void* parent_class = menus->visible_root[parent_index];
+            if (!parent_class) {
+                log_message("buildItem" + std::to_string(parent_index) +
+                            " has Refit children in " + source_odf +
+                            " but no native parent item");
+                continue;
+            }
+            if (submenu_page_for_parent(menus.get(), parent_class)) {
+                log_message("Duplicate build-submenu parent class in " +
+                            source_odf + " at buildItem" +
+                            std::to_string(parent_index) + "; later page "
+                            "ignored");
+                continue;
+            }
+            LiveBuildSubmenuPage page{};
+            page.parent_index = parent_index;
+            page.parent_class = parent_class;
+            std::size_t valid_children = 0;
+            for (std::size_t child_index = 0;
+                 child_index < kRuntimeBuildListCapacity; ++child_index) {
+                const std::string& name =
+                    configured.children[child_index];
+                if (name.empty()) continue;
+                void* child_class = find_class(name.c_str());
+                if (!child_class) {
+                    log_message("buildItem" +
+                                std::to_string(parent_index) + "Refit" +
+                                std::to_string(child_index) + " in " +
+                                source_odf + " could not resolve '" + name +
+                                "'");
+                    continue;
+                }
+                page.children[child_index] = child_class;
+                ++valid_children;
+            }
+            if (valid_children != 0) menus->pages.push_back(page);
+        }
+        if (menus->pages.empty()) return false;
+
+        std::size_t effective_count = 0;
+        for (std::size_t root_index = 0;
+             root_index < kRuntimeBuildListCapacity; ++root_index) {
+            void* root_item = menus->visible_root[root_index];
+            LiveBuildSubmenuPage* page =
+                submenu_page_for_parent(menus.get(), root_item);
+            if (page && page->parent_index == root_index) {
+                for (void* child : page->children) {
+                    if (!child) continue;
+                    if (effective_count >= kRuntimeBuildListCapacity) {
+                        log_message("Expanded build list in " + source_odf +
+                                    " exceeds the 57-item Producer limit; "
+                                    "submenus rejected");
+                        return false;
+                    }
+                    menus->effective_items[effective_count++] = child;
+                }
+            } else if (root_item) {
+                if (effective_count >= kRuntimeBuildListCapacity) {
+                    log_message("Expanded build list in " + source_odf +
+                                " exceeds the 57-item Producer limit; "
+                                "submenus rejected");
+                    return false;
+                }
+                menus->effective_items[effective_count++] = root_item;
+            }
+        }
+
+        void** effective_items = menus->effective_items.data();
+        EnterCriticalSection(&g_registry_lock);
+        if (g_live_build_submenus.find(producer_class) !=
+            g_live_build_submenus.end()) {
+            LeaveCriticalSection(&g_registry_lock);
+            return true;
+        }
+        try {
+            g_live_build_submenus.emplace(producer_class, std::move(menus));
+        } catch (...) {
+            LeaveCriticalSection(&g_registry_lock);
+            throw;
+        }
+        LeaveCriticalSection(&g_registry_lock);
+        *reinterpret_cast<void***>(
+            bytes(producer_class) + kProducerBuildItemsOffset) =
+            effective_items;
+
+        log_message("Live build submenus registered for " + source_odf +
+                    ": " + std::to_string(
+                        live_submenus_for_class(producer_class)->pages.size()) +
+                    " parent page(s), " +
+                    std::to_string(effective_count) +
+                    " effective AI/build item(s)");
+        return true;
+    } catch (...) {
+        log_message("Live build-submenu registration failed for " +
+                    source_odf);
+        return false;
+    }
 }
 
 bool register_research_station_hybrid_lists(

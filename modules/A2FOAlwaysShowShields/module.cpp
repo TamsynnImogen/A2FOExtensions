@@ -80,6 +80,8 @@ constexpr std::int32_t kContinuousShieldType = 7;
 constexpr std::int32_t kNativeEffectColour = 0;
 constexpr std::size_t kObjectClassOffset = 0x40;
 constexpr std::size_t kCurrentShieldsOffset = 0x1c8;
+constexpr std::uint32_t kConfiguredGlobalScanIntervalMs = 100;
+constexpr std::uint32_t kIdleGlobalScanIntervalMs = 1000;
 
 constexpr std::array<std::uint8_t, 10> kExpectedCreateShieldHit{
     0x55, 0x8b, 0xec, 0x6a, 0xff,
@@ -112,6 +114,8 @@ std::unordered_map<std::string, std::string> g_loose_odf_paths;
 bool g_logged_object_list_scan = false;
 void* g_cached_list_owner = nullptr;
 void* g_cached_list_sentinel = nullptr;
+std::uint32_t g_last_global_scan_tick = 0;
+bool g_global_scan_completed = false;
 
 const char* class_odf_name(void* object_class) noexcept;
 void update_craft(void* craft) noexcept;
@@ -446,15 +450,6 @@ bool class_policy_enabled(void* object_class) noexcept {
         const std::optional<bool> enabled =
             resolve_loose_flag(odf_name, &visiting);
         if (enabled.value_or(false)) g_enabled_classes.insert(object_class);
-        char message[320]{};
-        std::snprintf(
-            message, sizeof(message),
-            "Lazy policy lookup for preloaded class '%s': %s",
-            odf_name.empty() ? "<unknown>" : odf_name.c_str(),
-            enabled.has_value()
-                ? (*enabled ? "enabled" : "disabled")
-                : "command not found in loose ODF chain");
-        log_line(message);
         return enabled.value_or(false);
     } catch (...) {
         log_line("Could not resolve a preloaded shield class policy");
@@ -507,7 +502,19 @@ void __attribute__((fastcall)) render_game_objects_hook(
     // This stock render pass is the one authoritative traversal of Armada's
     // complete GameObject list. Run immediately before it builds the frame so
     // hidden Fleet Operations subclasses cannot bypass shield observation.
-    if (g_runtime_ready) update_all_crafts();
+    if (g_runtime_ready) {
+        const std::uint32_t now = GetTickCount();
+        const std::uint32_t interval = g_enabled_classes.empty()
+            ? kIdleGlobalScanIntervalMs
+            : kConfiguredGlobalScanIntervalMs;
+        if (a2fo::shields::global_scan_due(
+                now, g_last_global_scan_tick, g_global_scan_completed,
+                interval)) {
+            g_last_global_scan_tick = now;
+            g_global_scan_completed = true;
+            update_all_crafts();
+        }
+    }
     a2fo_shields_call_thiscall_1(
         g_render_game_objects_hook.gateway, renderer, render_argument);
 }
@@ -856,4 +863,6 @@ void A2FO_CALL A2FO_ModuleShutdown() {
     g_logged_object_list_scan = false;
     g_cached_list_owner = nullptr;
     g_cached_list_sentinel = nullptr;
+    g_last_global_scan_tick = 0;
+    g_global_scan_completed = false;
 }

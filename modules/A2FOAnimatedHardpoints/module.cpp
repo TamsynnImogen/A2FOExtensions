@@ -286,6 +286,13 @@ DatabaseCache* database_cache(void* database) noexcept {
 }
 
 void* resolve_visible_node(DatabaseCache& cache, void* logical_node) noexcept {
+    // Ordinary models have no matrix-animation channels, and ordinary
+    // hierarchy nodes need no replacement. Avoid growing/searching a negative
+    // node cache from the two globally hooked transform queries in either
+    // overwhelmingly common case.
+    if (cache.matrix_channels.empty() || !is_null_node(logical_node)) {
+        return nullptr;
+    }
     for (const NodeResolution& resolution : cache.node_resolutions) {
         if (resolution.logical_node == logical_node) {
             return resolution.visible_node;
@@ -293,18 +300,16 @@ void* resolve_visible_node(DatabaseCache& cache, void* logical_node) noexcept {
     }
 
     void* visible_node = nullptr;
-    if (is_null_node(logical_node) && !cache.matrix_channels.empty()) {
-        std::array<const char*, kMaximumHierarchyDepth> names{};
-        const std::size_t name_count = collect_ancestor_names(
-            logical_node, names);
-        if (name_count != 0 &&
-            hierarchy_has_matrix_channel(cache, names, name_count)) {
-            visible_node = reinterpret_cast<void*>(
-                a2fo_animated_hardpoints_call_thiscall_1(
-                    at(g_armada, kNodeFindRecursiveRva),
-                    cache.hierarchy_root,
-                    reinterpret_cast<std::uintptr_t>(names[0])));
-        }
+    std::array<const char*, kMaximumHierarchyDepth> names{};
+    const std::size_t name_count = collect_ancestor_names(
+        logical_node, names);
+    if (name_count != 0 &&
+        hierarchy_has_matrix_channel(cache, names, name_count)) {
+        visible_node = reinterpret_cast<void*>(
+            a2fo_animated_hardpoints_call_thiscall_1(
+                at(g_armada, kNodeFindRecursiveRva),
+                cache.hierarchy_root,
+                reinterpret_cast<std::uintptr_t>(names[0])));
     }
 
     try {

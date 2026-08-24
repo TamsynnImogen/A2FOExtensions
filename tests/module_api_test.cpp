@@ -29,10 +29,15 @@ int main() {
         &api, register_weapon_class_loaded_handler));
     assert(A2FO_MODULE_API_HAS(&api, register_weapon_trigger_handler));
     assert(A2FO_MODULE_API_HAS(&api, register_craft_event_handler));
+    assert(A2FO_MODULE_API_HAS(
+        &api, register_craft_event_handler_masked));
+    assert(A2FO_MODULE_API_HAS(
+        &api, register_weapon_trigger_handler_masked));
+    assert(A2FO_MODULE_API_HAS(&api, register_race_odf_defaults));
     assert(offsetof(A2FO_ModuleApi, api_revision) >=
            A2FO_MODULE_API_V4_BASE_SIZE);
     assert(A2FO_MODULE_API_VERSION == 4u);
-    assert(A2FO_MODULE_API_REVISION >= 14u);
+    assert(A2FO_MODULE_API_REVISION >= 17u);
     assert(A2FO_MODULE_API_HAS(&api, get_settings_directory));
     assert(A2FO_CAP_CLASSLABEL_ODF_DEFAULTS == (1ull << 7));
     assert(A2FO_CAP_GAME_OBJECT_CLASS_LOADED == (1ull << 8));
@@ -40,6 +45,13 @@ int main() {
     assert(A2FO_CAP_WEAPON_CLASS_LOADED == (1ull << 10));
     assert(A2FO_CAP_WEAPON_TRIGGER_EVENTS == (1ull << 11));
     assert(A2FO_CAP_CRAFT_EVENTS == (1ull << 12));
+    assert(A2FO_CAP_RACE_ODF_DEFAULTS == (1ull << 13));
+    assert(A2FO_CRAFT_EVENT_MASK_CLEANUP ==
+           (1u << A2FO_CRAFT_EVENT_CLEANUP));
+    assert(A2FO_CRAFT_EVENT_MASK_ALL == 0x0fu);
+    assert(A2FO_WEAPON_TRIGGER_EVENT_MASK_PRECHECK ==
+           (1u << A2FO_WEAPON_TRIGGER_PRECHECK));
+    assert(A2FO_WEAPON_TRIGGER_EVENT_MASK_ALL == 0x03u);
     assert(A2FO_PRODUCER_EVENT_FINISHING == 3u);
     assert(A2FO_PRODUCER_EVENT_STARTING_EFFECT == 4u);
     assert(A2FO_PRODUCER_EVENT_CANCELLED == 5u);

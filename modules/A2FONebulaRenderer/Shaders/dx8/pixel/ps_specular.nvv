@@ -1,0 +1,31 @@
+; A2FOExtensions combined DX8 DOT3/emissive/specular pixel shader.
+; Copyright (c) 2024 dev gao, MIT License
+;
+; Fleet Operations' stock dot3_directional.nvv vertex shader supplies one UV
+; iterator in t0 and the tangent-space light vector encoded in v0. In ps.1.4
+; the destination register chooses the sampler while the source chooses the
+; coordinate, allowing all four maps to share FO's unmodified t0 iterator.
+; stage0=diffuse, stage1=native bump/normal, stage2=emissive,
+; stage3=specular intensity
+; c0=ART_CFG.h A2FO_BUMP_LIGHT_BIAS
+; c1=ART_CFG.h A2FO_EMISSIVE_BUMP_MULTIPLIER
+; c2=ART_CFG.h A2FO_EMISSIVE_DIFFUSE_RESTORE
+;
+; The specular texture remains an additive, light-dependent gloss term rather
+; than a per-pixel Phong reflection. Materials without a specular map keep the
+; base shader and do not pay for the fourth texture sample.
+ps.1.4
+
+texld r0,t0
+texld r1,t0
+texld r2,t0
+texld r3,t0
+
+mov r4,r0
+dp3_sat r5.rgb,r1_bx2,v0_bx2
+add r5.rgb,r5,c0
+mul r0.rgb,r0,r5
+mad_sat r0.rgb,r3,r5,r0
+dp3 r5.rgb,r2,c2
+mad r0.rgb,r4,r5,r0
+mad_sat r0.rgb,r2,c1,r0

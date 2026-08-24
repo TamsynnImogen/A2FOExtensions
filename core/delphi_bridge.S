@@ -98,6 +98,37 @@ _a2fo_mod_settings_form_show_bridge:
 	addl $4, %esp
 	ret
 
+	# Graphics Options FormShow uses EAX=self and EDX=sender. Preserve both so
+	# the original handler receives its complete Delphi register ABI.
+	.globl _a2fo_graphics_options_form_show_bridge
+_a2fo_graphics_options_form_show_bridge:
+	pushl %edx
+	pushl %eax
+	call _a2fo_graphics_options_form_show_hook_cpp
+	addl $8, %esp
+	ret
+
+	# TJvgCheckBox.SetChecked uses EAX=self and DL=checked. The C++ hook calls
+	# the displaced prologue through its gateway before persisting only the two
+	# extension-owned Graphics Options controls.
+	.globl _a2fo_jvg_checkbox_set_checked_bridge
+_a2fo_jvg_checkbox_set_checked_bridge:
+	pushl %edx
+	pushl %eax
+	call _a2fo_jvg_checkbox_set_checked_hook_cpp
+	addl $8, %esp
+	ret
+
+	# TCustomCombo.OnChange is a Delphi TNotifyEvent method. EAX is the
+	# method-instance pointer and EDX is the combo passed as Sender.
+	.globl _a2fo_renderer_combo_change_bridge
+_a2fo_renderer_combo_change_bridge:
+	pushl %edx
+	pushl %eax
+	call _a2fo_renderer_combo_change_hook_cpp
+	addl $8, %esp
+	ret
+
 	.globl _a2fo_mod_settings_launch_bridge
 _a2fo_mod_settings_launch_bridge:
 	pushl %edx

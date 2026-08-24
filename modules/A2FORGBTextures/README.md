@@ -40,6 +40,15 @@ or `Textures/RGB`, as well as `Textures/Compressed`; explicit
 uncompressed 24/32-bit files are used directly. Unsupported or malformed legacy
 TGAs fail closed rather than being fed to the wrong decoder.
 
+Armada 1 can also store manually authored mip companions as `name_1.tga`,
+`name_2.tga`, and so on. Fleet Operations may request one of those flattened
+names while its native texture object still retains the base image dimensions;
+passing the smaller file to that row decoder causes a pixel overread. For the
+flattened root route only, the module recognizes a complete, same-format chain
+whose dimensions halve exactly at every level and serves its base image. A
+folder-qualified request still receives the named mip file, and same-sized
+animation frames ending in `_1` are not classified as mip levels.
+
 The root-TGA route hooks Armada's `ST3D_FileStream_FileExists` and
 `ST3D_BinaryFileStream::OpenRead` boundaries, leaving Fleet Operations'
 callbacks, texture objects, and both loader implementations untouched. DDS

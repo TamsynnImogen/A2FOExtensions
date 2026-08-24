@@ -1,0 +1,3132 @@
+# A2FOExtensions.dll
+
+  info.ini            [modules]        requiredX, rejectX, activeX
+  ──────────────────  ───────────────  ───────────────────────────────────────────
+   A2FORenderer.ini    [Renderer]       Backend, AppliedBackend, LastError
+  ──────────────────  ───────────────  ───────────────────────────────────────────
+   A2FORenderer.ini    [Effects]        EmissiveMaps, SpecularMaps, EmissiveBloom
+  ──────────────────  ───────────────  ───────────────────────────────────────────
+   A2FORenderer.ini    [Diagnostics]    MappedTextureCloak
+
+
+# A1Compat.dll
+
+     ### Object ODF commands
+
+  A1Compat directly consumes:
+
+   Command                   Use
+  ━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   classLabel = "wingman"    Aliased to native craft
+  ────────────────────────  ─────────────────────────────────────────────────────────────────────────
+   maximumUpgrades           Maximum officer upgrades for an A1 starbase; default 6, clamped 0..256
+  ────────────────────────  ─────────────────────────────────────────────────────────────────────────
+   officerGain               Base officer capacity or upgrade gain; default 20, clamped 0..1,000,000
+  ────────────────────────  ─────────────────────────────────────────────────────────────────────────
+   race                      Matches starbases and OfficerUpgrade objects to the correct faction
+
+  ### Race ODF fields
+
+  The Instant Action fallback observes these existing fields:
+
+  - instantActionSlot
+  - interfaceConfiguration
+  - displayKey
+  - displayName
+
+  They are not new commands, but A1Compat uses them to reconstruct the playable-race list when the native FO slot
+  configuration is invalid.
+
+  ### Missing-only ODF defaults
+
+  For classLabel = "wingman":
+
+  enginesHitPercent = 5.0
+  lifeSupportHitPercent = 8.5
+  weaponsHitPercent = 5.0
+  shieldGeneratorHitPercent = 8.0
+  sensorsHitPercent = 8.0
+  crewHitPercent = 8.5
+  hullHitPercent = 57.0
+  ship = 1
+  has_hitpoints = 1
+  has_crew = 1
+  transporter = 1
+  SHOW_MOVEMENT_AUTONOMY = 1
+  can_explore = 1
+
+  For classLabel = "constructionrig":
+
+  shipclass = "construction"
+  builder_facility = 1
+  SHOW_MOVEMENT_AUTONOMY = 1
+  SHOW_SW_AUTONOMY = 1
+  shipType = "N"
+  hotkeyLabel = "HOTKEY_F1"
+
+  For classLabel = "freighter":
+
+  shipclass = "mining"
+  maxDilithium = 150
+  alert = 1
+  miner = 1
+  SHOW_MOVEMENT_AUTONOMY = 1
+  resourcesCanHandle = "dilithium"
+  hotkeyLabel = "HOTKEY_F2"
+
+  These values are only supplied when the ODF and its includes omit the command.
+
+  ### Asset conventions
+
+  - Addon/ is registered as an override-priority ODF directory.
+  - Starbase model nodes named oq1, oq2, oq3, etc. are treated as officer-quarter geometry.
+  - Addon support currently covers ODF files only.
+
+  A1Compat does not directly parse:
+
+  - RTS_CFG.h
+  - ART_CFG.h
+  - interface CFG commands
+  - SPR definitions
+  - Dynamic_Localized_Strings.h
+
+# A2FOAlwaysShowShields
+
+  alwaysShowShields = 1
+
+  ### Behaviour
+
+  - Missing or zero: disabled.
+  - Any non-zero integer: enabled.
+  - Textual true values: true, yes, on.
+  - Textual false values: false, no, off.
+  - Command names are case-insensitive.
+  - Normal ODF #include inheritance is supported.
+  - A local value overrides inherited values.
+  - It applies to ships and stations.
+  - The effect disappears at zero shields and returns when shields become positive.
+
+  There are no additional controls for:
+
+  - shield colour
+  - shield effect type
+  - effect duration
+  - scan interval
+  - shield geometry
+  - activation threshold
+
+  Those are currently hardcoded. It uses Armada effect type 7, associated with the WEclairlink1 outline, with native
+  effect colour 0.
+
+  ### Files inspected
+
+  The DLL does not parse any:
+
+  - INI files
+  - CFG files
+  - SPR files
+  - ART_CFG.h
+  - RTS_CFG.h
+  - localization headers
+
+  It only reads ODF files, including a loose-ODF fallback that recursively indexes each extension root’s odf
+  directory.
+
+  ### Small inconsistency found
+
+  The normal ParameterDB path accepts malformed values such as:
+
+  alwaysShowShields = "1something"
+
+  as enabled because it does not validate the complete numeric string. The loose-ODF fallback rejects that value.
+  Proper values such as 0, 1, true, or false behave consistently.
+
+# A2FOAnimatedHardpoints.dll
+
+Its only modder-facing contract is an existing SOD convention:
+
+  1. Create a type-0 null/hardpoint node.
+  2. Add an ordinary SOD matrix-animation channel.
+  3. Give the channel the same identifier as that node, or animate one of its ancestors.
+
+  Example conceptually:
+
+  Node: hp01
+  Matrix animation channel: hp01
+
+  The identifier comparison is case-insensitive.
+
+  ### Behaviour and limits
+
+  - Only type-0 null nodes are redirected.
+  - Mesh, sprite and emitter nodes retain native behaviour.
+  - Animated ancestor transforms are inherited by descendant hardpoints.
+  - Gameplay calls to both world position and world transform use the animated result.
+  - Animation is evaluated separately for each model instance.
+  - Triggered animations use that instance’s current animation time.
+  - An untriggered animation uses its first frame.
+  - Up to 4,096 matrix channels are inspected per model.
+  - Node ancestry traversal is limited to 256 levels.
+  - Identifiers are limited to 255 characters.
+  - Duplicate node names should be avoided because native recursive lookup may select the first matching visible
+    node.
+
+  There are no modder controls for:
+
+  - animation speed
+  - animation selection
+  - channel enable/disable
+  - hardpoint prefixes
+  - interpolation
+  - cache size
+  - supported node types
+
+  Those remain part of the existing SOD animation data or are hardcoded implementation details.
+
+# A2FOBuildTooltips.dll
+
+  ### Native object input
+
+  It displays the object’s existing native build time—normally authored with stock Armada’s:
+
+  buildTime = 42.0
+
+  The DLL reads the resolved class value and Armada’s local-team adjusted result. It also accounts for the Instant
+  Action build-time multiplier.
+
+  The displayed time:
+
+  - is rounded to the nearest whole second;
+  - may display 0;
+  - appears only for actual build-item buttons;
+  - uses game seconds, not real-world seconds.
+
+  ### Localization keys
+
+  It directly queries these existing Dynamic_Localized_Strings.h keys:
+
+   Key                       Fallback
+  ━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━
+   GUI_CP_AMOUNT_SEPARATE    /
+  ────────────────────────  ──────────
+   GUI_CP_END_EXTRA          )
+
+  Normal output resembles:
+
+  /42 [0x8A glyph])
+
+  Verbose output uses hardcoded English:
+
+  /42 seconds)
+
+  second and seconds are not localization keys, so their wording currently cannot be changed through the string
+  table.
+
+  ### Font/SPR convention
+
+  Compact build-time text emits byte 0x8A.
+
+  Every font used by build tooltips therefore needs:
+
+  - a 0x8A UV frame in its Font*.spr animation;
+  - a matching width frame;
+  - corresponding artwork in the font texture.
+
+  The DLL does not parse SPR files itself—it simply emits the byte and relies on Armada’s font configuration.
+
+  ### Commands consumed through A2FOResources.dll
+
+  When that module is loaded, BuildTooltips displays:
+
+  tritaniumCost
+  supplyCost
+  creditsCost
+  collectiveconnectionsCost
+
+  Normal tooltips use the Race’s:
+
+  tritaniumIcon
+  supplyIcon
+  creditsIcon
+  collectiveconnectionsIcon
+
+  Verbose tooltips use:
+
+  tritaniumRes
+  supplyRes
+  creditsRes
+  collectiveconnectionsRes
+
+  These commands belong to A2FOResources.dll; BuildTooltips obtains their resolved values through its exported API.
+
+  ### No other configuration
+
+  It does not parse:
+
+  - INI files
+  - CFG files
+  - ordinary SPR commands
+  - ART_CFG.h
+  - RTS_CFG.h
+  - custom tooltip ODF fields
+
+# A2FOCheats.dll
+
+  ### RTS_CFG.h
+
+  Recognised field names are case-sensitive:
+
+  SHOWMETHEMONEY_DILITHIUM
+  SHOWMETHEMONEY_TRITANIUM
+  SHOWMETHEMONEY_METAL
+  SHOWMETHEMONEY_SUPPLIES
+  SHOWMETHEMONEY_CREW
+
+  Typical configuration:
+
+  float SHOWMETHEMONEY_DILITHIUM = 10000;
+  float SHOWMETHEMONEY_TRITANIUM = 10000;
+  float SHOWMETHEMONEY_METAL = 10000;
+  float SHOWMETHEMONEY_SUPPLIES = 10000;
+  float SHOWMETHEMONEY_CREW = 10000;
+
+  Rules:
+
+  - Each defaults to 10000.
+  - Valid range is 0 through 100000000.
+  - Zero disables that particular grant.
+  - Integer, decimal and scientific literals are accepted.
+  - An optional f or F suffix is accepted.
+  - Expressions and macros are not evaluated.
+  - // and /* ... */ comments are handled.
+  - Later declarations in the same file win.
+  - Values inherit individually through Data → parent mods → active mod.
+  - Invalid higher-precedence values retain the inherited value.
+
+  Important correction: the central reference calls these “integer declarations”, but the DLL uses strtof and
+  accepts floating-point values. The declaration’s written type is effectively ignored by its text parser.
+
+  These names refer to Fleet Operations’ historical resource helper slots. In particular, TRITANIUM and SUPPLIES do
+  not grant the new independent A2FOResources Tritanium and Supply pools. There are no corresponding configurable
+  grants for A2FO Credits or Collective Connections.
+
+  ### Runtime cheat commands
+
+   Command           Behaviour
+  ━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   showmethemoney    Grants all five configured resource amounts
+  ────────────────  ────────────────────────────────────────────────────────────────────
+   m                 Moves every selected craft 200 world units forward
+  ────────────────  ────────────────────────────────────────────────────────────────────
+   dis               Disables shields on every selected craft for 10,000 seconds
+  ────────────────  ────────────────────────────────────────────────────────────────────
+   elim              Eliminates the team belonging to the first suitable selected craft
+  ────────────────  ────────────────────────────────────────────────────────────────────
+   crash             Intentionally terminates Fleet Operations
+
+  showmethemoney is an existing Fleet Operations command whose handler is replaced. The other four are restored or
+  corrected by this module.
+
+  expl is not modified; it continues destroying only the selected object.
+
+  All these commands are registered as unavailable in multiplayer, leaving Fleet Operations’ multiplayer cheat gate
+  authoritative.
+
+  There are no configurable settings for:
+
+  - m movement distance
+  - dis duration
+  - the elim selection rule
+  - enabling cheats in multiplayer
+  - adding Credits or Collective Connections
+  - disabling individual restored command names
+
+# A2FOCraftIdentity.dll
+
+  ### Craft ODF commands
+
+  Identity and shield tooltip fields:
+
+  - possibleCraftNames — stock field consumed for row alignment
+  - possibleCaptainNames
+  - possibleCraftRegistry
+  - shieldTooltip
+  - shieldVerboseTooltip
+
+  Photon and Quantum presentation fields:
+
+  - photonTorpedoDisplayMode
+  - photonTorpedoValueDisplayMode
+  - photonTorpedoLabel
+  - photonTorpedoTooltip
+  - photonTorpedoVerboseTooltip
+  - photonTorpedoIcon
+  - photonTorpedoIconPos
+  - Equivalent seven quantumTorpedo* fields
+
+  Directional-shield graphic placement:
+
+  - forwardShieldPos
+  - aftShieldPos
+  - portShieldPos
+  - starboardShieldPos
+
+  Important syntax:
+
+  - *DisplayMode: 1 text label, 2 icon. Quoted "1"/"2" are accepted for compatibility.
+  - *ValueDisplayMode: 0 percent, 1 current/maximum, 2 status/reload, 3 capacity bar.
+  - Position/crop fields use x y width height; width and height must be positive.
+  - Icon crop coordinates must also be non-negative and fit inside the texture.
+  - Identity lists are bounded to 4,096 entries and 511 characters per retained string.
+
+  ### GUI CFG fields
+
+  Rectangles and anchors:
+
+  - infoSingleCaptainTextArea, legacy captainName
+  - infoSingleRegistryTextArea, legacy shipRegistry
+  - infoSinglePhotonTorpedoesTextArea
+  - infoSingleQuantumTorpedoesTextArea
+  - infoSingleDirectionalShieldsForwardAftTextArea
+  - infoSingleDirectionalShieldsPortStarboardTextArea
+  - infoSingleDirectionalShieldsGraphicArea
+  - infoSingleShieldBarArea
+  - infoSingleExperienceBarArea
+
+  Native anchor fields it consumes:
+
+  - infoSingleNameTextArea
+  - infoSingleClassTextArea
+  - infoBuildName, fallback infoBuildNameTextArea
+  - infoBuildClass, fallback infoBuildClassTextArea
+
+  Colours:
+
+  - infoTextColor, shipNameColor
+  - captainNameColor, shipRegistryColor
+  - photonTorpedoColor, photonTorpedoLowColor, photonTorpedoCriticalColor
+  - Equivalent three quantumTorpedo*Color fields
+  - directionalShieldColor, directionalShieldLowColor, directionalShieldCriticalColor
+  - systemIconHealthyColor
+  - systemIconLowColor
+  - systemIconCriticalColor
+  - systemIconDisabledColor
+  - systemIconDestroyedColor
+  - specialEnergyIconColor
+  - officerIconColor
+  - experienceBarColor
+  - experienceBarBackgroundColor
+
+  classTextColor is not read by this DLL; Fleet Operations retains its native handling.
+
+  ### ART_CFG.h
+
+  Five direct fields:
+
+  int directionalShieldDisplayMode = 1;
+  int directionalShieldForwardPosition = 0;
+  int directionalShieldAftPosition = 2;
+  int directionalShieldPortPosition = 3;
+  int directionalShieldStarboardPosition = 1;
+
+  The parser accepts case-insensitive identifiers, optional declaration prefixes and C/C++ comments. Values must be
+  literal integers—no macros or expressions.
+
+  - Display mode: 1..2
+  - Position: 0..3
+  - Final positions must be unique
+  - Settings inherit individually through the extension-root chain
+
+  ### Localized strings and sprites
+
+  Fixed localization keys:
+
+  - GUI_SD_SHIELD_TOOLTIP, GUI_SD_SHIELD_VTOOLTIP
+  - GUI_SD_EXPERIENCE_TOOLTIP, GUI_SD_EXPERIENCE_VTOOLTIP
+  - GUI_SD_SPE_READY, GUI_SD_AMMO_WAITING
+  - Eight GUI_SD_DIRSHIELD_*_TOOLTIP/VTOOLTIP keys
+  - GUI_SD_DIRSHIELD_STRENGTH
+
+  Configured labels/tooltips may also contain arbitrary localization keys or literal text.
+
+  Sprite dependencies:
+
+  - Directional ring: dsf, dsb, dsl, dsr
+  - Ammunition and XP capacity bars: large_shield_bar
+  - Ammunition icons may name registered interface sprites
+  - Stock atlas aliases: all_interface, all_interface2, all_interface_races, all_interface_ranks,
+    all_interface_ranks2
+
+  These must be interface/GUI sprites, normally loaded through gui_global.spr; the DLL does not parse .spr files
+  itself.
+
+  ### Not owned by this DLL
+
+  Ammunition capacities, recharge, costs and resupply fields belong to A2FOEnergySystems.dll. Directional shield
+  enablement and strength fields belong to A2FODirectionalShields.dll. CraftIdentity only obtains their live values
+  and draws them.
+
+  There are no direct:
+
+  - .ini settings
+  - RTS_CFG.h settings
+  - SOD naming conventions
+  - save-format fields
+  - texture/model commands
+
+  ### Documentation problems found
+
+  - The README says display mode 1 implies current/maximum; actually *ValueDisplayMode independently determines the
+    value. Default is percent.
+
+  - It mentions nonexistent a2fo_shield_* sprite names; the real names are dsf, dsb, dsl, and dsr.
+  - infoBuildNameTextArea and infoBuildClassTextArea are accepted fallbacks but undocumented.
+  - The XP bar also depends on large_shield_bar; documentation currently calls that dependency out only for
+    ammunition bars.
+
+  - Registry rendering requires the captain rectangle because that rectangle is the coordinate anchor.
+  - Several appended strings remain hardcoded English, including Ammunition:, the seconds suffix, and parts of the
+    numeric directional-shield and XP text.
+
+
+# A2FODirectionalShields.dll
+
+  ### Direct Craft ODF commands
+
+  directionalShields = 1
+  forwardShieldStrength = 200
+  aftShieldStrength = 150
+  portShieldStrength = 150
+  starboardShieldStrength = 150
+  maxShields = 650 // Native field consumed for validation
+
+  Rules:
+
+  - Field names are case-insensitive and use normal inherited ODF values.
+  - directionalShields is the mandatory activation gate.
+  - Accepted true values include any positive number, true, yes, or on.
+  - 0, false, no, and off disable it.
+  - enabled is not accepted.
+  - All four strengths must be finite and greater than zero.
+  - Floats, scientific notation and an optional f suffix are accepted.
+  - If resolved/inherited maxShields exists, it must be positive and match the facing total.
+  - Matching tolerance is 0.01 or 0.01% of the larger value, whichever is greater.
+  - If maxShields is entirely absent, the DLL installs the facing total as the native maximum.
+
+  Native maxHealth, healthRate, and shieldRate are not parsed by this DLL. Hull remains separate, while native
+  shield recharge changes the aggregate and is then distributed across depleted facings.
+
+  ### No direct UI or file configuration
+
+  This DLL contains no direct:
+
+  - GUI CFG commands
+  - ART_CFG.h or RTS_CFG.h parser
+  - INI settings
+  - localization keys
+  - sprite or texture names
+  - weapon ODF commands
+  - save-format fields
+
+  The following documented controls actually belong to A2FOCraftIdentity.dll:
+
+  - forwardShieldPos, aftShieldPos, portShieldPos, starboardShieldPos
+  - All infoSingleDirectionalShields* rectangles
+  - directionalShieldColor, directionalShieldLowColor, directionalShieldCriticalColor
+  - All five directionalShield*Position/DisplayMode ART fields
+  - dsf, dsb, dsl, dsr and their textures
+
+  ### Dependencies
+
+  - A2FOWeaponDamageControls.dll is required for gameplay because it owns the shared Craft::Damage hook.
+  - Module ordering in activeX does not matter; they perform a late handshake.
+  - A2FOCraftIdentity.dll is optional and only provides the selected-panel display.
+  - A2FOAlwaysShowShields.dll remains independent.
+
+  ### Gameplay and persistence
+
+  - Hits use the attacker’s target-local horizontal direction.
+  - Exact diagonal boundaries select forward or aft.
+  - An empty facing exposes the hull even if other facings remain charged.
+  - Damage without a resolvable weapon owner remains aggregate damage and is later spread proportionally.
+  - Native recharge is shared evenly among depleted facings.
+  - Per-facing values are not saved. Loading redistributes the saved aggregate percentage proportionally.
+
+  ### Findings
+
+  Documentation is generally accurate, with two omissions:
+
+  - It presents directionalShields = 1 as the only activation syntax, while the parser accepts positive numbers and
+    true/yes/on.
+
+  - The maxShields comparison tolerance is undocumented.
+
+  There is also a very minor validation edge case: four individually finite but enormous strengths can overflow
+  their summed total. With an explicit enormous maxShields, the infinity comparison could incorrectly accept the
+  policy. Normal gameplay-sized values are unaffected.
+
+# A2FOEnergySystems.dll
+
+  ### Craft ODF commands
+
+  Photon store:
+
+  maxPhotonTorpedoes = 80
+  photonTorpedoRate = 1.0
+  photonTorpedoRechargeMode = 1
+
+  Quantum store:
+
+  maxQuantumTorpedoes = 20
+  quantumTorpedoRate = 0.25
+  quantumTorpedoRechargeMode = 2
+
+  Resupply providers:
+
+  torpedoResupply = 1
+  torpedoResupplyRange = 300
+
+  It also consumes native classLabel:
+
+  - shipyard automatically provides resupply.
+  - RepairShip automatically provides resupply.
+  - Matching is case-insensitive.
+  - torpedoResupply explicitly overrides the automatic result.
+
+  Rules:
+
+  - Fields are case-insensitive and include inherited ODF values.
+  - Capacities, rates and ranges accept finite non-negative floats, scientific notation and optional f.
+  - Missing, zero or invalid capacity disables that store.
+  - Missing or invalid rate becomes zero.
+  - Recharge mode must be the exact integer 0, 1, or 2.
+  - Missing or invalid recharge mode silently defaults to 1—automatic recharge.
+  - New stores start full.
+  - torpedoResupplyRange defaults to 200.
+  - A zero range is accepted; negative or invalid values retain 200.
+  - The range belongs to the provider, not the receiving Craft.
+  - Mode 2 requires the same team and uses three-dimensional distance.
+  - A provider may resupply itself.
+
+  torpedoResupply accepts:
+
+  - True: positive numbers, true, yes, on
+  - False: 0, false, no, off
+  - enabled is not accepted
+
+  ### Weapon ODF commands
+
+  Put exactly one on the general weapon ODF:
+
+  photonTorpedoCost = 1
+
+  or:
+
+  quantumTorpedoCost = 1
+
+  Both costs accept positive fractional values. A configured weapon:
+
+  - Checks the owner’s matching store before every projectile.
+  - Cannot fire if its owner lacks that store.
+  - Pays after each successfully launched projectile.
+  - Can stop partway through a multi-projectile volley.
+  - Is ignored and behaves natively if both costs are positive.
+  - Behaves natively if neither cost is positive.
+
+  The fields belong on the weapon ODF, not its ordnance ODF.
+
+  ### Recharge behaviour
+
+  - Mode 0: no recharge.
+  - Mode 1: automatic recharge.
+  - Mode 2: recharge only within the provider’s range.
+  - Recharge remains fractional internally.
+  - Amounts are clamped to 0..maximum.
+  - photonTorpedoRate and quantumTorpedoRate are units restored per game second.
+
+  ### UI ownership
+
+  The current binary contains no live GUI, localization, sprite or presentation commands.
+
+  All these belong to A2FOCraftIdentity.dll:
+
+  - photonTorpedoDisplayMode and quantumTorpedoDisplayMode
+  - All *ValueDisplayMode, *Label, *Tooltip, *VerboseTooltip, *Icon, and *IconPos fields
+  - All Photon/Quantum GUI rectangles and colours
+  - GUI_SD_SPE_READY, GUI_SD_AMMO_WAITING
+  - large_shield_bar and atlas sprite handling
+
+  EnergySystems contains an old direct UI implementation in its source, but kSelectedInfoUiEnabled is hardcoded
+  false; the compiler has removed its GUI field strings from the current DLL. CraftIdentity instead reads
+  EnergySystems’ exported live values.
+
+  There are no direct INI, CFG, ART/RTS header, SPR, texture or localization parsers.
+
+  ### Save data
+
+  Configured Craft append a 16-byte versioned block labelled a2fo_torpedoStores containing:
+
+  - Magic
+  - Version 1
+  - Current Photon amount
+  - Current Quantum amount
+
+  Loaded values are clamped to the current ODF capacities. Older saves lack this block and are intentionally
+  rejected for configured Craft, so a new game is required after enabling the feature.
+
+  If the save/load signatures are unavailable, gameplay still runs but persistence is disabled and logged.
+
+  ### Native developer API
+
+  The DLL exports getters for current, maximum and remaining reload time, plus Set and Add functions for both
+  stores. These use float amounts and are not ODF commands.
+
+  ### Documentation findings
+
+  - Recharge mode’s default of 1 is not stated clearly.
+  - Fractional weapon costs and the full torpedoResupply boolean syntax are undocumented.
+  - The README says stores initially display whole current/maximum, but CraftIdentity’s actual default value mode is
+    percentage.
+
+  - docs/addresses.md still says EnergySystems registers its selected-info handler; that path is disabled.
+    CraftIdentity pulls the exported values instead.
+
+  - Presentation commands are included in the EnergySystems guide but should be labelled explicitly as
+    CraftIdentity-owned.
+
+
+
+# A2FOFeaturePack.dll
+
+  ### Direct commands
+
+  1. RTS_CFG.h
+
+  int upgradePodMaximumTier = 6;
+
+  - Default: 6
+  - Valid: 3..16
+  - Name is case-sensitive.
+  - Value must be a plain positive decimal integer—no floats, signs, hex, macros, or expressions.
+  - C/C++ comments and optional declaration prefixes are accepted.
+  - The last assignment in that file determines whether the file’s setting is valid. A trailing invalid assignment
+    discards earlier valid assignments from that file and retains the inherited setting.
+
+  - Child RTS_CFG.h files replace the complete parent file, so modders must copy the full parent configuration.
+
+  2. Upgrade-station ODFs
+
+  tier0BuildItem0 = "pod_weapons_2"
+  tier1BuildItem0 = "pod_weapons_3"
+  tier2BuildItem0 = "pod_weapons_4"
+
+  - tierTBuildItemX maps to upgradeLevel = T + 2.
+  - T is 0..maximumTier-2; with the default maximum that is 0..4, and the absolute maximum is 0..14.
+  - X is:
+      - 0..56 for tier0BuildItemX
+      - 0..57 for tier1BuildItemX and higher
+
+  - Sparse indices are supported.
+  - Missing commands preserve the existing entry.
+  - An explicitly empty value clears that index.
+  - Paths and an optional .odf suffix are accepted and reduced to the ODF basename.
+  - The target must resolve to an upgrade ResearchPod with exactly the corresponding upgradeLevel.
+  - Invalid entries are ignored and logged.
+  - Each upgrade chain should retain the same X and upgradeSystem at every tier.
+
+  upgradeLevel, upgradeSystem, the upgrade multiplier, podHardpoints, and the ResearchPod upgrade flag are existing
+  native data consumed after Fleet Operations parses them; they are not new FeaturePack commands.
+
+  3. BuildYard configuration ODFs
+
+  module0RequiredTechnology = "fed_module_basic_tech.odf"
+  module0PseudoTechnology = "fed_module_chassis_gate.odf"
+
+  - X is the same zero-based index as native moduleXRequiredTechnology.
+  - The implementation accepts indices through 1023, although actual usable indices remain constrained by Fleet
+    Operations’ module configuration.
+
+  - The value is resolved as a normal project ID.
+  - If no native requirement exists, the pseudo project becomes the module’s only technology gate.
+  - If both are different and valid, both must be available.
+  - Missing, unresolved, empty, or project-ID-zero pseudo entries are ignored.
+  - The fake project must be added to the selected .tt technology tree.
+  - Native moduleConf and moduleXRequiredTechnology are not owned by FeaturePack.
+
+  ### Automatic file conventions
+
+  FeaturePack also provides recursive ODF discovery without additional commands:
+
+  - Loose ODFs are discovered recursively beneath each extension root’s odf directory.
+  - Registered overlays such as A1Compat’s Addon directory are also scanned.
+  - Recursion is limited to 64 levels and reparse-point directories are skipped.
+  - The archive name is specifically odf.fpq at each extension root.
+  - FPQ versions 1 and 2 are accepted.
+  - Only .odf files beneath an odf folder inside the archive contribute directories.
+  - Lookups are basename-based and case-insensitive. Two nested files with the same basename cannot be addressed
+    independently; precedence selects one winner.
+
+  - Precedence is active mod over parent over Data, then override overlays, primary root, and loose before packed.
+  - Fleet Operations’ total virtual-directory limit is 255.
+
+  ### Not configurable
+
+  These have no ODF/INI/CFG commands:
+
+  - Ctrl-click ten-slot queue fill
+  - Ctrl+Alt-click continuous production
+  - Queue retry timing, markers, and save/load data
+  - Hotkeys
+  - Bink movie viewport scaling
+  - HybridBuild callback bridge
+  - Producer event dispatch
+  - A1 Addon precedence registration
+
+  FeaturePack directly parses no info.ini, ART_CFG.h, GUI CFG, SPR, localization, texture, or SOD settings.
+
+  ### Documentation finding
+
+  The central reference currently says all tierTBuildItemX indices are 0..56. The binary actually supports index 57
+  for tier 1 and higher; only tier 0 stops at 56. The strict RTS_CFG.h syntax, BuildYard index ceiling, recursive
+  depth/directory limits, and basename-collision rule are also undocumented.
+
+  The compiled DLL contains the expected command strings and is newer than all its source files. The upgrade parser,
+  FPQ paths, recursive ODF paths, documentation tests, and full Wine module-initialization smoke test all passed. No
+  files were changed.
+
+# A2FOFireArcs.dll
+
+  ### Weapon ODF commands
+
+  Place these in the general weapon ODF, not the ordnance ODF:
+
+   Command              Behaviour
+  ━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   fireArcMode          box or cone; case-insensitive
+  ───────────────────  ───────────────────────────────────────────────────
+   fireArcYaw           Horizontal centre; default 0, wraps to -180..180
+  ───────────────────  ───────────────────────────────────────────────────
+   fireArcPitch         Vertical centre; default 0, clamps to -90..90
+  ───────────────────  ───────────────────────────────────────────────────
+   fireArcYawAngle      Box total yaw width; default 360, clamps 0..360
+  ───────────────────  ───────────────────────────────────────────────────
+   fireArcPitchAngle    Box total pitch width; default 180, clamps 0..180
+  ───────────────────  ───────────────────────────────────────────────────
+   fireArcAngle         Cone’s total circular diameter; clamps 0..360
+  ───────────────────  ───────────────────────────────────────────────────
+   fireArcCenter        Compatibility alias for fireArcYaw
+  ───────────────────  ───────────────────────────────────────────────────
+   fireArcWidth         Compatibility alias for fireArcYawAngle
+
+  Rules:
+
+  - All widths are totals: 90 means 45 degrees on each side.
+  - Boundaries are inclusive.
+  - fireArcYaw overrides fireArcCenter.
+  - fireArcYawAngle overrides fireArcWidth.
+  - Supplying fireArcAngle without a mode selects cone mode.
+  - Explicit cone mode requires fireArcAngle.
+  - Box mode requires at least one of fireArcWidth, fireArcYawAngle, or fireArcPitchAngle.
+  - Centre fields alone do not activate a valid custom arc.
+  - Finite integer, decimal, scientific, quoted numeric and optional f suffix values are supported.
+  - Widths outside their range are clamped, not rejected.
+  - A malformed declared numeric field rejects the entire custom policy—even if that field would otherwise be unused
+    by the selected mode.
+
+  - An invalid or incomplete policy is logged and retains native Fleet Operations firing behaviour.
+  - Weapons containing none of these fields remain completely native.
+
+  Custom arcs replace only native restrictFireArc/fireArc directional checking. Range, target validity, obstruction
+  and other native checks remain active.
+
+  ### RTS_CFG.h
+
+  int firearc = 1;
+
+  - Default: enabled.
+  - 1: enables custom arc enforcement and hover previews.
+  - 0: disables the complete DLL’s runtime behaviour.
+  - The identifier is case-sensitive.
+  - Only literal 0 or 1 is accepted—no true, signs, floats, macros, or expressions.
+  - Optional declaration prefixes and C/C++ comments are accepted.
+  - Later valid extension roots override earlier roots.
+  - Within one file, the final assignment controls validity. A trailing invalid assignment causes that file to be
+    ignored and retains the inherited value.
+
+  - Files over 2 MiB are ignored.
+
+  As with upgradePodMaximumTier, a child RTS_CFG.h replaces the complete native parent file. The FireArcs README
+  does not currently warn modders to copy the full parent configuration.
+
+  ### Interface CFG colours
+
+  fireArcBoundaryColor    = 0.10 0.90 1.00
+  fireArcCenterColor      = 1.00 0.82 0.12
+  fireArcValidTargetColor = 0.15 1.00 0.20
+
+  Defaults:
+
+  - Boundary: cyan, 0.10 0.90 1.00
+  - Centre: gold, 1.00 0.82 0.12
+  - Target inside arc: green, 0.15 1.00 0.20
+
+  Each channel is clamped independently to 0..1. Missing, malformed or non-finite colours retain their default.
+  These belong in the active interface GUI CFG, not ART_CFG.h.
+
+  ### Existing native fields observed
+
+  These are not new FireArcs commands:
+
+  - restrictFireArc and fireArc: native directional policy retained when no valid custom arc exists.
+  - weaponXiconpos: exposes the weapon icon needed to activate the hover preview.
+  - Weapon range: sizes the preview to 35% of range, clamped to 80..500; invalid range uses 120.
+  - wpnName, then ordName: used only to identify malformed policies in the log.
+  - The weapon’s native hardpoint list: preview origin; up to 64 nodes are inspected before falling back to the
+    owner’s centre.
+
+  No special SOD hardpoint names are required.
+
+  ### No other modder configuration
+
+  The DLL has no direct:
+
+  - INI settings
+  - ART_CFG.h fields
+  - SPR definitions
+  - localization keys
+  - texture or SOD names
+  - technology-tree commands
+  - save-format fields
+
+  Its exported A2FOFireArcs_AllowWeaponTrigger function is a native module API, not a mod command.
+
+# A2FOHybridBuild.dll
+
+  ### Modder-facing ODF commands
+
+  classLabel = "hybridbuild"
+
+  constructItem0 = "fed_station"
+  yardItem0      = "fed_ship"
+  researchItem0  = "fed_research"
+  evolveItem0    = "fed_replacement"
+
+  cocoon = "custom_cocoon" // .sod optional
+
+  Rules:
+
+  - Indices are 0..56.
+  - At least one of the four explicit families must declare item 0 before any higher sparse entries are scanned.
+  - The same target can appear only once across all explicit lists.
+  - All methods share one ten-item FIFO.
+  - Evolution is a terminal barrier: once queued, no later jobs are accepted.
+  - Missing researchItemX retains the station’s native ResearchStation research/pod list.
+  - The original class label must be hybridbuild; ordinary classLabel = "research" does not activate these lists.
+  - cocoon works for native Evolvers and HybridBuild stations. Blank, missing, or unloadable models fall back to
+    Fleet Ops’ native cocoon.
+
+  ### Live build submenus
+
+  These work on ordinary Producer lists:
+
+  buildItem1 = "fexcelsiormenu"
+
+  buildItem1Refit0 = "fexcelsior"
+  buildItem1Refit1 = "fexcelsiorii"
+
+  - Both indices support 0..56 and sparse ordering.
+  - The native buildItemX must resolve to a real presentation-parent class.
+  - The parent is never constructed.
+  - Its standard unitName, tooltip, verboseTooltip, basename/button assets are used for presentation.
+  - Child ODFs retain their own cost, time and technology requirements.
+  - The expanded real list cannot exceed 57 targets.
+  - Unresolved children are skipped.
+  - If the same presentation class is used twice, the later page is ignored.
+  - Refit commands are case-insensitive; values may include paths or .odf.
+
+  Important limitation: these submenu rows are read directly from loose ODF files. Packed-only declarations and
+  inherited/include-file Refit rows do not work.
+
+  ### Required assets
+
+  - b_construct — fixed Construction root-button sprite.
+  - <research-basename>_s — research queue and mouse-over sprite.
+  - Normal w1 through w5 wireframes for ordinary constructed/evolved targets.
+  - Any custom SOD named by cocoon.
+  - Waiting construction ghosts are hardcoded warm yellow and are not configurable.
+
+  The DLL does not directly parse .spr; required sprites must already be registered through the normal GUI sprite
+  system.
+
+  ### Dependencies
+
+  - A2FOExtensions.dll
+  - A2FOFeaturePack.dll — mandatory; without it HybridBuild initialization fails.
+  - A2FOAlwaysShowShields.dll is optional and only linked through the shared render boundary.
+
+  ### Findings needing attention
+
+  1. evolveItemX currently becomes active only when there is also a valid yardItemX list. An evolve-only or
+     construct-plus-evolve HybridBuild station silently loses its Evolve menu. This restriction is not documented
+     and looks like a likely implementation oversight.
+
+  2. Documentation says a target cannot appear in two different explicit lists, but the implementation actually
+     prohibits duplicating it anywhere—even twice in the same list. The first declaration wins.
+
+  3. Hybrid typed jobs and construction-placement sidecars still lack a complete explicit serialization contract.
+     Save/load with queued placements remains listed as unfinished work.
+
+# A2FOInfoIni.dll
+
+  [mod]
+  DefaultGameSpeed = 5
+  SettingsDirectory = My Mod
+
+  ### DefaultGameSpeed
+
+  - Accepts decimal integers 1..6.
+  - Quoted values are accepted.
+  - +3 and 03 are also accepted as decimal.
+  - Floats, suffixes, trailing comments, zero and values above six are rejected.
+  - It applies only as a first-run/default value.
+  - An existing completed profile’s saved game speed takes precedence.
+  - When an active mod is selected, Data and parent-mod speed values are not inherited.
+
+  ### SettingsDirectory
+
+  Supported forms:
+
+  SettingsDirectory = Shared Mod
+  SettingsDirectory = profiles\Classic
+  SettingsDirectory = D:\Portable\Fleet Ops
+  SettingsDirectory = \\server\share\Fleet Ops
+  SettingsDirectory = Z:\Linux\Path
+  SettingsDirectory = %APPDATA%\My Fleet Ops
+
+  Resolution:
+
+  - Bare name → standard mods\<name> settings folder.
+  - Relative path with separators → relative to Star Trek Armada II Fleet Ops Config.
+  - Drive and UNC paths → used directly.
+  - Environment variables are expanded.
+  - Forward slashes become backslashes.
+  - A trailing backslash is added automatically.
+  - Do not include Settings.xml; name its containing directory.
+  - Active-mod values are not inherited from parent mods.
+  - A Data-level SettingsDirectory acts only as the shared root for an active mod’s bare name.
+
+  A bare Data shared root creates nesting such as:
+
+  ...\mods\Shared Root\mods\Active Name\
+
+  An absolute or separator-containing Data path is clearer for shared-root usage.
+
+  ### Parser caveats
+
+  - Section and key names are case-insensitive.
+  - Full-line ; and # comments are supported.
+  - Inline comments are not supported:
+
+  DefaultGameSpeed = 5 ; invalid
+
+  - If a key is repeated, the first declaration wins.
+  - Single and double quotes are supported, but there is no escaped-quote parser.
+  - Relative .. components are not rejected or canonicalised; modders should avoid them.
+  - info.ini files larger than 1 MiB are ignored.
+
+  ### Not owned by this DLL
+
+  ParentMod appears in the binary because shared extension-root code is statically linked, but A2FOInfoIni does not
+  consume or register it. Parent discovery belongs to the core.
+
+  It also does not own:
+
+  - [modules] activeX, requiredX, or rejectX
+  - Any ODF commands
+  - ART/RTS/GUI CFG fields
+  - SPR, texture, SOD or localization conventions
+  - Any save-format extension
+
+  ### Verification
+
+  - Current parser test passes.
+  - Built and installed DLLs have different hashes, but differ in only eight PE metadata bytes—code and behaviour
+    are effectively identical.
+
+# A2FOInstantActionSettings.dll
+
+  ### Activation
+
+  Select the module using the ordinary module list:
+
+  [modules]
+  activeX = "A2FOInstantActionSettings"
+
+  The activeX mechanism belongs to the core module loader, not this DLL.
+
+  ### Automatic behaviour
+
+  When enabled, it automatically:
+
+  - Restores the Instant Action Load Settings button route.
+  - Preserves the native host-only check.
+  - Repairs missing Load-button bounds using the adjacent Save button and the fixed six-pixel gap.
+  - Redirects an exact bare Settings.prf open to the resolved SettingsDirectory, when one is available.
+  - Correctly decodes Fleet Ops’ native profile line:
+
+  setupDetails = <1648 hexadecimal characters>
+
+  - Guards against saved setups referring to a race absent from the current mod.
+  - Replaces unreadable Instant Action toggle labels with a blank label instead of crashing.
+
+  setupDetails is an existing Fleet Ops profile field representing an exact 824-byte structure. It is not a modder
+  command and should not normally be edited manually.
+
+  ### Fixed textual conventions
+
+  - Profile filename: Settings.prf
+  - Profile label: case-sensitive setupDetails
+  - Button-caption fallback: English Load Settings
+
+  The caption matcher ignores ASCII case, spaces, tabs, underscores and &, so these match:
+
+  Load Settings
+  &LOAD_SETTINGS
+  loadsettings
+
+  A translated caption will not match the WM_COMMAND fallback, although the coordinate-based mouse route may still
+  work.
+
+  ### Dependencies
+
+  - Requires A2FOExtensions.dll and the supported Armada/Fleet Ops binaries.
+  - A2FOInfoIni.dll is not a hard dependency.
+  - However, profile-path redirection occurs only when the core can supply a resolved SettingsDirectory. Otherwise
+    the native bare Settings.prf path remains.
+
+  There are no:
+
+  - ODF fields
+  - info.ini fields
+  - RTS_CFG.h, ART_CFG.h or GUI CFG settings
+  - Localization keys
+  - Sprite, texture or SOD conventions
+  - New save/profile fields
+
+  ### Findings
+
+  1. The README says the corrected decoder runs only while reading the tracked Instant Action setup structure. The
+     implementation is slightly broader: it intercepts any 824-byte blob read whose current text line begins with
+     exact setupDetails. It does not actually require the tracked-load flag, matching destination or reader mode.
+     Collision risk is low but the documentation overstates its isolation.
+
+  2. The English Load Settings caption dependency is undocumented.
+  3. The exact profile redirection requires the incoming path string to be precisely Settings.prf; alternate casing
+     or .\Settings.prf is not redirected.
+
+  4. The optional Advanced Settings diagnostics signature is part of mandatory preflight. If that diagnostic-only
+     Fleet Ops function changes, the entire repair is disabled.
+
+  The parser/geometry tests pass. Built and installed DLLs differ only in nine PE metadata bytes; executable
+  behaviour is identical. Relevant source: A2FOHookExtensions/modules/A2FOInstantActionSettings/module.cpp:35,
+  A2FOHookExtensions/modules/A2FOInstantActionSettings/setup_details_line.cpp:10, and A2FOHookExtensions/modules/
+  A2FOInstantActionSettings/README.md:1.
+
+# A2FOMissionSelector.dll
+
+  ### Supported material
+
+   Format                          Support    Purpose
+  ━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   mission_selector.ini             Direct    Campaigns, missions, text, images and launch mapping
+  ──────────────────────  ─────────────────  ─────────────────────────────────────────────────────────────────────
+   label.map                        Direct    Native campaign and mission titles
+  ──────────────────────  ─────────────────  ─────────────────────────────────────────────────────────────────────
+   .bzn                    Native hand-off    Mission filename passed to Armada’s loader
+  ──────────────────────  ─────────────────  ─────────────────────────────────────────────────────────────────────
+   PNG/BMP/JPG/JPEG                 Direct    Campaign backgrounds and mission thumbnails
+  ──────────────────────  ─────────────────  ─────────────────────────────────────────────────────────────────────
+   mshell.set                     Indirect    Its already-loaded native mission table remains the stock fallback
+  ──────────────────────  ─────────────────  ─────────────────────────────────────────────────────────────────────
+   ODF                                None    No ParameterDB or ODF reads
+  ──────────────────────  ─────────────────  ─────────────────────────────────────────────────────────────────────
+   SPR/CFG/LDL                        None    UI layout, colours and fonts are currently hardcoded Win32 controls
+  ──────────────────────  ─────────────────  ─────────────────────────────────────────────────────────────────────
+   .h files                           None    No RTS_CFG.h, ART_CFG.h, or localization-header reads
+  ──────────────────────  ─────────────────  ─────────────────────────────────────────────────────────────────────
+   FPQ metadata/images                None    INI, label.map, and images are opened as loose disk files
+
+  The .h filenames visible inside the 11 MB DLL are compiler/debug headers such as basic_string.h, not hidden Armada
+  modding commands. Roughly 10 MB of the DLL is unstripped DWARF debug information.
+
+  ### INI commands recovered
+
+  [campaignN]
+  title =
+  overview =
+  background =
+  unlocked =
+
+  [campaignN.missionM]
+  file =
+  title =
+  description =
+  objectives =
+  thumbnail =
+  unlocked =
+  nativeCampaign =
+  nativeMission =
+
+  Important rules:
+
+  - Campaign indices: 0..127.
+  - Mission indices: 0..511, including sparse numbering.
+  - Campaigns 0..3 are the native Tutorial, Federation, Klingon and Borg sections.
+  - Native mission slots are 0..9.
+  - file can override a native BZN temporarily without modifying the native table permanently.
+  - Custom missions default to native launch cell nativeCampaign = 1, nativeMission = 0.
+  - nativeCampaign and nativeMission are ignored for native 0..9 slots.
+  - Native campaign/mission unlock state cannot be overridden by INI; unlocked controls custom entries only.
+  - Custom unlock state is static and is not saved as campaign progression.
+  - Boolean values accept 1/0, true/false, yes/no, and on/off.
+  - Section and field names are case-insensitive.
+  - Quoted values are accepted; \n and \t escapes work.
+  - Each INI or label.map must be no larger than 1 MiB.
+
+  ### File precedence
+
+  Roots are processed as:
+
+  Data → parent mods → active mod
+
+  Within each root:
+
+  mission_selector.ini → misc/mission_selector.ini
+  label.map             → misc/label.map
+
+  Later files override individual earlier values. Images are searched in reverse precedence—active mod first—under:
+
+  <root>/<requested>
+  <root>/bzn/<requested>
+  <root>/bitmaps/<requested>
+
+  Bare mission thumbnails auto-resolve as <BZN stem>.png, .bmp, .jpg, or .jpeg. The default campaign background is
+  bitmaps/single/singleplay.png.
+
+  ### label.map integration
+
+  Campaign titles come from single_player:
+
+  tutorials
+  federation_campaign
+  klingon_campaign
+  borg_campaign
+
+  Mission titles come from mission_select, keyed by BZN basename. Matching is case-insensitive and ignores directory
+  components. Explicit INI titles override these labels.
+
+  ### Current installation
+
+  The deployed module is loaded successfully according to Games/Fleet Ops Roots/Data/A2FOExtensions.log:89.
+
+  - Deployed DLL SHA-256: 8cdf42505290841a6222e086bdbc9a506ee403933c9357427078e15a5a5cd2b7
+  - The project-root DLL is an older/different build:
+    66936316bcca66f77a39ce1ebcd221538a0663f4846a2d222c18bc8422978cbf
+
+  The active test mod already has a complete Games/Fleet Ops Roots/Data/Mods/test/mission_selector.ini:1. Its four
+  campaign backgrounds exist, and its custom thumbnail resolves from the STA2 Classic parent mod. One tiny copy typo
+  is present on line 13: “A Select a Klingon mission.”
+
+# A2FONebulaRenderer.dll
+
+  ## Supported modding material
+
+   Material               Support
+  ━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Craft .odf             Direct: emissive maps, damage decals, logo decals
+  ─────────────────────  ─────────────────────────────────────────────────────
+   ART_CFG.h              Direct: suffixes and lighting parameters
+  ─────────────────────  ─────────────────────────────────────────────────────
+   A2FORenderer.ini       Core-coupled effect/backend switches
+  ─────────────────────  ─────────────────────────────────────────────────────
+   .sod                   Material names, bump slots, hardpoints and ScaleSOD
+  ─────────────────────  ─────────────────────────────────────────────────────
+   .nvv                   External DX8 pixel shaders
+  ─────────────────────  ─────────────────────────────────────────────────────
+   .dds/.tga/.png/.bmp    Loose effect textures
+  ─────────────────────  ─────────────────────────────────────────────────────
+   .spr/.cfg/.ldl         No direct parsing found
+  ─────────────────────  ─────────────────────────────────────────────────────
+   Localization .h        None; graphics-option labels are hardcoded English
+
+  ## ART_CFG.h
+
+  Recognized settings:
+
+  #define A2FO_EMISSIVE_SUFFIX "_emissive_"
+  #define A2FO_BUMP_SUFFIX "_bump"
+  #define A2FO_SPECULAR_SUFFIX "_specular"
+
+  #define A2FO_EMISSIVE_BUMP_MULTIPLIER 2.0
+  #define A2FO_BUMP_LIGHT_BIAS 0.55
+  #define A2FO_EMISSIVE_DIFFUSE_RESTORE 1.0
+
+  The parser also accepts undocumented aliases:
+
+  EmissiveTextureSuffix
+  BumpTextureSuffix
+  SpecularTextureSuffix
+  EmissiveBumpMultiplier
+  BumpLightBias
+  EmissiveDiffuseRestore
+
+  Important rules:
+
+  - Configuration layers load Data → parent mods → active mod.
+  - Each setting inherits independently.
+  - Empty suffix "" disables that convention.
+  - Suffixes are limited to 64 ASCII letters, digits, _ and -.
+  - Float ranges:
+      - multiplier: 0–8
+      - light bias: 0–1
+      - diffuse restore: 0–2
+
+  - Expressions and macro references are not evaluated.
+  - // and /* ... */ comments are stripped.
+
+  For diffuse material fbattle, the conventional assets are:
+
+  fbattle_bump
+  fbattle_specular
+  fbattle_emissive_warp
+  fbattle_emissive_impulse
+  fbattle_emissive_shields
+  fbattle_emissive_life
+  fbattle_emissive_sensor
+  fbattle_emissive_weapons
+
+  See the A2FOHookExtensions/modules/A2FONebulaRenderer/art_texture_suffix_config.cpp:178.
+
+  ## Craft ODF commands
+
+  ### Emissive maps
+
+  Single-material wildcard form:
+
+  emissiveWarp
+  emissiveImpulse
+  emissiveShields
+  emissiveLifeSupport
+  emissiveSensors
+  emissiveWeapons
+
+  Indexed form, with sparse indices 0–63:
+
+  textureX
+  emissiveXWarp
+  emissiveXImpulse
+  emissiveXShields
+  emissiveXLifeSupport
+  emissiveXSensors
+  emissiveXWeapons
+
+  textureX selects a particular SOD diffuse material. Comparison ignores case, directory and extension.
+
+  Once any textureX is present, indexed mode takes over and inherited unnumbered emissive commands are ignored.
+  Explicit emissive declarations also suppress global suffix fallback for that channel—even when the named texture
+  cannot be loaded.
+
+  ### Damage decals
+
+  damageThreshold = 0.1
+  damageDecalPreview = 0
+
+  hullScorch1 = "scorch"
+  hullScorch1Hardpoint = "hp05"
+  hullScorch1Offset = 0 0 0
+  hullScorch1Rotation = 0 0 0
+  hullScorch1Size = 6 6
+
+  Supported prefixes:
+
+  sensors
+  engines
+  weapons
+  lifeSupport
+  shieldGenerator
+  hull
+
+  Indices are sparse 1–64. An explicit entry suppresses legacy fallback for that system, even if the explicit
+  texture or hardpoint is invalid.
+
+  Legacy support remains:
+
+  scorchTextureX
+  sensorsTargetHardpoints
+  enginesTargetHardpoints
+  weaponsTargetHardpoints
+  lifeSupportTargetHardpoints
+  shieldGeneratorTargetHardpoints
+  hullTargetHardpoints
+
+  This damageThreshold is the Craft decal threshold; weapon ODFs have an unrelated native command with the same
+  name.
+
+  Current example: Games/Fleet Ops Roots/Data/Mods/test/odf/ships/cdestroy2.odf:85.
+
+  ### Logo decals
+
+  logoFileNames = "ship-logo"
+
+  logoDecal1Hardpoint = "hp01"
+  logoDecal1Suffix = "_alternate"
+  logoDecal1Offset = 0 0 0
+  logoDecal1Rotation = 0 0 0
+  logoDecal1Size = 6 6
+  logoDecal1ColourKey = 255 255 255
+  logoDecal1FlipU = 1
+
+  Notes:
+
+  - British spelling ColourKey is required.
+  - Colour values are clamped to 0–255.
+  - No suffix means the module can reuse a native/FPQ-loaded logo texture.
+  - Suffixed logos are loose-file only.
+  - Logo rows correspond to possibleCraftNames; empty rows are preserved.
+  - ScaleSOD affects decal offset and size, but not rotation.
+
+  Current example: Games/Fleet Ops Roots/Data/Mods/test/odf/ships/fgalaxy.odf:67.
+
+  ## Texture and archive behavior
+
+  Loose textures are searched in active-mod-first order under:
+
+  Textures/
+  Textures/RGB/
+  Textures/Index8/
+  Textures/Compressed/
+
+  Extensionless lookup order:
+
+  .dds → .tga → .png → .bmp → exact filename
+
+  Archive support differs by feature:
+
+  - Normal diffuse: loose or FPQ.
+  - Global bump: native DDS/TGA lookup, including FPQ.
+  - Unsuffixed logo: can use FPQ.
+  - Emissive, specular, damage decals and suffixed logos: loose files only.
+  - PNG bump maps are ignored by the native bump route.
+
+  ## Renderer and shaders
+
+  This module is DX8-only. Under /d3d9 it remains loaded but inactive.
+
+  Live shaders are:
+
+  - A2FOHookExtensions/modules/A2FONebulaRenderer/Shaders/dx8/pixel/ps.nvv
+  - A2FOHookExtensions/modules/A2FONebulaRenderer/Shaders/dx8/pixel/ps_specular.nvv
+
+  They use Pixel Shader 1.4 and expect:
+
+  stage 0: diffuse
+  stage 1: bump
+  stage 2: emissive
+  stage 3: specular
+
+  The supplied vertex shader files are reference/development material; Fleet Ops’ native dot3_directional.nvv
+  remains the live vertex shader.
+
+  The core controls are in Games/Fleet Ops Roots/Data/A2FORenderer.ini:1:
+
+  [Effects]
+  EmissiveMaps=1
+  SpecularMaps=1
+  EmissiveBloom=1
+
+  [Diagnostics]
+  MappedTextureCloak=0
+
+  ## Current installation status
+
+  The deployed DLL is:
+
+  Size:    11,880,981 bytes
+  SHA-256: 1fe677b269a89d03c1bd7d758004907147437019a40eacfb88929afe58eb6175
+
+  Most of that size is embedded DWARF debug information; it is not extra modding material.
+
+  The current test mod is working:
+
+  - Active ART multiplier is 4.0, overriding the parent’s 2.0.
+  - Five loose global candidates were indexed.
+  - Four emissive maps registered for fbattle.
+  - One specular map registered.
+  - Global bump suffix applied to two SOD materials.
+  - Damage decal and selected-name logo placement both registered.
+  - DXVK bloom was assembled and composited successfully.
+
+# A2FONormalWeaponTech.dll
+
+  ## Material support
+
+   Material                      Support
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   .tt                           Direct and authoritative
+  ────────────────────────────  ──────────────────────────────────────────────
+   Weapon .odf                   Indirect: its filename/project ID is checked
+  ────────────────────────────  ──────────────────────────────────────────────
+   Existing special ODF field    Determines whether the module applies
+  ────────────────────────────  ──────────────────────────────────────────────
+   .ini/.spr/.cfg/.h/.ldl        No parsing found
+  ────────────────────────────  ──────────────────────────────────────────────
+   Textures, SODs, sounds        No involvement
+
+  ## Technology-tree syntax
+
+  List the actual weapon ODF in every applicable technology tree:
+
+  fbphas.odf 0
+  fbpulse.odf 1 fresear.odf
+  fblockedweapon.odf -1
+  fconditionallyblocked.odf -2
+
+  Meanings are the normal Fleet Ops meanings:
+
+  - 0: immediately available.
+  - Positive number: that many following prerequisite projects must be available.
+  - -1: impossible and prevents dependent projects.
+  - -2: impossible itself, but does not automatically invalidate dependants.
+  - Unlisted weapon: treated by this module as 0, so it remains available.
+
+  For a weapon directly listed as -1 or -2, both forms prevent it firing. Their difference matters when other
+  technology entries depend upon that project.
+
+  The README’s fresearch.odf example is illustrative; that filename does not exist in the installed STA2 trees. The
+  real stock station is fresear.odf.
+
+  ## Which ODF to list
+
+  Use the weapon ODF assigned by the ship:
+
+  weapon1 = "fbphas"
+
+  Therefore the tree entry is:
+
+  fbphas.odf 1 fresear.odf
+
+  Do not list:
+
+  - The ordnance ODF named by ordName.
+  - The included parent such as phaser.odf.
+  - The ship ODF carrying the weapon.
+
+  The project ID comes from the completed WeaponClass’s own ParameterDB entry.
+
+  ## Actual applicability
+
+  The implementation is broader than the README wording suggests. It does not explicitly test for:
+
+  cannon
+  phaser
+  pulse
+  launcher
+  torpedo
+
+  Instead, it checks the native completed WeaponClass special flag:
+
+  special = 0  // checked by A2FONormalWeaponTech
+  special = 1  // bypasses this module
+
+  Consequently, any WeaponClass reaching the shared Weapon::Trigger path with special = 0 is potentially governed by
+  its .tt entry, even if it uses an unusual class label. special = 1 weapons remain under Fleet Operations’ native
+  special-weapon technology handling.
+
+  This behavior is visible in A2FOHookExtensions/modules/A2FONormalWeaponTech/module.cpp:118.
+
+  ## Runtime behavior
+
+  The decision occurs immediately before the native shot:
+
+  target/range/obstruction checks
+  → optional 3D fire-arc check
+  → normal-weapon technology check
+  → native Weapon::Trigger
+
+  It therefore:
+
+  - Prevents the shot itself.
+  - Does not hide or remove the weapon.
+  - Does not alter the weapon ODF or ordnance.
+  - Applies to human and AI firing through the same trigger path.
+  - Coexists with FireArcs, Turrets, and torpedo-ammunition prechecks.
+  - Does not require A2FOTurrets.dll.
+
+  The current owner’s team is resolved for every firing attempt. This means:
+
+  - Newly completed research can enable an existing weapon.
+  - Captured ships use the capturing team’s technology tree.
+  - If the weapon is absent from the capturer’s tree, it defaults to available.
+  - Every selectable .tt variant must contain the restriction; forgetting one silently leaves the weapon available.
+
+  The shared gate is documented in A2FOHookExtensions/core/dllmain.cpp:2229.
+
+  ## Failure and diagnostic behavior
+
+  The module deliberately fails open when it cannot safely resolve:
+
+  - The weapon or WeaponClass.
+  - The project ID.
+  - The weapon owner.
+  - Team indices outside 0–63.
+  - The team technology tree.
+  - Required game signatures.
+
+  A typo or missing weapon entry also effectively fails open because the weapon is considered unlisted.
+
+  It logs only the first occurrence of each decision type per process:
+
+  allowed (unlisted/default 0)
+  allowed by listed entry
+  blocked by listed entry
+
+  The messages contain the numeric project ID and team index, not the ODF filename.
+
+  ## Current installation
+
+  The live Games/Fleet Ops Roots/Data/Mods/test/techtree/tech1.tt:78 currently contains:
+
+  fbphas.odf 0
+
+  So fbphas is explicitly unrestricted. I found no positive, -1, or -2 normal-weapon test entry in that active test
+  tree.
+
+  The Games/Fleet Ops Roots/Data/A2FOExtensions.log:98 confirms:
+
+  Weapon-trigger handler registered by A2FONormalWeaponTech
+  Normal-weapon technology-tree filter initialized
+  Module loader: loaded ...A2FONormalWeaponTech.dll
+
+  No allow/block decision appears in the current log, so this session has not recorded an actual technology-
+  controlled firing attempt.
+
+  ## Binary audit
+
+  Deployed binary:
+
+  Size:     2,339,319 bytes
+  SHA-256:  6732fc8dfa1e950ba0581200a373b2961d2f079e87b83564f0bdaf768827b5b8
+  Built:    2026-08-20 19:31:31 +0100
+
+  Exports:
+
+  A2FO_ModuleInit
+  A2FO_ModuleShutdown
+  A2FONormalWeaponTech_AllowWeaponTrigger
+
+  The last export is a compatibility API for older native clients, not a modding command. The DLL contains no
+  meaningful filename-extension strings or file-reading imports. Much of its 2.34 MB size is embedded DWARF
+  debugging information.
+
+  The current deployed build includes the newer precheck-only event registration, avoiding unnecessary post-shot
+  callbacks.
+
+# A2FOPointDefenseCycles.dll
+
+  ## Supported material
+
+   Material                           Support
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Point-defense weapon .odf          Direct
+  ─────────────────────────────────  ────────────────────────────────────────────────
+   shotDelay                          Existing native command, additionally enforced
+  ─────────────────────────────────  ────────────────────────────────────────────────
+   .ini/.cfg/.spr/.h/.ldl/.tt         No parsing
+  ─────────────────────────────────  ────────────────────────────────────────────────
+   Textures, SODs, ordnance assets    No changes
+  ─────────────────────────────────  ────────────────────────────────────────────────
+   Savegames                          Stores two internal cycle-state fields
+
+  Only these class labels are supported:
+
+  classLabel = "PointDefenseLaser"
+  classLabel = "OrdnanceDefenseWeapon"
+
+  CannonImp uses similar commands natively, but this DLL does not replace or extend CannonImp itself.
+
+  ## ODF commands
+
+  Put these in the weapon ODF—not its ordnance ODF:
+
+  shotDelay0 = 0.1
+  shotDelay1 = 0.1
+  shotDelay2 = 2.0
+
+  saveFireCyclePoint = 2
+  shotCycleResetTime = 15.0
+
+  This produces:
+
+  first shot
+  → wait shotDelay0 (0.1)
+  → second shot
+  → wait shotDelay1 (0.1)
+  → third shot
+  → wait shotDelay2 (2.0)
+  → subsequent shots loop from index 2
+
+  shotDelay0 controls the delay after the first successful firing attempt. It does not control initial weapon
+  activation; native initial-delay behavior remains intact.
+
+  Without saveFireCyclePoint, the default is 0, so the entire sequence repeats.
+
+  ## Validation rules
+
+  - Accepted numbered range: shotDelay0 through shotDelay63.
+  - Entries must be contiguous from zero.
+  - A gap invalidates the entire numbered policy:
+
+  shotDelay0 = 0.1
+  shotDelay2 = 1.0  // invalid because shotDelay1 is absent
+
+  - Values must be finite and non-negative.
+  - Zero is valid.
+  - There is no practical upper limit beyond finite floating-point range.
+  - saveFireCyclePoint must be a whole, non-negative index inside the effective sequence.
+  - shotCycleResetTime must be finite and non-negative.
+  - A malformed numbered policy falls back to ordinary shotDelay.
+
+  Numeric strings are also accepted:
+
+  shotDelay0 = "0.1"
+  shotDelay1 = "0.25f"
+
+  Expressions and trailing text are not accepted.
+
+  One undocumented edge case: shotDelay64 is explicitly detected and rejects the policy, but shotDelay65 and above
+  are never queried and are silently ignored.
+
+  The parser is in A2FOHookExtensions/modules/A2FOPointDefenseCycles/module.cpp:188, with the pure sequence logic in
+  A2FOHookExtensions/modules/A2FOPointDefenseCycles/firing_cycle.cpp:23.
+
+  ## Unnumbered shotDelay
+
+  For either supported point-defense class:
+
+  shotDelay = 3.5
+
+  is treated as a one-entry sequence when no numbered policy exists.
+
+  For PointDefenseLaser, the intended runtime replaces Roots’ late timer check with a proper pre-fire gate. This
+  prevents target/ordnance searches while the timer remains positive.
+
+  For OrdnanceDefenseWeapon, its existing successful-shot timer assignment is replaced with the selected cycle
+  delay.
+
+  ## Idle reset
+
+  shotCycleResetTime = 15.0
+
+  The idle countdown starts only after the active firing delay reaches zero. If the weapon remains ready but finds
+  nothing to intercept for 15 seconds, the next shot uses shotDelay0.
+
+  Zero or omission disables reset.
+
+  For toggleable PointDefenseLaser weapons, the implementation only advances the timer while the native simulation
+  considers the weapon active. Turning it off therefore pauses the timer and idle-reset processing rather than
+  instantly resetting the cycle.
+
+  ## Runtime state
+
+  State is stored per Weapon instance:
+
+  - Current next-delay index.
+  - Remaining idle-reset time.
+  - Internal firing counter.
+
+  Therefore:
+
+  - Multiple ships using the same WeaponClass have independent cycles.
+  - Multiple weapon instances on one ship remain independent.
+  - Capturing a ship preserves its current cycle.
+  - State is removed when the Weapon is destroyed.
+
+  Internal save fields:
+
+  a2fo_pointDefenseCycleIndex
+  a2fo_pointDefenseCycleIdle
+
+  These are save-stream labels, not ODF commands.
+
+  Configured numbered-cycle saves require those extra fields. Saves made before enabling a cycle will fail the
+  module’s configured Weapon load because the fields are absent; similarly, removing the module from a save
+  containing its extra state should be treated as unsafe. Scalar-only shotDelay weapons do not receive this sidecar
+  save block.
+
+  ## Critical live-runtime problem
+
+  The current log reports:
+
+  [A2FOPointDefenseCycles] Supported point-defense signatures were not found; runtime disabled
+  Module loader: loaded ...A2FOPointDefenseCycles.dll
+
+  See Games/Fleet Ops Roots/Data/A2FOExtensions.log:101.
+
+  I checked all sixteen expected signatures against the installed ArmadaL.exe and FleetOpsHook.dll; every signature
+  matches on disk. The problem occurs after process startup:
+
+  1. The core detours ParameterDB::GetFloat and ParameterDB::GetString before modules load. PointDefenseCycles later
+     insists those locations still contain their original bytes, so its A2FOHookExtensions/modules/
+     A2FOPointDefenseCycles/module.cpp:512 fails.
+
+  2. A2FOEnergySystems.dll loads earlier and detours Armada RVA 0x00270dd0 for ammunition debit. PointDefenseCycles
+     expects that same entry to remain native for its shot-timer hook. The overlapping EnergySystems hook is visible
+     in A2FOHookExtensions/modules/A2FOEnergySystems/module.cpp:1020.
+
+  Because every signature is checked before any PointDefense patch is installed, failure is safe: none of its
+  runtime hooks are applied. But it means no shotDelay, numbered cycle, idle reset, or cycle persistence behavior
+  from this module is currently operational.
+
+  “Module loader: loaded” therefore does not mean its feature is active.
+
+  ## Current test configuration
+
+  The module is enabled as active16 in Games/Fleet Ops Roots/Data/Mods/test/info.ini:40.
+
+  The active test Games/Fleet Ops Roots/Data/Mods/test/odf/special_weapons/gpdlaser.odf:30 contains only:
+
+  shotDelay = 10.1
+  classLabel = "PointDefenseLaser"
+
+  There are no numbered delays, loop points, or reset times on any applicable PointDefenseLaser/
+  OrdnanceDefenseWeapon ODF in the active test/parent stack. The many shotDelayX entries under Fleet Ops 4.0 belong
+  to other native CannonImp weapons and are unrelated.
+
+  The mod-local DLL is ignored under managed module selection, but it is byte-identical to the global deployed copy.
+
+  ## Binary audit
+
+  Size:     2,450,035 bytes
+  SHA-256:  98974b61def8b58cf0fee651cf90a6a9a036bc9d9de1d94e433f035c53dec9ae
+  Built:    2026-08-12 12:29:08 +0100
+  Build ID: safe-prefire-gate-20260812-01
+
+  Exports:
+
+  A2FO_ModuleInit
+  A2FO_ModuleShutdown
+
+  Most of its size is DWARF debugging information. It contains no external configuration-file reader or hidden asset
+  commands.
+
+# A2FOResources.dll
+
+  ## Modding command map
+
+  ### Object ODF costs
+
+  Valid on buildable object ODFs:
+
+  tritaniumCost = 120
+  supplyCost = 8
+  creditsCost = 25
+  collectiveconnectionsCost = 3
+
+  Rules:
+
+  - Case-insensitive command names.
+  - Missing or malformed values become zero.
+  - Decimal integers only; negatives, floats, suffixes, and values above 2147483647 are rejected.
+  - Affordability is checked before native resources are deducted.
+  - The four costs are deducted only if the native transaction succeeds.
+  - Cancelled, deleted, and cleared queue entries are refunded through A2FOFeaturePack.
+  - Infinite-resources mode bypasses added affordability, payment, and refund changes.
+
+  See Games/Fleet Ops Roots/Data/Mods/test/odf/stations/fbase.odf:37, currently configured for 10 of each resource.
+
+  ### Race ODF starting balances
+
+  normalTritanium = 1000
+  lotsTritanium = 5000
+  normalSupply = 100
+  lotsSupply = 500
+  normalCredits = 250
+  lotsCredits = 1000
+  normalCollectiveConnections = 10
+  lotsCollectiveConnections = 50
+
+  Instant Action setting 1 selects lots; other values select normal.
+
+  The active Federation Race currently defines 100 normal and 1000 lots for all four in Games/Fleet Ops Roots/Data/
+  Mods/test/odf/other/fed.odf:124. Other active races lack these commands and therefore start at zero.
+
+  ### Race presentation ODF commands
+
+  Every resource accepts these suffixes:
+
+  <prefix>Res
+  <prefix>Tooltip
+  <prefix>VerboseTooltip
+  <prefix>Icon
+
+   Index    Prefix                   Default icon
+  ━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━
+       0    crew                             0x88
+  ───────  ───────────────────────  ──────────────
+       1    officer                          none
+  ───────  ───────────────────────  ──────────────
+       2    dilithium                        0x84
+  ───────  ───────────────────────  ──────────────
+       3    latinum                          0x81
+  ───────  ───────────────────────  ──────────────
+       4    metal                            0x80
+  ───────  ───────────────────────  ──────────────
+       5    biomatter                        0x82
+  ───────  ───────────────────────  ──────────────
+       6    tritanium                        0x87
+  ───────  ───────────────────────  ──────────────
+       7    supply                           0x86
+  ───────  ───────────────────────  ──────────────
+       8    credits                          0x89
+  ───────  ───────────────────────  ──────────────
+       9    collectiveconnections            0x85
+
+  Example:
+
+  creditsRes = "GUI_FED_CREDITS_RES"
+  creditsTooltip = "Federation Credits"
+  creditsVerboseTooltip = "Credits available for procurement."
+  creditsIcon = "GUI_FED_CREDITS_ICON"
+
+  Values can be keys from Dynamic_Localized_Strings.h or literal text. Unknown localization keys remain literal.
+  Icon must ultimately resolve to the actual one-byte font character—not the visible text "0x89".
+
+  The active Federation test currently uses literal Metal overrides:
+
+  metalRes = "Duranium"
+  metalTooltip = "Duranium"
+  metalVerboseTooltip = "custom metal name"
+
+  No added-resource presentation overrides are currently configured, so their built-in English names and glyphs
+  apply.
+
+  ## CFG and GUI
+
+  Recognized live GUI ParameterDB fields:
+
+  resource_6 = 50 30 120 18
+  resource_7 = 250 30 120 18
+  resource_8 = 450 30 120 18
+  resource_9 = 650 30 120 18
+
+  They normally belong in gui_interface.cfg. Missing entries use those same defaults. The module inherits font,
+  scaling, and text state from an available native resource_0–resource_5 display.
+
+  The active configuration has all four entries in Games/Fleet Ops Roots/Data/Mods/test/misc/gui_interface.cfg:67.
+  Live logging confirms:
+
+  - 4/4 rectangles resolved.
+  - All four returned draw=yes.
+  - Normal Federation balances resolved as [100, 100, 100, 100].
+
+  One visual issue remains: resourcePanelArea is correctly enlarged to 50 pixels, but the five resourcePanel_*
+  background slices remain 40 pixels high. The second row reaches approximately pixel 48, so its lower portion may
+  sit outside the painted background. Extending the resource-panel sprite artwork would finish that integration.
+
+  The noTritanium, noSupply, noCredits, and noCollectiveConnections CFG entries are not read by this DLL and should
+  not be treated as sidecar-resource enable/disable controls.
+
+  ## SPR, textures, INI, and .h
+
+  - SPR files are not parsed directly. The DLL emits raw high-byte glyphs and relies on the active font SPR
+    definitions.
+
+  - The test mod’s Games/Fleet Ops Roots/Data/Mods/test/Sprites/FontSmall.spr:109 and FontMedium.spr contain the
+    complete 0x80–0x8A block, backed by FontFinal4_16a.tga and FontFinal4_20a.tga.
+
+  - The added-row amount spacing is tuned to those icon widths; substantially different custom glyph widths may need
+    source-side adjustment.
+
+  - Dynamic_Localized_Strings.h is optional for presentation keys.
+  - ART_CFG.h and RTS_CFG.h contain no A2FOResources controls.
+  - No material, SOD, shader, weapon SPR, or dedicated resource INI commands are consumed.
+  - info.ini only selects modules. A2FOFeaturePack is required; A2FOBuildTooltips is optional but displays the new
+    costs. Both are active in the current Games/Fleet Ops Roots/Data/Mods/test/info.ini:24.
+
+  ## Important limitations
+
+  - Added balances are not saved. Loading a save recreates them from current Race normal/lots values.
+  - Mining, cargo, trading, ResourceWeapon income, Lua/script grants, gifting, and AI economic planning are not
+    extended.
+
+  - Historical Fleet Operations Tritanium/Supplies helpers alias native pools and do not access these independent
+    resources.
+
+  - Only production cost/payment/refund paths and the exported native API manipulate them automatically.
+
+# A2FORGBTextures.dll
+
+  ## Supported asset layout
+
+  Any loose extension root can provide:
+
+  Textures/RGB/
+  Textures/Index8/
+  Textures/Compressed/
+
+  Folder and filename matching is case-insensitive, so the current lowercase Textures/rgb works.
+
+  Typical material flow:
+
+  SOD material: mytexture
+  Fleet Ops tries: Textures/mytexture.dds
+  Then fallback:  Textures/mytexture.tga
+  A2FORGBTextures redirects that TGA request to the winning legacy folder
+
+  Subdirectories are scanned recursively to depth 32. Reparse points are ignored, maps are built once during
+  initialization, and newly added files require restarting the game.
+
+  ## Precedence
+
+  Across extension roots, later/more-specific roots win:
+
+  shared Data → parent mods → active child mod
+
+  Inside one root, a completed root-level TGA fallback uses:
+
+  Textures/name.tga
+  Textures/RGB/name.tga
+  Textures/Index8/name.tga
+  Textures/Compressed/name.tga
+
+  The first line has highest same-root priority. A child’s Index8 or Compressed file still overrides a parent’s RGB
+  file because root precedence is evaluated first.
+
+  Important distinctions:
+
+  - Native or packaged DDS/TGA resolution gets its normal attempt before legacy fallback.
+  - Explicit Textures\RGB\..., Textures\Index8\..., and Textures\Compressed\... requests stay inside that namespace.
+  - Only TGAs are flattened into the root-level fallback.
+  - A DDS inside Textures/RGB is not a replacement for Textures/name.dds unless the request explicitly contains RGB.
+  - Legacy folders must be loose directories; archived-only folders cannot activate the scanner.
+
+  The selection logic is visible in A2FOHookExtensions/modules/A2FORGBTextures/module.cpp:937.
+
+  ## TGA formats
+
+  Already-safe files are passed directly when their header declares:
+
+  - Uncompressed true-colour type 2
+  - 24-bit or 32-bit pixels
+  - Nonzero dimensions
+  - No colour map
+
+  The module can convert these to temporary uncompressed 24/32-bit type-2 TGAs:
+
+  - Colour-mapped types 1 and 9
+  - True-colour types 2 and 10, including 16-bit
+  - Grayscale types 3 and 11
+  - RLE types 9, 10, and 11
+  - 8/16-bit palette indices
+  - 15/16/24/32-bit palettes
+
+  Limits are 128 MiB input and 256 MiB prepared output. Converted files are cached in a process-specific temporary
+  directory and removed during normal shutdown.
+
+  Explicit Index8 and Compressed requests retain their original bytes for their corresponding native loader.
+  Conversion happens when those files are flattened through Fleet Operations’ true-colour root-TGA fallback.
+
+  ## Configuration matrix
+
+   Material                           Support
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Object/weapon/Race ODF commands    None
+  ─────────────────────────────────  ────────────────────────────────────────────────────────────
+   info.ini                           Module selection only
+  ─────────────────────────────────  ────────────────────────────────────────────────────────────
+   CFG commands                       None
+  ─────────────────────────────────  ────────────────────────────────────────────────────────────
+   SPR directives                     None added
+  ─────────────────────────────────  ────────────────────────────────────────────────────────────
+   ART_CFG.h / RTS_CFG.h              None
+  ─────────────────────────────────  ────────────────────────────────────────────────────────────
+   Dynamic_Localized_Strings.h        None
+  ─────────────────────────────────  ────────────────────────────────────────────────────────────
+   SOD material tags                  No custom tags; ordinary texture names benefit indirectly
+  ─────────────────────────────────  ────────────────────────────────────────────────────────────
+   Bump/emissive/specular suffixes    Not handled here; those belong to renderer/texture modules
+
+  Activation is simply:
+
+  [modules]
+  activeX = "A2FORGBTextures"
+
+  For an A1 compatibility parent, it can instead be mandatory:
+
+  requiredX = "A2FORGBTextures"
+
+  It is currently selected at Games/Fleet Ops Roots/Data/Mods/test/info.ini:42. If no supported legacy directory
+  exists, the DLL loads inertly without installing the bridge.
+
+  ## Live stack findings
+
+  The current test → STA2 Classic Mod stack contains:
+
+  - Parent RGB: 2,160 files.
+  - Child RGB: 34 files.
+  - Fourteen overlapping names.
+  - 2,180 unique RGB-map entries.
+  - 2,174 unique TGAs.
+  - No active Index8 or Compressed directories.
+  - 452 root DDS mappings: 449 from shared Data and 3 from the child mod.
+
+  Of the winning TGAs:
+
+  - 2,173 are native-safe uncompressed type-2 files.
+  - One is RLE type-10: Games/Fleet Ops Roots/Data/Mods/test/textures/rgb/Fbattle.tga.
+  - Fbattle.dds exists at root level, so normal Fleet Operations loading wins before that RLE fallback. No
+    conversion was needed in the captured run.
+
+  The live log confirms all bridge and safety hooks installed successfully and records the first real redirect:
+
+  Textures\PD_BORGalloc1.tga
+  → STA2 Classic Mod\Textures\rgb\PD_BORGalloc1.tga
+
+  See Games/Fleet Ops Roots/Data/A2FOExtensions.log:109. There are no unsupported-texture, failed-lock, null-blend,
+  or skipped scan-grid messages.
+
+  ## Two authoring caveats
+
+  Three DDS files currently sit inside the child RGB folder:
+
+  Fbattle_bump.dds
+  fcruise1_B.dds
+  federation_sovereign_bump.dds
+
+  They are available only to explicit RGB-qualified requests. Fbattle_bump.dds also has a proper root copy, so it is
+  safe. fed_sovereign.SOD references federation_sovereign_bump without an RGB path; if that currently commented-out
+  model is re-enabled, its bump DDS should be placed directly under Textures/.
+
+  Also, textures required while the central GUI sprite database is being built may load before this deferred module
+  initializes. Startup-critical GUI assets should have a normal root DDS/TGA rather than existing only in a legacy
+  folder.
+
+  One minor diagnostic defect exists: the startup line calls all 2,180 RGB-map entries “safe flattened TGA
+  candidates,” although six are non-TGA files and validation is lazy. Runtime selection itself correctly filters and
+  validates TGAs.
+
+# A2FOSwarmSystem.dll
+
+  The complete command reference is in A2FOHookExtensions/modules/A2FOSwarmSystem/README.md:25, with implementation
+  parsing in A2FOHookExtensions/modules/A2FOSwarmSystem/module.cpp:623.
+
+  ### ODF commands
+
+  Use X = 0..63; indices may be sparse.
+
+   Command                           Default                      Valid runtime range
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   swarmX                           required                        SOD/database name
+  ───────────────────────────  ──────────────  ───────────────────────────────────────
+   swarmXCount                             1    0..256; zero disables that definition
+  ───────────────────────────  ──────────────  ───────────────────────────────────────
+   swarmXScale                           1.0                               0.001..100
+  ───────────────────────────  ──────────────  ───────────────────────────────────────
+   swarmXRadius                           50         alias/default for maximum radius
+  ───────────────────────────  ──────────────  ───────────────────────────────────────
+   swarmXMinRadius                         0                                0..100000
+  ───────────────────────────  ──────────────  ───────────────────────────────────────
+   swarmXMaxRadius              swarmXRadius                        MinRadius..100000
+  ───────────────────────────  ──────────────  ───────────────────────────────────────
+   swarmXMinSpeed                          6                                0..100000
+  ───────────────────────────  ──────────────  ───────────────────────────────────────
+   swarmXMaxSpeed                         10                         MinSpeed..100000
+  ───────────────────────────  ──────────────  ───────────────────────────────────────
+   swarmXTurnRate                          2                               0.01..1000
+  ───────────────────────────  ──────────────  ───────────────────────────────────────
+   swarmXHardpoint               host origin          list of launch/return SOD nodes
+  ───────────────────────────  ──────────────  ───────────────────────────────────────
+   swarmXHardpointCapacity                 1             0..256; zero means unlimited
+  ───────────────────────────  ──────────────  ───────────────────────────────────────
+   swarmXInteraction                    none            list of interaction SOD nodes
+  ───────────────────────────  ──────────────  ───────────────────────────────────────
+   swarmXInteractionCapacity               1             0..256; zero means unlimited
+  ───────────────────────────  ──────────────  ───────────────────────────────────────
+   swarmXInteractionChance              0.35                                     0..1
+  ───────────────────────────  ──────────────  ───────────────────────────────────────
+   swarmXInteractionTime                   3                          0..3600 seconds
+  ───────────────────────────  ──────────────  ───────────────────────────────────────
+   swarmXInteractionRadius                 2                                0..100000
+  ───────────────────────────  ──────────────  ───────────────────────────────────────
+   swarmXReturnToHardpoint                 1                                  boolean
+  ───────────────────────────  ──────────────  ───────────────────────────────────────
+   swarmXAvoidHost                         1                                  boolean
+  ───────────────────────────  ──────────────  ───────────────────────────────────────
+   swarmXHostClearance                   0.5                                0..100000
+  ───────────────────────────  ──────────────  ───────────────────────────────────────
+   swarmXSeparation                        1                                0..100000
+
+  Limits are 256 members per definition, 1,024 per host, and 128 entries in each hardpoint list.
+
+  The model value selects a SOD database directly—it does not create or read a swarm-member craft ODF:
+
+  swarm0 = "repairdrone" // normally repairdrone.sod
+
+  Any recursively named SOD node works for the hardpoint lists; names are not required to start with hp.
+
+  ### Active test configuration
+
+  [fbase.odf](/home/tamsynn/Games/Fleet Ops Roots/Data/Mods/test/odf/stations/fbase.odf:264) currently creates:
+
+  - Ten fbee instances, scale 2, speed 6–15, radius 150, 60% interaction chance, launch at hp31, and ten interaction
+    nodes.
+
+  - Ten kbee instances with the same movement values, launch at hp31, and eight interaction nodes.
+  - Default separation 1, return enabled, and capacities 1/1.
+
+  All referenced nodes exist in the parent Games/Fleet Ops Roots/Data/Mods/STA2 Classic Mod/SOD/Fbase.sod. Arc Lab
+  found 60 nodes and 21 numeric hardpoints.
+
+  The runtime confirmed both groups and all 20 instances, then successfully submitted them for rendering in Games/
+  Fleet Ops Roots/Data/A2FOExtensions.log:282. There are no missing-model, missing-hardpoint, disabled-runtime, or
+  invalid-bounds errors.
+
+  ### Important behavioral details
+
+  - With avoidance enabled, radius is measured beyond the exclusion sphere. For the live Federation swarm, the inner
+    boundary is 116.34 + 5.73 + 0.50 = 122.57; radius 150 therefore reaches approximately 272.57 units from the
+    sphere centre.
+
+  - Hardpoint destinations inside that exclusion sphere are projected outward. Use swarmXAvoidHost = 0 for exact
+    docking, accepting possible model clipping.
+
+  - After each roaming leg, interaction is tested first. Returns then have a hard-coded 12% chance; there is no
+    ReturnChance command.
+
+  - Return dwell is hard-coded to a random 0.25–1.25 seconds. Interaction dwell uses InteractionTime.
+  - Interaction offsets and roaming destinations are volume-distributed within their spheres, not fixed-radius
+    orbits.
+
+  - Separation only applies inside the same numbered definition. swarm0 and swarm1 can overlap one another.
+  - Separation costs are quadratic per group. Groups up to 16 members receive three relaxation passes, 17–64 receive
+    two, and larger groups one. The README’s general “three passes” statement is incomplete.
+
+  - Policies are cached per host class after first discovery. ODF edits during a running match will not reload;
+    restart the match/game.
+
+  - Visual models face +Z along their direction of travel. Animation is enabled and triggered automatically, but
+    there are no animation-speed or phase-offset commands.
+
+  ### Other modding materials
+
+  - INI: only module activation, currently [active19](/home/tamsynn/Games/Fleet Ops Roots/Data/Mods/test/
+    info.ini:43).
+
+  - SOD: required for each visual model; host SOD needed only when named hardpoints are used.
+  - Textures/materials: ordinary native SOD materials. No new material, colour, alpha, team-glow, bump, emissive, or
+    texture-suffix commands.
+
+  - SPR / CFG / .h / techtree: none used.
+  - FPQ/includes/inheritance: supported through native ParameterDB and normal parent-mod resolution.
+  - The live Fbee and Kbee models use 128×128 legacy TGA textures from Textures/rgb; A2FORGBTextures.dll is
+    successfully bridging those assets. It is presentation support, not a hard SwarmSystem dependency.
+
+# A2FOTextureVariants.dll
+
+   Feature                                Current status
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Borg _b.dds compatibility              Enabled
+  ─────────────────────────────────────  ───────────────────────────────────────────
+   Owner-specific textures                Disabled at runtime
+  ─────────────────────────────────────  ───────────────────────────────────────────
+   Faction-specific SOD branches          Disabled at runtime
+  ─────────────────────────────────────  ───────────────────────────────────────────
+   Subsystem destruction/repair meshes    ODF parsed, but runtime behavior disabled
+  ─────────────────────────────────────  ───────────────────────────────────────────
+   Experimental scorch probe              Incomplete; do not use
+
+  ### 1. Owner-specific texture ODF code
+
+  Place this in a Race ODF:
+
+  factionTextureSuffix = "_k"
+
+  For a mesh using kli_birdofprey, the module searches for:
+
+  Textures\kli_birdofprey_k.dds
+  Textures\kli_birdofprey_k.tga
+
+  Rules:
+
+  - DDS takes precedence over TGA.
+  - Only diffuse texture slot 0 is replaced.
+  - Variants are selected per mesh.
+  - Missing variants fall back to the normal base or Borg texture.
+  - Suffixes accept up to 32 ASCII letters, numbers, _, or -.
+  - Dots and path separators are rejected.
+  - Empty or missing suffixes disable the feature.
+  - Missing-file results are cached, so restart after adding textures.
+  - Ownership is read from the current owner; capture should switch textures on the following update/render.
+  - The texture name does not need to be declared inside the SOD material.
+
+  The active Klingon Race ODF already contains:
+
+  name = "klingon"
+  factionTextureSuffix = "_k"
+
+  However, there are currently no *_k.dds or *_k.tga assets in the active test mod, parent mod, or main Data roots.
+  Even after repairing the hook conflict, all meshes would presently fall back to their ordinary textures.
+
+  See Games/Fleet Ops Roots/Data/Mods/test/odf/other/kling.odf:2.
+
+  ### 2. Faction-owned SOD branches
+
+  This system uses the existing internal Race ODF name:
+
+  name = "klingon"
+
+  A SOD node named klingon becomes an ownership-controlled parent. When operational, the module shows that subtree
+  for Klingon owners and hides other loaded faction-name subtrees.
+
+  Important behavior:
+
+  - Matching is case-insensitive.
+  - Up to 63 safe ASCII characters are accepted.
+  - Multiple matching nodes are supported.
+  - Faction parent nodes should be siblings, not nested inside each other.
+  - The special borg node is excluded and remains under native Borg handling.
+  - It applies to finalized ship/station CraftInstance rendering, not claimed construction cosmetics.
+
+  The active Fcruise1.sod and fed_sovereign.SOD contain klingon nodes, so the test assets are prepared for this
+  feature. They are not currently being toggled because the ownership render hooks failed installation.
+
+  ### 3. Subsystem damage-mesh ODF codes
+
+  Ship and station ODFs may use the following stems:
+
+  sensorMesh1 = "sensor_array"
+  sensorMesh1explosion = "xfirebsm"
+
+  engineMesh1 = "nacelle_l"
+  engineMesh1explosion = "xfirebsm"
+
+  weaponMesh1 = "weapon_pod"
+  weaponMesh1explosion = "xfirebsm"
+
+  lifeSupportMesh1 = "habitat"
+  lifeSupportMesh1explosion = "xfirebsm"
+
+  shieldGeneratorMesh1 = "shield_array"
+  shieldGeneratorMesh1explosion = "xfirebsm"
+
+  Supported command families are:
+
+  sensorMeshX
+  engineMeshX
+  weaponMeshX
+  lifeSupportMeshX
+  shieldGeneratorMeshX
+
+  Rules:
+
+  - X ranges from 1 through 64.
+  - Numbering can be sparse.
+  - Append lowercase explosion for the optional explosion project.
+  - A mesh without an explosion simply disappears.
+  - An explosion without its matching mesh is ignored.
+  - Node matching is case-insensitive.
+  - The selected node and its entire descendant subtree are hidden.
+  - One valid configured node is selected deterministically per destruction.
+  - Repair grows the root mesh from roughly 8% to full scale with xspark effects.
+  - Descendants return only when repair completes.
+  - Save-loaded destroyed systems hide a deterministic part without generating a false explosion.
+  - Hardpoints in a hidden subtree remain active for weapon simulation.
+  - Explosion ODFs should be visual-only unless native gameplay effects are intentional.
+
+  The active Games/Fleet Ops Roots/Data/Mods/test/odf/ships/cdestroy2.odf:125 correctly declares:
+
+  engineMesh1 = "Nacelle"
+  engineMesh1explosion = "xfirebsm"
+
+  weaponMesh1 = "Wings"
+  weaponMesh1explosion = "xfirebsm"
+
+  Both Nacelle and Wings exist in the active SOD. The log confirms that two definitions were registered.
+
+  ### Critical runtime defect
+
+  Although the log reports:
+
+  ODF-driven subsystem damage meshes, explosions, and repair sparks initialized
+  Registered 2 subsystem damage meshes...
+
+  the subsystem feature is not actually executing.
+
+  The subsystem update function is called only from craft_instance_update_hook, while subtree hiding is applied only
+  from craft_instance_render_call_hook. Both hooks are installed inside install_faction_variants(). Because that
+  installer failed, neither shared hook was installed.
+
+  Consequences in the current run:
+
+  - Destruction transitions are not detected.
+  - Nacelle or Wings will not disappear.
+  - The configured explosion will not be created by this module.
+  - Repair scaling and welding sparks will not run.
+  - The “initialized” message is a false-positive capability report: only ODF policy registration succeeded.
+
+  The log should ideally distinguish “class policy parser installed” from “update and render hooks installed.”
+
+  ### Why the ownership installer failed
+
+  The live log says:
+
+  Faction render hooks unavailable; native base/Borg rendering retained
+
+  All expected signatures match the Armada and FleetOpsHook files on disk. Another runtime patch or earlier hook
+  therefore appears to have changed at least one target before TextureVariants performed its preflight.
+
+  The module only logs an aggregate failure, so the current log cannot identify the exact conflicting address. Per-
+  signature failure logging or cooperative chaining would be needed to pinpoint and repair it.
+
+  See the shared-hook installer in A2FOHookExtensions/modules/A2FOTextureVariants/module.cpp:940.
+
+  ### 4. Borg DDS compatibility
+
+  No ODF command is needed.
+
+  The patch changes the native generated Borg alternate preflight so a DDS-only _b texture can be accepted when the
+  original TGA check fails. Normal TGA Borg textures and explicit Borg SOD materials retain native behavior.
+
+  This hook installed successfully:
+
+  Native Borg alternate preflight now accepts DDS as well as TGA
+
+  The test stack contains both:
+
+  fcruise1_B.dds
+  fcruise1_B.tga
+
+  Because the TGA is still present, the current asset does not prove that the DDS-only fallback works. A proper test
+  requires temporarily using a Borg alternate that has _b.dds but no corresponding _b.tga.
+
+  ### 5. Experimental scorch code
+
+  Earlier diagnostic DLLs emitted a scorch hardpoint probe build marker. The
+  production module no longer emits that marker.
+
+  Its source parses:
+
+  damageThreshold
+  scorchTexture1
+  scorchTexture2
+  ...
+
+  and these hardpoint fields:
+
+  sensorTargetHardpoints
+  engineTargetHardpoints
+  weaponTargetHardpoints
+  lifeSupportTargetHardpoints
+  shieldGeneratorTargetHardpoints
+
+  This is not a usable texture-scorch implementation:
+
+  - It never loads or renders the value from scorchTextureX.
+  - It creates a hardcoded xspark repair particle instead.
+  - The texture/effect string is used only in a log message.
+  - Several command names differ from stock plural fields such as sensorsTargetHardpoints, enginesTargetHardpoints,
+    and weaponsTargetHardpoints.
+
+  - No active scorchTextureX entries exist.
+  - It depends on the same missing update hook.
+
+  Treat this code as an unfinished diagnostic probe. Persistent hull and subsystem scorch decals belong to
+  A2FONebulaRenderer.dll. The active damageThreshold, hullScorch1, and associated offset/rotation/size fields in
+  cdestroy2.odf are being handled successfully by NebulaRenderer, not TextureVariants.
+
+  ### Relevant file/material types
+
+  - .odf: Race suffixes and subsystem mesh definitions.
+  - .sod: Diffuse material names, faction parent nodes, subsystem part hierarchies.
+  - .dds / .tga: Static diffuse variants and Borg alternates.
+  - Explosion .odf: Optional project used when a subsystem part disappears.
+  - .ini: Module activation through active20 = "A2FOTextureVariants" in Games/Fleet Ops Roots/Data/Mods/test/
+    info.ini:44.
+
+  - .spr: No commands or dependencies found.
+  - .cfg: No public configuration found.
+  - .h: Internal module/API declarations only; no modder-facing header codes.
+  - PNG/BMP and animated DDS variants are not supported or validated.
+
+# A2FOTurrets.dll
+
+   Component                                    Status
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   turret -> sensor classlabel alias            Active
+  ───────────────────────────────────────────  ──────────────────────────────────
+   Seven missing-only turret defaults           Registered
+  ───────────────────────────────────────────  ──────────────────────────────────
+   Class-constructor hook                       Chained through Fleet Operations
+  ───────────────────────────────────────────  ──────────────────────────────────
+   Craft simulation/post-load/cleanup events    Active
+  ───────────────────────────────────────────  ──────────────────────────────────
+   Weapon target/trigger tracking               Active
+  ───────────────────────────────────────────  ──────────────────────────────────
+   AlwaysShowShields integration                Linked
+  ───────────────────────────────────────────  ──────────────────────────────────
+   Active Akira turret definition               Resolved
+  ───────────────────────────────────────────  ──────────────────────────────────
+   Spawn/configuration errors                   None logged
+  ───────────────────────────────────────────  ──────────────────────────────────
+   In-game aim/fire/save validation             Still experimental
+
+  The deployed DLL exactly matches the current build.
+
+  ## Parent ODF commands
+
+  Declare indexed pairs on any Craft-derived ship or station:
+
+  turret0 = "fcruise1turr"
+  turretHardpoint0 = "hp26"
+
+  turret3 = "heavy_turret.odf"
+  turretHardpoint3 = "hp_turret03"
+
+  Rules:
+
+  - Indices 0 through 64 are supported.
+  - Indices may be sparse.
+  - Both commands are required for each index.
+  - A trailing .odf is accepted but removed internally.
+  - The turret value is an ODF basename, not a path.
+  - Missing pairs are logged and skipped.
+  - Missing hardpoints permanently disable that mount for the object.
+  - The first recursively matched SOD node is used; unique hardpoint names are safest.
+  - No per-mount position, orientation, or scale commands exist. Those come from the parent SOD hardpoint.
+  - The mount hardpoint’s local +Z axis is zero yaw/pitch.
+
+  The active Games/Fleet Ops Roots/Data/Mods/test/odf/ships/fcruise1.odf:128 correctly declares one mount on hp26.
+  Its ordinary ship weapons are commented out, so the linked turret is currently the Akira’s only operational
+  weapon.
+
+  ## Child turret ODF commands
+
+  The child must use:
+
+  classLabel = "turret"
+
+  A safe inheritance pattern is:
+
+  #include "fturret.odf"
+
+  // Must come after the include:
+  classLabel = "turret"
+
+  Placing the include afterward could restore classLabel = "sensor" and prevent semantic-turret registration.
+
+  Available rotation fields are:
+
+   Command               Default    Valid behavior
+  ━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   turretYawMin             -180    Clamped to -180..180
+  ────────────────────  ─────────  ────────────────────────────────────────────────────
+   turretYawMax              180    Clamped to -180..180
+  ────────────────────  ─────────  ────────────────────────────────────────────────────
+   turretPitchMin            -10    Clamped to -90..90
+  ────────────────────  ─────────  ────────────────────────────────────────────────────
+   turretPitchMax             85    Clamped to -90..90
+  ────────────────────  ─────────  ────────────────────────────────────────────────────
+   turretYawRate              90    Degrees/second, clamped to 0..3600
+  ────────────────────  ─────────  ────────────────────────────────────────────────────
+   turretPitchRate            60    Degrees/second, clamped to 0..3600
+  ────────────────────  ─────────  ────────────────────────────────────────────────────
+   turretRestYaw               0    Clamped inside the configured yaw range
+  ────────────────────  ─────────  ────────────────────────────────────────────────────
+   turretRestPitch             0    Clamped inside the pitch range
+  ────────────────────  ─────────  ────────────────────────────────────────────────────
+   turretReturnToRest          1    Return to rest when targetless; 0 holds last angle
+
+  If minimum exceeds maximum, the DLL swaps them.
+
+  These values belong to the child ODF class, not the parent mount. Different mounts needing different arcs, rates,
+  rest angles, or scales require different child ODF basenames.
+
+  The active Games/Fleet Ops Roots/Data/Mods/test/odf/ships/fcruise1turr.odf:1 resolves as:
+
+  #include "fturret.odf"
+  classLabel = "turret"
+
+  turretYawMin = -180
+  turretYawMax = 180
+  turretPitchMin = -10
+  turretPitchMax = 85
+  turretYawRate = 90
+  turretPitchRate = 60
+  turretRestYaw = 0
+  turretRestPitch = 0
+  turretReturnToRest = 1
+
+  weapon1 = "ftpulse"
+  weaponHardpoints1 = "hp01" "hp02"
+
+  ## Automatic child-object defaults
+
+  The semantic classlabel registers these missing-only values:
+
+  ignoreInterface = 1
+  avoidMe = 0
+  avoidanceClass = 0
+  mapIcon = "mapicon_empty"
+  footprintBuffer = 0.0
+  createFootprint = 0
+  destroyFootprint = 0
+
+  Explicit or inherited values remain authoritative.
+
+  In the active test, five defaults were applied. These two were not:
+
+  avoidanceClass
+  footprintBuffer
+
+  They are already inherited from station.odf/turret.odf as 1000 and 10.0. avoidMe = 0 and disabled footprint
+  creation should suppress the important behavior, but for an entirely clean linked-child policy, explicitly
+  override them after the include:
+
+  avoidanceClass = 0
+  footprintBuffer = 0.0
+
+  ## Runtime behavior
+
+  Each mounted turret is a complete native object:
+
+  - Own SOD, weapons, shields/hitpoints, team, race and target selection.
+  - Added to the current mission object table.
+  - Anchored to the parent after every simulation tick.
+  - Whole SOD rotates rigidly; separate yaw base/barrel articulation is unsupported.
+  - Aims at the target object’s origin without velocity prediction.
+  - Parent race/team changes propagate, including capture.
+  - Parent alert status and special-weapon autonomy propagate before child simulation.
+  - An explicit parent Attack command is mirrored to every child turret.
+  - Repair, guard and other commands are not mirrored.
+  - Explicit friendly-fire attack orders are retained.
+  - Destroying the parent expires its children.
+  - Destroying a turret removes that mount for the remainder of the session.
+  - Destroyed mounts currently return after loading a save.
+  - Saved surviving turrets reconnect through deterministic labels, but their visual angles restart at the
+    configured rest position.
+
+  Avoid self-referential turret definitions. A semantic turret may technically contain its own turretX pairs, and
+  there is no documented nesting-depth guard; self-reference could create an expanding chain of child objects.
+
+  ## Important active weapon limitation
+
+  The active Games/Fleet Ops Roots/Data/Mods/STA2 Classic Mod/odf/weapons/Pulse/ftpulse.odf:20 explicitly contains:
+
+  restrictFireArc = 0
+
+  Therefore, the weapon is not required to wait until its visual barrel is pointing at the target. It can fire while
+  the turret is still slewing or toward a target outside the configured visual yaw/pitch limits.
+
+  For convincing physical behavior, use either:
+
+  - A suitably narrow native restrictFireArc/fireArc, or
+  - An owner-local A2FOFireArcs cone/box following the turret’s live transform.
+
+  The Turrets DLL itself does not provide an “aligned before firing” threshold.
+
+  There is also only one tracked visual target per child object. If several weapons on the same child select
+  different targets, the most recently observed target drives the entire SOD orientation.
+
+  ## Active SOD and material chain
+
+  The active parent and child models resolve correctly:
+
+  - Fcruise1.sod: 63 nodes, 29 hardpoints; hp26 exists.
+  - fcruise1turr.sod: 22 nodes, three meshes, six hardpoints; hp01 and hp02 exist.
+  - Child base texture: fresear.tga.
+  - Child SOD raw radius: 20.899.
+  - Parent SOD raw radius: 16.637, with ScaleSOD = 1.92.
+
+  The child geometry has the same bounds/material profile as the stock Federation turret model and is relatively
+  large for a hull attachment. Since there is no per-mount scale command, adjust the child ODF’s ordinary ScaleSOD,
+  use a smaller SOD, or create separate turret child ODFs where different sizes are needed.
+
+  The active weapon material chain is:
+
+  fcruise1turr.odf
+    -> ftpulse.odf
+    -> ftpulseo.odf
+    -> Sprite = "pphaser"
+    -> weapon.spr: pphaser -> wpulse
+    -> Textures\rgb\Wpulse.tga
+
+  It also resolves ppfwea.WAV. The ordnance delivers 80 ± 2 native damage.
+
+  ## Relevant file types
+
+  - .odf: Parent mount pairs, child rotation settings, weapons, health and native object behavior.
+  - .sod: Mount orientation, turret geometry, weapon hardpoints and native damage/Borg nodes.
+  - .tga / .dds: Ordinary child SOD textures.
+  - .spr: Only through normal weapon/ordnance sprites; no Turrets-specific sprite syntax.
+  - .wav: Ordinary weapon and object sounds.
+  - .ini: Activation through active21 = "A2FOTurrets" in Games/Fleet Ops Roots/Data/Mods/test/info.ini:45.
+  - .cfg, RTS_CFG.h, ART_CFG.h: No Turrets-specific controls found.
+  - .h / .hpp: Internal API and aim/combat math declarations only; no modder-facing commands.
+
+# A2FOWeaponDamageControls.dll
+
+  The DLL is fully operational, but none of its four weapon commands are currently used anywhere in the active test
+  or STA2 Classic parent ODF trees. Its damage-policy path is therefore unexercised; its shared Craft::Damage hook
+  is still actively hosting A2FODirectionalShields.
+
+   Component                            Status
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   WeaponClass dispatcher               Active
+  ───────────────────────────────────  ───────────────────────────────
+   Craft::Damage hook                   Active
+  ───────────────────────────────────  ───────────────────────────────
+   Shield-break spillover correction    Active
+  ───────────────────────────────────  ───────────────────────────────
+   DirectionalShields bridge            Connected
+  ───────────────────────────────────  ───────────────────────────────
+   Active weapon policies               None registered
+  ───────────────────────────────────  ───────────────────────────────
+   Invalid/signature errors             None
+  ───────────────────────────────────  ───────────────────────────────
+   Deployed DLL                         Same payload as current build
+
+  ## Weapon ODF commands
+
+  These commands belong in the general weapon ODF:
+
+  canDamageShields = true
+  canDamageHull = true
+
+  shieldDamageModifier = 1.0
+  hullDamageModifier = 1.0
+
+  Do not put them in the referenced ordnance ODF containing damageBase, Sprite, shotSpeed, etc.
+
+  Defaults preserve ordinary behavior:
+
+   Configuration                     Result
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Both enabled                      Normal shield damage and hull spillover
+  ────────────────────────────────  ────────────────────────────────────────────────────────────────────────────────
+   Shields disabled, hull enabled    Positive shields block the entire hit; hull damage begins only after shields
+                                     reach zero
+  ────────────────────────────────  ────────────────────────────────────────────────────────────────────────────────
+   Shields enabled, hull disabled    Shields take damage; exposed-hull damage and spillover are discarded
+  ────────────────────────────────  ────────────────────────────────────────────────────────────────────────────────
+   Both disabled                     No primary shield, hull, or system damage
+
+  Crucially, canDamageShields = false does not bypass shields. It makes shields completely block that weapon.
+
+  ## Damage modifiers
+
+  shieldDamageModifier = 2.0
+  hullDamageModifier = 0.5
+
+  With resolved base damage D:
+
+  - A shielded hit inflicts D × 2.0 against shields.
+  - An exposed-hull hit inflicts D × 0.5.
+  - If the doubled hit breaks shields, the native spillover is corrected to the 0.5 hull scale.
+  - Native system/hull distribution operates on the corrected hull amount.
+
+  The modifiers are applied after Armada has resolved the weapon’s ordinary per-hit damage. They do not change:
+
+  - hitChance
+  - Range or firing rate
+  - Ordnance speed/lifetime
+  - Fire arcs or technology checks
+  - Weapon sprites and sounds
+  - Special-weapon side effects
+
+  Both booleans suppress primary damage only. An ordnance may still impact, display effects, or perform its own
+  special behavior.
+
+  ### Valid values
+
+  - Finite values from 0 upward are accepted.
+  - 0 removes damage from that channel.
+  - Negative, NaN, or infinite entries are replaced with 1.0.
+  - There is no upper cap; extreme values risk overflowing the final damage calculation.
+  - Booleans use Armada’s native boolean parser.
+
+  ## Target-specific damage tables
+
+  Both modifiers accept native cLookup target tables:
+
+  shieldDamageModifier =
+      1.0
+      "fed_sovereign.odf" 0.5
+      "bcruise1.odf" 2.0
+
+  hullDamageModifier =
+      1.0
+      "fed_sovereign.odf" 1.5
+      "bcruise1.odf" 0.25
+
+  Rules:
+
+  - The first number is the fallback.
+  - Each quoted target ODF is followed by its multiplier.
+  - Matching uses Armada’s native project-ID mechanism.
+  - The target’s actual object-class ODF is used.
+  - Capture or team/race changes do not change its class lookup.
+  - Upgraded/replacement classes with different ODFs need their own entries.
+  - The booleans are not target tables; only the two modifiers support overrides.
+  - A child weapon inherits its parent’s complete lookup when it does not redeclare that modifier.
+  - Invalid target values are individually replaced with 1.0.
+
+  A zero target-specific hull multiplier is the closest equivalent to making one target immune to that weapon’s
+  ordinary hull damage.
+
+  ## Shield-breaking calculation
+
+  For a normal weapon with:
+
+  shieldDamageModifier = S
+  hullDamageModifier = H
+
+  the DLL initially scales a shielded hit by S. Once Armada calculates shield absorption and spillover, it scales
+  only the resulting hull/system amount by:
+
+  H / S
+
+  The net spillover therefore has the intended H multiplier rather than inheriting the shield multiplier.
+
+  If S = 0, the shield loses nothing and no spillover can be generated.
+
+  ## Native ignoreShield interaction
+
+  The module only adds DamageInfo flags; it never clears existing ordnance flags such as native ignoreShield or
+  shield-only damage.
+
+  For an ordinary ignoreShield weapon:
+
+  - Leave canDamageShields = true; the native bypass flag remains present.
+  - With nonzero modifiers, the spillover correction normally produces the configured hull multiplier.
+  - Setting canDamageShields = false while shields remain blocks the complete hit, overriding the practical bypass
+    behavior.
+
+  ### Identified zero-modifier edge case
+
+  This combination is problematic:
+
+  // General weapon ODF
+  shieldDamageModifier = 0
+  hullDamageModifier = 1
+
+  // Its ordnance already has:
+  ignoreShield = 1
+
+  While the target has positive shields, the DLL classifies the hit as shielded and first multiplies it by zero.
+  Because division by the zero shield modifier is deliberately suppressed, it cannot recover the intended hull
+  multiplier. The supposedly shield-bypassing hit consequently inflicts zero hull damage.
+
+  Avoid shieldDamageModifier = 0 on weapons whose ordnance uses ignoreShield; use channel booleans or a small
+  nonzero shield multiplier according to the intended behavior.
+
+  ## DirectionalShields integration
+
+  The live bridge sequence is:
+
+  DirectionalShields loads
+    → waits for shared Craft::Damage owner
+  WeaponDamageControls loads
+    → installs Craft::Damage
+    → DirectionalShields connects
+
+  This succeeded in the current log.
+
+  Before WeaponDamageControls selects the shield or hull modifier, DirectionalShields temporarily presents the
+  struck facing’s current value. Therefore:
+
+  - A hit against a charged facing uses the shield modifier.
+  - A hit against a depleted facing uses the hull modifier.
+  - Other charged facings do not prevent exposed-facing hull damage.
+  - Spillover correction applies to the struck facing’s shield break.
+
+  Active directional policies exist for fbattle.odf and fbase.odf, although no currently loaded weapon uses a
+  WeaponDamageControls policy.
+
+  ## Current test-stack result
+
+  A full search of the active test mod and STA2 Classic parent found no occurrences of:
+
+  canDamageShields
+  canDamageHull
+  shieldDamageModifier
+  hullDamageModifier
+
+  The log correspondingly contains no:
+
+  Registered weapon damage policy...
+
+  messages.
+
+  This means ordinary weapons—including the Akira turret’s ftpulse—retain native damage behavior. The runtime
+  initialization proves hook installation and command registration, but not lookup parsing or an actual modified
+  hit.
+
+  One logging limitation is that future registration messages report values and target-table counts without naming
+  the weapon ODF, making several policies difficult to correlate.
+
+  ## Relevant file types
+
+  - .odf: The only modder-facing configuration. Commands go in the general weapon ODF.
+  - Ordnance .odf: Continues to provide damageBase, variance, native flags and special behavior, but not these four
+    commands.
+
+  - .ini: Module activation through active22 = "A2FOWeaponDamageControls" in Games/Fleet Ops Roots/Data/Mods/test/
+    info.ini:46.
+
+  - .sod, .spr, .tga, .dds, .wav: Unaffected; all visual/audio handling remains native.
+  - .cfg, RTS_CFG.h, ART_CFG.h: No WeaponDamageControls settings found.
+  - .h / .hpp: Internal damage-policy and DirectionalShields bridge declarations only; no public modding codes.
+  - .tt: Technology availability can determine whether a weapon fires, but does not change these damage
+    calculations.
+
+# A2FOWreckage.dll
+
+   Component                         Status
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Object-destroyed handler          Registered
+  ────────────────────────────────  ────────────────────────────────────────
+   Core Craft::Explode dispatcher    Enabled
+  ────────────────────────────────  ────────────────────────────────────────
+   ODF-field capture                 Working
+  ────────────────────────────────  ────────────────────────────────────────
+   Active configured class           fbattle.odf
+  ────────────────────────────────  ────────────────────────────────────────
+   Replacement ODF/SOD/texture       Resolved
+  ────────────────────────────────  ────────────────────────────────────────
+   Successful live replacement       Not yet observed
+  ────────────────────────────────  ────────────────────────────────────────
+   Destruction snapshots             Four unconfigured cargo craft observed
+
+  ## Craft ODF commands
+
+  Add these to a Craft-derived ship or station:
+
+  wreckage = "mwreck"
+  wreckageChance = 75
+
+  Rules:
+
+  - wreckage is the replacement GameObjectClass ODF basename.
+  - wreckageChance accepts 0..100, including fractional percentages.
+  - Missing wreckageChance defaults to 100.
+  - 0 reliably disables replacement.
+  - 100 always creates it.
+  - Values below zero, above 100, NaN, infinity or malformed text are rejected rather than clamped.
+  - Empty or missing wreckage leaves native destruction unchanged.
+  - Outer whitespace is trimmed.
+  - Replacement names are limited to 255 characters.
+  - Validated characters are ASCII letters, numbers, _, -, and ..
+  - Paths and spaces are rejected. Use a simple basename such as mwreck.
+  - Normal ODF inheritance applies.
+
+  An inherited policy can be disabled in a child with either:
+
+  wreckage = ""
+
+  or:
+
+  wreckageChance = 0
+
+  A wreckageChance without a valid wreckage has no useful effect.
+
+  ## Runtime sequence
+
+  The actual destruction flow is:
+
+  Craft enters Craft::Explode
+    → core snapshots ODF, handle, team and transform
+    → native Craft::Explode completes
+    → A2FOWreckage performs its deterministic chance roll
+    → core finds and constructs the replacement class
+    → replacement is added to the current AI mission
+
+  This means the DLL does not suppress or replace the source’s native explosion, debris, sound or fireball. It adds
+  a fresh object after native destruction finishes.
+
+  Only the checked Craft::Explode path is covered. Ordinary non-Craft GameObjects do not generate this event.
+
+  ## What the replacement inherits
+
+  The module always requests:
+
+  - Position
+  - Rotation
+
+  It always assigns:
+
+  - Neutral ownership/team 0
+
+  It does not inherit:
+
+  - Original owner or team
+  - Race state
+  - Hull, shields or subsystem damage
+  - Velocity or angular momentum
+  - Orders or target
+  - Crew
+  - Experience/rank
+  - Cargo or resources
+  - Object label/name
+  - Source ScaleSOD
+  - Source animation state
+
+  The replacement is a newly constructed native object using its own ODF defaults. A moving ship’s wreck therefore
+  does not automatically continue drifting or spinning.
+
+  The underlying core API supports original ownership, but A2FOWreckage.dll hardcodes neutral ownership and provides
+  no ODF command to change it.
+
+  ## Chance determinism
+
+  The chance seed is derived from:
+
+  - Normalized source ODF basename
+  - Source object handle
+  - Source team
+  - Complete death transform
+
+  The seed is then mixed independently rather than consuming Armada’s global random stream. This avoids perturbing
+  unrelated gameplay randomness and should give synchronized peers the same decision when their object state
+  matches.
+
+  The same destroyed object state always produces the same result. Different handles, teams or death positions
+  normally produce different rolls.
+
+  ## Active test configuration
+
+  The only wreckage policy anywhere under the complete Data tree is in Games/Fleet Ops Roots/Data/Mods/test/odf/
+  ships/fbattle.odf:176:
+
+  wreckage = "mwreck"
+  wreckageChance = 75
+
+  The class-loading log confirms that both fields were captured:
+
+  fbattle.odf (... wreckage, wreckagechance)
+
+  However, no fbattle destruction appears in the current log. The only destruction events were four zfercarg.odf
+  objects:
+
+  Object-destroyed snapshot ready: zfercarg.odf (1 ODF field)
+
+  Those snapshots contained only the automatic basename, so ignoring them was correct. There are no replacement
+  errors or successful replacement lines yet.
+
+  A successful event should produce:
+
+  Object-destroyed event claimed: fbattle.odf -> mwreck
+  Object replacement: fbattle.odf -> mwreck
+
+  ## Active mwreck asset
+
+  The replacement resolves through Games/Fleet Ops Roots/Data/Mods/STA2 Classic Mod/odf/other/mwreck.odf:1:
+
+  [GameObjectClass]
+  classLabel = "background_obj"
+  unitName = "Space Wreckage"
+  avoidMe = 0
+  avoidanceClass = 0
+
+  Resolved assets:
+
+  - SOD: Mwreck.SOD
+  - 10 nodes
+  - 9 meshes
+  - No numeric hardpoints
+  - No weapons
+  - Raw model radius: 17.750
+  - Base texture: metal.tga
+  - Texture format: 128×128, 24-bit RGB TGA
+
+  This is scenery, not a salvageable derelict:
+
+  - No resource values
+  - No crew
+  - No health/shields
+  - No weapons
+  - No explosion project
+  - No configured lifespan
+  - No physics configuration
+  - No expiry policy supplied by A2FOWreckage
+
+  The module will leave the object in the mission for the native background_obj lifetime. Large battles could
+  therefore accumulate many persistent scenery objects; wreckageChance is the only built-in population control.
+
+  ## Size mismatch in the active example
+
+  The destroyed Sovereign resolves as:
+
+  - Raw SOD radius: 34.312
+  - ScaleSOD = 1.4
+
+  The replacement has:
+
+  - Raw SOD radius: 17.750
+  - No replacement ScaleSOD
+
+  Because source scale is not explicitly copied, mwreck uses its own model scale and will appear substantially
+  smaller than the destroyed Sovereign. Give a custom wreckage ODF its own ScaleSOD or use a ship-specific wreck SOD
+  if matching size matters.
+
+  ## Replacement-class possibilities
+
+  Although the command is named wreckage, the core can construct any valid native GameObjectClass ODF. It could
+  therefore create:
+
+  - Static background wreckage
+  - A neutral derelict Craft
+  - A resource object
+  - A hazard
+  - Another scripted or weapon-equipped object
+
+  All ordinary behavior must be authored in that replacement ODF. A2FOWreckage itself supplies no salvage, capture,
+  lifetime, resource-transfer or drifting mechanics.
+
+  Be careful with Craft replacement chains. If a replacement Craft has its own wreckage policy, destroying it can
+  create another replacement. Self-referential policies could produce an indefinite sequence of objects across
+  repeated destructions.
+
+  ## Failure behavior and diagnostics
+
+   Condition                         Result
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Chance roll fails                 Native destruction only
+  ────────────────────────────────  ────────────────────────────────────────
+   Invalid chance                    Native destruction; generic warning
+  ────────────────────────────────  ────────────────────────────────────────
+   Empty wreckage                    Native destruction
+  ────────────────────────────────  ────────────────────────────────────────
+   Invalid replacement characters    Core rejects the claim
+  ────────────────────────────────  ────────────────────────────────────────
+   Missing replacement ODF           Object replacement ODF was not loaded
+  ────────────────────────────────  ────────────────────────────────────────
+   Construction fails                Object replacement could not construct
+  ────────────────────────────────  ────────────────────────────────────────
+   No active mission                 Constructed object cannot be published
+  ────────────────────────────────  ────────────────────────────────────────
+   Several destruction handlers      First valid claim wins
+
+  Chance failure returns control to any later registered destruction handler. The current setup has only one
+  handler.
+
+  ## Relevant file types
+
+  - .odf: Source wreckage policy and complete replacement-object behavior.
+  - .sod: Replacement geometry; defaults to the replacement ODF basename.
+  - .tga / .dds: Ordinary replacement SOD materials.
+  - .ini: Activation through active23 = "A2FOWreckage" in Games/Fleet Ops Roots/Data/Mods/test/info.ini:47.
+  - .spr: No A2FOWreckage syntax or active dependency.
+  - .cfg, RTS_CFG.h, ART_CFG.h: No wreckage settings found.
+  - .h / .hpp: Internal deterministic-policy and module-API declarations only.
+  - Explosion/sound ODFs: Not selected by this DLL; the destroyed source retains its normal native explosion
+    effects.

@@ -40,11 +40,8 @@ lets the affected option render blank instead of crashing while the Instant
 Action form is constructed or cycled.
 
 There are no ODF or INI commands. Select `A2FOInstantActionSettings` in the
-mod's `[modules]` list. Diagnostics are written to `A2FOExtensions.log` under
-the `A2FOInstantActionSettings` tag. The diagnostics report Ferengi and
-technology-level values before and after Armada's profile reader, after the
-enclosing setup-dialog dispatch, and when Fleet Operations refreshes its
-Advanced Settings controls.
+mod's `[modules]` list. Initialization and repair failures are written to
+`A2FOExtensions.log` under the `A2FOInstantActionSettings` tag.
 
 The runtime patch is restricted to the supported ArmadaL.exe identity and
 known function signatures. Unsupported binaries leave the module resident but

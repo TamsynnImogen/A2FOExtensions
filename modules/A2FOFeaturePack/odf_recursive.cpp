@@ -8,6 +8,7 @@
 #include "../../core/fpq_paths.hpp"
 #include "../../core/odf_paths.hpp"
 #include "bink_video.hpp"
+#include "buildyard_pseudo_technology.hpp"
 #include "queue_enhancement.hpp"
 #include "upgrade_pods.hpp"
 
@@ -46,7 +47,6 @@ constexpr std::uintptr_t kAddItemsFromPackRva = 0x109650;
 constexpr std::size_t kBuiltInVirtualDirectoryCount = 28;
 constexpr std::size_t kMaximumVirtualDirectoryCount = 255;
 constexpr std::size_t kMaximumPathLength = 32767;
-constexpr std::size_t kDetailedIndexLogLimit = 24;
 constexpr std::size_t kLookupLogLimit = 64;
 
 const std::uint8_t kExpectedAddDisk[] = {
@@ -749,7 +749,6 @@ std::size_t build_recursive_odf_winners(
 
     std::map<void*, CustomEntryInfo> custom_entries;
     std::map<std::string, std::vector<void*>> custom_groups;
-    std::size_t logged_entries = 0;
     for (void* directory : custom_directories) {
         auto* entries = field<DelphiList*>(directory, 0x0c);
         const auto precedence = directory_precedence.find(directory);
@@ -765,32 +764,13 @@ std::size_t build_recursive_odf_winners(
             custom_entries.emplace(
                 entry, CustomEntryInfo{directory_path, overlay});
             custom_groups[basename].push_back(entry);
-            if (logged_entries < kDetailedIndexLogLimit) {
-                log_line("Entry: " + basename + " from " + directory_path +
-                         " (primary=" +
-                         std::to_string(field<std::uint8_t>(
-                             entry, kFileEntryPrimaryRootOffset)) +
-                         ", packed=" +
-                         std::to_string(field<std::uint8_t>(
-                             entry, kFileEntryPackedOffset)) +
-                         ", overridden=" +
-                         std::to_string(field<std::uint8_t>(
-                             entry, kFileEntryOverriddenOffset)) + ")");
-                ++logged_entries;
-            }
         }
     }
     log_line("Precedence: " + std::to_string(custom_entries.size()) +
              " custom entries in hash table");
-    if (custom_entries.size() > logged_entries) {
-        log_line("Entry diagnostics: " +
-                 std::to_string(custom_entries.size() - logged_entries) +
-                 " additional entries suppressed");
-    }
 
     std::map<std::string, std::string> aliases;
     std::map<std::string, void*> winners;
-    std::size_t logged_winners = 0;
     for (const auto& group : custom_groups) {
         void* basename_value = field<void*>(
             group.second.front(), kFileEntryBasenameOffset);
@@ -801,20 +781,6 @@ std::size_t build_recursive_odf_winners(
         if (!collect_hash_bucket(file_system, bucket, chain)) {
             log_line("Alias skipped malformed bucket: " + group.first);
             continue;
-        }
-
-        if (logged_winners < kDetailedIndexLogLimit) {
-            std::string contents;
-            for (void* candidate : chain) {
-                if (!contents.empty()) contents += ", ";
-                contents += lower_ascii(delphi_string(
-                    candidate, kFileEntryBasenameOffset));
-                if (custom_entries.find(candidate) != custom_entries.end()) {
-                    contents += " [recursive]";
-                }
-            }
-            log_line("Hash bucket " + std::to_string(bucket) + ": " +
-                     contents);
         }
 
         void* winner = nullptr;
@@ -850,23 +816,8 @@ std::size_t build_recursive_odf_winners(
                     selected->second.directory_path, basename);
                 aliases[group.first] = target;
                 winners[group.first] = winner;
-                const bool corrected_override =
-                    field<std::uint8_t>(winner,
-                                        kFileEntryOverriddenOffset) != 0;
-                if (logged_winners < kDetailedIndexLogLimit) {
-                    log_line("Winner: " + group.first + " -> " + target +
-                             (corrected_override
-                                  ? " (recursive precedence corrected override flag)"
-                                  : ""));
-                    ++logged_winners;
-                }
             }
         }
-    }
-    if (winners.size() > logged_winners) {
-        log_line("Winner diagnostics: " +
-                 std::to_string(winners.size() - logged_winners) +
-                 " additional winners suppressed");
     }
 
     std::size_t winner_count = 0;
@@ -1173,6 +1124,8 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     log_line("Native feature pack initialized");
     a2fo::initialize_queue_enhancements(api, g_armada, g_fleet_ops);
     a2fo::initialize_upgrade_pods(api, g_armada, g_fleet_ops);
+    a2fo::initialize_buildyard_pseudo_technology(
+        api, g_armada, g_fleet_ops);
     a2fo::initialize_bink_video_scaling(api, g_armada);
     return true;
 }

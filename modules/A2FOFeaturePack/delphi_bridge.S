@@ -159,3 +159,31 @@ _a2fo_call_thiscall_4:
 	call *8(%ebp)
 	leave
 	ret
+
+	# Call a Delphi register-convention routine with EAX/EDX/ECX plus one
+	# callee-cleaned stack argument. BuildYard's private GetProjectId wrapper
+	# uses this shape.
+	.globl _a2fo_buildyard_call_delphi_reg3_stack1
+_a2fo_buildyard_call_delphi_reg3_stack1:
+	pushl %ebp
+	movl %esp, %ebp
+	pushl 24(%ebp)
+	movl 20(%ebp), %ecx
+	movl 16(%ebp), %edx
+	movl 12(%ebp), %eax
+	call *8(%ebp)
+	leave
+	ret
+
+	# Replacement for BuildYard's one RequiredTechnology GetProjectId call.
+	# The native caller supplies EAX=ParameterDB, EDX=Delphi command string,
+	# ECX=output cPrjID, and a callee-cleaned default value on the stack.
+	.globl _a2fo_buildyard_project_id_call_bridge
+_a2fo_buildyard_project_id_call_bridge:
+	pushl 4(%esp)
+	pushl %ecx
+	pushl %edx
+	pushl %eax
+	call _a2fo_buildyard_project_id_call_handler
+	addl $16, %esp
+	ret $4

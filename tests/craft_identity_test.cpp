@@ -1,6 +1,7 @@
 #include "directional_shield_display_config.hpp"
 #include "directional_shield_fill.hpp"
 #include "identity_selection.hpp"
+#include "system_icon_state.hpp"
 
 #include <cassert>
 #include <array>
@@ -125,5 +126,43 @@ int main() {
     assert(!remap_directional_shield_positions(
         duplicate_positions, stock_positions, &unchanged));
     assert(close(unchanged[0].x, stock_positions[0].x));
+
+    using a2fo::craft_identity::classify_system_icon_state;
+    using a2fo::craft_identity::SystemIconState;
+    SystemIconState icon_state = SystemIconState::destroyed;
+    assert(classify_system_icon_state(
+        true, false, 100, 100.0, 0.0f, &icon_state));
+    assert(icon_state == SystemIconState::healthy);
+    assert(classify_system_icon_state(
+        true, false, 100, 50.0, 0.0f, &icon_state));
+    assert(icon_state == SystemIconState::low);
+    assert(classify_system_icon_state(
+        true, false, 100, 25.0, 0.0f, &icon_state));
+    assert(icon_state == SystemIconState::critical);
+    assert(classify_system_icon_state(
+        false, true, 100, 80.0, 0.0f, &icon_state));
+    assert(icon_state == SystemIconState::disabled);
+    assert(classify_system_icon_state(
+        false, false, 100, 80.0, 0.0f, &icon_state));
+    assert(icon_state == SystemIconState::destroyed);
+    assert(classify_system_icon_state(
+        false, false, 100, 80.0, 3.0f, &icon_state));
+    assert(icon_state == SystemIconState::disabled);
+    assert(classify_system_icon_state(
+        false, true, 100, 0.0, 3.0f, &icon_state));
+    assert(icon_state == SystemIconState::destroyed);
+    assert(!classify_system_icon_state(
+        true, false, 0, 0.0, 0.0f, &icon_state));
+
+    using a2fo::craft_identity::tint_system_icon_colour;
+    const auto tinted = tint_system_icon_colour(
+        {{0.0f, 0.5f, 0.0f}}, {{1.0f, 0.0f, 1.0f}});
+    assert(close(tinted[0], 0.5f));
+    assert(close(tinted[1], 0.0f));
+    assert(close(tinted[2], 0.5f));
+    const auto black_layer = tint_system_icon_colour(
+        {{0.0f, 0.0f, 0.0f}}, {{1.0f, 0.0f, 1.0f}});
+    assert(close(black_layer[0], 0.0f));
+    assert(close(black_layer[2], 0.0f));
     return 0;
 }

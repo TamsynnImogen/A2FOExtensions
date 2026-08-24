@@ -33,11 +33,10 @@ POINT_DEFENSE_CYCLES_MODULE := $(MODULE_DIR)/A2FOPointDefenseCycles.dll
 SWARM_SYSTEM_MODULE := $(MODULE_DIR)/A2FOSwarmSystem.dll
 TEXTURE_VARIANTS_MODULE := $(MODULE_DIR)/A2FOTextureVariants.dll
 TURRETS_MODULE := $(MODULE_DIR)/A2FOTurrets.dll
+REFIT_YARDS_MODULE := $(MODULE_DIR)/A2FORefitYards.dll
 NEBULA_SHADER_ASSETS := \
-	$(BUILD_DIR)/Shaders/dx8/vertex/vs.nvv \
-	$(BUILD_DIR)/Shaders/dx8/vertex/vs_1.3.nvv \
 	$(BUILD_DIR)/Shaders/dx8/pixel/ps.nvv \
-	$(BUILD_DIR)/Shaders/dx8/pixel/ps_1.3.nvv
+	$(BUILD_DIR)/Shaders/dx8/pixel/ps_specular.nvv
 NEBULA_LICENSE := $(BUILD_DIR)/licenses/armada-nebula-patch.txt
 STA1_CLASSIC_GUI_CFG := \
 	mods/STA1Classic/misc/gui_fed.cfg \
@@ -54,6 +53,7 @@ EXTENSION_ROOT_SMOKE := $(BUILD_DIR)/extension_root_discovery_smoke.exe
 MODULE_API_TEST := $(BUILD_DIR)/module_api_test
 MODULE_POLICY_TEST := $(BUILD_DIR)/module_policy_test
 HYBRID_PRODUCTION_TEST := $(BUILD_DIR)/hybrid_production_test
+BUILD_SUBMENU_CONFIG_TEST := $(BUILD_DIR)/build_submenu_config_test
 TURRET_MATH_TEST := $(BUILD_DIR)/turret_math_test
 CRAFT_IDENTITY_TEST := $(BUILD_DIR)/craft_identity_test
 EDIT_MENU_TEST := $(BUILD_DIR)/edit_menu_test
@@ -62,16 +62,25 @@ DIRECTIONAL_SHIELDS_TEST := $(BUILD_DIR)/directional_shields_test
 INSTANT_ACTION_SETTINGS_TEST := $(BUILD_DIR)/instant_action_settings_test
 BUILD_TIME_TEXT_TEST := $(BUILD_DIR)/build_time_text_test
 ADDITIONAL_RESOURCES_TEST := $(BUILD_DIR)/additional_resources_test
+A1_RACE_MENU_TEST := $(BUILD_DIR)/a1_race_menu_policy_test
+A1_TEAM_COLOR_TEST := $(BUILD_DIR)/a1_team_color_policy_test
+A1_BZN_POLICY_TEST := $(BUILD_DIR)/a1_bzn_policy_test
+A1_UI_POLICY_TEST := $(BUILD_DIR)/a1_ui_policy_test
 FIRE_ARC_TEST := $(BUILD_DIR)/fire_arc_test
 UPGRADE_POD_CONFIG_TEST := $(BUILD_DIR)/upgrade_pod_config_test
 WRECKAGE_POLICY_TEST := $(BUILD_DIR)/wreckage_policy_test
 WEAPON_DAMAGE_CONTROLS_TEST := $(BUILD_DIR)/weapon_damage_controls_test
 SHIELD_VISIBILITY_TEST := $(BUILD_DIR)/shield_visibility_test
 NEBULA_EMISSIVE_TEST := $(BUILD_DIR)/nebula_emissive_test
+COM_OWNER_TEST := $(BUILD_DIR)/com_owner_test
+ART_TEXTURE_SUFFIX_CONFIG_TEST := $(BUILD_DIR)/art_texture_suffix_config_test
 DECAL_MATH_TEST := $(BUILD_DIR)/decal_math_test
 POINT_DEFENSE_CYCLE_TEST := $(BUILD_DIR)/point_defense_cycle_test
 SWARM_MOTION_TEST := $(BUILD_DIR)/swarm_motion_test
 TEXTURE_VARIANTS_TEST := $(BUILD_DIR)/texture_variants_test
+REFIT_POLICY_TEST := $(BUILD_DIR)/refit_policy_test
+A2FO_TELEMETRY := $(BUILD_DIR)/a2fo_telemetry
+A2FO_RENDERER_HELPER := $(BUILD_DIR)/A2FORendererHelper.exe
 ARCLAB_DIR := tools/A2FOArcLab
 
 CORE_SOURCES := \
@@ -80,6 +89,7 @@ CORE_SOURCES := \
 	core/module_menu.cpp \
 	core/module_loader.cpp \
 	core/module_policy.cpp \
+	core/renderer_options.cpp \
 	core/decal_math.cpp \
 	core/nebula_emissive.cpp \
 	core/nebula_renderer.cpp \
@@ -89,7 +99,7 @@ CORE_SOURCES := \
 
 .PHONY: all release sta1-classic verify-sta1-classic sdk-examples clean \
 	verify verify-sdk test smoke odf-module-smoke extension-root-smoke \
-	arclab arclab-test
+	arclab arclab-test telemetry
 
 all: release
 
@@ -99,9 +109,20 @@ arclab:
 arclab-test:
 	cargo test --locked --manifest-path $(ARCLAB_DIR)/Cargo.toml
 
+telemetry: $(A2FO_TELEMETRY)
+
+$(A2FO_TELEMETRY): tools/a2fo_telemetry.cpp | $(BUILD_DIR)
+	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+		-o $@ tools/a2fo_telemetry.cpp -ldl
+
+$(A2FO_RENDERER_HELPER): tools/a2fo_renderer_helper.cpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -static -static-libgcc -static-libstdc++ \
+		-o $@ tools/a2fo_renderer_helper.cpp
+
 release: \
 	$(BUILD_DIR)/A2FOExtensions.dll \
 	$(BUILD_DIR)/Win2kDisableTaskSwitch.dll \
+	$(A2FO_RENDERER_HELPER) \
 	$(ALWAYS_SHOW_SHIELDS_MODULE) \
 	$(ANIMATED_HARDPOINTS_MODULE) \
 	$(BUILD_TOOLTIPS_MODULE) \
@@ -128,6 +149,7 @@ release: \
 	$(NEBULA_SHADER_ASSETS) \
 	$(NEBULA_LICENSE) \
 	$(TURRETS_MODULE) \
+	$(REFIT_YARDS_MODULE) \
 	$(MODULE_DIR)/A2FORGBTextures.dll
 
 sta1-classic: release $(STA1_COMPAT_MODULE) $(STA1_CLASSIC_GUI_CFG) \
@@ -206,9 +228,14 @@ $(MODULE_DIR)/A2FOFeaturePack.dll: \
 		modules/A2FOFeaturePack/odf_recursive.cpp \
 		modules/A2FOFeaturePack/bink_video.cpp \
 		modules/A2FOFeaturePack/bink_video.hpp \
+		modules/A2FOFeaturePack/buildyard_pseudo_technology.cpp \
+		modules/A2FOFeaturePack/buildyard_pseudo_technology.hpp \
 		modules/A2FOFeaturePack/hybrid_bridge_api.hpp \
 		modules/A2FOFeaturePack/hybrid_bridge_client.cpp \
 		modules/A2FOFeaturePack/hybrid_bridge_client.hpp \
+		modules/A2FOFeaturePack/refit_queue_bridge_api.hpp \
+		modules/A2FOFeaturePack/refit_queue_bridge_client.cpp \
+		modules/A2FOFeaturePack/refit_queue_bridge_client.hpp \
 		modules/A2FOFeaturePack/queue_enhancement.cpp \
 		modules/A2FOFeaturePack/queue_enhancement.hpp \
 		modules/A2FOFeaturePack/upgrade_pods.cpp \
@@ -223,7 +250,9 @@ $(MODULE_DIR)/A2FOFeaturePack.dll: \
 		-o $@ \
 		modules/A2FOFeaturePack/odf_recursive.cpp \
 		modules/A2FOFeaturePack/bink_video.cpp \
+		modules/A2FOFeaturePack/buildyard_pseudo_technology.cpp \
 		modules/A2FOFeaturePack/hybrid_bridge_client.cpp \
+		modules/A2FOFeaturePack/refit_queue_bridge_client.cpp \
 		modules/A2FOFeaturePack/queue_enhancement.cpp \
 		modules/A2FOFeaturePack/upgrade_pods.cpp \
 		modules/A2FOFeaturePack/upgrade_pod_config.cpp \
@@ -235,6 +264,9 @@ $(MODULE_DIR)/A2FOHybridBuild.dll: \
 		modules/A2FOHybridBuild/module.cpp \
 		modules/A2FOHybridBuild/delphi_bridge.S \
 		modules/A2FOFeaturePack/hybrid_bridge_api.hpp \
+		modules/A2FOHybridBuild/refit_ui_bridge_api.hpp \
+		modules/A2FOHybridBuild/build_submenu_config.cpp \
+		modules/A2FOHybridBuild/build_submenu_config.hpp \
 		modules/A2FOHybridBuild/hybrid_production.cpp \
 		modules/A2FOHybridBuild/hybrid_production.hpp \
 		modules/A2FOHybridBuild/hybrid_production_runtime.cpp \
@@ -243,9 +275,24 @@ $(MODULE_DIR)/A2FOHybridBuild.dll: \
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
 		-o $@ \
 		modules/A2FOHybridBuild/module.cpp \
+		modules/A2FOHybridBuild/build_submenu_config.cpp \
 		modules/A2FOHybridBuild/hybrid_production.cpp \
 		modules/A2FOHybridBuild/hybrid_production_runtime.cpp \
 		modules/A2FOHybridBuild/delphi_bridge.S
+
+$(REFIT_YARDS_MODULE): \
+		modules/A2FORefitYards/module.cpp \
+		modules/A2FORefitYards/docking_transform.hpp \
+		modules/A2FORefitYards/refit_policy.cpp \
+		modules/A2FORefitYards/refit_policy.hpp \
+		modules/A2FORefitYards/thiscall_bridge.S \
+		modules/A2FOFeaturePack/refit_queue_bridge_api.hpp \
+		modules/A2FOHybridBuild/refit_ui_bridge_api.hpp \
+		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
+		-o $@ modules/A2FORefitYards/module.cpp \
+		modules/A2FORefitYards/refit_policy.cpp \
+		modules/A2FORefitYards/thiscall_bridge.S
 
 $(MODULE_DIR)/A2FOInfoIni.dll: \
 		modules/A2FOInfoIni/module.cpp \
@@ -270,6 +317,8 @@ $(CRAFT_IDENTITY_MODULE): \
 		modules/A2FOCraftIdentity/directional_shield_fill.hpp \
 		modules/A2FOCraftIdentity/identity_selection.cpp \
 		modules/A2FOCraftIdentity/identity_selection.hpp \
+		modules/A2FOCraftIdentity/system_icon_state.cpp \
+		modules/A2FOCraftIdentity/system_icon_state.hpp \
 		modules/A2FODirectionalShields/api.hpp \
 		modules/A2FOCraftIdentity/thiscall_bridge.S \
 		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
@@ -278,6 +327,7 @@ $(CRAFT_IDENTITY_MODULE): \
 		modules/A2FOCraftIdentity/directional_shield_display_config.cpp \
 		modules/A2FOCraftIdentity/directional_shield_fill.cpp \
 		modules/A2FOCraftIdentity/identity_selection.cpp \
+		modules/A2FOCraftIdentity/system_icon_state.cpp \
 		modules/A2FOCraftIdentity/thiscall_bridge.S
 
 $(EDIT_MENU_MODULE): \
@@ -308,9 +358,11 @@ $(INSTANT_ACTION_SETTINGS_MODULE): \
 
 $(MISSION_SELECTOR_MODULE): \
 		modules/A2FOMissionSelector/module.cpp \
+		modules/A2FOMissionSelector/thiscall_bridge.S \
 		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
 		-o $@ modules/A2FOMissionSelector/module.cpp \
+		modules/A2FOMissionSelector/thiscall_bridge.S \
 		-lcomctl32 -lgdi32 -lgdiplus
 
 $(FIRE_ARCS_MODULE): \
@@ -370,10 +422,13 @@ $(NORMAL_WEAPON_TECH_MODULE): \
 
 $(NEBULA_RENDERER_MODULE): \
 		modules/A2FONebulaRenderer/module.cpp \
+		modules/A2FONebulaRenderer/art_texture_suffix_config.cpp \
+		modules/A2FONebulaRenderer/art_texture_suffix_config.hpp \
 		modules/A2FONebulaRenderer/thiscall_bridge.S \
 		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
 		-o $@ modules/A2FONebulaRenderer/module.cpp \
+		modules/A2FONebulaRenderer/art_texture_suffix_config.cpp \
 		modules/A2FONebulaRenderer/thiscall_bridge.S
 
 $(POINT_DEFENSE_CYCLES_MODULE): \
@@ -397,11 +452,6 @@ $(SWARM_SYSTEM_MODULE): \
 		-o $@ modules/A2FOSwarmSystem/module.cpp \
 		modules/A2FOSwarmSystem/swarm_motion.cpp \
 		modules/A2FOSwarmSystem/thiscall_bridge.S
-
-$(BUILD_DIR)/Shaders/dx8/vertex/%.nvv: \
-		modules/A2FONebulaRenderer/Shaders/dx8/vertex/%.nvv | $(BUILD_DIR)
-	mkdir -p $(dir $@)
-	cp $< $@
 
 $(BUILD_DIR)/Shaders/dx8/pixel/%.nvv: \
 		modules/A2FONebulaRenderer/Shaders/dx8/pixel/%.nvv | $(BUILD_DIR)
@@ -469,10 +519,20 @@ $(WRECKAGE_MODULE): \
 
 $(STA1_COMPAT_MODULE): \
 		modules/A1Compat/module.cpp \
+		modules/A1Compat/a1_bzn_policy.cpp \
+		modules/A1Compat/a1_bzn_policy.hpp \
+		modules/A1Compat/a1_ui_policy.hpp \
+		modules/A1Compat/race_menu_policy.cpp \
+		modules/A1Compat/race_menu_policy.hpp \
+		modules/A1Compat/team_color_policy.cpp \
+		modules/A1Compat/team_color_policy.hpp \
 		modules/A1Compat/thiscall_bridge.S \
 		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
 		-o $@ modules/A1Compat/module.cpp \
+		modules/A1Compat/a1_bzn_policy.cpp \
+		modules/A1Compat/race_menu_policy.cpp \
+		modules/A1Compat/team_color_policy.cpp \
 		modules/A1Compat/thiscall_bridge.S
 
 $(SMOKE_TEST): tests/dll_load_smoke.cpp | $(BUILD_DIR)
@@ -493,6 +553,39 @@ $(ADDITIONAL_RESOURCES_TEST): \
 		-Imodules/A2FOResources -o $@ \
 		tests/additional_resources_test.cpp \
 		modules/A2FOResources/additional_resources.cpp
+
+$(A1_RACE_MENU_TEST): \
+		tests/a1_race_menu_policy_test.cpp \
+		modules/A1Compat/race_menu_policy.cpp \
+		modules/A1Compat/race_menu_policy.hpp | $(BUILD_DIR)
+	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+		-Imodules/A1Compat -o $@ \
+		tests/a1_race_menu_policy_test.cpp \
+		modules/A1Compat/race_menu_policy.cpp
+
+$(A1_TEAM_COLOR_TEST): \
+		tests/a1_team_color_policy_test.cpp \
+		modules/A1Compat/team_color_policy.cpp \
+		modules/A1Compat/team_color_policy.hpp | $(BUILD_DIR)
+	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+		-Imodules/A1Compat -o $@ \
+		tests/a1_team_color_policy_test.cpp \
+		modules/A1Compat/team_color_policy.cpp
+
+$(A1_BZN_POLICY_TEST): \
+		tests/a1_bzn_policy_test.cpp \
+		modules/A1Compat/a1_bzn_policy.cpp \
+		modules/A1Compat/a1_bzn_policy.hpp | $(BUILD_DIR)
+	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+		-Imodules/A1Compat -o $@ \
+		tests/a1_bzn_policy_test.cpp \
+		modules/A1Compat/a1_bzn_policy.cpp
+
+$(A1_UI_POLICY_TEST): \
+		tests/a1_ui_policy_test.cpp \
+		modules/A1Compat/a1_ui_policy.hpp | $(BUILD_DIR)
+	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+		-Imodules/A1Compat -o $@ tests/a1_ui_policy_test.cpp
 
 $(ODF_PATHS_TEST): tests/odf_paths_test.cpp \
 		core/odf_paths.cpp core/odf_paths.hpp | $(BUILD_DIR)
@@ -533,6 +626,14 @@ $(HYBRID_PRODUCTION_TEST): tests/hybrid_production_test.cpp \
 		tests/hybrid_production_test.cpp \
 		modules/A2FOHybridBuild/hybrid_production.cpp
 
+$(BUILD_SUBMENU_CONFIG_TEST): tests/build_submenu_config_test.cpp \
+		modules/A2FOHybridBuild/build_submenu_config.cpp \
+		modules/A2FOHybridBuild/build_submenu_config.hpp | $(BUILD_DIR)
+	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+		-Imodules/A2FOHybridBuild -o $@ \
+		tests/build_submenu_config_test.cpp \
+		modules/A2FOHybridBuild/build_submenu_config.cpp
+
 $(TURRET_MATH_TEST): tests/turret_math_test.cpp \
 		modules/A2FOTurrets/turret_combat.cpp \
 		modules/A2FOTurrets/turret_combat.hpp \
@@ -550,13 +651,16 @@ $(CRAFT_IDENTITY_TEST): tests/craft_identity_test.cpp \
 		modules/A2FOCraftIdentity/directional_shield_fill.cpp \
 		modules/A2FOCraftIdentity/directional_shield_fill.hpp \
 		modules/A2FOCraftIdentity/identity_selection.cpp \
-		modules/A2FOCraftIdentity/identity_selection.hpp | $(BUILD_DIR)
+		modules/A2FOCraftIdentity/identity_selection.hpp \
+		modules/A2FOCraftIdentity/system_icon_state.cpp \
+		modules/A2FOCraftIdentity/system_icon_state.hpp | $(BUILD_DIR)
 	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
 		-Imodules/A2FOCraftIdentity -o $@ \
 		tests/craft_identity_test.cpp \
 		modules/A2FOCraftIdentity/directional_shield_display_config.cpp \
 		modules/A2FOCraftIdentity/directional_shield_fill.cpp \
-		modules/A2FOCraftIdentity/identity_selection.cpp
+		modules/A2FOCraftIdentity/identity_selection.cpp \
+		modules/A2FOCraftIdentity/system_icon_state.cpp
 
 $(EDIT_MENU_TEST): tests/edit_menu_test.cpp \
 		modules/A2FOEditMenu/edit_menu_odf.cpp \
@@ -627,6 +731,15 @@ $(WRECKAGE_POLICY_TEST): tests/wreckage_policy_test.cpp \
 		tests/wreckage_policy_test.cpp \
 		modules/A2FOWreckage/wreckage_policy.cpp
 
+$(REFIT_POLICY_TEST): tests/refit_policy_test.cpp \
+		modules/A2FORefitYards/docking_transform.hpp \
+		modules/A2FORefitYards/refit_policy.cpp \
+		modules/A2FORefitYards/refit_policy.hpp | $(BUILD_DIR)
+	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+		-Imodules/A2FORefitYards -o $@ \
+		tests/refit_policy_test.cpp \
+		modules/A2FORefitYards/refit_policy.cpp
+
 $(WEAPON_DAMAGE_CONTROLS_TEST): tests/weapon_damage_controls_test.cpp \
 		modules/A2FOWeaponDamageControls/damage_controls.hpp | $(BUILD_DIR)
 	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
@@ -646,6 +759,18 @@ $(NEBULA_EMISSIVE_TEST): tests/nebula_emissive_test.cpp \
 	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
 		-Icore -o $@ tests/nebula_emissive_test.cpp \
 		core/nebula_emissive.cpp
+
+$(COM_OWNER_TEST): tests/com_owner_test.cpp core/com_owner.hpp | $(BUILD_DIR)
+	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+		-Icore -o $@ tests/com_owner_test.cpp
+
+$(ART_TEXTURE_SUFFIX_CONFIG_TEST): tests/art_texture_suffix_config_test.cpp \
+		modules/A2FONebulaRenderer/art_texture_suffix_config.cpp \
+		modules/A2FONebulaRenderer/art_texture_suffix_config.hpp | $(BUILD_DIR)
+	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+		-Imodules/A2FONebulaRenderer -o $@ \
+		tests/art_texture_suffix_config_test.cpp \
+		modules/A2FONebulaRenderer/art_texture_suffix_config.cpp
 
 $(DECAL_MATH_TEST): tests/decal_math_test.cpp \
 		core/decal_math.cpp core/decal_math.hpp | $(BUILD_DIR)
@@ -679,11 +804,15 @@ $(TEXTURE_VARIANTS_TEST): tests/texture_variants_test.cpp \
 verify: release
 	@echo "A2FOExtensions exports:"
 	@$(OBJDUMP) -p $(BUILD_DIR)/A2FOExtensions.dll | \
-		grep -E "A2FO_Initialize|A2FO_NebulaRendererStatus|A2FO_NebulaRegisterEmissive(Class|Materials)|A2FO_NebulaBeginCraftRender|A2FO_NebulaEndCraftRender|DLL Name" || true
+		grep -E "A2FO_Initialize|A2FO_NebulaRendererStatus|A2FO_NebulaSet(EmissiveBumpMultiplier|BumpLightBias|EmissiveDiffuseRestore)|A2FO_NebulaRegister(Emissive(Class|Materials)|SpecularMaterials)|A2FO_NebulaBeginCraftRender|A2FO_NebulaEndCraftRender|DLL Name" || true
 	@echo
 	@echo "Proxy exports:"
 	@$(OBJDUMP) -p $(BUILD_DIR)/Win2kDisableTaskSwitch.dll | \
 		grep -E "LowLevelKeyboardProc|SetHookID|DLL Name" || true
+	@echo
+	@echo "Renderer helper dependencies:"
+	@$(OBJDUMP) -p $(A2FO_RENDERER_HELPER) | \
+		grep -E "DLL Name" || true
 	@echo
 	@echo "A2FOAlwaysShowShields module exports:"
 	@$(OBJDUMP) -p $(ALWAYS_SHOW_SHIELDS_MODULE) | \
@@ -699,11 +828,11 @@ verify: release
 	@echo
 	@echo "A2FOFeaturePack module exports:"
 	@$(OBJDUMP) -p $(MODULE_DIR)/A2FOFeaturePack.dll | \
-		grep -E "A2FO_ModuleInit|DLL Name" || true
+		grep -E "A2FO_ModuleInit|A2FO_(RegisterRefitQueueBridge|ProducerPushRefit)|DLL Name" || true
 	@echo
 	@echo "A2FOHybridBuild module exports:"
 	@$(OBJDUMP) -p $(MODULE_DIR)/A2FOHybridBuild.dll | \
-		grep -E "A2FO_ModuleInit|DLL Name" || true
+		grep -E "A2FO_ModuleInit|A2FO_RegisterRefitUiBridge|DLL Name" || true
 	@echo
 	@echo "A2FOInfoIni module exports:"
 	@$(OBJDUMP) -p $(MODULE_DIR)/A2FOInfoIni.dll | \
@@ -773,6 +902,10 @@ verify: release
 	@$(OBJDUMP) -p $(TURRETS_MODULE) | \
 		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|DLL Name" || true
 	@echo
+	@echo "A2FORefitYards module exports:"
+	@$(OBJDUMP) -p $(REFIT_YARDS_MODULE) | \
+		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|DLL Name" || true
+	@echo
 	@echo "A2FORGBTextures module exports:"
 	@$(OBJDUMP) -p $(MODULE_DIR)/A2FORGBTextures.dll | \
 		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|DLL Name" || true
@@ -785,6 +918,7 @@ verify: release
 	@for dll in \
 		$(BUILD_DIR)/A2FOExtensions.dll \
 		$(BUILD_DIR)/Win2kDisableTaskSwitch.dll \
+		$(A2FO_RENDERER_HELPER) \
 		$(ALWAYS_SHOW_SHIELDS_MODULE) \
 		$(ANIMATED_HARDPOINTS_MODULE) \
 		$(BUILD_TOOLTIPS_MODULE) \
@@ -809,6 +943,7 @@ verify: release
 		$(TEXTURE_VARIANTS_MODULE) \
 		$(STA1_COMPAT_MODULE) \
 		$(TURRETS_MODULE) \
+		$(REFIT_YARDS_MODULE) \
 		$(MODULE_DIR)/A2FORGBTextures.dll; do \
 		if $(OBJDUMP) -p "$$dll" | \
 			grep -Eiq 'DLL Name: (libgcc|libstdc\+\+|libwinpthread)'; then \
@@ -841,14 +976,19 @@ verify-sdk: sdk-examples
 		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|DLL Name" || true
 
 test: $(FPQ_PATHS_TEST) $(ODF_PATHS_TEST) $(EXTENSION_ROOTS_TEST) \
-	$(MODULE_API_TEST) $(MODULE_POLICY_TEST) $(HYBRID_PRODUCTION_TEST) $(TURRET_MATH_TEST) \
+	$(MODULE_API_TEST) $(MODULE_POLICY_TEST) $(HYBRID_PRODUCTION_TEST) \
+	$(BUILD_SUBMENU_CONFIG_TEST) $(TURRET_MATH_TEST) \
 	$(CRAFT_IDENTITY_TEST) $(EDIT_MENU_TEST) $(INSTANT_ACTION_SETTINGS_TEST) \
 	$(ENERGY_SYSTEMS_TEST) $(DIRECTIONAL_SHIELDS_TEST) \
 	$(BUILD_TIME_TEXT_TEST) $(ADDITIONAL_RESOURCES_TEST) $(FIRE_ARC_TEST) \
+	$(A1_RACE_MENU_TEST) $(A1_TEAM_COLOR_TEST) $(A1_BZN_POLICY_TEST) \
+	$(A1_UI_POLICY_TEST) \
 	$(UPGRADE_POD_CONFIG_TEST) \
 	$(WRECKAGE_POLICY_TEST) \
+	$(REFIT_POLICY_TEST) \
 	$(WEAPON_DAMAGE_CONTROLS_TEST) \
-	$(SHIELD_VISIBILITY_TEST) $(NEBULA_EMISSIVE_TEST) $(DECAL_MATH_TEST) \
+	$(SHIELD_VISIBILITY_TEST) $(NEBULA_EMISSIVE_TEST) $(COM_OWNER_TEST) \
+	$(ART_TEXTURE_SUFFIX_CONFIG_TEST) $(DECAL_MATH_TEST) \
 	$(POINT_DEFENSE_CYCLE_TEST) $(SWARM_MOTION_TEST) \
 	$(TEXTURE_VARIANTS_TEST)
 	$(FPQ_PATHS_TEST)
@@ -857,6 +997,7 @@ test: $(FPQ_PATHS_TEST) $(ODF_PATHS_TEST) $(EXTENSION_ROOTS_TEST) \
 	$(MODULE_API_TEST)
 	$(MODULE_POLICY_TEST)
 	$(HYBRID_PRODUCTION_TEST)
+	$(BUILD_SUBMENU_CONFIG_TEST)
 	$(TURRET_MATH_TEST)
 	$(CRAFT_IDENTITY_TEST)
 	$(EDIT_MENU_TEST)
@@ -865,12 +1006,19 @@ test: $(FPQ_PATHS_TEST) $(ODF_PATHS_TEST) $(EXTENSION_ROOTS_TEST) \
 	$(INSTANT_ACTION_SETTINGS_TEST)
 	$(BUILD_TIME_TEXT_TEST)
 	$(ADDITIONAL_RESOURCES_TEST)
+	$(A1_RACE_MENU_TEST)
+	$(A1_TEAM_COLOR_TEST)
+	$(A1_BZN_POLICY_TEST)
+	$(A1_UI_POLICY_TEST)
 	$(FIRE_ARC_TEST)
 	$(UPGRADE_POD_CONFIG_TEST)
 	$(WRECKAGE_POLICY_TEST)
+	$(REFIT_POLICY_TEST)
 	$(WEAPON_DAMAGE_CONTROLS_TEST)
 	$(SHIELD_VISIBILITY_TEST)
 	$(NEBULA_EMISSIVE_TEST)
+	$(COM_OWNER_TEST)
+	$(ART_TEXTURE_SUFFIX_CONFIG_TEST)
 	$(DECAL_MATH_TEST)
 	$(POINT_DEFENSE_CYCLE_TEST)
 	$(SWARM_MOTION_TEST)

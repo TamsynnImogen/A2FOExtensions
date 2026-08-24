@@ -97,3 +97,45 @@ _a2fo_identity_fo_sprite_draw_scaled_2d:
 	call *8(%ebp)
 	leave
 	ret
+
+	# The six native SystemIcon colour-call sites retain the current icon in
+	# ESI. Forward that context to C++ without detouring SystemIcon::Render,
+	# whose entry Fleet Operations patches before A2FO modules are loaded.
+	.extern _a2fo_identity_system_icon_set_colour_hook_cpp
+	.globl _a2fo_identity_system_icon_set_colour_bridge
+_a2fo_identity_system_icon_set_colour_bridge:
+	pushl 4(%esp)
+	pushl %esi
+	pushl %ecx
+	call _a2fo_identity_system_icon_set_colour_hook_cpp
+	addl $12, %esp
+	ret $4
+
+	# SystemValue::Render likewise retains its component in ESI while issuing
+	# the checked sprite-colour call for the adjacent numeric value.
+	.extern _a2fo_identity_system_text_set_colour_hook_cpp
+	.globl _a2fo_identity_system_text_set_colour_bridge
+_a2fo_identity_system_text_set_colour_bridge:
+	pushl 4(%esp)
+	pushl %esi
+	pushl %ecx
+	call _a2fo_identity_system_text_set_colour_hook_cpp
+	addl $12, %esp
+	ret $4
+
+	# GUIText::Render receives a temporary {colour, text} record as its fourth
+	# DrawText argument.  The supported native value components retain their
+	# live object in ESI at this call site.  Let C++ replace only the record's RGB
+	# fields, restore the native renderer in ECX, then tail-chain the original
+	# thiscall so its seven arguments and callee cleanup remain untouched.
+	.extern _a2fo_identity_value_text_colour_hook_cpp
+	.extern _a2fo_identity_value_text_draw_original
+	.globl _a2fo_identity_value_text_draw_bridge
+_a2fo_identity_value_text_draw_bridge:
+	pushl %ecx
+	pushl 20(%esp)
+	pushl %esi
+	call _a2fo_identity_value_text_colour_hook_cpp
+	addl $8, %esp
+	popl %ecx
+	jmp *_a2fo_identity_value_text_draw_original
