@@ -79,7 +79,14 @@ _a2fo_nebula_standard_post_hook:
 _a2fo_nebula_nonvb_pre_hook:
 	pushfl
 	pushal
+	# ESI is the native material-pass index.  The surrounding Armada function
+	# stores its pass count at [EBP-4] immediately before entering this loop.
+	movl 4(%esp), %edx
+	movl 8(%esp), %eax
+	pushl -4(%eax)
+	pushl %edx
 	call _a2fo_nebula_nonvb_pre
+	addl $8, %esp
 	popal
 	popfl
 	jmp *_g_a2fo_nebula_nonvb_pre_gateway
@@ -112,16 +119,39 @@ _a2fo_nebula_workspace_dx8_draw_hook:
 	addl $20, %esp
 	popal
 	popfl
-	jmp *_g_a2fo_nebula_workspace_dx8_draw_gateway
+	call *0x11c(%edx)
+	pushfl
+	pushal
+	call _a2fo_nebula_workspace_dx8_post
+	popal
+	popfl
+	jmp *_g_a2fo_nebula_workspace_dx8_draw_return
 
-	# ST3D_DeviceDirectX8 is about to call IDirect3DDevice8::EndScene. ESI is
-	# the live device, and the scene remains open long enough to blur and add
-	# the accumulated ODF emissive mask to the completed frame.
+	# Reset the private emissive-mask lifecycle at the authoritative native
+	# BeginScene boundary. ESI is the live device and the original COM call is
+	# replayed through the inline-hook gateway after all registers are restored.
+	.globl _a2fo_nebula_frame_begin_hook
+_a2fo_nebula_frame_begin_hook:
+	pushfl
+	pushal
+	pushl 4(%esp)
+	call _a2fo_nebula_frame_begin
+	addl $4, %esp
+	popal
+	popfl
+	jmp *_g_a2fo_nebula_frame_begin_gateway
+
+	# ST3D_DeviceDirectX8::RefreshDisplay is in its final scene immediately
+	# before Present. ESI is the ST3D device wrapper; +0x90 is the live D3D8
+	# device. Composite here exactly once per displayed frame, then replay the
+	# displaced `mov eax,[esi+0x90]; push eax` through the gateway.
 	.globl _a2fo_nebula_frame_bloom_hook
 _a2fo_nebula_frame_bloom_hook:
 	pushfl
 	pushal
-	pushl 4(%esp)
+	movl 4(%esp), %eax
+	movl 0x90(%eax), %eax
+	pushl %eax
 	call _a2fo_nebula_frame_bloom
 	addl $4, %esp
 	popal
@@ -141,9 +171,25 @@ _a2fo_nebula_device_reset_hook:
 	popfl
 	jmp *_g_a2fo_nebula_device_reset_gateway
 
+	# Fleet Operations' checked DestroyDevice callback receives the live
+	# ST3D_DeviceDirectX8 wrapper in ECX. Drop A2FO's GPU resources and owned COM
+	# reference before replaying Fleet Operations' callback prologue and native
+	# destruction route.
+	.globl _a2fo_nebula_device_destroy_hook
+_a2fo_nebula_device_destroy_hook:
+	pushfl
+	pushal
+	pushl 24(%esp)
+	call _a2fo_nebula_before_device_destroy
+	addl $4, %esp
+	popal
+	popfl
+	jmp *_g_a2fo_nebula_device_destroy_gateway
+
 	# The DOT3 indexed draw has EAX=device, EBX=mesh stream and ESI=triangle
-	# count. Accumulate its ODF emissive sampler before replaying the untouched
-	# native draw call and its already-pushed Direct3D arguments.
+	# count. Configure any native emissive fallback, execute the displaced COM
+	# draw exactly once with its already-pushed arguments, restore stage state,
+	# and preserve the HRESULT in EAX for Armada's following test.
 	.globl _a2fo_nebula_dot3_draw_hook
 _a2fo_nebula_dot3_draw_hook:
 	pushfl
@@ -155,4 +201,37 @@ _a2fo_nebula_dot3_draw_hook:
 	addl $12, %esp
 	popal
 	popfl
-	jmp *_g_a2fo_nebula_dot3_draw_gateway
+	call *0x11c(%edx)
+	pushfl
+	pushal
+	call _a2fo_nebula_dot3_post
+	popal
+	popfl
+	jmp *_g_a2fo_nebula_dot3_draw_return
+
+	# Fleet Operations' replacement DOT3 renderer reaches its primary indexed
+	# draw with EAX holding the live device vtable and the device itself as the
+	# first already-pushed COM argument. Bind stage 2 after FO's final diffuse
+	# assignment, optionally replay the exact vertex/triangle range into the
+	# selective bloom mask, preserve the draw HRESULT, then restore state.
+	.globl _a2fo_nebula_fleetops_dot3_draw_hook
+_a2fo_nebula_fleetops_dot3_draw_hook:
+	pushfl
+	pushal
+	# Original COM arguments after pushfl/pushal: device at +36,
+	# NumVertices at +48 and PrimitiveCount at +56. Account for each push while
+	# constructing the cdecl helper arguments in reverse order.
+	pushl 56(%esp)
+	pushl 52(%esp)
+	pushl 44(%esp)
+	call _a2fo_nebula_fleetops_dot3_draw
+	addl $12, %esp
+	popal
+	popfl
+	call *0x11c(%eax)
+	pushfl
+	pushal
+	call _a2fo_nebula_fleetops_dot3_post
+	popal
+	popfl
+	jmp *_g_a2fo_nebula_fleetops_dot3_draw_return

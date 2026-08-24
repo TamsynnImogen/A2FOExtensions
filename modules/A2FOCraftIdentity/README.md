@@ -23,8 +23,8 @@ without shifting later rows.
 
 ## Selected-object GUI configuration
 
-The identities are drawn only in the panel for the single selected object,
-not the low `SDInfoBar` mouse-over strip. Armada already reads
+The identities are drawn only in the ordinary panel for the single selected
+object, not the low `SDInfoBar` mouse-over strip. Armada already reads
 `infoSingleCaptainTextArea`; the module adds the matching registry rectangle:
 
 ```text
@@ -46,9 +46,54 @@ accepted as fallbacks when their `infoSingle*TextArea` equivalents are absent,
 but they are still rendered in the selected panel. New GUI files should use
 the `infoSingle*TextArea` names above.
 
-`captainNameColor` and `shipRegistryColor` are optional. A missing field uses
-`infoTextColor`, then `shipNameColor`, then the selected ship-name component's
-native colour.
+`captainNameColor` and `shipRegistryColor` are independent and optional. A
+missing field uses `infoTextColor`, then the native captain component's
+colour. `shipNameColor` is not used as their fallback.
+
+When this module is active, `shipNameColor` also controls the native selected
+ship-name row. The override is limited to the two selected-name GUIText
+variants; the ship-class row continues to use Fleet Operations'
+`classTextColor`/`infoTextColor` path. The original low mouse-over strip keeps
+its native `shipNameColor` behaviour.
+
+The five native subsystem icons, their adjacent numeric value text, and the
+native mouse-over hull/shield/crew icon-values can also receive independent
+colours for their live condition:
+
+```text
+systemIconHealthyColor = 0.20 1.00 0.20
+systemIconLowColor = 1.00 0.90 0.00
+systemIconCriticalColor = 1.00 0.15 0.00
+systemIconDisabledColor = 0.25 0.55 1.00
+systemIconDestroyedColor = 1.00 0.00 1.00
+specialEnergyIconColor = 1.00 1.00 0.00
+officerIconColor = 1.00 0.50 0.00
+```
+
+The implementation leaves Fleet Operations' existing `SystemIcon::Render`
+detour in place and redirects only the six native icon sprite-colour calls,
+the specialised `SystemValue` icon-colour call, and the shared value-text draw
+call after verifying that its live component is `SystemValue` or
+`HullText`, `ShieldText`, `CrewNumText`, `EnergyText`, or
+`OfficerTextAndSprite`. When Fleet Operations has already replaced that draw
+call, the bridge preserves and tail-chains its live handler.
+
+Healthy is above 50% hitpoints, low is above 25% through 50%, and critical is
+25% or below while the native system remains operational. A timed or
+control-forced outage is disabled; zero hitpoints, or a damaged system which
+has not returned to operational state, is destroyed. Every command is
+optional and independent: when the current state's command is absent, Armada's
+native colour is left unchanged. The configured hue retains the stock icon's
+fill intensity, repair animation, black background, and disabled flash.
+Hull, shields, and crew use their native live percentages with the same
+healthy/low/critical thresholds, so the mouse-over strip and selected-panel
+crew presentation use one consistent palette; zero uses the destroyed colour.
+`specialEnergyIconColor` gives the native selected-panel special-energy icon
+and adjacent value text one independent fixed RGB colour; it never inherits
+the live-health palette.
+`officerIconColor` is deliberately separate from that state palette and gives
+the native selected-panel officer icon and adjacent value text one fixed RGB
+colour. When omitted, both retain their native colour.
 
 The same panel can add a ranked-craft XP bar and a native hover region over
 Fleet Operations' existing shield-strength bar:
@@ -85,6 +130,16 @@ Hovering it shows the same live values. The tooltip keys
 are `GUI_SD_EXPERIENCE_TOOLTIP` and `GUI_SD_EXPERIENCE_VTOOLTIP`; missing keys
 fall back to `Experience` and an English explanation. Unranked and maximum-rank
 Craft do not show the XP bar.
+
+Photon/Quantum ammunition and directional shields are also submitted from
+Armada's separate tall producer-panel renderer used by stations with build
+queues. The module uses the live native `infoBuildName` or `infoBuildClass`
+component as its text/display anchor, rebases that rectangle onto
+`infoSingleCaptainTextArea`, and then reuses the same `infoSinglePhoton*`,
+`infoSingleQuantum*`, and `infoSingleDirectionalShields*` coordinates. Mods do
+not need duplicate build-panel versions of those A2FO fields. Keep the stock
+`infoBuildName` and `infoBuildClass` rectangles defined in interfaces which
+show producer queues.
 
 The selected-panel observer also presents A2FOEnergySystems ammunition. Its
 automatic Photon and Quantum rows use offsets `+16` and `+40` from the live

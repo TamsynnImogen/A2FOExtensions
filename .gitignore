@@ -1,5 +1,6 @@
 /build/
 /dist/
+/.deployment-backups/
 /tools/A2FOArcLab/target/
 rgb-module-fixture-*/
 __pycache__/

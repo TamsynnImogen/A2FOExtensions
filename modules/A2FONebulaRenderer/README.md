@@ -17,17 +17,19 @@ Copy both release outputs into the game's `Data` directory:
 ```text
 modules/A2FONebulaRenderer.dll
 Shaders/dx8/
-├── pixel/
-│   ├── ps.nvv
-│   └── ps_1.3.nvv
-└── vertex/
-    ├── vs.nvv
-    └── vs_1.3.nvv
+└── pixel/
+    ├── ps.nvv
+    └── ps_specular.nvv
 licenses/armada-nebula-patch.txt
 ```
 
-`vs.nvv` and `ps.nvv` are the active shader pair. The `_1.3` files are the
-upstream compatibility/reference pair and are packaged for shader authors.
+Fleet Operations' native `Shaders/dot3_directional.nvv` and native multipass
+DOT3 renderer remain active and are never replaced. The packaged `ps.nvv` and
+`ps_specular.nvv` files are retained as forward-development assets, but are not
+selected by the bump-safe runtime. Bumped emissive materials use a scoped
+fixed-function stage at the final draw. Bumped specular maps use a separate,
+quarter-strength additive replay immediately afterward, isolated from Fleet
+Operations' earlier normal-map light draws.
 Removing `A2FONebulaRenderer.dll` before launch disables the feature; the core's
 early hook sites remain native pass-throughs and the shader files may remain in
 place harmlessly.
@@ -41,37 +43,51 @@ startup proxies cannot coexist.
 
 Armada creates its shared DOT3 shader before ordinary deferred modules load.
 The core therefore installs checked pass-through sites during process attach.
-At the first DOT3 mesh—outside loader lock and immediately before Armada reads
-the shader path—it checks that `A2FONebulaRenderer.dll` is installed and only
-then performs file/D3DX activation. The deferred module acts as the opt-in
-controller and reports the already-armed subsystem's status.
+At the first DOT3 mesh—outside loader lock—it checks that
+`A2FONebulaRenderer.dll` is installed and only then enables D3DX texture
+loading. The deferred module acts as the opt-in controller and reports the
+already-armed subsystem's status.
 
 The runtime:
 
 - validates the exact supported Armada/Fleet Ops PE identities and every
   renderer signature before enabling;
-- uses the core's checked fixed-byte writer for the vertex-shader path;
-- assembles the pixel shader through Fleet Operations' existing
-  `D3DX81ab.dll`, so no MinHook or MinGW runtime DLL is added;
-- routes Fleet Operations' own DOT3 `GetShaderHandle` function-pointer slot at
-  first compilation, after Fleet Operations has completed early startup;
-- resolves the renderer's current live DX8 wrapper after Armada creates the
-  custom vertex shader, then creates its paired pixel shader on that device;
-- supplies world, world-view, inverse-world, and camera-direction vertex
-  constants before the custom pixel shader is selected;
+- leaves Fleet Operations' stock DOT3 vertex-shader path and shader source
+  untouched;
+- leaves Fleet Operations' DOT3 `GetShaderHandle` function-pointer slot
+  untouched, avoiding redundant shader state calls between its native handle
+  lookup and `SetVertexShader` on Windows dxwrapper/d3d8to9 systems;
+- resolves the renderer's current live DX8 wrapper only at the scoped final
+  material draw, without selecting a pixel shader during Fleet Operations'
+  native normal-map light draws;
+- preserves Fleet Operations' complete multipass DOT3 bump sequence and adds
+  a mapped emissive texture only at the exact final indexed draw;
+- replays only specular-mapped final geometry once with a bounded additive
+  intensity overlay, then restores the complete preceding D3D8 state;
 - combines the active craft's configured subsystem emissive maps into one
-  cached texture and binds it to the shader's second sampler;
+  cached texture and binds it to the shader's second sampler; generated
+  composites use a bounded least-recently-used cache rather than growing for
+  every subsystem and movement state seen during a long battle;
 - preserves each loose emissive source's authored RGB values for the sharp
   self-lit material centre, builds a complete mip chain, and uses trilinear
-  filtering so thin lights remain stable during camera movement;
+  filtering so thin lights remain stable during camera movement; mostly-black
+  source maps are retained losslessly as sparse non-black texels to reduce RAM;
 - applies the same composite to classic/non-DOT3 SODs as a scoped additive
   fixed-function texture stage on MeshVB and both observed workspace classes,
   restoring the complete preceding state after each draw;
-- leaves the experimental private-mask framebuffer compositor disabled because
-  its render-target and shader-state replay is unstable through
-  dxwrapper/d3d8to9/ReShade, especially across edit-mode transitions;
+- retains native DOT3 bump rendering and adds the emissive composite through a
+  scoped stage-2 fixed-function combiner around the existing indexed draw; the
+  geometry is submitted only once;
+- enables the selective private-mask framebuffer compositor only with the
+  restart-applied managed DXVK backend, avoiding the unstable
+  dxwrapper/d3d8to9/ReShade system-renderer path;
 - disables the pixel shader at Fleet Operations' fixed-pipeline transition,
   then resumes the displaced code and all remaining alpha draws.
+
+These renderer and SOD-mutation paths are enabled only when the managed DXVK
+payload is the active `Data\\d3d9.dll`. On the Windows system renderer the
+module remains loaded for configuration/reporting, but class registration is a
+no-op and Fleet Operations owns the complete native DX8/DOT3 path.
 
 That final gateway is an intentional safety change from upstream. The original
 patch returned from the renderer in the middle of the function, which fixed
@@ -81,6 +97,91 @@ letters black. This port preserves Fleet Operations' remainder instead.
 All installed early hooks are pass-through until the complete feature has
 enabled. An absent controller/shader, missing D3DX export, changed signature,
 or DX9 mode therefore leaves native rendering active and logs the reason.
+
+## Global texture suffixes
+
+Mods can opt into filename-based emissive, bump-map, and specular-map discovery
+once in their active or inherited `ART_CFG.h`:
+
+```cpp
+#define A2FO_EMISSIVE_SUFFIX "_emissive_"
+#define A2FO_BUMP_SUFFIX "_bump"
+#define A2FO_SPECULAR_SUFFIX "_specular"
+#define A2FO_EMISSIVE_BUMP_MULTIPLIER 2.0
+#define A2FO_BUMP_LIGHT_BIAS 0.55
+#define A2FO_EMISSIVE_DIFFUSE_RESTORE 1.0
+```
+
+The renderer inspects the actual diffuse texture on every loaded SOD material.
+For a diffuse called `fbattle`, the example emissive suffix searches for:
+
+- `fbattle_emissive_warp`
+- `fbattle_emissive_impulse`
+- `fbattle_emissive_shields`
+- `fbattle_emissive_life`
+- `fbattle_emissive_sensor`
+- `fbattle_emissive_weapons`
+
+The bump suffix searches for `fbattle_bump`, and the specular suffix searches
+for `fbattle_specular`. Filename matching is case-insensitive and extensions
+are optional. Emissive and specular maps retain the loose-file formats and root
+precedence described below. Bump maps use Storm3D's native DDS/TGA lookup,
+including ordinary Fleet Operations archive resolution.
+
+Specular maps use the diffuse texture's UV layout. Black contributes no gloss;
+brighter RGB contributes a stronger broad highlight. The bump-safe runtime
+draws that mask at quarter strength in a separate additive replay after Fleet
+Operations has completed the native bump and diffuse passes. This is a broad
+material-gloss approximation rather than view-dependent Phong/PBR specularity.
+A material without a bump map keeps its ordinary renderer.
+
+The DOT3 emissive/specular draw interception is enabled only with the managed
+DXVK backend. On the System Direct3D 9 / WineD3D backend, Fleet Operations'
+native bump draw is left completely unintercepted because Windows dxwrapper
+and some vendor drivers crash when that boundary is wrapped. Native bump maps
+remain available there; extension emissive/specular overlays on bumped
+materials require DXVK.
+
+`A2FO_EMISSIVE_BUMP_MULTIPLIER` is retained for the redesigned bumped-material
+extension pass. It is temporarily inactive while bumped emissives use the
+fixed-function compatibility route. The accepted range remains `0.0` through
+`8.0`; omission defaults to `1.0`.
+
+`A2FO_BUMP_LIGHT_BIAS` is also retained for the redesigned extension pass and
+is temporarily inactive. Native Fleet Operations lighting now determines the
+brightness of bumped hulls. Its accepted range remains `0.0` through `1.0`.
+
+`A2FO_EMISSIVE_DIFFUSE_RESTORE` is likewise retained but temporarily inactive
+for bumped materials. It defaults to `0.0` and accepts `0.0` through `2.0`.
+
+Only materials for which the derived file exists are changed. A bump texture
+already stored in the SOD wins over the global convention. A derived bump map
+is added as native texture slot 1 and that mesh is rebuilt through Armada's
+DOT3 MeshVB path at class-load time; the SOD and source texture files are not
+rewritten.
+
+Explicit emissive ODF declarations also win. An unnumbered declaration keeps
+the existing class-wide wildcard behaviour. In indexed mode, each explicit
+`emissiveX<Subsystem>` overrides the derived filename for that channel while
+undeclared channels may still use the global suffix. Set any suffix macro to
+an empty quoted string, or omit it, to disable that convention. Suffixes accept
+up to 64 ASCII letters, digits, underscores, and hyphens.
+
+Fleet Operations' Graphics Options screen retains its native **Bump Mapping**
+checkbox and adds independent **Emissive Maps** and **Specular Maps** boxes
+beside it. The new switches apply immediately, default on, and persist as
+`EmissiveMaps` and `SpecularMaps` under `[Effects]` in
+`Data/A2FORenderer.ini`. With DXVK selected, emissive maps also receive native
+framebuffer bloom by default. Set restart-applied `EmissiveBloom=0` in the same
+section to retain only their sharp self-lit centres.
+
+For renderer diagnosis, restart with
+`[Diagnostics] MappedTextureCloak=1` in `Data/A2FORenderer.ini`. The log then
+records the native texture stages, colour operations, shaders, blend state,
+and fixed/workspace versus DOT3 route once for each visible, cloaking, fully
+cloaked, and decloaking state reached by a mapped-lighting craft. Leave it at
+`0` or remove it during normal play; no per-draw state inspection occurs when
+the option is disabled.
 
 ## Subsystem emissive maps
 
@@ -172,25 +273,38 @@ Channels saturate at 255, so very bright source artwork may show less motion
 variation once its material centre is already white.
 
 Composite textures are created lazily for only the active subsystem and motion
-profiles actually encountered by each material and are cached afterward; no
-texture is rebuilt every frame.
+profiles actually encountered by each material. The eight most recently used
+composites per material are eligible to remain cached, with a 96 MiB global
+target for generated mip chains. One live composite per material is retained
+even when that floor exceeds the target, avoiding constant rebuilding when a
+scene contains many different ship classes. Eviction changes only derived
+cache residency; source artwork, generated pixels, mip levels, and filtering
+remain identical.
+
+Emissive sources which are less than half non-black are stored as an exact
+index/ARGB sparse list after loading. Denser sources retain the original packed
+ARGB array, so the representation is never larger than the previous one.
 
 The shader makes these pixels self-lit and independent of map lighting. The
-runtime preserves that sharp material centre. A former experimental path also
-replayed every emissive mesh into private render targets and composited a soft
-halo before `EndScene`; it is disabled because dxwrapper/d3d8to9/ReShade cannot
-reliably restore Armada's opaque shader and stream state across UI/edit-mode
-transitions. ReShade bloom may be used for the external halo while the native
-ODF emissive material remains the selective bright source.
+runtime preserves that sharp material centre. With the managed DXVK backend,
+each registered emissive draw is also replayed into a private full-resolution
+mask. A half-resolution separable blur is screen-composited before `EndScene`,
+producing a genuine coloured halo without blooming unrelated UI or bright map
+objects. The compositor remains off on the system renderer because the old
+dxwrapper/d3d8to9/ReShade chain cannot reliably restore Armada's opaque state
+across UI/edit-mode transitions.
 
-All observed render families are covered. Bump/DOT3 meshes consume the
-composite in the custom pixel shader; ordinary MeshVB and classic workspace
-meshes receive it after their native material setup through Direct3D 8 texture
-stage 1. The scoped pre/post material hooks cover both observed workspace
-classes without installing the inactive mask-capture hooks. Ships such as the
-classic `fbattle.sod` therefore retain the visible additive emissive layer.
-Stage 1 samples the emissive map through the proven UV route on classic
-mirrored meshes and is then restored to the preceding material state.
+All observed render families are covered. Bump/DOT3 meshes retain Fleet
+Operations' native multipass lighting and consume the emissive composite from
+stage 2 through a scoped fixed-function addition at the final draw. Ordinary
+MeshVB and classic workspace meshes receive it after their native material
+setup through Direct3D 8 texture stage 1 when that stage is free, or stage 2
+when a native bump/secondary texture already occupies stage 1. Every scoped
+route restores the preceding material state. Ships such as the classic
+`fbattle.sod`
+therefore retain both bump lighting and the additive emissive layer in the
+same draw. Registered specular masks are replayed only after that native DOT3
+draw and never replace its normal-map lighting shader.
 
 ## Subsystem and hull damage decals
 

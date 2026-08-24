@@ -134,6 +134,38 @@ collidable, AI-controlled, saveable map units. See
 * [PERFORMANCE] Establish repeatable baselines against the clean Sigma engine
   before changing hot paths. Optimise only hotspots confirmed by profiles.
 * [PERFORMANCE] Ensure profiling and verbose logging can be disabled in release builds.
+* [x] Bound derived emissive `D3DPOOL_MANAGED` composites to eight states per
+  material and a 96 MiB global target (retaining one live state per material),
+  store sparse mostly-black source maps losslessly, and remove the redundant
+  full-resolution mip-upload copy.
+* [x] Retain only destruction-handler ODF fields after class-load dispatch,
+  omit classes without destruction commands, clean TextureVariants' per-craft
+  render sidecars on native Craft cleanup, and remove one heap allocation per
+  ambient-swarm member.
+* [x] Add a non-invasive 64-bit Linux telemetry helper for Wine process CPU,
+  PSS/private memory, threads, handles, NVIDIA load, and GPU-wide VRAM.
+* [x] Discard inactive TextureVariants damage policies and avoid collecting
+  class mesh/faction-node caches when their corresponding ODF policy is absent.
+* [x] Retain only root DDS and flattened TGA routes in A2FORGBTextures, time
+  the persistent-shield global safety scan instead of walking every object on
+  every frame, and bound per-class cache diagnostics.
+* [x] Read only the 18-byte header for already-compatible true-colour TGAs,
+  keep a key-only compatibility cache, and reserve full-file decoding for
+  formats which actually require conversion.
+* [x] Add revision-15 masked Craft-event registration; register
+  TextureVariants for cleanup only, skip EnergySystems simulation globally
+  when no store policy exists, and bypass inactive DirectionalShields/Turrets
+  work before reading Craft fields.
+* [x] Add revision-16 masked weapon-trigger registration and migrate FireArcs,
+  NormalWeaponTech, and Turrets to precheck-only callbacks, removing three
+  no-op cross-DLL calls after every accepted weapon shot.
+* [x] Avoid negative animated-hardpoint node caches and their linear searches
+  for ordinary models without matrix-animation channels.
+* [ ] Run repeated shell -> match -> shell -> same-match telemetry sessions and
+  investigate only memory, thread, or descriptor growth that remains after the
+  same scene has settled a second time. An initial 8-second startup capture
+  showed stable thread (32), descriptor (163), and GPU-wide VRAM
+  (466--467 MiB) counts after loading, but was too short to assess retention.
 
 ## ODF Semantics and Compatibility
 
@@ -426,9 +458,23 @@ Follow-up work:
   `emissiveImpulse`, `emissiveShields`, `emissiveLifeSupport`,
   `emissiveSensors`, and `emissiveWeapons`), combine active maps without extra
   model passes, and feed the result to the DX8 shader's second sampler.
+* [x] Add opt-in `ART_CFG.h` emissive and bump suffix conventions which inspect
+  each SOD material's live diffuse texture, retain explicit ODF/SOD overrides,
+  and rebuild only newly bump-enabled meshes through native DOT3 MeshVB.
+* [x] Reintroduce bumped-material specular rendering only after it is scoped
+  away from Fleet Operations' native DOT3 light-accumulation draws.
 * [x] Cover classic/non-DOT3 SODs through scoped fixed-function additive
   stages after native material setup in both MeshVB and legacy non-VB face
   paths; restore all stage state immediately after every draw.
+* [ ] Restore selective native emissive framebuffer bloom without re-enabling
+  the unstable implementation unchanged. Reproduce and isolate the lost-state
+  failure across `dxwrapper -> d3d8to9 -> ReShade`, then replace the private
+  render-target/draw-replay path with a checked approach which preserves all
+  shaders, streams, render targets, viewports, texture stages, and scene state.
+  It must survive ordinary play, UI and edit-mode transitions, repeated map
+  loads, Alt-Tab/device loss and reset, and operation with and without ReShade.
+  Keep the current direct self-lit emissive material path as the safe fallback
+  and make bloom opt-in until those tests pass.
 * [ ] Manually validate emissive texture loading, UV alignment, subsystem
   disable/repair transitions, device reset, and Fleet Ops 4 bloom response.
 * [ ] Extend subsystem emissive resolution to textures stored only in FPQ
@@ -527,9 +573,60 @@ Work after community approval:
 * [ ] Document the compatibility decision and community response before
   enabling the feature in a release build.
 
+### Collapsible Fleet Sidebar
+
+[IDEA, HIGH VIABILITY]
+
+Add an optional in-game sidebar which lists the player's available numbered
+fleets. In the first version, a fleet means one of Armada's native control
+groups rather than an AI `AIFleet` or a transient `UserFormationFleet`. This
+keeps Ctrl-number binding, member removal, selection, camera focus, formation
+data, and save/load under the existing `cGroupMgr`/`cGroup` implementation.
+
+The sidebar should use Armada's native `DisplayInterface`, `StandardButton`,
+sprite, text, and view-registration paths. Do not implement it as an external
+window or a renderer-specific D3D overlay. Layout and artwork should be
+moddable through the active `gui_interface.cfg`, with safe defaults when the
+new entries are absent.
+
+Initial scope:
+
+* [ ] Confirm the live `cGroupMgr` location inside `cOverViewImp` and document
+  the checked layouts needed to enumerate groups and member handles without
+  mutating them.
+* [ ] Add a dedicated optional `A2FOFleetSidebar.dll` module and a bounded
+  native interface view which can be expanded or collapsed with one button.
+* [ ] Show only populated groups, initially labelled `Fleet 0` through
+  `Fleet 9`, with member count and an optional aggregate health indicator.
+* [ ] Select a fleet through the native `cOverViewImp::mSelectGroup` path and
+  centre the camera through `mFocusCameraOnShipGroup`, preserving the existing
+  keyboard behaviour.
+* [ ] Refresh rows safely when ships die, transfer owner, leave a group, are
+  replaced, or a saved game restores the overview and group manager.
+* [ ] Define GUI CFG rectangles, sprites, colours, row height, expanded width,
+  collapsed position, and screen-edge anchoring without hardcoding one race
+  interface or resolution.
+* [ ] Suppress or hide the panel during cinematics, full-interface hide,
+  replays, editor mode, shell screens, and other states where the native game
+  interface is unavailable.
+* [ ] Ensure the expanded panel owns mouse input only inside its visible
+  rectangle and does not interfere with world selection, edge scrolling,
+  tooltips, the minimap, or the command palette.
+* [ ] Decide whether collapsed/expanded state is session-local or persisted in
+  the user's settings. It is presentation state and must never enter the
+  synchronized simulation stream.
+* [ ] Validate all supported aspect ratios, every stock Fleet Operations race
+  GUI, empty/full groups, rapid rebinding, save/load, observer/replay state,
+  and a two-peer match to confirm the module remains local UI only.
+
+Possible later additions include moddable fleet names, representative
+wireframes, alert/order status, and squad-aware counts. None should require
+the Squadron System module, and the sidebar must remain useful with ordinary
+native control groups alone.
+
 ### Single-Player Mission Selector Redesign
 
-[IMPLEMENTED, AWAITING MANUAL VALIDATION] Replace the fixed native Single Player mission selector with a
+[IMPLEMENTED AND MANUALLY VALIDATED] Replace the fixed native Single Player mission selector with a
 dedicated A2FO module while retaining Armada's existing mission-launch and
 campaign-progression paths.
 
@@ -546,6 +643,8 @@ Planned scope:
   mission setup paths.
 * [x] Scale or adapt the layout safely across Fleet Operations' supported
   resolutions and aspect ratios.
+* [x] Host the browser through Armada's native display window and borderless
+  Single Player dialog resource instead of a detached application window.
 * [x] Keep campaign and mission display metadata/assets moddable without
   turning the selector into an in-game campaign editor.
 
@@ -770,6 +869,120 @@ safety constraint.
   without either subclass tail being touched by the wrong path.
 * [ ] Recheck editor mode and cancellation/refund behavior under Gamescope's
   SDL backend.
+
+### Squadron System
+
+[IDEA, VIABLE, LARGE GAMEPLAY SYSTEM]
+
+Add Dawn of War-style squadrons: one logical selectable and commandable unit
+made from several real native Craft objects. Every member must retain its own
+hull, shields, crew, subsystems, weapons, targets, collision, movement, and
+destruction. Do not build the gameplay system from render-only swarm instances
+or one aggregate Craft with simulated member health.
+
+Squad membership belongs in extension-owned deterministic sidecar state. Do
+not consume Armada's ten player control groups as the membership store: a
+squad must be allowed to appear in any native control group, and several
+squads and ordinary ships may share one fleet. Once a squad selection has been
+expanded to its surviving Craft members, ordinary multi-selection, formation,
+command, weapon, and damage paths should remain native wherever possible.
+
+Provisional authoring shape, to be finalized only after the construction and
+save/load prototypes prove the required identities:
+
+```ini
+squadMember0 = "fed_squad_member"
+squadMember1 = "fed_squad_member"
+squadMember2 = "fed_squad_member"
+
+squadReinforceAtYard = 1
+```
+
+The buildable squad definition should own the aggregate button, tooltip,
+build time, and initial cost policy. The member ODFs remain authoritative for
+their individual combat and presentation behaviour. The first supported
+version should use a fixed homogeneous composition even if the indexed format
+is kept capable of later mixed squads.
+
+Core prototype:
+
+* [ ] Add a dedicated optional `A2FOSquadrons.dll` module and define strict
+  bounds for members per squad and live squads per team.
+* [ ] Prototype one fixed three-member squad built from an ordinary Shipyard
+  item, with all three outputs created as normal mission-published Craft.
+* [ ] Before admitting the build job, atomically validate the aggregate
+  resource cost, technology requirements, all member ODFs, and enough unit-cap
+  capacity for the complete initial squad. A partial initial spawn must either
+  roll back safely or never begin.
+* [ ] Give every squad a deterministic identity and every member a stable slot
+  identity which survives leader death, handle changes during loading, and
+  reinforcement. Reuse the proven native object-label reconnection pattern
+  where possible without exposing internal labels to the player.
+* [ ] Selecting any live member should select the whole surviving squad once,
+  while Shift-selection, box selection, deselection, control-group binding,
+  camera focus, and selection limits retain understandable native behaviour.
+* [ ] Route movement, attack, guard, repair, halt, stance, autonomy, special-
+  weapon, and formation orders through the synchronized native group command
+  paths after selection expansion. Do not mirror unsynchronized UI state into
+  simulation decisions.
+* [ ] Define loose native formation behaviour for the first version, then add
+  a bounded cohesion/leash policy only if members routinely split or cease to
+  behave as one tactical unit.
+* [ ] Remove destroyed members from the live membership set while preserving
+  their vacant configured slots. Replace a dead logical leader deterministically
+  without changing squad identity or orders.
+* [ ] Decide how native veterancy, capture, assimilation, recrewing, transport,
+  refit, separation weapons, and scripted object replacement apply to a
+  member. Features without a safe squad-wide policy should be rejected or
+  disabled for squad members in the first release.
+
+Yard-only reinforcement:
+
+* [ ] Detect a compatible same-team Shipyard's native repair/waiting/active
+  state and define exactly when the squad counts as being `during repair`.
+* [ ] Require all surviving members to reach the same yard or a bounded yard
+  staging area before reinforcement becomes available; prevent one distant
+  member from granting reinforcement to the rest of the squad.
+* [ ] Expose a manual Reinforce action first. Automatic reinforcement may be
+  considered later, but must never spend resources unexpectedly by default.
+* [ ] Admit each missing configured slot as a real synchronized yard job, with
+  per-member cost, build time, cap, cancellation/refund, queue-wireframe, and
+  launch handling. Reinforce one member at a time rather than creating a whole
+  batch in one simulation tick.
+* [ ] Attach the completed member to its original stable slot and current
+  squad, then bring it into formation through native movement rather than
+  teleporting it beside the squad.
+* [ ] Define what happens if repair is halted, the squad leaves, resources or
+  cap become unavailable, ownership changes, or the yard is destroyed while a
+  reinforcement is waiting or active.
+* [ ] Keep reinforcement compatible with the existing ten-slot Producer queue,
+  queue enhancements, HybridBuild jobs, and RefitYards without allowing two
+  modules to own the same native queue hook independently.
+
+Persistence, presentation, and validation:
+
+* [ ] Reconstruct membership, configured composition, stable slots, missing
+  members, leader choice, active orders, and queued reinforcement after
+  save/load without changing the native stream layout unsafely.
+* [ ] Use native multi-selection presentation for the first playable version.
+  Later add a dedicated squad panel showing each member and its individual
+  health only after core selection and combat behaviour is stable.
+* [ ] Make the Collapsible Fleet Sidebar squad-aware as an optional integration:
+  one logical squad may be summarized as one fleet entry component while the
+  native control group still contains the real member handles.
+* [ ] Profile pathfinding, simulation, selection rendering, and weapon cost at
+  representative and deliberately excessive squad counts. Every member is a
+  full engine Craft and therefore has a real CPU cost.
+* [ ] Add AI production, squad-order, retreat/repair, and reinforcement policy
+  only after human-controlled single-player behaviour passes the full matrix.
+* [ ] Validate individual damage/death, leader loss, partial squads, mixed
+  selections, control groups, repair/reinforcement, save/load, capture and
+  destruction edge cases, then complete deterministic two-peer multiplayer
+  tests before declaring the feature multiplayer-safe.
+
+Explicitly out of scope for the first version: freely splitting or merging
+squads, changing a squad's authored composition in the field, strict Dawn of
+War-style cover/morale systems, and a new squad-wide veterancy model.
 
 ### Configurable Ship-System Upgrade Pods
 

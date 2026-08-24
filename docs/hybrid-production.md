@@ -33,6 +33,45 @@ Armada's synchronized build order identifies the target class but does not
 preserve which ODF command produced the button, so such an entry would be
 ambiguous in multiplayer.
 
+## Live build submenus
+
+`buildItem<X>Refit<Y>` adds a submenu to an ordinary live Producer build list;
+it does not affect the map editor and is unrelated to `A2FOEditMenu`.
+
+```ini
+buildItem0 = "fscout"
+buildItem1 = "fexcelsiormenu"
+buildItem1Refit0 = "fexcelsior"
+buildItem1Refit1 = "fexcelsiorii"
+buildItem2 = "fcruise1"
+```
+
+The `X` index identifies the existing parent `buildItemX`; `Y` orders that
+parent's child variants. Both are zero-based in the range `0..56`, and sparse
+indices are accepted. A parent with no Refit rows behaves exactly as before.
+
+The parent ODF is presentation-only. It supplies the button identity, name,
+tooltip, and verbose tooltip and is never constructed, so it needs no build
+cost, construction time, or technology prerequisites. Child classes keep all
+of those properties from their own ODFs. A parent remains enabled as a
+navigation control even when every child is locked. Within its page, the
+Producer's native technology, busy, resource, and queue rules apply to each
+real child independently.
+
+Internally the real Producer list expands the parent into its children. AI and
+synchronized orders consequently see only real constructible targets. During
+one UI refresh the module swaps in either the original visible root or the
+selected child page, then restores the effective child-only list. The native
+Build Back button closes the child page first; pressing Back again leaves the
+Build palette normally. An expanded list may contain at most 57 real targets,
+and using the same presentation parent class for two different pages is
+rejected as ambiguous.
+
+This initial parser reads custom Refit rows from loose ODF files indexed across
+the normal Data, parent-mod, and active-mod roots. It deliberately leaves
+packed-only and inherited custom rows native until the shared ParameterDB
+snapshot API supports bounded indexed command families.
+
 ## Shared queue rules
 
 The feature uses one ten-slot FIFO, matching the supported Producer and command

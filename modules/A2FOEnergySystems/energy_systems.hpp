@@ -22,6 +22,8 @@ struct Stores {
 };
 
 StorePolicy normalize_policy(StorePolicy policy) noexcept;
+bool store_enabled(const StorePolicy& policy) noexcept;
+bool requires_resupply(const StorePolicy& policy) noexcept;
 float clamp_amount(float amount, const StorePolicy& policy) noexcept;
 bool can_consume(float amount, float cost) noexcept;
 float consume(float amount, float cost) noexcept;

@@ -31,6 +31,9 @@ int main() {
     assert(combine_emissive_pixel(
                pixels, (1u << warp) | (1u << impulse), intensity) ==
            0xffc0ff20u);
+    assert(merge_emissive_pixel(
+               merge_emissive_pixel(0xff000000u, pixels[warp], 100u),
+               pixels[impulse], 150u) == 0xffc0ff20u);
 
     assert(classify_craft_motion_light(0u, 0.0f, 120.0f) ==
            CraftMotionLightState::gravity_well);

@@ -5,6 +5,11 @@ A2FOExtensions. It lists every extension-owned ODF, INI, CFG, asset, and
 authoring convention. The linked module guides remain authoritative for
 runtime details, validation rules, and current limitations.
 
+For copyable, file-by-file setup of the ten-resource panel, resource/build-time
+font glyphs, selected shield and XP UI, Photon/Quantum ammunition, and
+directional-shield sprites, see the
+[ODF and GUI/misc integration guide](odf-gui-integration-guide.md).
+
 Unless a section says otherwise, ODF commands use Armada's normal
 case-insensitive `ParameterDB` lookup and may be inherited through `#include`.
 Use the spelling shown here in new files. Boolean commands accept the usual
@@ -26,14 +31,14 @@ loaded.
 | [`A2FOCraftIdentity`](../modules/A2FOCraftIdentity/README.md) | captain/registry lists, ammunition/directional-shield UI, XP bar, and selected shield/XP tooltips |
 | [`A2FODirectionalShields`](../modules/A2FODirectionalShields/README.md) | optional forward, aft, port, and starboard Craft shield facings |
 | [`A2FOEditMenu`](../modules/A2FOEditMenu/README.md) | recursive `buildItemX` edit-menu submenus |
-| [`A2FOFeaturePack`](../modules/A2FOFeaturePack/README.md) | recursive ODF/FPQ discovery, queue controls, extended upgrade pods, and viewport-correct Bink movies |
+| [`A2FOFeaturePack`](../modules/A2FOFeaturePack/README.md) | recursive ODF/FPQ discovery, BuildYard pseudo-technology gates, queue controls, extended upgrade pods, and viewport-correct Bink movies |
 | [`A2FOFireArcs`](../modules/A2FOFireArcs/README.md) | three-dimensional weapon fire volumes and tactical hover preview |
 | [`A2FOEnergySystems`](../modules/A2FOEnergySystems/README.md) | Photon and Quantum Torpedo ammunition, recharge, and resupply |
 | [`A2FOHybridBuild`](../modules/A2FOHybridBuild/README.md) | `hybridbuild`, four production lists, shared queue, placements, and cocoons |
 | [`A2FOInfoIni`](../modules/A2FOInfoIni/README.md) | `SettingsDirectory` and `DefaultGameSpeed` |
 | [`A2FOInstantActionSettings`](../modules/A2FOInstantActionSettings/README.md) | restored Instant Action `Load Settings` behavior; no new command |
 | [`A2FOMissionSelector`](../modules/A2FOMissionSelector/README.md) | scrollable stock/custom campaign browser and `mission_selector.ini` |
-| [`A2FONebulaRenderer`](../modules/A2FONebulaRenderer/README.md) | DX8 per-pixel lighting, emissive maps, damage decals, and ship-name logo decals |
+| [`A2FONebulaRenderer`](../modules/A2FONebulaRenderer/README.md) | DX8 per-pixel lighting, emissive/specular maps, damage decals, and ship-name logo decals |
 | [`A2FONormalWeaponTech`](../modules/A2FONormalWeaponTech/README.md) | normal-weapon `.tt` prerequisite enforcement; no new ODF command |
 | [`A2FOPointDefenseCycles`](../modules/A2FOPointDefenseCycles/README.md) | CannonImp-style numbered point-defense firing delays |
 | [`A2FOResources`](../modules/A2FOResources/README.md) | four independent resources, object costs, Race starting values, panel row, and native accessors |
@@ -41,6 +46,7 @@ loaded.
 | [`A2FOSwarmSystem`](../modules/A2FOSwarmSystem/README.md) | lightweight render-only ambient swarms |
 | [`A2FOTextureVariants`](../modules/A2FOTextureVariants/README.md) | faction textures/nodes, Borg DDS repair, and subsystem damage meshes |
 | [`A2FOTurrets`](../modules/A2FOTurrets/README.md) | indexed independently armed hull turrets |
+| [`A2FORefitYards`](../modules/A2FORefitYards/README.md) | synchronized ship refits through native Shipyard queues |
 | [`A2FOWeaponDamageControls`](../modules/A2FOWeaponDamageControls/README.md) | independent shield/hull permission and damage multipliers |
 | [`A2FOWreckage`](../modules/A2FOWreckage/README.md) | deterministic native `wreckage` replacement policy |
 
@@ -236,6 +242,12 @@ that graphic area. Their defaults are `26 0 76 20`, `26 108 76 20`,
 its centre and the second vertically; this eased presentation never delays
 the underlying shield value.
 
+The same ammunition and directional-shield fields are drawn for selected
+stations using Armada's tall build-queue panel. A2FO rebases the native
+`infoBuildName`/`infoBuildClass` text context onto the configured
+`infoSingleCaptainTextArea`, so the existing `infoSingle*` extension
+rectangles remain authoritative and no build-panel duplicates are required.
+
 The active mod's `ART_CFG.h` can select the presentation mode and assign each
 logical facing to one of the four physical compass slots:
 
@@ -351,6 +363,15 @@ The active GUI configuration accepts:
 | `infoSingleRegistryTextArea` | Selected-panel `x y width height` rectangle |
 | `captainNameColor` | Optional captain RGB float triplet |
 | `shipRegistryColor` | Optional registry RGB float triplet |
+| `shipNameColor` | Native low-strip colour and, with `A2FOCraftIdentity`, selected ship-name colour |
+| `infoTextColor` | Shared selected-panel fallback; remains the ship-class colour when no more specific class colour is supplied |
+| `systemIconHealthyColor` | Optional native subsystem and mouse-over hull/shield/crew icon-value colour above 50% |
+| `systemIconLowColor` | Optional native subsystem and mouse-over hull/shield/crew icon-value colour above 25% through 50% |
+| `systemIconCriticalColor` | Optional native subsystem and mouse-over hull/shield/crew icon-value colour at or below 25% while operational |
+| `systemIconDisabledColor` | Optional native subsystem icon/value-text colour for timed/control-disabled systems |
+| `systemIconDestroyedColor` | Optional native subsystem icon/value-text colour for destroyed or not-yet-operational repaired systems, and for zero hull/shields/crew |
+| `specialEnergyIconColor` | Optional fixed colour for the native selected-panel special-energy icon and adjacent value text; independent of all live-state colours |
+| `officerIconColor` | Optional fixed colour for the native selected-panel officer icon and adjacent value text; independent of all live-state colours |
 | `infoSingleShieldBarArea` | Existing selected shield-bar rectangle; A2FO adds its hover region |
 | `infoSingleExperienceBarArea` | Optional ranked-craft XP-bar `x y width height` rectangle |
 | `experienceBarColor` | Optional ranked-craft XP-bar RGB float triplet |
@@ -358,8 +379,11 @@ The active GUI configuration accepts:
 | `captainName` | Legacy captain-rectangle fallback |
 | `shipRegistry` | Legacy registry-rectangle fallback |
 
-Missing colours fall back through `infoTextColor`, `shipNameColor`, and the
-native selected-name colour.
+Missing captain and registry colours fall back through `infoTextColor` and the
+native captain-component colour. `shipNameColor` affects only the native
+ship-name rows; it is not a fallback for A2FO's additional text elements.
+Each system-icon colour is independent; a missing state keeps Armada's native
+colour for that state.
 
 ## Race ODF commands and conventions
 
@@ -466,6 +490,27 @@ The child ODF uses `classLabel = "turret"` and may set:
 | `cocoon` | Evolver/HybridBuild cocoon SOD, with optional `.sod`. |
 | `upgradeLevel` | Existing pod level; the extension safely supports configured levels through 16. |
 
+### Refit yards
+
+Source Craft may expose up to sixteen destinations with `refitItem0` through
+`refitItem15`. A compatible station must use `classLabel = "shipyard"` and
+declare `refitHardpoint`; in the current implementation it must name the same
+SOD node as the inherited `buildHardpoint`.
+
+The source's root palette receives one Refit navigation button. HybridBuild
+selects an unused popup control only after native and special-weapon actions
+have been bound, so the opener does not replace teleport or another existing
+command. It opens a
+destination page containing the configured classes and a native Back control.
+Selecting a destination sends the ship to the nearest same-team refit yard,
+using normal pathfinding to reach an outside approach on the negative forward
+axis of `refitHardpoint`, then admits the destination to that yard's native
+Producer FIFO. Destination costs and `buildTime`, cancellation/refunds, queue
+presentation, and progress are therefore native. An active cancellation
+uses the yard's native completed-build output queue and launch path before the
+source can request another refit. Saving during a refit is not supported in
+this first implementation.
+
 ### A1 object and officer compatibility
 
 `classLabel = "wingman"` aliases to `craft` only when `A1Compat` is activated
@@ -482,12 +527,43 @@ ODF and its includes omit them:
 - Freighter: `shipclass`, `maxDilithium`, `alert`, `miner`,
   `SHOW_MOVEMENT_AUTONOMY`, `resourcesCanHandle`, and `hotkeyLabel`.
 
+A1 Race ODFs may omit `normalCrew`, `normalDilithium`, `normalMetal`,
+`normalTritanium`, `normalSupply`, and their `lots*` counterparts. A1Compat
+uses the active `SHOWMETHEMONEY_*` amounts as missing-only normal defaults and
+1.5 times each normal amount for lots. Explicit and inherited fields win. No
+defaults are invented for resources without a matching showmethemoney grant.
+
 A1 starbase ODFs use `maximumUpgrades` and `officerGain`. Each corresponding
 OfficerUpgrade ODF must declare its stock `race` because A2/FO removed the A1
 race-side `officerUpgradeODF` route. Numbered model nodes are named exactly
 `oq1`, `oq2`, and so on.
 
 ## Producer and upgrade-station ODF commands
+
+### BuildYard module technology
+
+Place `moduleXPseudoTechnology` in the BuildYard configuration ODF named by a
+BuildYard class's native `moduleConf` command. `X` is the same zero-based
+module index used by `moduleXRequiredTechnology`:
+
+```cpp
+module0RequiredTechnology = "fed_module_basic_tech.odf"
+module0PseudoTechnology = "fed_module_chassis_gate.odf"
+```
+
+The value is a normal project ID. Add the named fake item to the selected
+technology-tree file with the prerequisites that should control the module,
+for example:
+
+```text
+fed_module_chassis_gate.odf 2 fed_research_1.odf fed_research_2.odf
+```
+
+The fake item is checked but never constructed. A pseudo-only module uses it
+as its technology gate. When both commands are present, both project IDs must
+be available. Omitting `moduleXPseudoTechnology` preserves native BuildYard
+behavior. All multiplayer peers must use the same configuration ODF and
+technology tree.
 
 ### Hybrid production
 
@@ -504,6 +580,19 @@ are supported after at least one explicit method begins at item zero:
 
 The lists share one ten-slot FIFO. The same target may not appear in two
 explicit method lists on the same producer.
+
+### Live Producer build submenus
+
+| Command | Meaning |
+| --- | --- |
+| `buildItemXRefitY` | Make native `buildItemX` a presentation-only parent and add the referenced real build class at child index `Y`. |
+
+`X` and `Y` are zero-based `0..56`. The parent ODF supplies its button/name,
+tooltip, and verbose tooltip but is never constructed; cost, time, technology,
+and all build behaviour come from each child ODF. The native Back button first
+returns to the Producer's main build list. ODFs without Refit children retain
+their exact native behaviour. The initial implementation reads these custom
+rows from loose ODFs.
 
 ### Extended upgrade-station lists
 
@@ -583,6 +672,50 @@ Each visible level keeps the native 12-entry limit; nesting is capped at 32
 levels and cycles are rejected.
 
 ## Nebula renderer ODF commands
+
+### Global emissive, bump, and specular suffixes
+
+The active/inherited `ART_CFG.h` can discover maps from every SOD material's
+actual diffuse texture without per-ship ODF rows:
+
+```cpp
+#define A2FO_EMISSIVE_SUFFIX "_emissive_"
+#define A2FO_BUMP_SUFFIX "_bump"
+#define A2FO_SPECULAR_SUFFIX "_specular"
+#define A2FO_EMISSIVE_BUMP_MULTIPLIER 2.0
+#define A2FO_BUMP_LIGHT_BIAS 0.55
+#define A2FO_EMISSIVE_DIFFUSE_RESTORE 1.0
+```
+
+For diffuse `example`, the emissive rule looks for
+`example_emissive_warp`, `example_emissive_impulse`,
+`example_emissive_shields`, `example_emissive_life`,
+`example_emissive_sensor`, and `example_emissive_weapons`. The bump rule looks
+for `example_bump`; the specular rule looks for `example_specular`. Missing
+derived files leave that material unchanged. Existing SOD bump slots and
+explicit emissive ODF commands take precedence. Empty quoted suffixes disable
+their rule. Specular maps are loose, diffuse-UV intensity maps used only on
+DOT3/bumped materials: black has no effect and brighter pixels add a stronger
+light-dependent gloss.
+
+The managed DXVK backend supports the extension emissive/specular overlay on
+DOT3 materials. With System Direct3D 9 / WineD3D, Fleet Operations' bump draw
+is left native and unintercepted for driver stability, so native bumps remain
+enabled but extension overlays on those bumped materials are unavailable.
+
+`A2FO_EMISSIVE_BUMP_MULTIPLIER` scales the emissive RGB only when the combined
+bump/emissive pixel shader is active. It defaults to `1.0` and accepts `0.0`
+through `8.0`; values above `1.0` make the glow stronger. Non-bump and
+fixed-function emissive paths are unchanged.
+
+`A2FO_BUMP_LIGHT_BIAS` adds ambient light to the DOT3 calculation before it
+modulates the diffuse map. It defaults to `0.2` and accepts `0.0` through
+`1.0`; higher values brighten bumped hulls independently of emissive strength.
+
+`A2FO_EMISSIVE_DIFFUSE_RESTORE` restores unlit diffuse colour beneath
+emissive pixels before adding their emission. It defaults to `0.0`, accepts
+`0.0` through `2.0`, and can recover the luminous core of already-saturated
+red or blue maps without brightening non-emitting hull areas.
 
 ### Subsystem emissive maps
 

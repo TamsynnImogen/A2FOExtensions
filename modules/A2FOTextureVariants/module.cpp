@@ -52,6 +52,8 @@ void __attribute__((fastcall)) craft_instance_update_hook(
     void* craft_instance, void*, void* object) noexcept;
 void A2FO_CALL race_loaded_handler(
     const A2FO_RaceLoadedEvent* event, void* user_data);
+void A2FO_CALL craft_cleanup_event_handler(
+    const A2FO_CraftEvent* event, void* user_data);
 
 namespace {
 
@@ -63,6 +65,7 @@ using a2fo::texture_variants::subsystem_condition;
 using a2fo::texture_variants::subsystem_mesh_choice;
 using a2fo::texture_variants::subsystem_rebuild_scale;
 using a2fo::texture_variants::subsystem_repair_sample;
+using a2fo::texture_variants::subsystem_damage_policy_active;
 using a2fo::texture_variants::SubsystemCondition;
 using a2fo::texture_variants::texture_asset_path;
 
@@ -295,7 +298,11 @@ void* g_craft_instance_render = nullptr;
 std::unordered_map<void*, std::string> g_race_suffixes;
 std::unordered_map<void*, std::string> g_race_node_names;
 std::unordered_set<std::string> g_known_race_node_names;
-std::unordered_map<void*, void*> g_craft_races;
+struct CraftRaceState {
+    void* object = nullptr;
+    void* race = nullptr;
+};
+std::unordered_map<void*, CraftRaceState> g_craft_races;
 std::unordered_map<void*, std::vector<MeshRecord>> g_class_meshes;
 std::unordered_map<void*, std::vector<FactionNodeRecord>>
     g_class_faction_nodes;
@@ -750,7 +757,8 @@ void apply_faction_node_visibility(void* craft_instance,
         std::string owner_name;
         const auto craft_race = g_craft_races.find(craft_instance);
         if (craft_race != g_craft_races.end()) {
-            const auto race_name = g_race_node_names.find(craft_race->second);
+            const auto race_name = g_race_node_names.find(
+                craft_race->second.race);
             if (race_name != g_race_node_names.end()) {
                 owner_name = race_name->second;
             }
@@ -823,7 +831,8 @@ void apply_faction_textures(void* craft_instance,
         std::string suffix;
         const auto craft_race = g_craft_races.find(craft_instance);
         if (craft_race != g_craft_races.end()) {
-            const auto race_suffix = g_race_suffixes.find(craft_race->second);
+            const auto race_suffix = g_race_suffixes.find(
+                craft_race->second.race);
             if (race_suffix != g_race_suffixes.end()) {
                 suffix = race_suffix->second;
             }
@@ -1097,16 +1106,28 @@ void register_class_damage_visuals(void* object_class,
             }
         }
 
-        bool has_targets = policy.damage_threshold > 0.0f &&
-            !policy.scorch_effects.empty();
+        std::size_t target_hardpoint_count = 0;
         for (const auto& targets : policy.target_hardpoints) {
-            has_targets = has_targets || !targets.empty();
+            target_hardpoint_count += targets.size();
         }
-        if (total_entries == 0 && !has_targets) {
+        const bool has_scorch_policy =
+            std::isfinite(policy.damage_threshold) &&
+            policy.damage_threshold > 0.0f &&
+            !policy.scorch_effects.empty() &&
+            target_hardpoint_count != 0;
+        if (!subsystem_damage_policy_active(
+                total_entries, policy.damage_threshold,
+                policy.scorch_effects.size(), target_hardpoint_count)) {
             g_class_damage_visuals.erase(object_class);
             return;
         }
-        if (has_targets) {
+        if (!has_scorch_policy) {
+            policy.damage_threshold = 0.0f;
+            std::vector<std::string>().swap(policy.scorch_effects);
+            for (auto& targets : policy.target_hardpoints) {
+                std::vector<std::string>().swap(targets);
+            }
+        } else {
             char message[192]{};
             std::snprintf(message, sizeof(message),
                           "Registered damage threshold %.3f with %u scorch effect(s)",
@@ -1781,15 +1802,45 @@ void A2FO_CALL race_loaded_handler(
     }
 }
 
+void A2FO_CALL craft_cleanup_event_handler(
+    const A2FO_CraftEvent* event, void*) {
+    if (!event || event->struct_size < sizeof(*event) || !event->craft ||
+        event->kind != A2FO_CRAFT_EVENT_CLEANUP) {
+        return;
+    }
+    for (auto entry = g_craft_races.begin(); entry != g_craft_races.end();) {
+        if (entry->second.object == event->craft) {
+            entry = g_craft_races.erase(entry);
+        } else {
+            ++entry;
+        }
+    }
+    for (auto entry = g_craft_damage_visuals.begin();
+         entry != g_craft_damage_visuals.end();) {
+        if (entry->second.object == event->craft) {
+            entry = g_craft_damage_visuals.erase(entry);
+        } else {
+            ++entry;
+        }
+    }
+}
+
 extern "C" void __cdecl a2fo_texture_variants_apply_render_textures(
     void* craft_instance, void* object_class,
     std::uint32_t use_borg_textures) noexcept {
-    if ((g_faction_variants_enabled || g_subsystem_visuals_enabled) &&
-        object_class) {
+    if (object_class) {
         try {
-            collect_class_meshes(object_class);
-            collect_class_faction_nodes(object_class);
-            resolve_class_damage_nodes(object_class);
+            if (g_faction_variants_enabled && !g_race_suffixes.empty()) {
+                collect_class_meshes(object_class);
+            }
+            if (g_faction_variants_enabled &&
+                !g_known_race_node_names.empty()) {
+                collect_class_faction_nodes(object_class);
+            }
+            if (g_subsystem_visuals_enabled &&
+                !g_class_damage_visuals.empty()) {
+                resolve_class_damage_nodes(object_class);
+            }
         } catch (...) {
             log_line("Could not enumerate a CraftClass model hierarchy");
         }
@@ -1820,15 +1871,18 @@ void __attribute__((fastcall)) craft_instance_update_hook(
     }
     if (!g_runtime_alive || !craft_instance) return;
     try {
-        if (g_capture_enabled) {
+        if (g_capture_enabled &&
+            (!g_race_suffixes.empty() || !g_race_node_names.empty())) {
             void* race = read_at<void*>(object, kObjectRaceOffset, nullptr);
             if (race) {
-                g_craft_races[craft_instance] = race;
+                g_craft_races[craft_instance] = CraftRaceState{object, race};
             } else {
                 g_craft_races.erase(craft_instance);
             }
         }
-        update_subsystem_damage_visuals(craft_instance, object);
+        if (!g_class_damage_visuals.empty()) {
+            update_subsystem_damage_visuals(craft_instance, object);
+        }
     } catch (...) {
         // The native update already completed; missing sidecar rows simply
         // leave this render on its ordinary intact/base appearance.
@@ -1866,7 +1920,25 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     g_get_mesh_texture = at(g_armada, kMeshGetTextureRva);
     g_set_mesh_texture = at(g_armada, kMeshSetTextureRva);
     g_runtime_alive = true;
-    log_line("Scorch hardpoint probe build 20260813-3 loaded");
+
+    bool cleanup_registered = false;
+    if ((api->capabilities & A2FO_CAP_CRAFT_EVENTS) != 0 &&
+        A2FO_MODULE_API_HAS(
+            api, register_craft_event_handler_masked) &&
+        api->register_craft_event_handler_masked) {
+        cleanup_registered = api->register_craft_event_handler_masked(
+            kModuleName, A2FO_CRAFT_EVENT_MASK_CLEANUP,
+            &craft_cleanup_event_handler, nullptr);
+    } else if (A2FO_MODULE_API_HAS(api, register_craft_event_handler) &&
+               (api->capabilities & A2FO_CAP_CRAFT_EVENTS) != 0 &&
+               api->register_craft_event_handler) {
+        cleanup_registered = api->register_craft_event_handler(
+            kModuleName, &craft_cleanup_event_handler, nullptr);
+    }
+    if (!cleanup_registered) {
+        log_line("Craft cleanup dispatch unavailable; render sidecars use "
+                 "pointer-reuse replacement only");
+    }
 
     if (install_borg_dds_fix(api)) {
         log_line("Native Borg alternate preflight now accepts DDS as well as TGA");
@@ -1911,4 +1983,13 @@ void A2FO_CALL A2FO_ModuleShutdown() {
     g_borg_dds_enabled = false;
     g_capture_enabled = false;
     g_runtime_alive = false;
+    g_craft_races.clear();
+    g_craft_damage_visuals.clear();
+    g_race_suffixes.clear();
+    g_race_node_names.clear();
+    g_known_race_node_names.clear();
+    g_class_meshes.clear();
+    g_class_faction_nodes.clear();
+    g_variant_textures.clear();
+    g_class_damage_visuals.clear();
 }

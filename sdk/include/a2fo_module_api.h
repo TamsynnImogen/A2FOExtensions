@@ -23,7 +23,7 @@
 #endif
 
 #define A2FO_MODULE_API_VERSION 4u
-#define A2FO_MODULE_API_REVISION 14u
+#define A2FO_MODULE_API_REVISION 17u
 
 // The major version remains 4 so DLLs compiled against the original v4 ABI
 // continue to load. Revisions append fields to A2FO_ModuleApi; never insert or
@@ -43,6 +43,7 @@ enum A2FO_ModuleCapability : std::uint64_t {
     A2FO_CAP_WEAPON_CLASS_LOADED = 1ull << 10,
     A2FO_CAP_WEAPON_TRIGGER_EVENTS = 1ull << 11,
     A2FO_CAP_CRAFT_EVENTS = 1ull << 12,
+    A2FO_CAP_RACE_ODF_DEFAULTS = 1ull << 13,
 };
 
 enum A2FO_ProducerEventKind : std::uint32_t {
@@ -114,6 +115,15 @@ struct A2FO_OdfFieldView {
 // ParameterDB's ordinary lookup (including ODF includes) reports the command
 // missing, so an object or inherited parent value always wins.
 struct A2FO_ClasslabelOdfDefault {
+    const char* command;
+    const char* value;
+};
+
+// Startup-only declarative fallback for a Race ODF field. The core copies
+// both strings during registration and exposes the fallback to Race-loaded
+// callbacks only when the resolved ParameterDB reports the command missing.
+// Explicit and inherited Race ODF values therefore always win.
+struct A2FO_RaceOdfDefault {
     const char* command;
     const char* value;
 };
@@ -237,6 +247,16 @@ enum A2FO_WeaponTriggerEventKind : std::uint32_t {
     A2FO_WEAPON_TRIGGER_COMMITTED = 1,
 };
 
+enum A2FO_WeaponTriggerEventMask : std::uint32_t {
+    A2FO_WEAPON_TRIGGER_EVENT_MASK_PRECHECK =
+        1u << A2FO_WEAPON_TRIGGER_PRECHECK,
+    A2FO_WEAPON_TRIGGER_EVENT_MASK_COMMITTED =
+        1u << A2FO_WEAPON_TRIGGER_COMMITTED,
+    A2FO_WEAPON_TRIGGER_EVENT_MASK_ALL =
+        A2FO_WEAPON_TRIGGER_EVENT_MASK_PRECHECK |
+        A2FO_WEAPON_TRIGGER_EVENT_MASK_COMMITTED,
+};
+
 struct A2FO_WeaponTriggerEvent {
     std::uint32_t struct_size;
     std::uint32_t kind;
@@ -253,6 +273,22 @@ enum A2FO_CraftEventKind : std::uint32_t {
     A2FO_CRAFT_EVENT_SIMULATE_POST = 1,
     A2FO_CRAFT_EVENT_CLEANUP = 2,
     A2FO_CRAFT_EVENT_POST_LOAD = 3,
+};
+
+enum A2FO_CraftEventMask : std::uint32_t {
+    A2FO_CRAFT_EVENT_MASK_SIMULATE_PRE =
+        1u << A2FO_CRAFT_EVENT_SIMULATE_PRE,
+    A2FO_CRAFT_EVENT_MASK_SIMULATE_POST =
+        1u << A2FO_CRAFT_EVENT_SIMULATE_POST,
+    A2FO_CRAFT_EVENT_MASK_CLEANUP =
+        1u << A2FO_CRAFT_EVENT_CLEANUP,
+    A2FO_CRAFT_EVENT_MASK_POST_LOAD =
+        1u << A2FO_CRAFT_EVENT_POST_LOAD,
+    A2FO_CRAFT_EVENT_MASK_ALL =
+        A2FO_CRAFT_EVENT_MASK_SIMULATE_PRE |
+        A2FO_CRAFT_EVENT_MASK_SIMULATE_POST |
+        A2FO_CRAFT_EVENT_MASK_CLEANUP |
+        A2FO_CRAFT_EVENT_MASK_POST_LOAD,
 };
 
 struct A2FO_CraftEvent {
@@ -452,6 +488,31 @@ struct A2FO_ModuleApi {
         const char* module_name,
         A2FO_CraftEventHandler handler,
         void* user_data);
+
+    // Revision 15 addition. Equivalent to the revision-14 registration, but
+    // the core skips the callback for event kinds absent from event_mask.
+    bool (A2FO_CALL* register_craft_event_handler_masked)(
+        const char* module_name,
+        std::uint32_t event_mask,
+        A2FO_CraftEventHandler handler,
+        void* user_data);
+
+    // Revision 16 addition. Equivalent to the revision-14 registration, but
+    // the core skips the callback for trigger event kinds absent from
+    // event_mask.
+    bool (A2FO_CALL* register_weapon_trigger_handler_masked)(
+        const char* module_name,
+        std::uint32_t event_mask,
+        A2FO_WeaponTriggerHandler handler,
+        void* user_data);
+
+    // Revision 17 addition. Supplies missing-only fields to the shared Race
+    // ODF snapshot before any Race-loaded callback is dispatched. A command
+    // may have only one policy owner.
+    bool (A2FO_CALL* register_race_odf_defaults)(
+        const char* module_name,
+        const A2FO_RaceOdfDefault* defaults,
+        std::uint32_t default_count);
 
 };
 

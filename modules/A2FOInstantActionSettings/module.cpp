@@ -21,10 +21,6 @@ a2fo_instant_action_settings_call_thiscall_0(void* function, void* self);
 extern "C" std::uintptr_t __cdecl
 a2fo_instant_action_settings_call_thiscall_2(
     void* function, void* self, void* first, std::uintptr_t second);
-extern "C" std::uintptr_t __cdecl
-a2fo_instant_action_settings_call_delphi_2(
-    void* function, void* first, std::uintptr_t second);
-extern "C" void a2fo_instant_action_settings_read_advanced_bridge();
 extern "C" void a2fo_instant_action_settings_file_reader_bridge();
 
 namespace {
@@ -43,7 +39,6 @@ constexpr std::uintptr_t kMultiplayerSetupDlgProcRva = 0x001c2270;
 constexpr std::uintptr_t kLoadSettingsRva = 0x001c9430;
 constexpr std::uintptr_t kFileReaderConstructorRva = 0x0012d3c0;
 constexpr std::uintptr_t kReadBlobRva = 0x0012d7a0;
-constexpr std::uintptr_t kReadIntRva = 0x0012ef70;
 constexpr std::uintptr_t kRaceByIdRva = 0x0008b180;
 constexpr std::uintptr_t kStartingUnitsRaceLookupReturnRva = 0x00088b77;
 constexpr std::uintptr_t kShellMultipleConstructorScanRvaA = 0x001a6b47;
@@ -61,40 +56,27 @@ constexpr std::uintptr_t kGameSetupIsHostRva = 0x00146de0;
 constexpr std::uintptr_t kSaveButtonSlotRva = 0x003a32dc;
 constexpr std::uintptr_t kLoadButtonSlotRva = 0x003a32d8;
 
-// FleetOpsHook.map offsets omit the PE .text section's 0x1000 RVA.
-constexpr std::uintptr_t kReadAdvancedSettingsRva = 0x001c7220;
-
 constexpr std::size_t kButtonLeftOffset = 0x14;
 constexpr std::size_t kButtonTopOffset = 0x18;
 constexpr std::size_t kButtonRightOffset = 0x1c;
 constexpr std::size_t kButtonBottomOffset = 0x20;
-constexpr std::size_t kSetupDetailsPointerOffset = 0x10;
 constexpr std::size_t kSetupDetailsSize = 0x338;
-constexpr std::size_t kFerengiAllowedOffset = 0xb6;
-constexpr std::size_t kTechLevelOffset = 0xc4;
-constexpr std::size_t kAdvancedFerengiCheckboxOffset = 0x428;
-constexpr std::size_t kCheckBoxCheckedOffset = 0x1c8;
 
 constexpr std::array<std::uint8_t, 5> kExpectedFunctionPrologue{{
     0x55, 0x8b, 0xec, 0x6a, 0xff}};
 constexpr std::array<std::uint8_t, 5> kExpectedReadBlob{{
     0x55, 0x8b, 0xec, 0x53, 0x56}};
-constexpr std::array<std::uint8_t, 6> kExpectedReadInt{{
-    0x55, 0x8b, 0xec, 0x8b, 0x45, 0x0c}};
 constexpr std::array<std::uint8_t, 5> kExpectedRaceById{{
     0x55, 0x8b, 0xec, 0x53, 0x56}};
 constexpr std::array<std::uint8_t, 4> kExpectedGetGameSetup{{
     0x8b, 0x41, 0x30, 0xc3}};
 constexpr std::array<std::uint8_t, 11> kExpectedGameSetupIsHost{{
     0x8b, 0x51, 0x18, 0x33, 0xc0, 0x85, 0xd2, 0x0f, 0x95, 0xc0, 0xc3}};
-constexpr std::array<std::uint8_t, 8> kExpectedReadAdvancedSettings{{
-    0x55, 0x8b, 0xec, 0xb9, 0x08, 0x00, 0x00, 0x00}};
 
 using DialogProc = INT_PTR (CALLBACK*)(HWND, UINT, WPARAM, LPARAM);
 using LoadSettings = void (__cdecl*)(void* game_setup);
 using ReadBlob = bool (__cdecl*)(void* reader, void* destination,
                                 std::uint32_t size);
-using ReadInt = bool (__cdecl*)(void* reader, std::int32_t* destination);
 using RaceById = void* (__cdecl*)(std::int32_t race_id);
 
 const A2FO_ModuleApi* g_api = nullptr;
@@ -104,21 +86,12 @@ A2FO_InlineHook g_dialog_hook{};
 A2FO_InlineHook g_load_settings_hook{};
 A2FO_InlineHook g_file_reader_hook{};
 A2FO_InlineHook g_read_blob_hook{};
-A2FO_InlineHook g_read_int_hook{};
 A2FO_InlineHook g_race_by_id_hook{};
-A2FO_InlineHook g_read_advanced_settings_hook{};
 PVOID g_shell_multiple_exception_handler = nullptr;
 volatile LONG g_load_invocations = 0;
-volatile LONG g_header_read_invocations = 0;
 volatile LONG g_missing_starting_race_reports = 0;
 volatile LONG g_shell_multiple_recovery_reports = 0;
 bool g_runtime_ready = false;
-bool g_geometry_logged = false;
-bool g_fallback_logged = false;
-bool g_command_logged = false;
-bool g_native_load_logged = false;
-bool g_blob_candidate_logged = false;
-bool g_corrected_blob_logged = false;
 void* g_active_load_game_setup = nullptr;
 char g_resolved_profile_path[kMaximumProfilePath]{};
 
@@ -129,16 +102,6 @@ char g_resolved_profile_path[kMaximumProfilePath]{};
 // missing race's starting objects instead of dereferencing address 0x32c.
 alignas(void*) std::array<std::uint8_t, 0x500>
     g_empty_starting_race_table{};
-
-struct SetupState {
-    void* details = nullptr;
-    std::uint8_t ferengi_allowed = 0;
-    std::int32_t tech_level = 0;
-    bool valid = false;
-};
-
-void* g_last_loaded_game_setup = nullptr;
-SetupState g_last_loaded_state{};
 
 void log_line(const char* message) noexcept {
     if (g_api && g_api->log && message) g_api->log(kModuleName, message);
@@ -359,42 +322,6 @@ bool read_member(const void* object, std::size_t offset,
         static_cast<const std::uint8_t*>(object) + offset, value);
 }
 
-SetupState read_setup_state(void* game_setup) noexcept {
-    SetupState state{};
-    if (!read_member(game_setup, kSetupDetailsPointerOffset,
-                     &state.details) || !state.details ||
-        !read_member(state.details, kFerengiAllowedOffset,
-                     &state.ferengi_allowed) ||
-        !read_member(state.details, kTechLevelOffset,
-                     &state.tech_level)) {
-        return state;
-    }
-    state.valid = true;
-    return state;
-}
-
-const char* enabled_word(std::uint8_t value) noexcept {
-    return value ? "enabled" : "disabled";
-}
-
-void log_setup_transition(const char* stage, const SetupState& before,
-                          const SetupState& after) noexcept {
-    char message[320]{};
-    if (before.valid && after.valid) {
-        std::snprintf(
-            message, sizeof(message),
-            "%s: Ferengi %s -> %s; tech level %ld -> %ld",
-            stage, enabled_word(before.ferengi_allowed),
-            enabled_word(after.ferengi_allowed),
-            static_cast<long>(before.tech_level),
-            static_cast<long>(after.tech_level));
-    } else {
-        std::snprintf(message, sizeof(message),
-                      "%s: live GameSetup state was unavailable", stage);
-    }
-    log_line(message);
-}
-
 bool read_button_bounds(std::uintptr_t slot_rva, Bounds* bounds) noexcept {
     if (!bounds) return false;
     void* button = nullptr;
@@ -421,82 +348,13 @@ bool signature_matches(
         std::memcmp(target, expected.data(), expected.size()) == 0;
 }
 
-void log_geometry_once(const Bounds& raw_load, const Bounds& raw_save,
-                       const EffectiveBounds& effective) noexcept {
-    if (g_geometry_logged) return;
-    g_geometry_logged = true;
-    char message[320]{};
-    std::snprintf(
-        message, sizeof(message),
-        "Load click geometry: load=(%ld,%ld)-(%ld,%ld), "
-        "save=(%ld,%ld)-(%ld,%ld), effective=(%ld,%ld)-(%ld,%ld)%s",
-        static_cast<long>(raw_load.left), static_cast<long>(raw_load.top),
-        static_cast<long>(raw_load.right), static_cast<long>(raw_load.bottom),
-        static_cast<long>(raw_save.left), static_cast<long>(raw_save.top),
-        static_cast<long>(raw_save.right), static_cast<long>(raw_save.bottom),
-        static_cast<long>(effective.bounds.left),
-        static_cast<long>(effective.bounds.top),
-        static_cast<long>(effective.bounds.right),
-        static_cast<long>(effective.bounds.bottom),
-        effective.repaired ? " (repaired)" : "");
-    log_line(message);
-}
-
 void __cdecl load_settings_hook(void* game_setup) noexcept {
-    const SetupState before = read_setup_state(game_setup);
-    const LONG header_reads_before = InterlockedCompareExchange(
-        &g_header_read_invocations, 0, 0);
     InterlockedIncrement(&g_load_invocations);
-    if (!g_native_load_logged) {
-        g_native_load_logged = true;
-        log_line("Armada's native LoadSettings routine was invoked");
-    }
     const auto original = reinterpret_cast<LoadSettings>(
         g_load_settings_hook.gateway);
     g_active_load_game_setup = game_setup;
     if (original) original(game_setup);
     g_active_load_game_setup = nullptr;
-    const LONG header_reads_after = InterlockedCompareExchange(
-        &g_header_read_invocations, 0, 0);
-    if (header_reads_after == header_reads_before) {
-        log_line("Native loader exited before reading the Settings.prf "
-                 "header (profile open rejected)");
-    }
-    const SetupState after = read_setup_state(game_setup);
-    g_last_loaded_game_setup = game_setup;
-    g_last_loaded_state = after;
-    log_setup_transition("Native Settings.prf reader", before, after);
-}
-
-bool __cdecl read_int_hook(void* reader,
-                           std::int32_t* destination) noexcept {
-    const auto original = reinterpret_cast<ReadInt>(g_read_int_hook.gateway);
-    const bool tracked = g_active_load_game_setup != nullptr;
-    const bool result = original ? original(reader, destination) : false;
-    if (tracked) {
-        InterlockedIncrement(&g_header_read_invocations);
-        char* current = nullptr;
-        char prefix[17]{};
-        if (read_member(reader, 0x54, &current) && current &&
-            readable_range(current, sizeof(prefix) - 1)) {
-            std::memcpy(prefix, current, sizeof(prefix) - 1);
-            for (char& value : prefix) {
-                if (value == '\r' || value == '\n' || value == '\0') {
-                    value = '\0';
-                    break;
-                }
-            }
-        }
-        char message[260]{};
-        std::snprintf(message, sizeof(message),
-                      "Settings.prf header read: result=%s; value=%ld; "
-                      "next='%s'",
-                      result ? "success" : "failure",
-                      destination ? static_cast<long>(*destination) : -1L,
-                      prefix);
-        log_line(message);
-    }
-    return result;
 }
 
 extern "C" std::uintptr_t __cdecl
@@ -552,62 +410,19 @@ a2fo_instant_action_settings_file_reader_hook_cpp(
         std::memcpy(static_cast<std::uint8_t*>(path_string) + 0x04,
                     &original_path, sizeof(original_path));
     }
-    if (tracked) {
-        std::uint8_t open_error = 1;
-        read_member(reader, 0x04, &open_error);
-        char message[700]{};
-        std::snprintf(message, sizeof(message),
-                      "Native Settings.prf open: path='%s'; result=%s%s",
-                      opened_path ? opened_path : path_copy,
-                      open_error ? "rejected" : "accepted",
-                      redirected ? " (resolved SettingsDirectory)" : "");
-        log_line(message);
-    }
     return result;
 }
 
 bool __cdecl read_blob_hook(void* reader, void* destination,
                             std::uint32_t size) noexcept {
     const auto original = reinterpret_cast<ReadBlob>(g_read_blob_hook.gateway);
-    void* active_details = nullptr;
-    std::uint8_t binary_mode = 1;
     char* current = nullptr;
     char* end = nullptr;
-    const bool details_available = g_active_load_game_setup &&
-        read_member(g_active_load_game_setup, kSetupDetailsPointerOffset,
-                    &active_details);
-    const bool mode_available = read_member(reader, 0x06, &binary_mode);
     const bool cursor_available =
         read_member(reader, 0x54, &current) &&
         read_member(reader, 0x58, &end) && current && end && current < end;
-    const bool is_setup_details = size == kSetupDetailsSize &&
-        cursor_available;
-
-    if (size == kSetupDetailsSize && !g_blob_candidate_logged) {
-        g_blob_candidate_logged = true;
-        char message[320]{};
-        char prefix[17]{};
-        if (cursor_available && readable_range(current, sizeof(prefix) - 1)) {
-            std::memcpy(prefix, current, sizeof(prefix) - 1);
-            for (char& value : prefix) {
-                if (value == '\r' || value == '\n' || value == '\0') {
-                    value = '\0';
-                    break;
-                }
-            }
-        }
-        std::snprintf(
-            message, sizeof(message),
-            "824-byte blob candidate: tracked=%s; destination=%s; "
-            "mode=%s%u; cursor=%s; prefix='%s'",
-            g_active_load_game_setup ? "yes" : "no",
-            details_available && active_details == destination
-                ? "setupDetails" : "other",
-            mode_available ? "" : "unknown/",
-            static_cast<unsigned>(binary_mode),
-            cursor_available ? "available" : "unavailable", prefix);
-        log_line(message);
-    }
+    const bool is_setup_details = g_active_load_game_setup &&
+        size == kSetupDetailsSize && cursor_available;
 
     if (is_setup_details) {
         const std::size_t available = static_cast<std::size_t>(end - current);
@@ -627,11 +442,6 @@ bool __cdecl read_blob_hook(void* reader, void* destination,
                 char* next = current + result.next_line_offset;
                 std::memcpy(static_cast<std::uint8_t*>(reader) + 0x54,
                             &next, sizeof(next));
-                if (!g_corrected_blob_logged) {
-                    g_corrected_blob_logged = true;
-                    log_line("Corrected Fleet Operations' spaced "
-                             "setupDetails payload before Armada validation");
-                }
                 return true;
             }
         }
@@ -639,42 +449,6 @@ bool __cdecl read_blob_hook(void* reader, void* destination,
                  "falling back to Armada's reader");
     }
     return original ? original(reader, destination, size) : false;
-}
-
-void* current_game_setup() noexcept;
-
-extern "C" std::uintptr_t __cdecl
-a2fo_instant_action_settings_read_advanced_hook_cpp(
-    void* form, std::uintptr_t use_defaults) noexcept {
-    const SetupState before = use_defaults == 0
-        ? read_setup_state(current_game_setup()) : SetupState{};
-    const std::uintptr_t result =
-        a2fo_instant_action_settings_call_delphi_2(
-            g_read_advanced_settings_hook.gateway, form, use_defaults);
-
-    if (use_defaults == 0) {
-        void* checkbox = nullptr;
-        std::uint8_t checked = 0;
-        const bool checkbox_valid =
-            read_member(form, kAdvancedFerengiCheckboxOffset, &checkbox) &&
-            checkbox &&
-            read_member(checkbox, kCheckBoxCheckedOffset, &checked);
-        char message[280]{};
-        if (before.valid && checkbox_valid) {
-            std::snprintf(
-                message, sizeof(message),
-                "Advanced Settings refresh: GameSetup Ferengi=%s; "
-                "checkbox=%s; tech level=%ld",
-                enabled_word(before.ferengi_allowed),
-                enabled_word(checked),
-                static_cast<long>(before.tech_level));
-        } else {
-            std::snprintf(message, sizeof(message),
-                          "Advanced Settings refresh state was unavailable");
-        }
-        log_line(message);
-    }
-    return result;
 }
 
 void* current_game_setup() noexcept {
@@ -695,18 +469,8 @@ bool is_load_button_command(WPARAM wparam, LPARAM lparam) noexcept {
     char caption[128]{};
     const int length = GetWindowTextA(
         control, caption, static_cast<int>(sizeof(caption)));
-    const bool matched = length > 0 &&
+    return length > 0 &&
         a2fo::instant_action_settings::is_load_settings_caption(caption);
-    if (matched && !g_command_logged) {
-        g_command_logged = true;
-        char message[240]{};
-        std::snprintf(message, sizeof(message),
-                      "Received Load Settings button command (control ID %d, "
-                      "caption '%s')",
-                      GetDlgCtrlID(control), caption);
-        log_line(message);
-    }
-    return matched;
 }
 
 INT_PTR CALLBACK multiplayer_setup_dialog_hook(
@@ -725,7 +489,6 @@ INT_PTR CALLBACK multiplayer_setup_dialog_hook(
                 a2fo::instant_action_settings::effective_load_bounds(
                     raw_load, raw_save);
             if (effective.valid) {
-                log_geometry_once(raw_load, raw_save, effective);
                 const std::int32_t x = static_cast<std::int16_t>(
                     static_cast<std::uint16_t>(LOWORD(lparam)));
                 const std::int32_t y = static_cast<std::int16_t>(
@@ -741,12 +504,6 @@ INT_PTR CALLBACK multiplayer_setup_dialog_hook(
     const INT_PTR result = original(window, message, wparam, lparam);
     const LONG after = InterlockedCompareExchange(
         &g_load_invocations, 0, 0);
-    if (after != before && g_last_loaded_game_setup) {
-        const SetupState post_dialog =
-            read_setup_state(g_last_loaded_game_setup);
-        log_setup_transition("After setup dialog dispatch",
-                             g_last_loaded_state, post_dialog);
-    }
     if (!load_click || after != before) {
         return result;
     }
@@ -758,11 +515,6 @@ INT_PTR CALLBACK multiplayer_setup_dialog_hook(
         return result;
     }
 
-    if (!g_fallback_logged) {
-        g_fallback_logged = true;
-        log_line("Native Load button dispatch was missed; invoking Armada's "
-                 "LoadSettings routine through the repaired click route");
-    }
     load_settings_hook(game_setup);
     return result;
 }
@@ -784,7 +536,6 @@ bool preflight() noexcept {
         !signature_matches(kFileReaderConstructorRva,
                            kExpectedFunctionPrologue) ||
         !signature_matches(kReadBlobRva, kExpectedReadBlob) ||
-        !signature_matches(kReadIntRva, kExpectedReadInt) ||
         !signature_matches(kRaceByIdRva, kExpectedRaceById)) {
         log_line("Supported Instant Action dialog signatures were not found; "
                  "runtime disabled");
@@ -797,15 +548,6 @@ bool preflight() noexcept {
         !readable_range(at(g_armada, kSaveButtonSlotRva), sizeof(void*)) ||
         !readable_range(at(g_armada, kLoadButtonSlotRva), sizeof(void*))) {
         log_line("An Instant Action helper or button binding did not match; "
-                 "runtime disabled");
-        return false;
-    }
-    const void* read_advanced = at(g_fleetops, kReadAdvancedSettingsRva);
-    if (!readable_range(read_advanced,
-                        kExpectedReadAdvancedSettings.size()) ||
-        std::memcmp(read_advanced, kExpectedReadAdvancedSettings.data(),
-                    kExpectedReadAdvancedSettings.size()) != 0) {
-        log_line("Fleet Operations' Advanced Settings reader did not match; "
                  "runtime disabled");
         return false;
     }
@@ -856,16 +598,7 @@ bool install_hooks() noexcept {
                 &a2fo_instant_action_settings_file_reader_bridge),
             kExpectedFunctionPrologue.size(),
             kExpectedFunctionPrologue.data(), &g_file_reader_hook)) {
-        log_line("Could not install the Settings.prf pathname diagnostics "
-                 "hook");
-        return false;
-    }
-    if (!g_api->install_inline_hook(
-            at(g_armada, kReadIntRva),
-            reinterpret_cast<void*>(&read_int_hook),
-            kExpectedReadInt.size(), kExpectedReadInt.data(),
-            &g_read_int_hook)) {
-        log_line("Could not install the Settings.prf header diagnostics hook");
+        log_line("Could not install the Settings.prf path-resolution hook");
         return false;
     }
     if (!g_api->install_inline_hook(
@@ -875,17 +608,6 @@ bool install_hooks() noexcept {
             kExpectedFunctionPrologue.data(), &g_dialog_hook)) {
         log_line("Could not install the Instant Action dialog hook; the "
                  "LoadSettings hook remains a transparent pass-through");
-        return false;
-    }
-    if (!g_api->install_inline_hook(
-            at(g_fleetops, kReadAdvancedSettingsRva),
-            reinterpret_cast<void*>(
-                &a2fo_instant_action_settings_read_advanced_bridge),
-            kExpectedReadAdvancedSettings.size(),
-            kExpectedReadAdvancedSettings.data(),
-            &g_read_advanced_settings_hook)) {
-        log_line("Could not install the Advanced Settings refresh "
-                 "diagnostics hook");
         return false;
     }
     return true;

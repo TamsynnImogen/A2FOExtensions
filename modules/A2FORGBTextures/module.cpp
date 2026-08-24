@@ -88,6 +88,13 @@ enum class RootTgaRoute {
 
 struct RootTgaCandidate {
     std::string physical;
+    // Armada 1 stores manually authored mip levels as name_1.tga,
+    // name_2.tga, and so on. Fleet Operations' flattened root lookup can
+    // request those names while retaining the base texture dimensions. When
+    // an exact, same-format mip chain is present, serve the base image to that
+    // flattened request so the native row decoder receives the pixel count it
+    // expects. Direct RGB/Index8/Compressed requests remain unchanged.
+    std::string legacy_mip_base;
     RootTgaRoute route = RootTgaRoute::none;
 };
 
@@ -120,6 +127,7 @@ std::unordered_map<std::string, std::string> g_root_texture_files;
 std::unordered_map<std::string, std::vector<RootTgaCandidate>>
     g_flattened_tga_candidates;
 std::unordered_map<std::string, std::string> g_prepared_texture_files;
+std::unordered_set<std::string> g_compatible_texture_files;
 std::unordered_set<std::string> g_unusable_texture_files;
 std::vector<std::string> g_generated_texture_files;
 std::string g_root_directory;
@@ -134,6 +142,7 @@ volatile LONG g_root_redirect_log_count = 0;
 volatile LONG g_scan_grid_guard_log_count = 0;
 volatile LONG g_conversion_log_count = 0;
 volatile LONG g_conversion_file_counter = 0;
+volatile LONG g_manual_mip_redirect_log_count = 0;
 
 template <typename T = void>
 T* at(HMODULE module, std::uintptr_t rva) {
@@ -170,6 +179,15 @@ std::uint16_t little_u16(const std::uint8_t* bytes) {
            (static_cast<std::uint16_t>(bytes[1]) << 8);
 }
 
+bool native_true_colour_tga_header(const std::uint8_t* source,
+                                   std::size_t size) {
+    if (!source || size < 18) return false;
+    const std::uint16_t width = little_u16(source + 12);
+    const std::uint16_t height = little_u16(source + 14);
+    return width != 0 && height != 0 && source[1] == 0 && source[2] == 2 &&
+           (source[16] == 24 || source[16] == 32);
+}
+
 enum class TgaPreparation {
     compatible,
     converted,
@@ -182,6 +200,10 @@ TgaPreparation prepare_tga_for_rgb_loader(
     output.clear();
     if (source.size() < 18) return TgaPreparation::unsupported;
 
+    if (native_true_colour_tga_header(source.data(), source.size())) {
+        return TgaPreparation::compatible;
+    }
+
     const std::uint8_t id_length = source[0];
     const std::uint8_t color_map_type = source[1];
     const std::uint8_t image_type = source[2];
@@ -193,10 +215,6 @@ TgaPreparation prepare_tga_for_rgb_loader(
     const std::uint8_t pixel_depth = source[16];
 
     if (width == 0 || height == 0) return TgaPreparation::unsupported;
-    if (image_type == 2 && color_map_type == 0 &&
-        (pixel_depth == 24 || pixel_depth == 32)) {
-        return TgaPreparation::compatible;
-    }
 
     enum class PixelKind { color_mapped, true_color, grayscale };
     PixelKind kind{};
@@ -409,6 +427,125 @@ bool read_binary_file(const std::string& path,
     return ok;
 }
 
+bool read_binary_prefix(const std::string& path, std::uint8_t* bytes,
+                        std::size_t size) {
+    if (!bytes || size == 0 ||
+        size > static_cast<std::size_t>(
+                   std::numeric_limits<DWORD>::max())) {
+        return false;
+    }
+    HANDLE file = CreateFileA(
+        path.c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return false;
+    DWORD read = 0;
+    const bool ok = ReadFile(file, bytes, static_cast<DWORD>(size),
+                             &read, nullptr) && read == size;
+    CloseHandle(file);
+    return ok;
+}
+
+struct TgaHeaderSummary {
+    std::uint16_t width = 0;
+    std::uint16_t height = 0;
+    std::uint8_t color_map_type = 0;
+    std::uint8_t image_type = 0;
+    std::uint8_t color_map_depth = 0;
+    std::uint8_t pixel_depth = 0;
+};
+
+bool tga_filename(const std::string& filename);
+
+bool read_tga_header_summary(const std::string& path,
+                             TgaHeaderSummary& summary) {
+    std::array<std::uint8_t, 18> header{};
+    if (!read_binary_prefix(path, header.data(), header.size())) return false;
+    summary.width = little_u16(header.data() + 12);
+    summary.height = little_u16(header.data() + 14);
+    summary.color_map_type = header[1];
+    summary.image_type = header[2];
+    summary.color_map_depth = header[7];
+    summary.pixel_depth = header[16];
+    return summary.width != 0 && summary.height != 0 &&
+           summary.pixel_depth != 0;
+}
+
+bool same_tga_pixel_format(const TgaHeaderSummary& left,
+                           const TgaHeaderSummary& right) {
+    return left.color_map_type == right.color_map_type &&
+           left.image_type == right.image_type &&
+           left.color_map_depth == right.color_map_depth &&
+           left.pixel_depth == right.pixel_depth;
+}
+
+bool parse_manual_mip_key(const std::string& key, std::string& stem,
+                          std::uint32_t& level) {
+    stem.clear();
+    level = 0;
+    if (!tga_filename(key) || key.size() <= 6) return false;
+
+    const std::size_t extension = key.size() - 4;
+    const std::size_t separator = key.rfind('_', extension - 1);
+    const std::size_t slash = key.find_last_of("\\/");
+    if (separator == std::string::npos ||
+        (slash != std::string::npos && separator <= slash) ||
+        separator + 1 == extension) {
+        return false;
+    }
+
+    std::uint32_t parsed = 0;
+    for (std::size_t index = separator + 1; index < extension; ++index) {
+        const unsigned char byte =
+            static_cast<unsigned char>(key[index]);
+        if (byte < '0' || byte > '9') return false;
+        parsed = parsed * 10u + static_cast<std::uint32_t>(byte - '0');
+        if (parsed > 8u) return false;
+    }
+    if (parsed == 0) return false;
+    stem.assign(key, 0, separator);
+    level = parsed;
+    return true;
+}
+
+std::string validated_manual_mip_base(
+    const std::unordered_map<std::string, std::string>& files,
+    const std::string& key) {
+    std::string stem;
+    std::uint32_t level = 0;
+    if (!parse_manual_mip_key(key, stem, level)) return {};
+
+    const auto base = files.find(stem + ".tga");
+    if (base == files.end()) return {};
+
+    TgaHeaderSummary base_header{};
+    if (!read_tga_header_summary(base->second, base_header)) return {};
+
+    // Require the complete 1..N chain, exact power-of-two dimensions, and an
+    // identical TGA pixel format. This keeps ordinary animation frames such
+    // as explosion_1.tga on their original files.
+    for (std::uint32_t current = 1; current <= level; ++current) {
+        const std::string current_key =
+            stem + "_" + std::to_string(current) + ".tga";
+        const auto mip = files.find(current_key);
+        if (mip == files.end()) return {};
+
+        TgaHeaderSummary mip_header{};
+        if (!read_tga_header_summary(mip->second, mip_header) ||
+            !same_tga_pixel_format(base_header, mip_header)) {
+            return {};
+        }
+        const std::uint32_t divisor = 1u << current;
+        if (base_header.width % divisor != 0 ||
+            base_header.height % divisor != 0 ||
+            mip_header.width != base_header.width / divisor ||
+            mip_header.height != base_header.height / divisor) {
+            return {};
+        }
+    }
+    return base->second;
+}
+
 class ConversionLockGuard {
 public:
     ConversionLockGuard() {
@@ -480,9 +617,22 @@ bool prepare_legacy_tga(const std::string& source,
         prepared = cached->second;
         return true;
     }
+    if (g_compatible_texture_files.find(cache_key) !=
+        g_compatible_texture_files.end()) {
+        prepared = source;
+        return true;
+    }
     if (g_unusable_texture_files.find(cache_key) !=
         g_unusable_texture_files.end()) {
         return false;
+    }
+
+    std::array<std::uint8_t, 18> header{};
+    if (read_binary_prefix(source, header.data(), header.size()) &&
+        native_true_colour_tga_header(header.data(), header.size())) {
+        g_compatible_texture_files.insert(cache_key);
+        prepared = source;
+        return true;
     }
 
     std::vector<std::uint8_t> input;
@@ -492,7 +642,7 @@ bool prepare_legacy_tga(const std::string& source,
         ? prepare_tga_for_rgb_loader(input, output)
         : TgaPreparation::unsupported;
     if (result == TgaPreparation::compatible) {
-        g_prepared_texture_files[cache_key] = source;
+        g_compatible_texture_files.insert(cache_key);
         prepared = source;
         return true;
     }
@@ -530,6 +680,9 @@ bool is_legacy_texture_directory(const std::string& name) {
     return ascii_equal(name, "RGB") || ascii_equal(name, "Index8") ||
            ascii_equal(name, "Compressed");
 }
+
+bool tga_filename(const std::string& filename);
+bool dds_filename(const std::string& filename);
 
 std::string find_child_directory(const std::string& parent,
                                  const char* wanted) {
@@ -616,8 +769,12 @@ bool discover_legacy_texture_files(LegacyTextureDiscovery& discovery) {
         scan_texture_directory(textures, {}, 0, true, root_files);
         for (const auto& file : root_files) {
             // Roots arrive from lowest to highest precedence, so the active
-            // mod remains the winner for direct root/DDS lookups.
-            g_root_texture_files[file.first] = file.second;
+            // mod remains the winner for direct root/DDS lookups. The map is
+            // never queried for another extension, so avoid retaining a
+            // duplicate path entry for every other texture asset.
+            if (dds_filename(file.first)) {
+                g_root_texture_files[file.first] = file.second;
+            }
         }
 
         bool root_has_legacy_textures = false;
@@ -659,7 +816,14 @@ bool discover_legacy_texture_files(LegacyTextureDiscovery& discovery) {
             const std::unordered_map<std::string, std::string>& files,
             RootTgaRoute route) {
             for (const auto& file : files) {
-                root_candidates[file.first] = {file.second, route};
+                // This precedence chain is only queried by the root-TGA
+                // route. Other legacy files remain available through their
+                // direct RGB/Index8/Compressed maps.
+                if (!tga_filename(file.first)) continue;
+                root_candidates[file.first] = {
+                    file.second,
+                    validated_manual_mip_base(files, file.first),
+                    route};
             }
         };
         publish(compressed_files, RootTgaRoute::compressed);
@@ -893,8 +1057,21 @@ bool select_root_tga(const std::string& key, std::string& physical,
         // which physical folder supplied the winning file. Validate all TGA
         // routes so type-9/10/11 RLE files in root Textures or RGB receive the
         // same bounded expansion already used by Index8 and Compressed.
-        if (!prepare_legacy_tga(candidate->physical, physical)) {
+        const std::string& source = candidate->legacy_mip_base.empty()
+            ? candidate->physical : candidate->legacy_mip_base;
+        if (!prepare_legacy_tga(source, physical)) {
             continue;
+        }
+        if (!candidate->legacy_mip_base.empty()) {
+            const LONG count = InterlockedIncrement(
+                &g_manual_mip_redirect_log_count);
+            if (count <= 16) {
+                log_line("Legacy manual-mip root request normalized: " +
+                         candidate->physical + " -> " + physical);
+            } else if (count == 17) {
+                log_line("Further legacy manual-mip normalization logs "
+                         "suppressed");
+            }
         }
         route = candidate->route;
         return true;
@@ -1698,6 +1875,7 @@ void clear_conversion_cache() {
         }
         g_generated_texture_files.clear();
         g_prepared_texture_files.clear();
+        g_compatible_texture_files.clear();
         g_unusable_texture_files.clear();
         if (!g_conversion_cache_directory.empty()) {
             RemoveDirectoryA(g_conversion_cache_directory.c_str());
@@ -1709,6 +1887,7 @@ void clear_conversion_cache() {
     } else {
         g_generated_texture_files.clear();
         g_prepared_texture_files.clear();
+        g_compatible_texture_files.clear();
         g_unusable_texture_files.clear();
         g_conversion_cache_directory.clear();
     }
@@ -1734,6 +1913,7 @@ void clear_state() {
     InterlockedExchange(&g_scan_grid_guard_log_count, 0);
     InterlockedExchange(&g_conversion_log_count, 0);
     InterlockedExchange(&g_conversion_file_counter, 0);
+    InterlockedExchange(&g_manual_mip_redirect_log_count, 0);
     g_api = nullptr;
 }
 

@@ -1103,9 +1103,12 @@ void A2FO_CALL craft_event_handler(
         return;
     }
     if (event->kind == A2FO_CRAFT_EVENT_POST_LOAD) {
+        if (g_parent_classes.empty() && g_turret_classes.empty()) return;
         attach_loaded_turret(craft);
         return;
     }
+
+    if (g_children.empty() && g_parent_classes.empty()) return;
 
     const bool active =
         read_live_at<std::uint8_t>(craft, kObjectExpiredOffset, 1) == 0;
@@ -1434,8 +1437,16 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     const bool defaults_registered = api->register_classlabel_odf_defaults(
         kModuleName, "turret", kTurretDefaults.data(),
         static_cast<std::uint32_t>(kTurretDefaults.size()));
-    const bool trigger_registered = api->register_weapon_trigger_handler(
-        kModuleName, &weapon_trigger_handler, nullptr);
+    const bool trigger_registered =
+        A2FO_MODULE_API_HAS(
+            api, register_weapon_trigger_handler_masked) &&
+        api->register_weapon_trigger_handler_masked
+            ? api->register_weapon_trigger_handler_masked(
+                  kModuleName,
+                  A2FO_WEAPON_TRIGGER_EVENT_MASK_PRECHECK,
+                  &weapon_trigger_handler, nullptr)
+            : api->register_weapon_trigger_handler(
+                  kModuleName, &weapon_trigger_handler, nullptr);
     const bool craft_events_registered = api->register_craft_event_handler(
         kModuleName, &craft_event_handler, nullptr);
     if (!alias_registered || !defaults_registered || !trigger_registered ||

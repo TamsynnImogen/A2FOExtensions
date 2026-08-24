@@ -60,6 +60,63 @@ _a2fo_call_thiscall_4:
 	leave
 	ret
 
+	# Fleet Ops' Craft render callback calls Armada's actual base hull renderer
+	# before adding shields, reflections, and special-effect overlays. Bracket
+	# only that call with the mapped-lighting craft context. The former
+	# whole-callback scope allowed those later passes to replay ship emissives
+	# into the selective bloom mask at an alternate transform.
+	.extern _a2fo_hybrid_nebula_base_render_begin
+	.extern _a2fo_hybrid_nebula_base_render_end
+	.extern _a2fo_hybrid_nebula_base_render_target
+	.extern _a2fo_hybrid_nebula_base_render_return
+
+	.globl _a2fo_hybrid_nebula_base_render_dispatch
+_a2fo_hybrid_nebula_base_render_dispatch:
+	pushfl
+	pushal
+	pushl 24(%esp)
+	call _a2fo_hybrid_nebula_base_render_begin
+	addl $4, %esp
+	popal
+	popfl
+	# Displaced `push esi; call [Fleet Ops import]`.
+	pushl %esi
+	call *_a2fo_hybrid_nebula_base_render_target
+	# End the narrow context while retaining the original call's complete
+	# register/flag result. EAX and EBX are then overwritten by the two displaced
+	# instructions which originally followed that call.
+	pushfl
+	pushal
+	pushl -4(%ebp)
+	call _a2fo_hybrid_nebula_base_render_end
+	addl $4, %esp
+	popal
+	popfl
+	movl -4(%ebp), %eax
+	movl 0x1a4(%eax), %ebx
+	jmp *_a2fo_hybrid_nebula_base_render_return
+
+	# PopupPalette::UpdateButtons converges on one compaction/layout pass after
+	# binding every menu control. Refit controls must be present before that
+	# pass, otherwise they overlay stale root positions and migrate on the next
+	# refresh. This mid-function boundary supplies the live popup/selection
+	# frame to C++, then reproduces the two displaced register initializers.
+	.extern _a2fo_hybrid_refit_pre_layout
+	.extern _a2fo_hybrid_refit_pre_layout_continue
+	.globl _a2fo_hybrid_refit_pre_layout_dispatch
+_a2fo_hybrid_refit_pre_layout_dispatch:
+	pushfl
+	pushal
+	pushl 8(%ebp)
+	pushl -4(%ebp)
+	call _a2fo_hybrid_refit_pre_layout
+	addl $8, %esp
+	popal
+	popfl
+	orl $-1, %edi
+	xorl %esi, %esi
+	jmp *_a2fo_hybrid_refit_pre_layout_continue
+
 	# Armada's synchronized build-command receiver reads
 	# ConstructionRig::mBuildPositionInterface directly from ESI+0x2a4. A
 	# hybrid ResearchStation owns pod data at that address, so resolve the

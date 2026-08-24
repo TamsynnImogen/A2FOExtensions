@@ -220,7 +220,9 @@ private:
 struct Agent {
     explicit Agent(std::uint32_t seed) : random(seed), identity(seed) {}
 
-    std::unique_ptr<NativeInstance> visual;
+    // Keep the native render instance in the Agent allocation. The old
+    // pointer form required a second heap allocation for every swarm member.
+    NativeInstance visual;
     Random random;
     std::uint32_t identity = 0;
     Vec3 position{};
@@ -1024,8 +1026,7 @@ HostRuntime create_host_runtime(void* object, const ClassPolicy& policy) {
         for (std::uint32_t member = 0; member < definition.count; ++member) {
             auto agent = std::make_unique<Agent>(mix_seed(
                 runtime.handle, definition.index, member));
-            agent->visual = std::make_unique<NativeInstance>();
-            if (!agent->visual->initialize(
+            if (!agent->visual.initialize(
                     definition.model, definition.scale)) {
                 const LONG report = InterlockedIncrement(
                     &g_instance_failure_reports);
@@ -1047,7 +1048,7 @@ HostRuntime create_host_runtime(void* object, const ClassPolicy& policy) {
             // ST3D_Instance keeps its database sphere unscaled even when
             // ScaleGeometry stores a separate per-axis render scale.
             agent->visual_radius =
-                agent->visual->bounding_radius() * definition.scale;
+                agent->visual.bounding_radius() * definition.scale;
             if (definition.avoid_host && !g_logged_avoidance_volume &&
                 runtime.bounds.radius > 0.0f) {
                 char message[320]{};
@@ -1409,7 +1410,7 @@ void render_swarms(void* camera) noexcept {
                                 transform.values[5]};
         for (RuntimeGroup& group : host.groups) {
             for (const auto& agent : group.agents) {
-                if (!agent || !agent->visual) continue;
+                if (!agent) continue;
                 const Vec3 world_position = a2fo::swarm::transform_point(
                     transform, agent->position);
                 const Vec3 world_direction = a2fo::swarm::transform_direction(
@@ -1417,8 +1418,8 @@ void render_swarms(void* camera) noexcept {
                 const Matrix34 visual_transform =
                     a2fo::swarm::compose_facing_transform(
                         world_position, world_direction, preferred_up);
-                agent->visual->set_transform(visual_transform);
-                const bool rendered = agent->visual->render(camera);
+                agent->visual.set_transform(visual_transform);
+                const bool rendered = agent->visual.render(camera);
                 if (rendered && !g_logged_first_instance_render) {
                     log_line("First dynamic swarm visual instance submitted "
                              "after passing Storm3D frustum testing");

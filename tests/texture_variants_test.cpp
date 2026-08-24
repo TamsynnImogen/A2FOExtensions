@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <limits>
 #include <string>
 
 int main() {
@@ -10,6 +11,7 @@ int main() {
     using a2fo::texture_variants::normalize_faction_node_name;
     using a2fo::texture_variants::normalize_faction_suffix;
     using a2fo::texture_variants::subsystem_condition;
+    using a2fo::texture_variants::subsystem_damage_policy_active;
     using a2fo::texture_variants::subsystem_mesh_choice;
     using a2fo::texture_variants::subsystem_rebuild_scale;
     using a2fo::texture_variants::subsystem_repair_sample;
@@ -106,4 +108,13 @@ int main() {
             sample != repair_sample;
     }
     assert(saw_different_sample);
+
+    assert(!subsystem_damage_policy_active(0, 0.0f, 0, 0));
+    assert(!subsystem_damage_policy_active(0, 0.1f, 0, 4));
+    assert(!subsystem_damage_policy_active(0, 0.1f, 2, 0));
+    assert(!subsystem_damage_policy_active(0, 0.0f, 2, 4));
+    assert(!subsystem_damage_policy_active(
+        0, std::numeric_limits<float>::quiet_NaN(), 2, 4));
+    assert(subsystem_damage_policy_active(0, 0.1f, 2, 4));
+    assert(subsystem_damage_policy_active(1, 0.0f, 0, 0));
 }

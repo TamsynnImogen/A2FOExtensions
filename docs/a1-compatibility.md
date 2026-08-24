@@ -15,9 +15,10 @@ Fleet Ops 4.0
         `-- original A1 child addon
 ```
 
-This first milestone establishes the parent metadata and the optional
-`A1Compat.dll` boundary. It does not yet claim playable stock A1 Instant Action
-or campaign compatibility.
+This milestone establishes the parent metadata and the optional
+`A1Compat.dll` boundary, including legacy race discovery for the Instant Action
+dropdown. It does not yet claim complete Instant Action gameplay or campaign
+compatibility.
 
 ## Installation contract
 
@@ -42,7 +43,7 @@ required1="A2FORGBTextures"
 ```
 
 The root also contains `a1compat.ini`, an extension-owned activation marker.
-Its optional diagnostic setting is:
+Its optional compatibility-isolation setting is:
 
 ```ini
 [A1Compat]
@@ -50,9 +51,9 @@ SafeMode = 0
 ```
 
 It accepts `1/true/yes/on/enabled` and `0/false/no/off/disabled`.
-Safe mode retains the `wingman` alias, missing-only class defaults, and
-`Addon` overlay while withholding the riskier executable diagnostics and
-officer-quarter runtime hooks.
+Safe mode retains the `wingman` alias, missing-only class defaults, `Addon`
+overlay, and legacy race-menu fallback while withholding the riskier
+executable compatibility and officer-quarter runtime hooks.
 
 `A1Compat.dll` and `A2FORGBTextures.dll` belong in the central `Data/modules`
 directory. The parent's required module policy selects them for the parent and
@@ -108,11 +109,46 @@ mining/resource defaults: `shipclass`, `maxDilithium`, `alert`, `miner`,
 `SHOW_MOVEMENT_AUTONOMY`, `resourcesCanHandle`, and `hotkeyLabel`. It is not
 aliased, and normal ODF/include values still take precedence.
 
+Raw A1 `research` stations receive A2's missing `research = 1` context-menu
+capability and `transporter = 1` flag through the same missing-only policy.
+This exposes the native research-pod list for stations such as `fresear` and
+`fresear2` without modifying their ODFs or overriding converted-mod values.
+
+A1's `scout = 1` is an AI/default-order marker, not the A2 context-menu
+capability which exposes Scout/Search. For a completed class whose inherited
+ODF sets that legacy marker, A1Compat supplies A2 ScoutBase's missing
+`combat`, `alert`, `can_sandd`, and `can_explore` capability bits. Any
+explicit or inherited declaration, including zero, remains authoritative.
+This restores the stock A1 scouts' Orders palette without editing their ODFs.
+
+There is a separate A1 basename collision: its shared scout ship base is
+`scout.odf`, the same basename used by A2's Explore CommandInfo. If flat ODF
+selection feeds the ship base to the command loader, A1Compat repairs only the
+result whose `buttonName` remained empty, supplying the stock Explore command
+identity, Orders position, and `ship + can_explore` source mask. A valid
+command ODF is left unchanged and no A1 file is edited.
+
+Raw A1 stations inherit `is_starbase = 1` but predate A2's menu-capability
+declarations. For those completed classes, A1Compat supplies missing
+`facility`, `has_crew`, and `has_hitpoints` bits so Fleet Operations can expose
+the Recrew command. Explicit and inherited declarations, including zero,
+remain authoritative and no station ODF is rewritten.
+
+A1 source ODFs are not rewritten to add A2 commands. For A2 maps containing
+`scrap` moon records, A1Compat intercepts only `GameObjectClass`'s `resource`
+lookup. Normal ODF/include resolution runs first. If the command is absent,
+the resolved project ID selects the A2 Classic default:
+`mdmoon` plus numbered variants uses `ResourceMoon`, and `mmooninf` plus
+numbered variants uses `ResourceMoonInf`. Those exact moon families also
+receive missing-only `spatial_object` and `has_resource` capability bits, so
+they remain targetable by freighters as well as physically collidable. Other
+`scrap` objects, including asteroids and comets, remain untouched.
+
 The module requires the versioned native SDK and registers its alias
 transactionally. Rejected registration causes initialization to fail without
 leaving partial A1 policy behind. It also installs the A1-scoped,
-signature-checked nebula sprite-node guard and temporary map/GUI diagnostics
-documented below.
+signature-checked nebula sprite-node guard and compatibility bridges documented
+below.
 
 It also registers the original A1 `Addon` directory as an ODF overlay. The
 shared FeaturePack filesystem hook indexes `.odf` files found there without
@@ -132,9 +168,60 @@ their own confirmed lookup bridges.
 Fleet Operations' Instant Action menu additionally expects `displayKey` and a
 unique `instantActionSlot` in each playable race ODF. Stock Armada 1 supplies
 `displayName` but neither FO-specific field, which produces an empty race list.
-The local stock parent currently patches its four playable race definitions;
-general synthesis for unmodified third-party A1 races remains future A1Compat
-work.
+A1Compat now consumes resolved Race ODF fields through the core's shared
+Race-loaded callback without changing those files. If every record referenced
+by the active `races.odf` has a distinct in-range `instantActionSlot`, native FO
+slot and `displayKey` behaviour is retained unchanged. If any record lacks a
+valid slot, A1Compat assigns contiguous runtime slots to records which define
+`interfaceConfiguration`, in exact `race0` through
+`race<numberOfRaces - 1>` declaration order. All other Race records remain
+loaded but are omitted from the playable dropdown. Missing playable
+`displayKey` values are supplied at runtime from the resolved `displayName`, so
+inherited fields and child-mod overrides keep normal ParameterDB precedence.
+
+The same completed-Race boundary supplies the starting-resource commands which
+stock A1 faction ODFs omit. A1Compat resolves the effective
+`SHOWMETHEMONEY_CREW`, `SHOWMETHEMONEY_DILITHIUM`,
+`SHOWMETHEMONEY_METAL`, `SHOWMETHEMONEY_TRITANIUM`, and
+`SHOWMETHEMONEY_SUPPLIES` values from the active `RTS_CFG.h` chain. Missing
+`normal*` fields receive those values and missing `lots*` fields receive 1.5
+times normal. Native Crew/Dilithium/Metal values are written to the Race
+starting-resource matrix; Tritanium/Supply remain independent A2FOResources
+pools and are visible to that module through the shared snapshot. No default
+is invented for resources absent from `showmethemoney`, and explicit or
+inherited Race values always win. This is runtime policy: the A1 ODFs remain
+unchanged.
+
+Raw A1 `teamcolor.odf` files use thirteen named values (`white` through
+`black`) rather than Fleet Operations' `mpcolor01` through `mpcolor16` keys.
+Fleet Operations' rewritten `TeamColor_Init` table therefore does not populate
+the player-colour entries used by the Instant Action setup screen and minimap.
+Those consumers are patched to the relocated `FOTeamColor` array in
+`FleetOpsHook.dll`, not Armada's original static palette. While the A1 marker
+is active, A1Compat merges the winning table from each
+extension root and translates the legacy names into player slots 1 through 13
+at runtime. Normal root precedence is preserved; explicit `mpcolorXX` entries
+win over legacy aliases in the same layer, and parent values can supply the
+three player slots that A1 did not define. The palette is reapplied after every
+native team-colour initialization and writes the live relocated array, without
+changing an A1 file on disk. This
+does not force model team-colour tinting or alter its graphics checkbox.
+
+A1 physics files use `impulseSpeed` as their turning tier and `warpSpeed` as
+ordinary aligned cruise; Borg movement additionally uses the legacy
+`borgPhysics` boolean. A2 instead requires `combatSpeed`, uses `impulseSpeed`
+for ordinary cruise, and reserves `warpSpeed` for strategic warp. At the exact
+PhysicsClass lookup calls, A1Compat first preserves normal ParameterDB
+resolution. When `combatSpeed` is absent, the translated combat tier is the
+larger of legacy impulse and half legacy cruise, A2 impulse receives the legacy
+cruise value, and A2 strategic warp is disabled. A missing `physics` receives
+`borg` for nonzero `borgPhysics` and `smooth` otherwise. The ordinary path
+supplies the matching A2 Classic smooth-controller profile per shared physics
+file (`cnstphys`, `destphys`, or `battphys`), with the Federation destroyer
+profile as the default for an unknown ordinary family. Explicit smooth fields
+still win. A declared or inherited `combatSpeed` identifies an A2/FO contract
+and leaves every native speed value authoritative. The legacy ODFs remain
+unchanged.
 
 The race ODFs retain the shared `gui_fed.cfg`, `gui_bor.cfg`, `gui_kli.cfg`,
 and `gui_rom.cfg` names. STA1 Classic uses the stock Armada 2 versions because
@@ -192,8 +279,7 @@ through the sprite node's null type-specific-data pointer. `A1Compat.dll`
 hooks the signature-checked seven-byte prologue and checks only nodes whose
 virtual type is `3` (`ST3D_SpriteNode`). Invalid nodes are logged with their
 node and parent names and skipped; every valid node passes through the native
-gateway unchanged. This guard is deliberately parent-scoped while diagnostics
-establish why the legacy SOD node did not receive sprite data.
+gateway unchanged. This guard is deliberately parent-scoped.
 
 The guard identified 81 missing A2-era nodes, including the `fluid*`,
 `tachyon*`, and `big*` nebula families. A1's `nebula.spr` is a strict subset of
@@ -204,63 +290,193 @@ hardware SODs and A2/FO map objects. The original A1 table remains a local
 backup outside the active mod tree.
 
 After bypassing that fault, Armada reached `RtimeClass::Load(FileReader&)` and
-failed at RVA `0x0013c334` because a serialized map/save object type had no
-registered runtime factory. A temporary mid-function diagnostic at RVA
-`0x0013c2da` checks the already-read 40-byte class name against
-`RtimeClass::Find` at RVA `0x0013c1a0`, logs a missing name, and otherwise
-preserves native execution unchanged. Its five-byte signature starts after an
-absolute-address instruction, keeping the checked bytes independent of the
-image base. Non-textual failures include the exact 40 input bytes and native
-caller RVA so serialization misalignment can be distinguished from a missing
-registered textual type. The diagnostic also records the `FileReader` binary
-and labelled-stream flags, buffer cursor/remaining byte counts, the second
-read's result, and bytes surrounding the stream cursor. This identifies the
-unexpected serialized record without changing native load behaviour.
+failed at RVA `0x0013c334` because the A2 loader attempted to read a runtime
+class where the A1 stream had no matching section. Temporary instrumentation
+identified stream misalignment rather than a missing registered class and was
+removed after the checked runtime-class-width, object-tail, load-order, and
+mission bridges replaced it.
 
-After correcting the moon resource declarations, map loading advances beyond
-that serialization fault and reaches `StandardText::InitializeConfiguration`.
+Direct Armada 1 BZN loading now has its first schema bridges. Fleet Operations'
+map-open path still contains the original `saveGameDesc`, `binarySave`, and
+pre-2067 branches and correctly preserves local A1 versions 2050–2053.
+Observed A1 maps declare 40-byte runtime-class records like A2. The
+fixed-character input bridge at Armada RVA `0x0013c2c3` follows the live
+labelled field's declared width for a completely validated A1 reader and
+supports a 32-byte legacy record only when that field explicitly declares it.
+
+The same validated A1 header contains six labelled floats in min/max X, Y, Z
+order. A2 expects their equivalent in `MapDetails::MPDMinExtent` and
+`MapDetails::MPDSize`; without that translation, Instant Action displays `0x0`
+even though the A1 map has real bounds. The checked `KnownMaps` call at Armada
+RVAs `0x00147a59` and `0x001b7da9` now preserve native
+`MapDetailsFactory::Load` for both selected-map launch and map discovery. Bare,
+virtual `bzn\\...`, and already-qualified filenames resolve through the active
+extension-root chain. The bridge then fills those two fields for A1 maps only.
+The object-loader bridge republishes the corresponding min/max values to
+Armada's live world-bound globals before its native position conversion begins.
+Applying them at the later runtime-class/mission boundary leaves the displayed
+map size correct but transforms all previously constructed objects against
+A2's old bounds. X/Z remain the source map's values, while Y is widened only as
+needed to include A2's native `-1250..1250` scanner envelope. This keeps A1
+moons at Y `-50` and wormholes at Y `-30` inside the gameplay visibility
+volume without changing their serialized positions. Original BZN bytes remain
+untouched.
+
+Armada 1 stores multiplayer player positions beside the map in `<map>.mdf` as
+`StartLocations` plus `StartN = X Y`. A2 expects world-space positions in its
+native `StartLocationDetails` array instead. The same checked MapDetails bridge
+now validates A1's `0..117` minimap grid, converts X directly and inverted Y to
+world X/Z, uses the map's vertical midpoint for Y, and marks unused A2 slots
+empty. This restores the opposing player slots needed by normal Instant Action
+setup and victory checks without editing either source file.
+
+Fleet Operations' Instant Action AI requests
+`<race>_instant_action_build_list` and numbered variants, whereas A1 races use
+`<race>_build_list`. A1Compat intercepts the checked
+`AIP_Manager::Look_Up_New_AIP` entry at Armada RVA `0x00025a50`. When the
+highest relevant A1 mod layer contains only the legacy filename, that loaded
+plan is returned instead of a same-named Fleet Ops plan inherited from Data.
+Explicit modern plans at equal or higher priority retain normal lookup.
+
+The runtime-class width bridge patches only the fixed-character CALL at Armada
+RVA `0x0013c2c3`.
+The replacement validates the complete A1 front matter in the live reader and
+requires its parsed version to match `FileReader+0x08`; numeric version alone
+cannot activate it. A validated A1 stream uses the field's declared 40-byte
+width, or receives a zero-padded 40-byte native buffer only when the field
+explicitly declares the shorter 32-byte legacy width. A2/FO maps retain the
+requested contract.
+
+The `2blue.bzn` trace showed `AiMission::LoadMission` receiving an `mnebula5`
+record rather than a mission. Comparing `LoadGame_MainLoad` with the original
+Armada 1 executable identified one difference: A2 inserts a craft-class table
+loader after the shared Teams loader, while A1 has no equivalent stage.
+A1Compat replaces the checked A2 table call at RVA `0x002025c0`; validated A1
+readers return success without consuming bytes, while A2/FO readers execute the
+native loader at RVA `0x000767a0`.
+
+Live testing proved that bypass is necessary but insufficient. A2's primary
+object count stops at `mnebula5219`, before a trailing A1 neutral block of 20
+complete objects: ten nebulae, two infinite moons, four dilithium moons, and
+four wormholes. For a validated A1 reader, the object wrapper requires one
+unique later `EmptyMission`, counts only structurally complete object prefixes,
+and passes the tail through A2's native object loader with a temporary
+in-memory count record. It restores the displaced bytes immediately, so the
+source BZN remains unchanged. The native Teams loader then begins at the real
+Teams data rather than consuming part of the first omitted nebula.
+
+The checked mission call at RVA `0x00202608` retains its forward-only,
+unique-marker resynchronization as a guarded fallback. Native A2/FO streams are
+neither scanned, replayed, nor moved. The A1 header's source-map filename
+remains diagnostic only until campaign-aware mission translation exists, and
+no original BZN is rewritten.
+
+The moon-resource bridge runs during `GameObjectClass::BuildClass`, before the
+core's completed-class field cache is guaranteed to contain that ParameterDB.
+It therefore prefers a cached original classlabel when available but falls
+back to the live validated `ParameterDB::GetString` entry on an early cache
+miss. A cache miss alone must not suppress the missing-only A2 resource
+default.
+
+After A1Compat supplies the missing A2 moon-resource command at runtime, map
+loading advances beyond that serialization fault and reaches
+`StandardText::InitializeConfiguration`.
 Fleet Operations crashes at Armada RVA `0x0010ad39` when an ST3D sprite lookup
 returns null and native code immediately reads the sprite's field at offset
-`0x50`. A temporary non-bypassing diagnostic at RVA `0x0010ad23` records the
-live GUI configuration string, generated sprite name, item index, and caller
-RVA. It then runs the displaced temporary-string cleanup setup and preserves
-the original null result so the upstream CFG/SPR mismatch can be corrected
-without disguising it.
+`0x50`. Temporary instrumentation identified the missing generated sprite and
+was removed after the upstream CFG/SPR bridge was implemented.
 
 The first report names `buttonBackgroundPanel.0`. The active child
 `gui_interface.cfg` is byte-identical to STA2 Classic and requests both
 `buttonBackgroundPanel.0` and `.1`, but the child's overriding
-`gui_global.spr` omits them. The local compatibility parent therefore uses
-STA2 Classic's complete `gui_global.spr`; the displaced A1 table is retained
-outside the active tree as `gui_global.a1-original.spr`. This follows the
-existing rule that FO/A2 GUI structures remain authoritative while A1 game
-assets are ported around them.
+`gui_global.spr` omits them. A data-only include in the compatibility parent's
+table cannot solve this generally because basename override selects the child
+table first.
+
+`A1Compat.dll` therefore replaces the checked `ReadTable` CALL at Armada RVA
+`0x0011a776`, inside `DisplayInterface::PostLoadAll`. With the newly constructed
+interface sprite database and native `ST3D_SpriteTableParser` still live, the
+bridge reads `a2_gui_global.spr` first and the active mod's winning
+`gui_global.spr` second. The active table remains authoritative for duplicate
+names, while required A2/FO records survive a child override. The loader checks
+`buttonBackgroundPanel.0` immediately after the essential table and again
+after the active table, logging both native results before any interface
+components initialize. This affects only the startup GUI database; it does not
+load the file through the separate world `sprites.spr` registry.
+
+The matching first gameplay-UI bridge hooks the stable post-construction
+publication instruction at Armada RVA `0x0011a80f`. The preceding constructor
+CALL can already be redirected by Fleet Operations before deferred modules
+load, so A1Compat deliberately composes after it instead of replacing it. With
+the completed database still in EAX, the bridge identifies a raw A1 layout
+only when both `speedPanelArea` and `controlPanelArea` exist while
+`screenWidth` and `screenHeight` are both absent. Before the component PostLoad
+loop begins, A1Compat changes the active database's integer reference
+dimensions at `+0x2c/+0x30` from A2's default 1600x1200 to A1's 640x480.
+`ParameterDB::Get(DBRectangle)` then performs the native scaling for every
+legacy rectangle A2 consumes. Explicit modern screen dimensions and non-A1
+layouts are never changed. Each construction logs the CFG, four-key evidence,
+original dimensions, selected policy, and number of legacy command-button
+rectangles captured.
+
+A1's `ControlPanel` is the ancestor of A2/Fleet Operations' `PopupPalette`,
+not the A2 top-bar `ButtonPanel`. Fleet Operations compacts active command
+modes into a 64-control backing array and lays those controls out immediately
+before `ControlButton::Render`; HybridBuild also deliberately owns that popup
+update path. A1Compat therefore leaves both systems in place and hooks only
+the final Armada `ControlButton::Render` boundary at RVA `0x000e64e0`. For a
+detected raw-A1 layout, the first twelve compacted popup controls receive the
+native-scaled, panel-relative `controlButton1` through `controlButton12`
+areas captured from the selected race CFG. `ParameterDB::GetRectangle` retains
+the CFG's `x, y, width, height` semantics, so A1Compat converts each area to the
+inclusive `left, top, right, bottom` fields stored by `ControlButton`. This
+preserves non-grid A1
+layouts such as the Romulan and Borg panels, while command identity, page
+binding, input handling, and build/research behavior remain native. Controls
+outside the twelve legacy slots are not mutated by this first adapter slice.
+
+A1 has one Status Report/ship-display panel, whereas A2's `ShipDisplay`
+requests separate low, middle, and tall rectangles and background panels.
+For the exact live legacy gameplay database, A1Compat aliases
+`infoPanelArea_0..2` to `infoPanelArea`, `infoBlackArea_0..2` to
+`infoBlackArea`, and the A2 low/middle background names to A1's
+`infoBackgroundPanelArea`/`infoBackgroundPanel`. Rectangle aliases run at the
+supported ArmadaL `DisplayInterface::LoadRectangle` entry (RVA `0x0011b430`);
+the two background-name aliases run at `ParameterDB::GetString` (RVA
+`0x00135350`). Installation of the string boundary occurs after every other
+A1Compat feature has preflighted that shared native entry. Nonlegacy databases
+and unrelated keys remain native.
+
+The target is faithful A1 gameplay UI presentation and behavior. A1Compat
+does not automatically graft A2-only panels or controls into legacy layouts;
+mods that want those features can ship an A2-compatible interface.
 
 With the missing panel sprites restored, game opening advances into
 `CraftEnhancement.Craft_mLevelUp` and faults at Fleet Ops RVA `0x001dbdcb`.
 The function follows `Craft+0xf0` to its `Side`, then `Side+0x244` to its
 `Race`, and reads the RaceEnhancement `canGainXP` flag at `Race+0x634`. The
 observed read of address `0x00000634` proves that this craft's Side has a null
-Race pointer; it does not indicate a missing RaceEnhancement sidecar. A
-temporary non-bypassing diagnostic at the failing instruction records the
-craft ODF, handle/team, Side and Race pointers, class and craft-enhancement
-pointers, force flag, and caller Fleet Ops RVA. It then executes the displaced
-read unchanged so the object/data contract can be fixed from evidence rather
-than hidden with a broad null bypass.
+Race pointer; it does not indicate a missing RaceEnhancement sidecar. The
+checked hook records the craft ODF, handle/team, Side and Race pointers, class
+and craft-enhancement pointers, force flag, and caller Fleet Ops RVA.
 
 The first report identifies `zferscav.odf` on neutral team 0 during
 `Craft_Init_Callback` (`force=0`). Stock A2 registers `norace.odf` specifically
 for uninhabited objects, but A1's overriding ten-entry `races.odf` does not
-contain it. The local compatibility registry therefore appends `norace.odf` as
-entry 10. Appending rather than inserting preserves all ten original A1 race
-indices and the explicit Instant Action slots already added to the four
-playable A1 race ODFs.
+contain it. A1Compat therefore patches only `Race::InitAll`'s checked
+`numberOfRaces` and `raceN` lookups. When the declared list has no neutral Race
+and the next index is unoccupied, the module appends inherited `norace.odf` to
+the runtime registry as entry 10. Appending rather than inserting preserves
+all ten original A1 race indices. `norace` lacks an interface configuration
+and remains outside the playable Instant Action slots. Existing declarations
+remain authoritative and the A1 `races.odf` is never edited.
 
-The corrected eleven-entry registry passes the former Fleet Ops
-`Craft_mLevelUp` fault and allows `mp08walr.bzn` to enter live gameplay. The
-initial scene renders the A1 units and textures against the inherited map with
-the deliberately retained A2-compatible interface, confirming the first full
-map-open path through this chain.
+The earlier narrow `canGainXP = false` fallback passed the former Fleet Ops
+`Craft_mLevelUp` fault, then exposed a second null-Race read of
+`crewAccumulationRate` at Armada RVA `0x000b5259`. That second report confirms
+that a complete neutral Race object, rather than per-field null guards, is the
+correct compatibility contract. The eleven-entry runtime registry supplies
+all inherited `norace.odf` fields to every native consumer.
 
 ## Officer-quarter starbase geometry
 
@@ -279,7 +495,9 @@ nothing to models without numbered `oqN` nodes.
 
 The gameplay bridge now parses `maximumUpgrades` and base `officerGain` from
 each A1 Starbase ODF. FeaturePack dispatches shared admission and lifecycle
-events through the native API. A1Compat recognises the retained
+events through the native API when loaded. For A1-only chains where FeaturePack
+is absent, A1Compat also guards Fleet Operations' writable native Producer
+queue target cell before insertion. A1Compat recognises the retained
 `OfficerUpgradeClass`, applies its `officerGain`, increments per-starbase state,
 reveals the matching next `oqN`, and rejects admissions once completed plus
 queued upgrades reaches the declared maximum.
@@ -312,8 +530,11 @@ read beyond it at class offset `+0x408`; the observed fault was again
 `0x004cb151`, before any `FINISHING` event. Native API revision 9 therefore
 adds a claimable `STARTING_EFFECT` event at the already shared construction-
 effect hook. A1Compat suppresses that cosmetic effect only for the matching
-A1 Starbase officer upgrade. The build timer, resource charging, queue state,
-and A1-scoped Starbase completion remain active.
+A1 Starbase officer upgrade. If that optional emitter is not loaded, A1Compat
+also guards Starbase's live derived effect slot at vtable offset `+0x16c`
+(Armada RVA `0x000bbe90`); its ordinary path chains the override and any later
+generic Producer detour. The build timer, resource charging, queue state, and
+A1-scoped Starbase completion remain active.
 
 Starbase policy/menu registration is deliberately independent of the officer
 target and completion bridge. If either optional officer boundary fails its
@@ -322,8 +543,8 @@ menu remain active; officer buttons are withheld and the exact unavailable
 boundary is logged.
 
 A1 selected the visible command through each race ODF's `officerUpgradeODF`.
-A2/FO no longer consumes that command. Native visibility diagnostics report
-all four retained slots as visible even when `race` is declared in `fedoff`,
+A2/FO no longer consumes that command. Investigation showed all four retained
+slots as visible even when `race` is declared in `fedoff`,
 `klingoff`, `romoff`, and `borgoff`. A1Compat now records those target race
 identities during `OfficerUpgradeClass::BuildClass` at Armada RVA
 `0x000ce910`, records the Starbase race,
@@ -342,17 +563,16 @@ record stores the count and cumulative upgrade gain before native Starbase
 state; loading restores the visual/lifecycle state while the native Team save
 retains the aggregate officer maximum.
 
-Producer diagnostics confirmed that Fleet Operations retains all stock A1
+Inspection confirmed that Fleet Operations retains all stock A1
 starbase `buildItem` entries after parsing. Moving A1's `techlvl.odf` from its
 recursive `odf/other` location to the conventional `odf/system` namespace
 produced no palette change, proving that the recursive copy was already being
-resolved and was not the missing-command cause. A bounded diagnostic now wraps
-Fleet Ops' `ProducerClass::mBuildButtonIsVisible` at FleetOpsHook RVA
-`0x0011d8f8`. For registered A1 starbases it records the team, slot, target
-project ID, technology-item state, requirement count, and unmodified native
-visibility result.
+resolved and was not the missing-command cause. A checked filter at Fleet Ops'
+`ProducerClass::mBuildButtonIsVisible` boundary (FleetOpsHook RVA
+`0x0011d8f8`) preserves the native result and hides only an officer upgrade
+whose recorded race does not match the owning A1 starbase.
 
-That diagnostic proved every stock A1 Starbase item was natively visible. The
+Every stock A1 Starbase item was otherwise natively visible. The
 actual loss occurred one level above it: Armada II introduced
 `builder_ship = 1` for context-sensitive menus, while A1 data predates the
 command. Fleet Ops represents it as capability bit `0x80` at

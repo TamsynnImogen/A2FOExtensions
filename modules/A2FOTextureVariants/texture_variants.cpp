@@ -209,4 +209,13 @@ float subsystem_repair_sample(std::uint32_t craft_handle,
         static_cast<double>(value & 0x00ffffffu) / denominator);
 }
 
+bool subsystem_damage_policy_active(
+    std::size_t mesh_count, float damage_threshold,
+    std::size_t scorch_effect_count,
+    std::size_t target_hardpoint_count) noexcept {
+    if (mesh_count != 0) return true;
+    return std::isfinite(damage_threshold) && damage_threshold > 0.0f &&
+        scorch_effect_count != 0 && target_hardpoint_count != 0;
+}
+
 }  // namespace a2fo::texture_variants

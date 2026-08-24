@@ -1,4 +1,4 @@
-# Native module SDK v4 revision 14
+# Native module SDK v4 revision 17
 
 A module must be a 32-bit Windows DLL exporting:
 
@@ -186,3 +186,21 @@ native trigger ran. Craft simulation notifications bracket the complete
 native/Fleet Operations call. WeaponClass callbacks receive copied requested
 ODF fields plus the live ParameterDB and parent-class pointer for typed native
 lookups and inherited policies.
+
+Revision 15 appends `register_craft_event_handler_masked`. It preserves the
+revision-14 callback ABI while allowing a module to request only the Craft
+event kinds it consumes. The core therefore avoids entering cleanup-only
+handlers twice for every simulated craft. Modules fall back to the unmasked
+registration when running against a revision-14 core.
+
+Revision 16 appends `register_weapon_trigger_handler_masked`. It preserves the
+revision-14 callback ABI while allowing a module to request only precheck or
+committed trigger events. FireArcs, NormalWeaponTech, and Turrets request only
+prechecks, avoiding three no-op cross-DLL callbacks after every accepted shot.
+
+Revision 17 appends `register_race_odf_defaults`, guarded by
+`A2FO_CAP_RACE_ODF_DEFAULTS`. Modules register copied command/value pairs at
+startup. At the completed-Race boundary, the core consults each fallback only
+after the live ParameterDB reports that requested command missing, then exposes
+the resolved value to every Race-loaded callback. A command has one policy
+owner, and explicit or inherited Race ODF values always win.

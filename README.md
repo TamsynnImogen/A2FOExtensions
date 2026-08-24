@@ -24,12 +24,20 @@ hooks, reusable semantic dispatch, and optional native feature modules.
   and animated ancestors.
 - Optional DX8 per-pixel ship lighting derived from armadaNebulaPatch, with
   the remaining Fleet Operations alpha-render path preserved and per-diffuse
-  ODF-driven, subsystem-aware emissive texture channels. The stable material
-  glow remains native DX8; external framebuffer bloom is currently delegated
-  to ReShade because render-target replay is unsafe through the supported
-  dxwrapper/d3d8to9 stack.
+  subsystem-aware emissive texture channels. Global `ART_CFG.h` emissive and
+  bump suffixes can discover material maps without per-ship declarations,
+  while explicit ODF/SOD assignments remain authoritative. The stable material
+  glow and selective framebuffer bloom run on the managed DXVK backend. The
+  Windows system renderer keeps Fleet Operations' complete native DX8 path and
+  receives no A2FO mapped-material hooks or SOD texture-slot mutations.
 - Optional recursive map-editor menus: a `buildItemX` target containing its own
   `buildItemX` rows opens as another submenu, with native Back navigation.
+- Optional live yard submenus: `buildItemXRefitY` turns one normal Producer
+  item into a presentation-only parent whose child ODFs retain their own tech,
+  cost, build-time, tooltip, and synchronized construction behaviour.
+- Optional BuildYard module gates: `moduleXPseudoTechnology` evaluates a fake
+  technology-tree project ID in addition to native
+  `moduleXRequiredTechnology`, allowing module-specific prerequisite chains.
 - Experimental indexed hull-mounted turrets through matching `turretX` and
   `turretHardpointX` ODF commands, with independent weapons, hitpoints, yaw,
   pitch, slew rates, ownership changes, and save/load reconnection.
@@ -37,6 +45,10 @@ hooks, reusable semantic dispatch, and optional native feature modules.
   mapped safely to `craft` only through the `STA1 Classic` mod chain.
 - Armada 1 `Addon` ODF overlay support through `A1Compat.dll`, preserving A1's
   within-root rule that `Addon` wins over a same-basename structured ODF.
+- Runtime translation of Armada 1's named `teamcolor.odf` entries into Fleet
+  Operations' Instant Action/minimap player palette, without rewriting A1 data.
+- Direct A1 multiplayer-map support for BZN bounds and companion MDF player
+  starts, translated into native A2 MapDetails records at runtime.
 - Armada 1 starbase officer-quarter compatibility: A1 ODF limits and gains,
   sequential `oqN` model reveal, native FO officer-cap changes, ownership
   reversal, queue admission limits, and compatibility save state.
@@ -169,7 +181,9 @@ launch. Optional `mission_selector.ini` metadata supplies campaign text,
 switchable campaign backgrounds, mission descriptions/objectives, preview
 images, replacement BZNs, and additional custom campaign sections; missing
 metadata falls back safely to native filenames. Custom campaigns use static
-unlock policy until independent saveable progression is implemented. See
+unlock policy until independent saveable progression is implemented. The
+browser reuses Armada's borderless shell dialog and native game-window owner,
+so it remains embedded in and fills the Fleet Operations client area. See
 [`modules/A2FOMissionSelector/README.md`](modules/A2FOMissionSelector/README.md).
 
 `A2FOInstantActionSettings.dll` restores the Instant Action **Load Settings**
@@ -217,6 +231,15 @@ integer `current/maximum`, localized ready/reload status, or a capacity bar.
 Each row supports a per-Craft label or texture-atlas icon, short and verbose
 tooltips, explicit GUI placement, and green/yellow/red capacity colours. See
 [`modules/A2FOEnergySystems/README.md`](modules/A2FOEnergySystems/README.md).
+
+The same selected-panel module can independently recolour the five native
+subsystem icons and their adjacent value text for healthy, low, critical,
+disabled, and destroyed states. The native hull/shield/crew icon-values use
+that same live-state palette in the mouse-over strip, as does crew in the
+selected presentation. The native officer icon/value has its own independent
+`officerIconColor` command, while the native special-energy icon/value has an
+independent `specialEnergyIconColor`; neither inherits those health colours.
+Omitted colours retain Armada's native presentation.
 
 `A2FODirectionalShields.dll` adds strictly opt-in forward, aft, port, and
 starboard shield stores while retaining Armada's aggregate shield display and
@@ -528,6 +551,19 @@ wreckageChance = 50
 and defaults to 100. Select `A2FOWreckage.dll` for the mod to enable this
 native policy.
 
+`A2FORefitYards.dll` lets a Craft declare `refitItem0` through
+`refitItem15`. Selecting one returns the Craft to the nearest same-team
+Shipyard with `refitHardpoint`; the destination then uses the yard's native
+Producer queue, costs, `buildTime`, progress UI, and cancellation/refund path.
+The source pathfinds to the hardpoint's oriented outside approach, then only
+that source object's collision-avoidance participation is suspended while a
+five-second synchronized position/orientation transition docks it. Active
+cancellation hands the original ship to the yard's native completed-build
+output queue, giving it the same launch path as a finished ship and restoring
+its collision state under native queue protection. The completed object
+replaces the original through the safe Evolver identity handoff. See
+[`modules/A2FORefitYards/README.md`](modules/A2FORefitYards/README.md).
+
 Higher ship-system upgrade pods continue to use Armada's existing field:
 
 ```text
@@ -608,6 +644,10 @@ The two optional Fleet Ops mod-information fields are documented in
 [`docs/fleetops-info-defaults.md`](docs/fleetops-info-defaults.md).
 The complete modder command and feature index is in
 [`docs/modder-command-reference.md`](docs/modder-command-reference.md).
+Copyable Race/Craft/weapon ODF blocks and the complete GUI/misc integration
+pack for resources, font glyphs, ammunition, directional shields, shield
+tooltips, and the XP bar are in
+[`docs/odf-gui-integration-guide.md`](docs/odf-gui-integration-guide.md).
 Legacy texture-folder activation and precedence are documented in
 [`modules/A2FORGBTextures/README.md`](modules/A2FORGBTextures/README.md).
 Faction-owned model texture suffixes, Race-name SOD nodes, and the Borg DDS
@@ -645,6 +685,8 @@ Dynamic render-only ambient swarms are documented in
 [`modules/A2FOSwarmSystem/README.md`](modules/A2FOSwarmSystem/README.md).
 Indexed hull-turret ODF commands and validation status are documented in
 [`modules/A2FOTurrets/README.md`](modules/A2FOTurrets/README.md).
+Ship-to-yard refit commands and current save limitation are documented in
+[`modules/A2FORefitYards/README.md`](modules/A2FORefitYards/README.md).
 DX8 per-pixel lighting, subsystem emissive commands, damage decals, selected
 `logoFileNames` hull-name decals, installation, and current shader limitations
 are documented in
@@ -659,8 +701,14 @@ Upgrade-pod configuration and ODF commands are documented in
 ```text
 Armada II/
 ├── A2FOExtensions.dll
+├── A2FORendererHelper.exe
+├── A2FORenderer.ini
 ├── Win2kDisableTaskSwitch.dll
 ├── Win2kDisableTaskSwitch.original.dll
+├── d3d9.dll                 (active only when DXVK is selected)
+├── renderers/
+│   └── dxvk/
+│       └── d3d9.dll             (32-bit DXVK payload)
 ├── modules/
 │   ├── A2FOAlwaysShowShields.dll
 │   ├── A2FOAnimatedHardpoints.dll
@@ -689,12 +737,9 @@ Armada II/
 │   └── A1Compat.dll
 ├── Shaders/
 │   └── dx8/
-│       ├── pixel/
-│       │   ├── ps.nvv
-│       │   └── ps_1.3.nvv
-│       └── vertex/
-│           ├── vs.nvv
-│           └── vs_1.3.nvv
+│       └── pixel/
+│           ├── ps.nvv
+│           └── ps_specular.nvv
 ├── RTS_CFG.h                (`upgradePodMaximumTier`; mod-overridable)
 └── A2FOExtensions.log
 ```
@@ -733,6 +778,7 @@ Outputs:
 
 ```text
 build/A2FOExtensions.dll
+build/A2FORendererHelper.exe
 build/Win2kDisableTaskSwitch.dll
 build/modules/A2FOAlwaysShowShields.dll
 build/modules/A2FOAnimatedHardpoints.dll
@@ -759,10 +805,8 @@ build/modules/A2FOTextureVariants.dll
 build/modules/A2FOTurrets.dll
 build/modules/A2FOWeaponDamageControls.dll
 build/modules/A2FOWreckage.dll
-build/Shaders/dx8/vertex/vs.nvv
-build/Shaders/dx8/vertex/vs_1.3.nvv
 build/Shaders/dx8/pixel/ps.nvv
-build/Shaders/dx8/pixel/ps_1.3.nvv
+build/Shaders/dx8/pixel/ps_specular.nvv
 build/licenses/armada-nebula-patch.txt
 ```
 
@@ -779,6 +823,14 @@ that depend on deploy-time MinGW DLLs such as `libwinpthread-1.dll`; Armada's
 On Linux, `make smoke` also verifies under Wine that the core DLL loads and
 exports `A2FO_Initialize`.
 
+For non-invasive performance and leak measurements, `make telemetry` builds a
+native 64-bit Linux monitor at `build/a2fo_telemetry`. It observes the Wine
+process through `/proc` and, when requested, NVML; it does not inject into the
+game or control windows/input. It records GPU-wide telemetry and attempts to
+record per-process VRAM when the Wine graphics process is exposed by NVML.
+Usage and baseline interpretation are recorded in
+[`PERFORMANCE_LOG.md`](PERFORMANCE_LOG.md).
+
 Before installing the proxy, rename the original shipped startup DLL:
 
 ```text
@@ -787,5 +839,46 @@ Win2kDisableTaskSwitch.dll
 ```
 
 Then copy the newly built `Win2kDisableTaskSwitch.dll`,
-`A2FOExtensions.dll`, the `modules` directory, and the `Shaders` directory
-into the Fleet Operations `Data` directory.
+`A2FOExtensions.dll`, `A2FORendererHelper.exe`, the `modules` directory, and
+the `Shaders` directory into the Fleet Operations `Data` directory.
+
+## Renderer selection
+
+A2FOExtensions adds a **Renderer** list to Fleet Operations' native Graphics
+Options screen:
+
+- **System Direct3D 9 (Windows / WineD3D)** uses Windows' native D3D9 on
+  Windows and WineD3D under Wine.
+- **DXVK (Vulkan)** uses the 32-bit DXVK `d3d9.dll` stored at
+  `Data/renderers/dxvk/d3d9.dll`.
+
+Renderer choice is installation-wide and is saved in
+`Data/A2FORenderer.ini`. A visible note on the form explains that a game
+restart means fully exiting and relaunching Fleet Operations; the in-engine
+reset cannot replace a loaded graphics DLL. The game never replaces its live graphics DLL:
+`A2FORendererHelper.exe` waits for Armada to exit, then activates or removes
+the A2FO-managed `Data/d3d9.dll` for the next start. On the first DXVK switch,
+an existing system wrapper such as ReShade is preserved byte-for-byte at
+`Data/renderers/system/d3d9.dll`; switching back restores that file. Once the
+backup exists, the helper refuses to replace an active DLL that matches neither
+the managed DXVK payload nor the saved system wrapper. Results and errors are
+recorded in `Data/A2FORenderer.log` and `A2FORenderer.ini`.
+
+At startup, A2FO also compares the active `Data/d3d9.dll` with the managed
+payload. That file state is authoritative over stale `AppliedBackend` metadata
+when selecting the DXVK-specific DOT3/bloom safety path, and the Graphics page
+reconciles its applied-state display from the same files.
+
+The same screen adds **Emissive Maps** and **Specular Maps** switches beside
+Fleet Operations' native **Bump Mapping** switch. These two effects apply
+immediately, default to enabled, and are persisted in the `[Effects]` section
+of `Data/A2FORenderer.ini`; changing them does not require a restart. With the
+managed DXVK backend, emissive maps also receive selective native framebuffer
+bloom. It defaults on and can be disabled for the next start with
+`EmissiveBloom=0` in the same section; the system renderer retains sharp
+emissive centres without the private bloom targets.
+
+DXVK is optional and is not produced by this source build. Install the 32-bit
+DXVK D3D9 DLL in the payload location above before selecting it. Wine launchers
+should retain a native-then-builtin D3D9 override such as `d3d9=n,b`: with the
+managed DLL present Wine loads DXVK, and without it Wine falls back to WineD3D.

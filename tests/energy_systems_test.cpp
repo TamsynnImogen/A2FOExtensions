@@ -14,6 +14,12 @@ int main() {
                9.0f, automatic, 2.0f, false) == 10.0f);
 
     StorePolicy docked{12.0f, 4.0f, RechargeMode::resupply_only};
+    assert(a2fo::energy_systems::store_enabled(automatic));
+    assert(!a2fo::energy_systems::requires_resupply(automatic));
+    assert(a2fo::energy_systems::store_enabled(docked));
+    assert(a2fo::energy_systems::requires_resupply(docked));
+    assert(!a2fo::energy_systems::store_enabled(StorePolicy{}));
+    assert(!a2fo::energy_systems::requires_resupply(StorePolicy{}));
     assert(a2fo::energy_systems::recharge(
                3.0f, docked, 1.0f, false) == 3.0f);
     assert(a2fo::energy_systems::recharge(

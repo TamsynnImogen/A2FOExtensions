@@ -206,26 +206,31 @@ std::uint32_t combine_emissive_pixel(
     std::uint8_t enabled_mask,
     const std::array<std::uint32_t, kEmissiveSystemCount>&
         intensity_percent) noexcept {
-    std::uint32_t red = 0;
-    std::uint32_t green = 0;
-    std::uint32_t blue = 0;
-    const auto scaled_channel = [](std::uint32_t channel,
-                                   std::uint32_t percent) noexcept {
+    std::uint32_t combined = 0xff000000u;
+    for (std::size_t index = 0; index < pixels.size(); ++index) {
+        if ((enabled_mask & (1u << index)) == 0) continue;
+        combined = merge_emissive_pixel(
+            combined, pixels[index], intensity_percent[index]);
+    }
+    return combined;
+}
+
+std::uint32_t merge_emissive_pixel(
+    std::uint32_t combined, std::uint32_t source,
+    std::uint32_t intensity_percent) noexcept {
+    const auto scaled_channel = [intensity_percent](
+                                    std::uint32_t channel) noexcept {
         const std::uint64_t scaled =
-            static_cast<std::uint64_t>(channel) * percent + 50u;
+            static_cast<std::uint64_t>(channel) * intensity_percent + 50u;
         return static_cast<std::uint32_t>(
             std::min<std::uint64_t>(255u, scaled / 100u));
     };
-    for (std::size_t index = 0; index < pixels.size(); ++index) {
-        if ((enabled_mask & (1u << index)) == 0) continue;
-        const std::uint32_t pixel = pixels[index];
-        red = std::max(red, scaled_channel(
-            (pixel >> 16) & 0xffu, intensity_percent[index]));
-        green = std::max(green, scaled_channel(
-            (pixel >> 8) & 0xffu, intensity_percent[index]));
-        blue = std::max(blue, scaled_channel(
-            pixel & 0xffu, intensity_percent[index]));
-    }
+    const std::uint32_t red = std::max(
+        (combined >> 16) & 0xffu, scaled_channel((source >> 16) & 0xffu));
+    const std::uint32_t green = std::max(
+        (combined >> 8) & 0xffu, scaled_channel((source >> 8) & 0xffu));
+    const std::uint32_t blue = std::max(
+        combined & 0xffu, scaled_channel(source & 0xffu));
     return 0xff000000u | (red << 16) | (green << 8) | blue;
 }
 

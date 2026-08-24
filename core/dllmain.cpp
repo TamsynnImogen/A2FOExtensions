@@ -10,6 +10,8 @@
 #include "module_loader.hpp"
 #include "module_menu.hpp"
 #include "nebula_renderer.hpp"
+#include "renderer_options.hpp"
+#include "build_identity.hpp"
 #include "../sdk/include/a2fo_module_api.h"
 #include "../sdk/include/a2fo_supported_armada.hpp"
 
@@ -239,6 +241,7 @@ bool g_weapon_class_loaded_hook_ready = false;
 bool g_weapon_trigger_hook_ready = false;
 bool g_craft_event_hooks_ready = false;
 bool g_module_menu_hook_ready = false;
+bool g_renderer_options_hook_ready = false;
 a2fo::InlineHook g_build_class_hook;
 a2fo::InlineHook g_dtor_hook;
 a2fo::InlineHook g_parameter_db_get_string_hook;
@@ -298,6 +301,11 @@ struct ClasslabelOdfDefaultsPolicy {
     std::string owner;
 };
 
+struct RaceOdfDefaultPolicy {
+    std::string value;
+    std::string owner;
+};
+
 struct OdfOverlayDirectoryPolicy {
     std::string directory;
     std::string owner;
@@ -343,17 +351,21 @@ struct NativeWeaponTriggerRegistration {
     std::string owner;
     A2FO_WeaponTriggerHandler handler = nullptr;
     void* user_data = nullptr;
+    std::uint32_t event_mask = A2FO_WEAPON_TRIGGER_EVENT_MASK_ALL;
 };
 
 struct NativeCraftEventRegistration {
     std::string owner;
     A2FO_CraftEventHandler handler = nullptr;
     void* user_data = nullptr;
+    std::uint32_t event_mask = A2FO_CRAFT_EVENT_MASK_ALL;
 };
 
 std::unordered_map<std::string, ClasslabelAliasPolicy> g_classlabel_aliases;
 std::unordered_map<std::string, ClasslabelOdfDefaultsPolicy>
     g_classlabel_odf_defaults;
+std::unordered_map<std::string, RaceOdfDefaultPolicy>
+    g_race_odf_defaults;
 std::vector<OdfOverlayDirectoryPolicy> g_odf_overlay_directories;
 std::unordered_map<void*, std::string> g_original_classlabels;
 std::unordered_map<std::string, OdfSnapshot> g_odf_snapshots;
@@ -377,8 +389,10 @@ std::vector<NativeRaceLoadedRegistration> g_race_loaded_handlers;
 std::vector<NativeWeaponClassLoadedRegistration>
     g_weapon_class_loaded_handlers;
 std::vector<NativeWeaponTriggerRegistration> g_weapon_trigger_handlers;
+std::uint32_t g_weapon_trigger_event_mask = 0;
 std::vector<NativeCraftEventRegistration> g_craft_event_handlers;
 std::set<std::string> g_game_object_class_odf_fields{"basename"};
+std::set<std::string> g_object_destroyed_odf_fields{"basename"};
 std::set<std::string> g_race_odf_fields;
 std::set<std::string> g_weapon_class_odf_fields;
 bool g_policy_registration_open = true;
@@ -395,6 +409,8 @@ struct RegistrationTransaction {
     std::unordered_map<std::string, ClasslabelAliasPolicy> classlabel_aliases;
     std::unordered_map<std::string, ClasslabelOdfDefaultsPolicy>
         classlabel_odf_defaults;
+    std::unordered_map<std::string, RaceOdfDefaultPolicy>
+        race_odf_defaults;
     std::vector<OdfOverlayDirectoryPolicy> odf_overlay_directories;
     std::string cocoon_command;
     std::string cocoon_owner;
@@ -407,8 +423,10 @@ struct RegistrationTransaction {
     std::vector<NativeWeaponClassLoadedRegistration>
         weapon_class_loaded_handlers;
     std::vector<NativeWeaponTriggerRegistration> weapon_trigger_handlers;
+    std::uint32_t weapon_trigger_event_mask = 0;
     std::vector<NativeCraftEventRegistration> craft_event_handlers;
     std::set<std::string> game_object_class_odf_fields;
+    std::set<std::string> object_destroyed_odf_fields;
     std::set<std::string> race_odf_fields;
     std::set<std::string> weapon_class_odf_fields;
 };
@@ -1373,6 +1391,90 @@ bool register_classlabel_odf_defaults_policy(
     return registered;
 }
 
+bool register_race_odf_defaults_policy(
+    const char* owner_value, const A2FO_RaceOdfDefault* defaults,
+    std::uint32_t default_count) {
+    const std::string owner = policy_owner(owner_value);
+    if (!defaults || default_count == 0 || default_count > 64) {
+        log_line("Race ODF defaults rejected for " + owner +
+                 "; invalid default list");
+        return false;
+    }
+
+    std::vector<std::pair<std::string, std::string>> copied_defaults;
+    try {
+        copied_defaults.reserve(default_count);
+        std::set<std::string> unique_commands;
+        for (std::uint32_t index = 0; index < default_count; ++index) {
+            const A2FO_RaceOdfDefault& item = defaults[index];
+            if (!valid_odf_field_name(item.command) ||
+                !valid_odf_default_value(item.value)) {
+                log_line("Race ODF defaults rejected for " + owner +
+                         "; commands and values must be bounded text");
+                return false;
+            }
+            std::string command = lower_ascii(item.command);
+            if (!unique_commands.insert(command).second) {
+                log_line("Race ODF defaults rejected for " + owner +
+                         "; duplicate command " + command);
+                return false;
+            }
+            copied_defaults.emplace_back(
+                std::move(command), std::string(item.value));
+        }
+    } catch (...) {
+        log_line("Race ODF defaults rejected for " + owner +
+                 "; could not copy registration data");
+        return false;
+    }
+
+    bool registered = false;
+    bool registration_open = false;
+    std::string conflict_command;
+    std::string conflict_owner;
+    {
+        StateLockGuard lock;
+        registration_open = g_policy_registration_open &&
+                            g_registration_transaction.active;
+        if (registration_open &&
+            g_race_odf_defaults.size() + copied_defaults.size() <= 256) {
+            for (const auto& item : copied_defaults) {
+                const auto existing = g_race_odf_defaults.find(item.first);
+                if (existing != g_race_odf_defaults.end()) {
+                    conflict_command = item.first;
+                    conflict_owner = existing->second.owner;
+                    break;
+                }
+            }
+            if (conflict_command.empty()) {
+                for (auto& item : copied_defaults) {
+                    g_race_odf_defaults.emplace(
+                        std::move(item.first),
+                        RaceOdfDefaultPolicy{
+                            std::move(item.second), owner});
+                }
+                registered = true;
+            }
+        }
+    }
+
+    if (registered) {
+        log_line("Race ODF defaults registered by " + owner + " (" +
+                 std::to_string(default_count) + " commands)");
+    } else if (!registration_open) {
+        log_line("Race ODF defaults rejected for " + owner +
+                 "; startup registration is closed");
+    } else if (!conflict_command.empty()) {
+        log_line("Race ODF defaults rejected for " + owner + "; " +
+                 conflict_command + " is already owned by " +
+                 conflict_owner);
+    } else {
+        log_line("Race ODF defaults rejected for " + owner +
+                 "; the command limit was reached");
+    }
+    return registered;
+}
+
 bool register_evolver_cocoon_policy(const char* owner_value,
                                     const char* command_value) {
     const std::string owner = policy_owner(owner_value);
@@ -1482,6 +1584,7 @@ void begin_module_registration(const std::string& path) {
         snapshot.info_ini_defaults_owner = g_info_ini_defaults_owner;
         snapshot.classlabel_aliases = g_classlabel_aliases;
         snapshot.classlabel_odf_defaults = g_classlabel_odf_defaults;
+        snapshot.race_odf_defaults = g_race_odf_defaults;
         snapshot.odf_overlay_directories = g_odf_overlay_directories;
         snapshot.cocoon_command = g_evolver_cocoon_command;
         snapshot.cocoon_owner = g_evolver_cocoon_owner;
@@ -1493,9 +1596,12 @@ void begin_module_registration(const std::string& path) {
         snapshot.weapon_class_loaded_handlers =
             g_weapon_class_loaded_handlers;
         snapshot.weapon_trigger_handlers = g_weapon_trigger_handlers;
+        snapshot.weapon_trigger_event_mask = g_weapon_trigger_event_mask;
         snapshot.craft_event_handlers = g_craft_event_handlers;
         snapshot.game_object_class_odf_fields =
             g_game_object_class_odf_fields;
+        snapshot.object_destroyed_odf_fields =
+            g_object_destroyed_odf_fields;
         snapshot.race_odf_fields = g_race_odf_fields;
         snapshot.weapon_class_odf_fields = g_weapon_class_odf_fields;
         g_registration_transaction = std::move(snapshot);
@@ -1532,6 +1638,8 @@ void finish_module_registration(const std::string& path, bool initialized) {
                 std::move(g_registration_transaction.classlabel_aliases);
             g_classlabel_odf_defaults = std::move(
                 g_registration_transaction.classlabel_odf_defaults);
+            g_race_odf_defaults = std::move(
+                g_registration_transaction.race_odf_defaults);
             g_odf_overlay_directories = std::move(
                 g_registration_transaction.odf_overlay_directories);
             g_evolver_cocoon_command =
@@ -1550,10 +1658,14 @@ void finish_module_registration(const std::string& path, bool initialized) {
                 g_registration_transaction.weapon_class_loaded_handlers);
             g_weapon_trigger_handlers = std::move(
                 g_registration_transaction.weapon_trigger_handlers);
+            g_weapon_trigger_event_mask =
+                g_registration_transaction.weapon_trigger_event_mask;
             g_craft_event_handlers = std::move(
                 g_registration_transaction.craft_event_handlers);
             g_game_object_class_odf_fields = std::move(
                 g_registration_transaction.game_object_class_odf_fields);
+            g_object_destroyed_odf_fields = std::move(
+                g_registration_transaction.object_destroyed_odf_fields);
             g_race_odf_fields = std::move(
                 g_registration_transaction.race_odf_fields);
             g_weapon_class_odf_fields = std::move(
@@ -2029,16 +2141,27 @@ void* A2FO_CALL game_object_class_find_project_id_hook(
     const std::string key = normalize_odf_basename(basename);
     if (key.empty()) return object_class;
 
-    std::string field_names;
-    for (const auto& field : context.fields) {
-        if (!field_names.empty()) field_names += ", ";
-        field_names += field.first;
-    }
     context.fields["basename"] = basename;
-    OdfSnapshot snapshot = context.fields;
+    OdfSnapshot snapshot = std::move(context.fields);
     {
         StateLockGuard lock;
-        g_odf_snapshots[key] = std::move(context.fields);
+        // Object-destruction dispatch is the only consumer which outlives
+        // this load callback. Retain just its requested fields instead of the
+        // much larger union requested by every class-loaded module.
+        if (!g_object_destroyed_handlers.empty()) {
+            OdfSnapshot retained;
+            for (const std::string& field : g_object_destroyed_odf_fields) {
+                const auto value = snapshot.find(field);
+                if (value != snapshot.end()) retained.emplace(*value);
+            }
+            if (retained.size() > 1) {
+                g_odf_snapshots[key] = std::move(retained);
+            } else {
+                // `snapshot_destroyed_object` already supplies basename, so
+                // classes without any destruction command need no cache row.
+                g_odf_snapshots.erase(key);
+            }
+        }
     }
 
     std::vector<NativeGameObjectClassLoadedRegistration> handlers;
@@ -2073,8 +2196,6 @@ void* A2FO_CALL game_object_class_find_project_id_hook(
             }
         }
     }
-    log_line("GameObjectClass ODF fields cached: " + basename +
-             " (" + field_names + ")");
     return object_class;
 }
 
@@ -2084,11 +2205,16 @@ extern "C" void __cdecl a2fo_dispatch_race_odf_loaded(
     try {
         std::vector<std::string> requested_fields;
         std::vector<NativeRaceLoadedRegistration> handlers;
+        std::unordered_map<std::string, std::string> odf_defaults;
         {
             StateLockGuard lock;
             requested_fields.assign(
                 g_race_odf_fields.begin(), g_race_odf_fields.end());
             handlers = g_race_loaded_handlers;
+            odf_defaults.reserve(g_race_odf_defaults.size());
+            for (const auto& item : g_race_odf_defaults) {
+                odf_defaults.emplace(item.first, item.second.value);
+            }
         }
         if (handlers.empty()) return;
 
@@ -2098,6 +2224,11 @@ extern "C" void __cdecl a2fo_dispatch_race_odf_loaded(
             if (read_odf_snapshot_value(
                     parameter_db, command.c_str(), value)) {
                 snapshot[command] = std::move(value);
+            } else {
+                const auto fallback = odf_defaults.find(command);
+                if (fallback != odf_defaults.end()) {
+                    snapshot[command] = fallback->second;
+                }
             }
         }
         std::vector<A2FO_OdfFieldView> fields;
@@ -2188,13 +2319,20 @@ std::uintptr_t __attribute__((fastcall)) weapon_class_constructor_hook(
 
 bool dispatch_weapon_trigger(
     std::uint32_t kind, void* weapon, const void* target) noexcept {
+    if (kind > A2FO_WEAPON_TRIGGER_COMMITTED ||
+        (g_weapon_trigger_event_mask & (1u << kind)) == 0) {
+        return true;
+    }
     A2FO_WeaponTriggerEvent event{};
     event.struct_size = sizeof(event);
     event.kind = kind;
     event.weapon = weapon;
     event.target = target;
     for (const auto& registration : g_weapon_trigger_handlers) {
-        if (!registration.handler) continue;
+        if (!registration.handler ||
+            (registration.event_mask & (1u << kind)) == 0) {
+            continue;
+        }
         try {
             const bool accepted = registration.handler(
                 &event, registration.user_data);
@@ -2231,7 +2369,10 @@ void dispatch_craft_event(std::uint32_t kind, void* craft,
     event.craft = craft;
     event.elapsed_seconds = elapsed_seconds;
     for (const auto& registration : g_craft_event_handlers) {
-        if (!registration.handler) continue;
+        if (!registration.handler || kind > A2FO_CRAFT_EVENT_POST_LOAD ||
+            (registration.event_mask & (1u << kind)) == 0) {
+            continue;
+        }
         try {
             registration.handler(&event, registration.user_data);
         } catch (...) {
@@ -2312,11 +2453,11 @@ DestroyedObjectSnapshot snapshot_destroyed_object(void* self) {
     }
 
     auto* bytes = static_cast<std::uint8_t*>(self);
-    if (bytes[0x113] != 0) {
-        log_line("Object-destroyed snapshot unavailable: Craft explosion "
-                 "state was already " + std::to_string(bytes[0x113]));
-        return snapshot;
-    }
+    // Craft's native destruction lifecycle commonly sets its +0x113
+    // explosion flag to 1 before dispatching the virtual Craft::Explode call.
+    // It therefore describes the expected entry state here, not a duplicate
+    // callback. Craft::Explode destroys the object before returning, so the
+    // entry hook itself is already the one-shot boundary.
     void* object_class = *reinterpret_cast<void**>(bytes + 0x40);
     if (!object_class) {
         log_line("Object-destroyed snapshot unavailable: Craft class was null");
@@ -3295,6 +3436,24 @@ bool A2FO_CALL api_register_classlabel_odf_defaults(
     }
 }
 
+bool A2FO_CALL api_register_race_odf_defaults(
+    const char* module_name, const A2FO_RaceOdfDefault* defaults,
+    std::uint32_t default_count) {
+    if (!g_race_loaded_hook_ready && !g_policy_registration_open) {
+        log_line("Race ODF defaults rejected; Race-loaded dispatch is "
+                 "unavailable");
+        return false;
+    }
+    try {
+        return register_race_odf_defaults_policy(
+            module_name, defaults, default_count);
+    } catch (...) {
+        log_line("Race ODF defaults registration failed after an "
+                 "unexpected C++ exception");
+        return false;
+    }
+}
+
 bool A2FO_CALL api_register_evolver_cocoon_command(
     const char* module_name, const char* command) {
     try {
@@ -3391,6 +3550,7 @@ bool A2FO_CALL api_register_object_destroyed_handler(
             for (const std::string& field :
                  registration.required_odf_fields) {
                 g_game_object_class_odf_fields.insert(field);
+                g_object_destroyed_odf_fields.insert(field);
             }
             g_object_destroyed_handlers.push_back(std::move(registration));
             registered = true;
@@ -3589,11 +3749,14 @@ bool A2FO_CALL api_register_weapon_class_loaded_handler(
     return registered;
 }
 
-bool A2FO_CALL api_register_weapon_trigger_handler(
-    const char* module_name, A2FO_WeaponTriggerHandler handler,
-    void* user_data) {
+bool A2FO_CALL api_register_weapon_trigger_handler_masked(
+    const char* module_name, std::uint32_t event_mask,
+    A2FO_WeaponTriggerHandler handler, void* user_data) {
     const std::string owner = policy_owner(module_name);
-    if (!handler || !g_state_lock_ready) return false;
+    if (!handler || !g_state_lock_ready || event_mask == 0 ||
+        (event_mask & ~A2FO_WEAPON_TRIGGER_EVENT_MASK_ALL) != 0) {
+        return false;
+    }
     bool registered = false;
     {
         StateLockGuard lock;
@@ -3601,7 +3764,9 @@ bool A2FO_CALL api_register_weapon_trigger_handler(
             g_registration_transaction.active &&
             g_weapon_trigger_handlers.size() < 64) {
             g_weapon_trigger_handlers.push_back(
-                NativeWeaponTriggerRegistration{owner, handler, user_data});
+                NativeWeaponTriggerRegistration{
+                    owner, handler, user_data, event_mask});
+            g_weapon_trigger_event_mask |= event_mask;
             registered = true;
         }
     }
@@ -3610,11 +3775,22 @@ bool A2FO_CALL api_register_weapon_trigger_handler(
     return registered;
 }
 
-bool A2FO_CALL api_register_craft_event_handler(
-    const char* module_name, A2FO_CraftEventHandler handler,
+bool A2FO_CALL api_register_weapon_trigger_handler(
+    const char* module_name, A2FO_WeaponTriggerHandler handler,
     void* user_data) {
+    return api_register_weapon_trigger_handler_masked(
+        module_name, A2FO_WEAPON_TRIGGER_EVENT_MASK_ALL,
+        handler, user_data);
+}
+
+bool A2FO_CALL api_register_craft_event_handler_masked(
+    const char* module_name, std::uint32_t event_mask,
+    A2FO_CraftEventHandler handler, void* user_data) {
     const std::string owner = policy_owner(module_name);
-    if (!handler || !g_state_lock_ready) return false;
+    if (!handler || !g_state_lock_ready || event_mask == 0 ||
+        (event_mask & ~A2FO_CRAFT_EVENT_MASK_ALL) != 0) {
+        return false;
+    }
     bool registered = false;
     {
         StateLockGuard lock;
@@ -3622,13 +3798,21 @@ bool A2FO_CALL api_register_craft_event_handler(
             g_registration_transaction.active &&
             g_craft_event_handlers.size() < 64) {
             g_craft_event_handlers.push_back(
-                NativeCraftEventRegistration{owner, handler, user_data});
+                NativeCraftEventRegistration{
+                    owner, handler, user_data, event_mask});
             registered = true;
         }
     }
     log_line(std::string("Craft-event handler ") +
              (registered ? "registered by " : "rejected for ") + owner);
     return registered;
+}
+
+bool A2FO_CALL api_register_craft_event_handler(
+    const char* module_name, A2FO_CraftEventHandler handler,
+    void* user_data) {
+    return api_register_craft_event_handler_masked(
+        module_name, A2FO_CRAFT_EVENT_MASK_ALL, handler, user_data);
 }
 
 bool A2FO_CALL api_dispatch_producer_event(
@@ -3751,6 +3935,7 @@ A2FO_ModuleApi make_module_api() {
     api.capabilities |= A2FO_CAP_WEAPON_CLASS_LOADED;
     api.capabilities |= A2FO_CAP_WEAPON_TRIGGER_EVENTS;
     api.capabilities |= A2FO_CAP_CRAFT_EVENTS;
+    api.capabilities |= A2FO_CAP_RACE_ODF_DEFAULTS;
     if (g_classlabel_alias_hook_ready) {
         api.capabilities |= A2FO_CAP_CLASSLABEL_ODF_DEFAULTS;
     }
@@ -3783,6 +3968,12 @@ A2FO_ModuleApi make_module_api() {
     api.register_weapon_trigger_handler =
         &api_register_weapon_trigger_handler;
     api.register_craft_event_handler = &api_register_craft_event_handler;
+    api.register_craft_event_handler_masked =
+        &api_register_craft_event_handler_masked;
+    api.register_weapon_trigger_handler_masked =
+        &api_register_weapon_trigger_handler_masked;
+    api.register_race_odf_defaults =
+        &api_register_race_odf_defaults;
     return api;
 }
 
@@ -3883,6 +4074,10 @@ DWORD WINAPI initialize(void*) {
 
       if (!g_module_menu_hook_ready && g_fleet_ops) {
           g_module_menu_hook_ready = a2fo::install_module_menu(
+              g_fleet_ops, g_extension_roots.front(), &log_line);
+      }
+      if (!g_renderer_options_hook_ready && g_fleet_ops) {
+          g_renderer_options_hook_ready = a2fo::install_renderer_options(
               g_fleet_ops, g_extension_roots.front(), &log_line);
       }
 
@@ -4095,7 +4290,7 @@ DWORD WINAPI initialize_worker(void*) {
     return 0;
 }
 
-BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
+BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
     if (reason == DLL_PROCESS_ATTACH) {
         // Preserve the startup timing of the proven monolithic build. These
         // checked memory hooks must exist before Armada builds its ODF classes.
@@ -4104,6 +4299,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
         DisableThreadLibraryCalls(instance);
         open_log();
         log_line("A2FOExtensions initialization started");
+        log_line(std::string("A2FOExtensions build: ") + A2FO_BUILD_ID);
         g_root_directory = module_directory(nullptr);
         g_armada = GetModuleHandleA(nullptr);
         g_fleet_ops = GetModuleHandleA("FleetOpsHook.dll");
@@ -4142,6 +4338,11 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
             log_line("Could not create deferred initialization worker");
         }
         (void)instance;
+    } else if (reason == DLL_PROCESS_DETACH && reserved == nullptr) {
+        // An explicit FreeLibrary happens while dependency code is still
+        // callable. During whole-process termination Windows reclaims the COM
+        // objects, and avoiding virtual calls under teardown is safer.
+        a2fo::shutdown_nebula_renderer();
     }
     return TRUE;
 }

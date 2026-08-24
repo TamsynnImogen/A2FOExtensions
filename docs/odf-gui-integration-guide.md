@@ -412,12 +412,31 @@ infoSingleShieldBarArea = 26 126 103 10
 infoSingleExperienceBarArea = 10 148 512 8
 experienceBarColor = 0.2 0.65 1.0
 experienceBarBackgroundColor = 0.25 0.25 0.25
+
+// Native subsystem icons by live state
+systemIconHealthyColor = 0.20 1.00 0.20
+systemIconLowColor = 1.00 0.90 0.00
+systemIconCriticalColor = 1.00 0.15 0.00
+systemIconDisabledColor = 0.25 0.55 1.00
+systemIconDestroyedColor = 1.00 0.00 1.00
+
+// Fixed special-energy and officer icon/value colours, independent of live state
+specialEnergyIconColor = 1.00 1.00 0.00
+officerIconColor = 1.00 0.50 0.00
 ```
 
 `infoSingleCaptainTextArea` is also A2FO's selected-panel coordinate anchor.
 Keep it defined even if the Craft does not use `possibleCaptainNames`.
 Without it, custom ammunition rectangles, the native shield hover region, and
 the XP bar cannot be translated into the selected panel reliably.
+
+Stations with a build queue use Armada's separate tall producer panel. A2FO
+hooks that renderer too: ammunition and directional shields use the panel's
+live `infoBuildName` or `infoBuildClass` component, then rebase it onto
+`infoSingleCaptainTextArea`. The `infoSinglePhoton*`, `infoSingleQuantum*`, and
+`infoSingleDirectionalShields*` rectangles above therefore remain the one
+authoritative set; do not duplicate them. Preserve the native `infoBuildName`
+and `infoBuildClass` rectangles in the same GUI CFG.
 
 The directional graphic area should remain 128 by 128. When all four sprites
 load, the ring replaces the two numeric directional-shield rows. When any
@@ -431,6 +450,19 @@ Ammunition and directional colours use these thresholds:
 - low: above 25% through 50%;
 - critical: 25% or below;
 - a mode-2 directional arc at exactly zero is black.
+
+Native subsystem icons and their adjacent numeric value text use the same
+healthy/low/critical thresholds while operational. Their disabled and
+destroyed colours are separate: timed or control-forced outages are disabled,
+while zero-hitpoint and damaged not-yet-operational systems are destroyed.
+Each of the five colour commands is optional; a missing command preserves the
+native colour for that state.
+`specialEnergyIconColor` is a separate optional fixed colour for the native
+selected-panel special-energy icon and adjacent value. It never follows the
+subsystem, hull, shield, or crew health palette.
+`officerIconColor` is a separate optional fixed colour for the selected-panel
+officer icon and adjacent value. It never follows the subsystem, hull, shield,
+or crew health palette.
 
 ## `ART_CFG.h`
 

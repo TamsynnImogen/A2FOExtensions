@@ -85,6 +85,13 @@ std::uint32_t combine_emissive_pixel(
     const std::array<std::uint32_t, kEmissiveSystemCount>&
         intensity_percent) noexcept;
 
+// Merges one source into an already-combined opaque ARGB pixel. The operation
+// is associative per colour channel, so render caches can process dense and
+// sparse source maps without changing the final image.
+std::uint32_t merge_emissive_pixel(
+    std::uint32_t combined, std::uint32_t source,
+    std::uint32_t intensity_percent) noexcept;
+
 // Expands an emissive mask across nearby texels before it is uploaded. This
 // produces a soft material-space halo without replacing Fleet Operations'
 // stable native D3D8 device with a post-processing wrapper. The original

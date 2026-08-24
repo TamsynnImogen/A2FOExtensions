@@ -6,7 +6,9 @@
 
 #pragma once
 
+#include "build_submenu_config.hpp"
 #include "hybrid_production.hpp"
+#include "refit_ui_bridge_api.hpp"
 
 #include "../../sdk/include/a2fo_module_api.h"
 
@@ -26,6 +28,19 @@ namespace a2fo {
 bool initialize_hybrid_production_registry(const A2FO_ModuleApi* api,
                                            HMODULE armada,
                                            HMODULE fleet_ops) noexcept;
+
+// Registers the optional RefitYards presentation adapter. HybridBuild keeps
+// sole ownership of the popup and ControlButton hooks; the refit module only
+// supplies items and queues synchronized requests through this bridge.
+bool register_refit_ui_bridge(
+    const A2FO_RefitUiBridge* bridge) noexcept;
+
+// Converts a Producer's presentation-only buildItem parents into live palette
+// submenus while publishing only the real children to the runtime build list.
+bool register_live_build_submenus(
+    void* producer_class,
+    const build_submenu::Config& config,
+    const std::string& source_odf) noexcept;
 
 // Reads the explicit commands from the proven ResearchStation class callback.
 // Keeping parsing on the exact supported host avoids intercepting every

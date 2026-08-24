@@ -301,8 +301,6 @@ std::unordered_map<void*, RaceStartingResources> g_race_starting_resources;
 std::unordered_map<void*, ResourcePresentation> g_race_presentations;
 std::uint32_t g_presentation_generation = 0;
 PanelConfiguration g_panel_configuration{};
-bool g_panel_draw_probe_logged = false;
-bool g_starting_resource_probe_logged = false;
 void* g_panel_tooltip_component = nullptr;
 void* g_panel_tooltip_team = nullptr;
 std::int32_t g_panel_tooltip_resource = -1;
@@ -736,31 +734,13 @@ bool starting_amounts(void* team, Amounts* output) {
         a2fo_resources_call_thiscall_0(
             at(g_armada, kGameSetupGetStartingResourcesIndexRva), setup));
     Amounts amounts{};
-    bool log_probe = false;
     {
         LockGuard lock;
         const auto found = g_race_starting_resources.find(race);
         if (found == g_race_starting_resources.end()) return false;
         amounts = setting == 1 ? found->second.lots : found->second.normal;
-        if (!g_starting_resource_probe_logged) {
-            g_starting_resource_probe_logged = true;
-            log_probe = true;
-        }
     }
     *output = amounts;
-    if (log_probe) {
-        char message[224]{};
-        std::snprintf(
-            message, sizeof(message),
-            "Team starting resources resolved: team=%p race=%p setting=%lu "
-            "amounts=[%lld, %lld, %lld, %lld]",
-            team, race, static_cast<unsigned long>(setting),
-            static_cast<long long>(amounts[0]),
-            static_cast<long long>(amounts[1]),
-            static_cast<long long>(amounts[2]),
-            static_cast<long long>(amounts[3]));
-        log_line(message);
-    }
     return true;
 }
 
@@ -1156,19 +1136,6 @@ void __attribute__((fastcall)) resource_panel_render_hook(
         g_panel_configuration.parameter_db != parameter_db) {
         refresh_panel_configuration(parameter_db);
     }
-    const bool log_probe = !g_panel_draw_probe_logged;
-    if (log_probe) {
-        char message[224]{};
-        std::snprintf(message, sizeof(message),
-                      "Resource-panel draw probe: panel=%p team=%p "
-                      "amounts=[%lld, %lld, %lld, %lld]",
-                      panel, team,
-                      static_cast<long long>(amounts[0]),
-                      static_cast<long long>(amounts[1]),
-                      static_cast<long long>(amounts[2]),
-                      static_cast<long long>(amounts[3]));
-        log_line(message);
-    }
     const PanelRenderContext context = find_panel_render_context(panel);
     std::array<NativeRectangle, kResourceCount> rectangles{};
     for (std::size_t index = 0; index < kResourceCount; ++index) {
@@ -1176,37 +1143,16 @@ void __attribute__((fastcall)) resource_panel_render_hook(
             index, context.index, context.rectangle);
         rectangles[index] = rectangle;
         const Colour neutral_icon_colour{};
-        const bool icon_drawn = draw_panel_text(
+        draw_panel_text(
             cached_added_presentation(
                 index, A2FO_RESOURCE_PRESENTATION_ICON),
             rectangle, context.text_component, &neutral_icon_colour);
-        const bool amount_drawn = draw_panel_text(
+        draw_panel_text(
             g_panel_text_cache.lines[index].c_str(),
             panel_amount_rectangle(index, rectangle),
             context.text_component);
-        const bool drawn = icon_drawn && amount_drawn;
-        if (log_probe) {
-            char message[256]{};
-            std::snprintf(
-                message, sizeof(message),
-                "  resource_%lu: shared-context=%lu wrapper=%p text=%p "
-                "context=%ld,%ld,%ld,%ld target=%ld,%ld,%ld,%ld draw=%s",
-                static_cast<unsigned long>(index + kFirstAdditionalResource),
-                static_cast<unsigned long>(context.index),
-                context.resource_display, context.text_component,
-                static_cast<long>(context.rectangle.left),
-                static_cast<long>(context.rectangle.top),
-                static_cast<long>(context.rectangle.right),
-                static_cast<long>(context.rectangle.bottom),
-                static_cast<long>(rectangle.left),
-                static_cast<long>(rectangle.top),
-                static_cast<long>(rectangle.right),
-                static_cast<long>(rectangle.bottom), drawn ? "yes" : "no");
-            log_line(message);
-        }
     }
     update_added_resource_tooltip(panel, team, rectangles);
-    if (log_probe) g_panel_draw_probe_logged = true;
 }
 
 bool A2FO_CALL producer_event_handler(

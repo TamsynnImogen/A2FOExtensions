@@ -639,7 +639,10 @@ void A2FO_CALL craft_event_handler(
         g_craft_states.erase(event->craft);
         return;
     }
-    if (!g_runtime_ready || !g_damage_bridge_connected) return;
+    if (!g_runtime_ready || !g_damage_bridge_connected ||
+        g_class_policies.empty()) {
+        return;
+    }
     const ShieldPolicy* policy = policy_for_craft(event->craft);
     if (!policy) return;
     if (event->kind == A2FO_CRAFT_EVENT_POST_LOAD) {

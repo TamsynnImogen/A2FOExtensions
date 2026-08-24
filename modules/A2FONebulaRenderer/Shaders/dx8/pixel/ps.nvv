@@ -1,63 +1,24 @@
-; armadaNebulaPatch DX8 pixel shader
+; A2FOExtensions DX8 DOT3 pixel shader, derived from armadaNebulaPatch.
 ; Copyright (c) 2024 dev gao, MIT License
-ps.1.4  ;phase1 address shader
-;c0=ambient color
-;TODO: c1=light color
-;c2=specular&rim color
-def c0,0.2f,0.2f,0.2f,0.2f
-def c2,0.35f,0.35f,0.35f,0.35f
+;
+; Fleet Operations' stock dot3_directional.nvv vertex shader supplies one UV
+; iterator in t0 and the tangent-space light vector encoded in v0. ps.1.4 can
+; sample each destination texture stage with that shared t0 coordinate, so no
+; replacement vertex shader or extra oT registers are required.
+; stage0=diffuse, stage1=native bump/normal, stage2=emissive
+; c0=ART_CFG.h A2FO_BUMP_LIGHT_BIAS
+; c1=ART_CFG.h A2FO_EMISSIVE_BUMP_MULTIPLIER
+; c2=ART_CFG.h A2FO_EMISSIVE_DIFFUSE_RESTORE
+ps.1.4
 
-texcrd r5.rgb,t5    ;normal
-texcrd r4.rgb,t4    ;light dir
-;texld r1,t0    ;TODO: sample normal from texcoord 0
-texcrd r3.rgb,t3    ;halfwayDir
-texcrd r2.rgb,t2    ;viewDir
+texld r0,t0
+texld r1,t0
+texld r2,t0
 
-;normal dot halfwayDir(NdH)
-dp3_sat r3.rgb, r3, r5
-;normal dot viewDir(NdV)
-dp3_sat r2.rgb, r2_bx2, r5
-;normal dot light(NdL)
-dp3_sat r5.rgb, r4, r5
-
-;NdH pow 4 to get specular
-mul r3.rgb,r3,r3
-mul r3.rgb,r3,r3
-mul r3.rgb,r3,c2
-
-;rim
-mul r2.rgb,1-r2,1-r2
-mul r2.rgb,r2,c2
-
-phase   ;phase2 color shader
-
-texld r0,t0     ;sample diffuse from texcoord 0
-texld r1,t1     ;sample ODF subsystem-emissive composite
-
-;extract emissive from diffuse.alpha
-sub_sat r4.rgb,r0.aaa,r5
-add r5.rgb,r5,r4
-
-;ambient light
-add r5.rgb,r5,c0
-
-;mix light into diffuse
-mul r5.rgb,r0,r5
-
-;specular*diffuse
-mul r3.rgb,r0,r3
-
-;rim*diffuse
-mul r2.rgb,r0,r2
-
-;r0=final output
-;mix diffuse+specular+rim
-add r0.rgb,r3,r5
-add r0.rgb,r0,r2
-
-; emissive maps are independent of ambient/directional lighting. Fleet Ops'
-; post-process bloom can therefore pick up their bright pixels.
-add_sat r0.rgb,r0,r1
-
-;test
-;mov r0.rgb,r2
+mov r4,r0
+dp3_sat r3.rgb,r1_bx2,v0_bx2
+add r3.rgb,r3,c0
+mul r0.rgb,r0,r3
+dp3 r3.rgb,r2,c2
+mad r0.rgb,r4,r3,r0
+mad_sat r0.rgb,r2,c1,r0

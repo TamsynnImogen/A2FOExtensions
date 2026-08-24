@@ -7,6 +7,11 @@ browser. The four stock campaign sections deliberately retain native
 loading paths. Additional INI-defined campaigns reuse one native launch-table
 cell temporarily, without enlarging or writing beyond Armada's fixed table.
 
+The combined browser is hosted by Armada's own display-engine window and
+reuses the stock borderless Single Player dialog resource. It therefore stays
+inside the Fleet Operations shell instead of creating a captioned application
+window or a second taskbar entry, and fills the complete native client area.
+
 The selector uses a campaign-specific background image when one is configured,
 falling back to the active mod's `bitmaps/single/singleplay.png` and then a dark
 fill. If its native tables or window cannot be created, it falls back to
@@ -32,8 +37,11 @@ thumbnail = bzn/a2_fed01.png
 ```
 
 Sections are `campaign0` through `campaign3`; mission sections append
-`.mission0` through `.mission9`. Missing values fall back to native filenames
-and built-in campaign labels. `background` accepts a PNG, BMP, JPEG, or JPG
+`.mission0` through `.mission9`. When a mission `title` is omitted, the selector
+uses the matching entry from the active `label.map` `mission_select` section,
+just like Armada's native mission selector. If no label exists it falls back to
+a readable name derived from the BZN filename. Other missing values retain their
+existing built-in fallbacks. `background` accepts a PNG, BMP, JPEG, or JPG
 path. It is aspect-filled behind the selector and changes as soon as another
 campaign is selected; a subtle dark overlay preserves text readability.
 Mission thumbnails also auto-resolve beside the corresponding BZN in the same

@@ -4,7 +4,8 @@
  * The hook sites must be claimed during A2FOExtensions process attach because
  * Armada creates its shared DOT3 shader before deferred modules are loaded.
  * Heavy D3DX/file work remains lazy and occurs at the first DOT3 compilation,
- * outside the Windows loader lock.
+ * outside the Windows loader lock. Fleet Operations' stock DOT3 vertex shader
+ * and its source path remain untouched.
  */
 
 #pragma once
@@ -19,13 +20,28 @@ namespace a2fo {
 using NebulaRendererLog = void (*)(const std::string& message);
 
 // Installs checked pass-through hooks only. The feature activates lazily when
-// A2FONebulaRenderer.dll and its shaders are present at first DOT3 use.
+// A2FONebulaRenderer.dll and its pixel shaders are present at first DOT3 use.
 bool install_nebula_renderer_early(HMODULE armada, HMODULE fleet_ops,
                                    const std::string& root_directory,
                                    NebulaRendererLog log);
 
+// Releases the retained live Direct3D device and every GPU object owned by
+// the renderer. Process termination lets Windows reclaim these objects; this
+// entry point is for an orderly explicit core unload.
+void shutdown_nebula_renderer() noexcept;
+
 // -1 disabled/failed, 0 unavailable, 1 armed/waiting, 2 active.
 int nebula_renderer_status() noexcept;
+
+// Scales emissive RGB in the combined DOT3 bump/emissive pixel shader.
+// The fixed-function and non-bump emissive paths retain their native strength.
+bool set_nebula_emissive_bump_multiplier(float multiplier) noexcept;
+
+// Adds ambient light to the DOT3 result before diffuse modulation.
+bool set_nebula_bump_light_bias(float bias) noexcept;
+
+// Restores unlit diffuse RGB under the combined shader's emissive pixels.
+bool set_nebula_emissive_diffuse_restore(float amount) noexcept;
 
 // Called by the optional controller after a CraftClass has consumed its ODF.
 // All six paths are copied immediately in warp/impulse/shields/life-support/
@@ -41,6 +57,11 @@ bool register_nebula_emissive_materials(
     void* object_class, const char* const* diffuse_names,
     const char* const* texture_paths, std::uint32_t material_count,
     std::uint32_t texture_paths_per_material) noexcept;
+
+// Registers one loose specular-map path per indexed diffuse material.
+bool register_nebula_specular_materials(
+    void* object_class, const char* const* diffuse_names,
+    const char* const* texture_paths, std::uint32_t material_count) noexcept;
 
 // Cooperative render-boundary callbacks supplied to A2FOHybridBuild. They
 // maintain a thread-local stack because Fleet Operations may nest craft draws.

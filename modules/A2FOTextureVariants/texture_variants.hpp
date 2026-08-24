@@ -74,4 +74,13 @@ float subsystem_repair_sample(std::uint32_t craft_handle,
                               std::uint32_t sequence,
                               std::size_t component) noexcept;
 
+// A damage-visual policy is useful when it owns at least one replacement
+// mesh, or when all three scorch requirements are present. Inherited target
+// hardpoints on their own cannot render anything and should not create a
+// process-lifetime class policy or per-craft update state.
+bool subsystem_damage_policy_active(std::size_t mesh_count,
+                                    float damage_threshold,
+                                    std::size_t scorch_effect_count,
+                                    std::size_t target_hardpoint_count) noexcept;
+
 }  // namespace a2fo::texture_variants

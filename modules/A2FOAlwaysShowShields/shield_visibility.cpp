@@ -20,4 +20,11 @@ EffectAction choose_effect_action(bool configured,
     return EffectAction::none;
 }
 
+bool global_scan_due(std::uint32_t now,
+                     std::uint32_t last_scan,
+                     bool has_scanned,
+                     std::uint32_t interval) noexcept {
+    return !has_scanned || interval == 0 || now - last_scan >= interval;
+}
+
 }  // namespace a2fo::shields
