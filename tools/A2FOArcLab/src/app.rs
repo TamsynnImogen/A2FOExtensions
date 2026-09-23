@@ -1142,6 +1142,7 @@ fn draw_decal_controls(
                 state.decal_size.x, state.decal_size.y)
         }
     };
+    let snippet = snippet.replace('\n', "\r\n");
     let mut display = snippet.clone();
     ui.add(
         egui::TextEdit::multiline(&mut display)

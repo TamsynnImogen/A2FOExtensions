@@ -733,10 +733,8 @@ def decode_odf(data: bytes) -> tuple[str, str, bytes]:
         return payload.decode("cp1252"), "cp1252", bom
 
 
-def newline_for(data: bytes) -> str:
-    crlf = data.count(b"\r\n")
-    bare_lf = data.count(b"\n") - crlf
-    return "\r\n" if crlf >= bare_lf else "\n"
+def newline_for(_data: bytes) -> str:
+    return "\r\n"
 
 
 def encode_odf(text: str, encoding: str, bom: bytes) -> bytes:

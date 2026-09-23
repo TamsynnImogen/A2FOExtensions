@@ -4,6 +4,7 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <string>
 
 namespace a2fo::craft_identity {
@@ -119,6 +120,40 @@ bool usable_rectangle(const RectangleF& rectangle) noexcept {
 }
 
 }  // namespace
+
+bool format_directional_shield_value(
+    DirectionalShieldValueDisplayMode mode, float current, float maximum,
+    char* output, std::size_t output_size) noexcept {
+    if (!output || output_size == 0) return false;
+    output[0] = '\0';
+    if (mode == DirectionalShieldValueDisplayMode::none ||
+        !std::isfinite(current) || !std::isfinite(maximum) ||
+        maximum <= 0.0f) {
+        return false;
+    }
+
+    const float clamped_current = std::max(0.0f, std::min(maximum, current));
+    int written = -1;
+    if (mode == DirectionalShieldValueDisplayMode::percent) {
+        const double rounded_percent = std::floor(
+            static_cast<double>(clamped_current / maximum * 100.0f) + 0.5);
+        written = std::snprintf(
+            output, output_size, "%.0f", rounded_percent);
+    } else if (mode == DirectionalShieldValueDisplayMode::amount) {
+        const double rounded_current = std::floor(
+            static_cast<double>(clamped_current) + 0.5);
+        const double rounded_maximum = std::floor(
+            static_cast<double>(maximum) + 0.5);
+        written = std::snprintf(
+            output, output_size, "%.0f/%.0f",
+            rounded_current, rounded_maximum);
+    }
+    if (written < 0 || static_cast<std::size_t>(written) >= output_size) {
+        output[0] = '\0';
+        return false;
+    }
+    return written > 0;
+}
 
 DirectionalShieldDisplayParseReport parse_directional_shield_display_config(
     std::string_view source, DirectionalShieldDisplayConfig* config) {

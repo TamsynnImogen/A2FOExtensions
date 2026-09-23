@@ -1,0 +1,11 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Type=Application
+Name=Armada UI Editor
+Comment=Edit Star Trek Armada I and II interface layouts
+Exec=/home/tamsynn/.local/bin/armada-ui-editor
+TryExec=/home/tamsynn/.local/bin/armada-ui-editor
+Icon=applications-graphics
+Terminal=false
+Categories=Development;Graphics;
+StartupNotify=true

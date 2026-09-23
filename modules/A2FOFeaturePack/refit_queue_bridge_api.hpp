@@ -57,3 +57,8 @@ using A2FO_RegisterRefitQueueBridgeFn = bool (__cdecl*)(
     const A2FO_RefitQueueBridge* bridge);
 using A2FO_ProducerPushRefitFn = std::uint32_t (__cdecl*)(
     void* producer, void* target_class);
+
+// Cancel one exact paid native queue ID, bypassing grouped UI slot remapping.
+// Refunds, resource callbacks and native removal remain FeaturePack-owned.
+using A2FO_ProducerCancelQueuedJobFn = bool (__cdecl*)(
+    void* producer, std::uint32_t queue_id);

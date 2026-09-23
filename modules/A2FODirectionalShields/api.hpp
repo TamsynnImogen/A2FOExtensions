@@ -29,3 +29,16 @@ using A2FO_DirectionalShieldsEndDamageFn = void (A2FO_CALL*)(
 using A2FO_DirectionalShieldsIsEnabledFn = bool (A2FO_CALL*)(void* craft);
 using A2FO_DirectionalShieldsGetValueFn = float (A2FO_CALL*)(
     void* craft, std::uint32_t facing);
+
+struct A2FO_DirectionalShieldState {
+    std::uint32_t struct_size;
+    float current[4];
+    float maximum[4];
+};
+
+using A2FO_DirectionalShieldsGetStateFn = bool (A2FO_CALL*)(
+    void* craft, A2FO_DirectionalShieldState* state);
+using A2FO_DirectionalShieldsSetStateFn = bool (A2FO_CALL*)(
+    void* craft, const A2FO_DirectionalShieldState* state);
+using A2FO_CraftIdentityTakeLoadedShieldsFn = bool (A2FO_CALL*)(
+    void* craft, A2FO_DirectionalShieldState* state);

@@ -34,7 +34,8 @@ Arc tab provides:
 - derived coverage and warnings for easy-to-miss hemisphere overlap;
 - a movable target probe whose ALLOWED/BLOCKED result comes from the DLL
   geometry;
-- copy and save actions for the generated weapon-ODF block.
+- copy and save actions for the generated weapon-ODF block, using CRLF line
+  endings for legacy Armada and Fleet Operations compatibility.
 
 The viewport has Top, Bottom, Front, Back, Left, and Right model-relative view
 buttons, plus Fit. Right-drag orbits the camera, middle-drag pans, and the mouse
@@ -84,9 +85,10 @@ Explicit texture subpaths are honoured, while basename-only SOD references use
 a lazily built recursive index covering arbitrary texture subfolder depth.
 Active-mod, parent-mod, and shared-Data precedence remains authoritative.
 
-ODF includes and multi-line list values are supported. SOD versions 1.4 through
-1.93 are accepted. If a model cannot be resolved from `baseName` or the ODF
-filename, use **Choose SOD**.
+ODF includes and multi-line list values are supported. Text files may be UTF-8
+or legacy Windows-1252/ANSI, including the typographic punctuation used by
+older Armada mods. SOD versions 1.4 through 1.93 are accepted. If a model
+cannot be resolved from `baseName` or the ODF filename, use **Choose SOD**.
 
 Arc Lab currently reads loose files, not content stored only inside FPQ
 archives. Extract the relevant ODF/SOD/texture files or place loose overrides
@@ -133,7 +135,8 @@ subsystem or hull channel and an alpha texture. Ship-logo mode reads
 preview any aligned row, and exports `logoDecalX` placement commands without
 repeating the logo filenames. An optional suffix automatically selects split
 art such as `_upper`, `_lower`, or `_nacelle`. Both modes attach the preview to
-the selected hardpoint and share offset, rotation, and size controls.
+the selected hardpoint and share offset, rotation, and size controls. Copied
+mapped-decal blocks also use CRLF line endings.
 Ship-logo mode can also treat pure white as transparent, previews that colour
 key, and exports `logoDecalXColourKey = "255 255 255"`. The size controls now
 show each plane dimension as a percentage of the loaded model diameter, so

@@ -6,7 +6,7 @@ authoring convention. The linked module guides remain authoritative for
 runtime details, validation rules, and current limitations.
 
 For copyable, file-by-file setup of the ten-resource panel, resource/build-time
-font glyphs, selected shield and XP UI, Photon/Quantum ammunition, and
+font glyphs, selected shield and XP UI, ammunition stores, and
 directional-shield sprites, see the
 [ODF and GUI/misc integration guide](odf-gui-integration-guide.md).
 
@@ -24,8 +24,10 @@ loaded.
 | Module | Modder-facing feature or configuration |
 | --- | --- |
 | [`A1Compat`](../modules/A1Compat/README.md) | `a1compat.ini`, the `wingman` alias, A1 missing-only ODF defaults, `Addon` overlay, and officer-quarter compatibility |
+| [`A1Fallbacks`](../modules/A1Fallbacks/README.md) | missing wireframe fallback to `b_<object>`, then `<faction>_icon`; no ODF command |
 | [`A2FOAlwaysShowShields`](../modules/A2FOAlwaysShowShields/README.md) | `alwaysShowShields` object command |
 | [`A2FOAnimatedHardpoints`](../modules/A2FOAnimatedHardpoints/README.md) | SOD matrix animation for gameplay hardpoint/null transforms; no ODF command |
+| [`A2FOAnimations`](../modules/A2FOAnimations/README.md) | `animationXevent`, `start`, `end`, `direction`, `repeat`, `resetonend`, `speed`; SOD clips for lifecycle events, paired states and opted-in weapon names; overrides vanilla matrix animation; in-game acceptance pending |
 | [`A2FOBuildTooltips`](../modules/A2FOBuildTooltips/README.md) | adjusted build-time text in normal and verbose build-button tooltips; no ODF command |
 | [`A2FOCheats`](../modules/A2FOCheats/README.md) | configurable `showmethemoney` resources and restored single-player chat cheats |
 | [`A2FOCraftIdentity`](../modules/A2FOCraftIdentity/README.md) | captain/registry lists, ammunition/directional-shield UI, XP bar, and selected shield/XP tooltips |
@@ -33,16 +35,19 @@ loaded.
 | [`A2FOEditMenu`](../modules/A2FOEditMenu/README.md) | recursive `buildItemX` edit-menu submenus |
 | [`A2FOFeaturePack`](../modules/A2FOFeaturePack/README.md) | recursive ODF/FPQ discovery, BuildYard pseudo-technology gates, queue controls, extended upgrade pods, and viewport-correct Bink movies |
 | [`A2FOFireArcs`](../modules/A2FOFireArcs/README.md) | three-dimensional weapon fire volumes and tactical hover preview |
-| [`A2FOEnergySystems`](../modules/A2FOEnergySystems/README.md) | Photon and Quantum Torpedo ammunition, recharge, and resupply |
+| [`A2FOEnergySystems`](../modules/A2FOEnergySystems/README.md) | Photon Torpedo, Quantum Torpedo, and Shuttle Craft stores, recharge, and resupply |
 | [`A2FOHybridBuild`](../modules/A2FOHybridBuild/README.md) | `hybridbuild`, four production lists, shared queue, placements, and cocoons |
 | [`A2FOInfoIni`](../modules/A2FOInfoIni/README.md) | `SettingsDirectory` and `DefaultGameSpeed` |
 | [`A2FOInstantActionSettings`](../modules/A2FOInstantActionSettings/README.md) | restored Instant Action `Load Settings` behavior; no new command |
 | [`A2FOMissionSelector`](../modules/A2FOMissionSelector/README.md) | scrollable stock/custom campaign browser and `mission_selector.ini` |
 | [`A2FONebulaRenderer`](../modules/A2FONebulaRenderer/README.md) | DX8 per-pixel lighting, emissive/specular maps, damage decals, and ship-name logo decals |
 | [`A2FONormalWeaponTech`](../modules/A2FONormalWeaponTech/README.md) | normal-weapon `.tt` prerequisite enforcement; no new ODF command |
+| [`A2FOODFVariants`](../modules/A2FOODFVariants/README.md) | ownership-aware ODF swapping using the shared faction suffix convention |
+| [`A2FOTeamChangeWeapons`](../modules/A2FOTeamChangeWeapons/README.md) | weapon `activateOnTeamChange`: automatic activation after ownership changes, including self-destruct |
 | [`A2FOPointDefenseCycles`](../modules/A2FOPointDefenseCycles/README.md) | CannonImp-style numbered point-defense firing delays |
 | [`A2FOResources`](../modules/A2FOResources/README.md) | four independent resources, object costs, Race starting values, panel row, and native accessors |
 | [`A2FORGBTextures`](../modules/A2FORGBTextures/README.md) | presence-based legacy RGB/Index8/Compressed TGA loading; no ODF command |
+| [`A2FOStationRotation`](../modules/A2FOStationRotation/README.md) | experimental R/Shift+R 90-degree station placement, footprints and native rally facing; no ODF command; matching version required on all peers |
 | [`A2FOSwarmSystem`](../modules/A2FOSwarmSystem/README.md) | lightweight render-only ambient swarms |
 | [`A2FOTextureVariants`](../modules/A2FOTextureVariants/README.md) | faction textures/nodes, Borg DDS repair, and subsystem damage meshes |
 | [`A2FOTurrets`](../modules/A2FOTurrets/README.md) | indexed independently armed hull turrets |
@@ -53,6 +58,17 @@ loaded.
 The core also supplies deterministic module loading, module policy, checked
 semantic dispatch, and the versioned
 [`native module SDK`](../sdk/README.md).
+
+In development: [A2FOSquadrons](../modules/A2FOSquadrons/README.md) provides a
+native `classLabel = "squadron"` build descriptor, sequential member launch,
+group selection and paid repair replenishment. Use `squadMemberX` and
+`squadMemberCountX` rows, with optional `squadReinforceAtYard = 0` to disable
+replacement. Initial costs and build time are automatically summed from all
+members and their counts; squad ODF cost/time fields are overridden. Enable
+`A2FOSquadrons` with the updated `A2FOFeaturePack`; the updated `A2FOResources`
+integrates the four additional resource totals. Native save persistence and
+aggregate physical-cap reservation remain pending; reinforcement still needs
+in-game acceptance. See the module README for commands and validation.
 
 ## `info.ini`
 
@@ -123,22 +139,24 @@ exists and otherwise acts as literal text. For example:
 See [the resource module guide](../modules/A2FOResources/README.md) for layout,
 native accessors, and the current save-persistence limitation.
 
-## Photon and Quantum Torpedo stores
+## Photon Torpedo, Quantum Torpedo, and Shuttle Craft stores
 
-`A2FOEnergySystems.dll` adds two per-Craft ammunition pools. Craft ODFs use
+`A2FOEnergySystems.dll` adds three per-Craft ammunition pools. Craft ODFs use
 `maxPhotonTorpedoes`, `photonTorpedoRate`, and
 `photonTorpedoRechargeMode`, or `maxQuantumTorpedoes`,
-`quantumTorpedoRate`, and `quantumTorpedoRechargeMode`. Mode `1`
+`quantumTorpedoRate`, and `quantumTorpedoRechargeMode`, or
+`maxShuttleCraft`, `shuttleCraftRate`, and `shuttleCraftRechargeMode`. Mode `1`
 recharges continuously; mode `2` recharges only near a same-team provider.
 Weapon ODFs consume them with `photonTorpedoCost` or
-`quantumTorpedoCost`. The selected cost is charged once for each successfully
+`quantumTorpedoCost` or `shuttleCraftCost`. The selected cost is charged once for each successfully
 launched projectile, so multi-projectile volleys consume one cost per shot.
 
 Configured stores appear in the selected-craft panel as whole-number
-`current/maximum` values. GUI rectangles `infoSinglePhotonTorpedoesTextArea` and
-`infoSingleQuantumTorpedoesTextArea` optionally position the two rows;
-`photonTorpedoColor` and `quantumTorpedoColor` optionally colour them.
-Without explicit rectangles the rows use offsets `+16` and `+40` from the
+`current/maximum` values. GUI rectangles `infoSinglePhotonTorpedoesTextArea`,
+`infoSingleQuantumTorpedoesTextArea`, and `infoSingleShuttleCraftTextArea`
+optionally position the three rows; `photonTorpedoColor`,
+`quantumTorpedoColor`, and `shuttleCraftColor` optionally colour them. Without
+explicit rectangles the rows use offsets `+16`, `+40`, and `+64` from the
 selected name anchor.
 
 Each Craft ODF may customize their presentation independently:
@@ -156,6 +174,14 @@ quantumTorpedoIcon = "all_interface"
 quantumTorpedoIconPos = 71 151 34 34
 quantumTorpedoTooltip = "Quantum Torpedo Ammunition"
 quantumTorpedoVerboseTooltip = "The ship's quantum torpedo reserve."
+
+shuttleCraftDisplayMode = 2
+shuttleCraftValueDisplayMode = 1
+shuttleCraftLabel = "Shuttle Craft"
+shuttleCraftIcon = "all_interface"
+shuttleCraftIconPos = 105 151 34 34
+shuttleCraftTooltip = "Shuttle Craft"
+shuttleCraftVerboseTooltip = "The ship's embarked shuttlecraft reserve."
 ```
 
 Display mode `1` shows `label: current/maximum`; mode `2` shows the selected
@@ -191,6 +217,9 @@ photonTorpedoCriticalColor = 1.0 0.0 0.0
 quantumTorpedoColor = 0.0 1.0 0.0
 quantumTorpedoLowColor = 1.0 1.0 0.0
 quantumTorpedoCriticalColor = 1.0 0.0 0.0
+shuttleCraftColor = 0.0 1.0 0.0
+shuttleCraftLowColor = 1.0 1.0 0.0
+shuttleCraftCriticalColor = 1.0 0.0 0.0
 ```
 
 Shipyards and `RepairShip` classes provide resupply within 200 units by
@@ -242,10 +271,26 @@ that graphic area. Their defaults are `26 0 76 20`, `26 108 76 20`,
 its centre and the second vertically; this eased presentation never delays
 the underlying shield value.
 
+Each directional Craft ODF may also set
+`directionalShieldValueDisplayMode = 0`, `1`, or `2`. Mode `0` hides value
+labels, mode `1` draws a rounded percentage number without a `%` sign, and
+mode `2` draws `current/maximum`. Modes `1` and `2` remain visible alongside
+the ring. Place them independently with
+`infoSingleDirectionalShieldsForwardValueTextArea`,
+`infoSingleDirectionalShieldsAftValueTextArea`,
+`infoSingleDirectionalShieldsPortValueTextArea`, and
+`infoSingleDirectionalShieldsStarboardValueTextArea`. Their separate health
+colours are `directionalShieldValueColor`,
+`directionalShieldValueLowColor`, and
+`directionalShieldValueCriticalColor`; they do not recolour the ring.
+Omitting the ODF display command retains the legacy ring-or-two-row fallback.
+
 The same ammunition and directional-shield fields are drawn for selected
-stations using Armada's tall build-queue panel. A2FO rebases the native
-`infoBuildName`/`infoBuildClass` text context onto the configured
-`infoSingleCaptainTextArea`, so the existing `infoSingle*` extension
+stations using Armada's tall build-queue panel, including repair-only shipyards.
+A2FO prefers the same initialized captain text context and
+`infoSingleCaptainTextArea` anchor for both panel types. The native
+`infoBuildName`/`infoBuildClass` context is a fallback only when its matching
+CFG rectangle is available for rebasing. The existing `infoSingle*` extension
 rectangles remain authoritative and no build-panel duplicates are required.
 
 The active mod's `ART_CFG.h` can select the presentation mode and assign each
@@ -290,6 +335,19 @@ runtime while diagnosing an A1 conversion.
 
 Place the file in a mod root or its `misc` directory. Higher-precedence roots
 override individual values.
+
+The optional selector section chooses whether the INI augments the native
+campaign table or completely defines the visible catalog:
+
+```ini
+[selector]
+catalogMode = ini
+```
+
+The default is `native`. With `ini`, only explicitly configured campaigns and
+missions are shown, so legacy `mshell.set` padding and fixed grouping do not
+leak into a replacement campaign browser. Custom `campaign4` and higher
+sections are recommended for a wholly independent tree.
 
 Sections use `campaignN` and `campaignN.missionM`. Campaign indices are
 `0..127`; mission indices are `0..511` and may be sparse. Campaigns `0..3`
@@ -357,6 +415,14 @@ defaults.
 
 The active GUI configuration accepts:
 
+`A2FOCraftIdentity` extends Fleet Operations' fixed selected-panel allocation
+from 32 to 128 `weaponXiconpos` controls. Slots 33 through 128 use the same ODF
+command format, native tooltips/input, technology rules, status colours, and
+fire-arc hover integration as slots 1 through 32. Slot 129 and above has no UI
+control. For any unavailable normal or special weapon, an unsatisfied
+technology-tree requirement with `buttonHideUnavailable="true"` hides its
+icon; without that flag the icon remains visible in its disabled colour.
+
 | Command | Meaning |
 | --- | --- |
 | `infoSingleCaptainTextArea` | Selected-panel `x y width height` rectangle |
@@ -365,11 +431,17 @@ The active GUI configuration accepts:
 | `shipRegistryColor` | Optional registry RGB float triplet |
 | `shipNameColor` | Native low-strip colour and, with `A2FOCraftIdentity`, selected ship-name colour |
 | `infoTextColor` | Shared selected-panel fallback; remains the ship-class colour when no more specific class colour is supplied |
-| `systemIconHealthyColor` | Optional native subsystem and mouse-over hull/shield/crew icon-value colour above 50% |
-| `systemIconLowColor` | Optional native subsystem and mouse-over hull/shield/crew icon-value colour above 25% through 50% |
-| `systemIconCriticalColor` | Optional native subsystem and mouse-over hull/shield/crew icon-value colour at or below 25% while operational |
-| `systemIconDisabledColor` | Optional native subsystem icon/value-text colour for timed/control-disabled systems |
-| `systemIconDestroyedColor` | Optional native subsystem icon/value-text colour for destroyed or not-yet-operational repaired systems, and for zero hull/shields/crew |
+| `systemIconHealthyColor` | Optional native subsystem and mouse-over hull/shield/crew icon-value colour above 50%; weapon-icon fallback when `weaponIconColor` is absent |
+| `systemIconLowColor` | Optional native subsystem and mouse-over hull/shield/crew icon-value colour above 25% through 50%; weapon-icon fallback when `weaponIconLowColor` is absent |
+| `systemIconCriticalColor` | Optional native subsystem icon-value colour at or below 25% while operational; weapon-icon fallback when `weaponIconCriticalColor` is absent |
+| `systemIconDisabledColor` | Optional native subsystem icon/value-text colour for timed/control-disabled systems; weapon-icon fallback when `weaponIconDisabledColor` is absent |
+| `systemIconDestroyedColor` | Optional native subsystem icon/value-text colour for destroyed or not-yet-operational repaired systems, and for zero hull/shields/crew; weapon-icon fallback when `weaponIconDestroyedColor` is absent |
+| `weaponIconColor` | Optional `weaponXiconpos` colour while the weapons system is healthy |
+| `weaponIconLowColor` | Optional `weaponXiconpos` colour while weapons-system health is above 25% through 50% |
+| `weaponIconCriticalColor` | Optional `weaponXiconpos` colour while operational weapons-system health is 25% or below |
+| `weaponIconDisabledColor` | Optional `weaponXiconpos` colour while the weapons system or a non-hidden unavailable weapon is disabled |
+| `weaponIconDestroyedColor` | Optional `weaponXiconpos` colour while the weapons system is destroyed or not yet operational after damage |
+| `passiveWeaponIconColor` | Optional fixed colour for passive `UtilityWeapon` icons; these do not follow weapon-system state |
 | `specialEnergyIconColor` | Optional fixed colour for the native selected-panel special-energy icon and adjacent value text; independent of all live-state colours |
 | `officerIconColor` | Optional fixed colour for the native selected-panel officer icon and adjacent value text; independent of all live-state colours |
 | `infoSingleShieldBarArea` | Existing selected shield-bar rectangle; A2FO adds its hover region |
@@ -637,6 +709,21 @@ shieldDamageModifier = 1.0 "fed_sovereign.odf" 0.5 "bcruise1.odf" 2.0
 Widths are totals: `90` means 45 degrees on each side. Supplying
 `fireArcAngle` selects cone mode when `fireArcMode` is absent.
 
+Fleet Operations' existing `CannonImp` command `usePrimaryTarget` controls
+what happens when the custom arc rejects a target:
+
+| Native command | Targeting behavior with a custom arc |
+| --- | --- |
+| `usePrimaryTarget = 1` | Try the craft's primary target only; if it is outside the arc, skip this weapon and continue with the next weapon. |
+| `usePrimaryTarget = 0` | Skip out-of-arc candidates and continue CannonImp's native search until an otherwise-valid in-arc target is found. |
+
+Rejected candidates do not consume `baseTargets`/`maxExtraTargets`. This is a
+documented interaction with the native command, not a new A2FO ODF field. In
+automatic mode FireArcs allows CannonImp's initial primary-target activation,
+then enforces the custom arc inside its native per-candidate `CanFireAt` scan;
+this prevents an out-of-arc primary target from stopping the search before it
+starts.
+
 ### Point-defense firing cycles
 
 For `PointDefenseLaser` and `OrdnanceDefenseWeapon`:
@@ -649,6 +736,28 @@ For `PointDefenseLaser` and `OrdnanceDefenseWeapon`:
 | `shotCycleResetTime` | Ready-but-idle seconds before returning to `shotDelay0`; zero/absent disables reset |
 
 `shotDelay64` is deliberately rejected as overflow.
+
+### Activation on team changes
+
+With [`A2FOTeamChangeWeapons`](../modules/A2FOTeamChangeWeapons/README.md):
+
+```text
+// In the weapon ODF (for example, the self-destruct weapon)
+activateOnTeamChange = 1
+```
+
+Default `0`. After a live ship/station swaps owner, request activation once
+at the next native weapon pass, using the new owner's state. Includes AI,
+player and team-0 transfers. Same-team assignment, initial construction,
+load, and alliance-only changes do not activate it. Any weapon class can opt
+in; weapons needing targets retain an existing native target when available,
+and still require their usual valid target/resources/readiness to fire.
+No capturing-unit target or new ground location is invented. Rejected requests
+are not retried. Already-on toggles remain on; self-destruct starts its authored
+countdown and later captures do not cancel/restart that countdown. Multiple
+swaps before one weapon pass coalesce to the final owner. Pending requests
+are cleared by cleanup/PostLoad, not saved for replay. Native replaceweapon
+instant-player/AI/derelict options remain independent.
 
 ### Normal weapon technology
 
@@ -697,6 +806,28 @@ explicit emissive ODF commands take precedence. Empty quoted suffixes disable
 their rule. Specular maps are loose, diffuse-UV intensity maps used only on
 DOT3/bumped materials: black has no effect and brighter pixels add a stronger
 light-dependent gloss.
+
+`[Compatibility] NeutralBumpWhenDisabled=1` in `Data/A2FORenderer.ini`
+preserves the native DOT3 fast path when Fleet Operations' saved
+`disable_bump` option is true. On DXVK, the DOT3 MeshVB's per-light pass uses
+the normalized tangent-space light against a fixed flat normal instead of
+sampling the authored normal map.
+It retains the material's original texture assignments, has no dependency on
+`all_bump.dds`, and preflights the shader asset before changing native DOT3
+eligibility; D3DX assembly remains deferred until Fleet Operations' first safe
+DOT3 compilation boundary. Set it to `0` to restore the native non-VB bump-off
+renderer. This is a restart-applied compatibility option, not an ART suffix
+rule.
+
+`[Compatibility] FastAlphaMeshVB` selects how that DXVK bump-off fast path
+handles Fleet Operations' polygon-sorted materials. `0` leaves every such
+material on the native CPU sorter. `1` (default) accelerates opaque whole-model
+fades and order-independent additive materials. `2` additionally accelerates
+ordinary transparent materials by drawing their existing MeshVB with the
+engine's authored z-sort blend state applied immediately; exact per-triangle
+ordering is not retained and intersecting transparent surfaces may differ.
+The option is restart-applied and has no effect unless the neutral bump-off
+compatibility path is active.
 
 The managed DXVK backend supports the extension emissive/specular overlay on
 DOT3 materials. With System Direct3D 9 / WineD3D, Fleet Operations' bump draw

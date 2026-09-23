@@ -13,7 +13,9 @@ BUILD_DIR := build
 MODULE_DIR := $(BUILD_DIR)/modules
 STA1_CLASSIC_DIR := $(BUILD_DIR)/sta1-classic
 STA1_COMPAT_MODULE := $(MODULE_DIR)/A1Compat.dll
+A1_FALLBACKS_MODULE := $(MODULE_DIR)/A1Fallbacks.dll
 ALWAYS_SHOW_SHIELDS_MODULE := $(MODULE_DIR)/A2FOAlwaysShowShields.dll
+ANIMATIONS_MODULE := $(MODULE_DIR)/A2FOAnimations.dll
 ANIMATED_HARDPOINTS_MODULE := $(MODULE_DIR)/A2FOAnimatedHardpoints.dll
 BUILD_TOOLTIPS_MODULE := $(MODULE_DIR)/A2FOBuildTooltips.dll
 CHEATS_MODULE := $(MODULE_DIR)/A2FOCheats.dll
@@ -21,6 +23,7 @@ CRAFT_IDENTITY_MODULE := $(MODULE_DIR)/A2FOCraftIdentity.dll
 EDIT_MENU_MODULE := $(MODULE_DIR)/A2FOEditMenu.dll
 DIRECTIONAL_SHIELDS_MODULE := $(MODULE_DIR)/A2FODirectionalShields.dll
 ENERGY_SYSTEMS_MODULE := $(MODULE_DIR)/A2FOEnergySystems.dll
+MUZZLE_FLASHES_MODULE := $(MODULE_DIR)/A2FOMuzzleFlashes.dll
 INSTANT_ACTION_SETTINGS_MODULE := $(MODULE_DIR)/A2FOInstantActionSettings.dll
 RESOURCES_MODULE := $(MODULE_DIR)/A2FOResources.dll
 MISSION_SELECTOR_MODULE := $(MODULE_DIR)/A2FOMissionSelector.dll
@@ -32,11 +35,19 @@ NEBULA_RENDERER_MODULE := $(MODULE_DIR)/A2FONebulaRenderer.dll
 POINT_DEFENSE_CYCLES_MODULE := $(MODULE_DIR)/A2FOPointDefenseCycles.dll
 SWARM_SYSTEM_MODULE := $(MODULE_DIR)/A2FOSwarmSystem.dll
 TEXTURE_VARIANTS_MODULE := $(MODULE_DIR)/A2FOTextureVariants.dll
+ODF_VARIANTS_MODULE := $(MODULE_DIR)/A2FOODFVariants.dll
 TURRETS_MODULE := $(MODULE_DIR)/A2FOTurrets.dll
 REFIT_YARDS_MODULE := $(MODULE_DIR)/A2FORefitYards.dll
+SQUADRONS_MODULE := $(MODULE_DIR)/A2FOSquadrons.dll
+STATION_ROTATION_MODULE := $(MODULE_DIR)/A2FOStationRotation.dll
+TEAM_CHANGE_WEAPONS_MODULE := $(MODULE_DIR)/A2FOTeamChangeWeapons.dll
+TEAM_CHANGE_WEAPONS_SMOKE := $(BUILD_DIR)/team_change_weapons_smoke.exe
 NEBULA_SHADER_ASSETS := \
+	$(BUILD_DIR)/Shaders/dot3_amd.nvv \
+	$(BUILD_DIR)/Shaders/dot3_amd9.nvv \
 	$(BUILD_DIR)/Shaders/dx8/pixel/ps.nvv \
-	$(BUILD_DIR)/Shaders/dx8/pixel/ps_specular.nvv
+	$(BUILD_DIR)/Shaders/dx8/pixel/ps_specular.nvv \
+	$(BUILD_DIR)/Shaders/dx8/vertex/vs_flat_lighting.nvv
 NEBULA_LICENSE := $(BUILD_DIR)/licenses/armada-nebula-patch.txt
 STA1_CLASSIC_GUI_CFG := \
 	mods/STA1Classic/misc/gui_fed.cfg \
@@ -44,7 +55,9 @@ STA1_CLASSIC_GUI_CFG := \
 	mods/STA1Classic/misc/gui_kli.cfg \
 	mods/STA1Classic/misc/gui_rom.cfg
 STA1_CLASSIC_SPRITE_REGISTRY := mods/STA1Classic/Sprites/sprites.spr
+STA1_CLASSIC_MISSION_SELECTOR := mods/STA1Classic/mission_selector.ini
 SMOKE_TEST := $(BUILD_DIR)/dll_load_smoke.exe
+GAME_MONITOR_SMOKE := $(BUILD_DIR)/game_monitor_win32_smoke.exe
 FPQ_PATHS_TEST := $(BUILD_DIR)/fpq_paths_test
 ODF_PATHS_TEST := $(BUILD_DIR)/odf_paths_test
 ODF_MODULE_SMOKE := $(BUILD_DIR)/odf_module_init_smoke.exe
@@ -66,19 +79,30 @@ A1_RACE_MENU_TEST := $(BUILD_DIR)/a1_race_menu_policy_test
 A1_TEAM_COLOR_TEST := $(BUILD_DIR)/a1_team_color_policy_test
 A1_BZN_POLICY_TEST := $(BUILD_DIR)/a1_bzn_policy_test
 A1_UI_POLICY_TEST := $(BUILD_DIR)/a1_ui_policy_test
+A1_FALLBACK_POLICY_TEST := $(BUILD_DIR)/a1_fallback_policy_test
 FIRE_ARC_TEST := $(BUILD_DIR)/fire_arc_test
 UPGRADE_POD_CONFIG_TEST := $(BUILD_DIR)/upgrade_pod_config_test
 WRECKAGE_POLICY_TEST := $(BUILD_DIR)/wreckage_policy_test
 WEAPON_DAMAGE_CONTROLS_TEST := $(BUILD_DIR)/weapon_damage_controls_test
 SHIELD_VISIBILITY_TEST := $(BUILD_DIR)/shield_visibility_test
 NEBULA_EMISSIVE_TEST := $(BUILD_DIR)/nebula_emissive_test
+AMD_DOT3_COMPAT_TEST := $(BUILD_DIR)/amd_dot3_compat_test
 COM_OWNER_TEST := $(BUILD_DIR)/com_owner_test
+GAME_MONITOR_POLICY_TEST := $(BUILD_DIR)/game_monitor_policy_test
 ART_TEXTURE_SUFFIX_CONFIG_TEST := $(BUILD_DIR)/art_texture_suffix_config_test
 DECAL_MATH_TEST := $(BUILD_DIR)/decal_math_test
 POINT_DEFENSE_CYCLE_TEST := $(BUILD_DIR)/point_defense_cycle_test
 SWARM_MOTION_TEST := $(BUILD_DIR)/swarm_motion_test
 TEXTURE_VARIANTS_TEST := $(BUILD_DIR)/texture_variants_test
 REFIT_POLICY_TEST := $(BUILD_DIR)/refit_policy_test
+SQUADRONS_TEST := $(BUILD_DIR)/squadrons_test
+SQUADRONS_X86_TEST := $(BUILD_DIR)/squadrons_test.exe
+SQUADRONS_SOURCES := modules/A2FOSquadrons/squadron_config.cpp \
+	modules/A2FOSquadrons/squadron_state.cpp
+SQUADRONS_HEADERS := modules/A2FOSquadrons/squadron_config.hpp \
+	modules/A2FOSquadrons/squadron_state.hpp
+STATION_ROTATION_TEST := $(BUILD_DIR)/station_rotation_test
+STATION_ROTATION_SMOKE := $(BUILD_DIR)/station_rotation_smoke.exe
 A2FO_TELEMETRY := $(BUILD_DIR)/a2fo_telemetry
 A2FO_RENDERER_HELPER := $(BUILD_DIR)/A2FORendererHelper.exe
 ARCLAB_DIR := tools/A2FOArcLab
@@ -90,6 +114,8 @@ CORE_SOURCES := \
 	core/module_loader.cpp \
 	core/module_policy.cpp \
 	core/renderer_options.cpp \
+	core/game_monitor.cpp \
+	core/game_monitor_policy.cpp \
 	core/decal_math.cpp \
 	core/nebula_emissive.cpp \
 	core/nebula_renderer.cpp \
@@ -115,7 +141,8 @@ $(A2FO_TELEMETRY): tools/a2fo_telemetry.cpp | $(BUILD_DIR)
 	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
 		-o $@ tools/a2fo_telemetry.cpp -ldl
 
-$(A2FO_RENDERER_HELPER): tools/a2fo_renderer_helper.cpp | $(BUILD_DIR)
+$(A2FO_RENDERER_HELPER): tools/a2fo_renderer_helper.cpp \
+		core/build_identity.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -static -static-libgcc -static-libstdc++ \
 		-o $@ tools/a2fo_renderer_helper.cpp
 
@@ -125,6 +152,7 @@ release: \
 	$(A2FO_RENDERER_HELPER) \
 	$(ALWAYS_SHOW_SHIELDS_MODULE) \
 	$(ANIMATED_HARDPOINTS_MODULE) \
+	$(ANIMATIONS_MODULE) \
 	$(BUILD_TOOLTIPS_MODULE) \
 	$(MODULE_DIR)/A2FOFeaturePack.dll \
 	$(MODULE_DIR)/A2FOHybridBuild.dll \
@@ -134,6 +162,7 @@ release: \
 	$(EDIT_MENU_MODULE) \
 	$(DIRECTIONAL_SHIELDS_MODULE) \
 	$(ENERGY_SYSTEMS_MODULE) \
+	$(MUZZLE_FLASHES_MODULE) \
 	$(INSTANT_ACTION_SETTINGS_MODULE) \
 	$(RESOURCES_MODULE) \
 	$(MISSION_SELECTOR_MODULE) \
@@ -145,15 +174,20 @@ release: \
 	$(POINT_DEFENSE_CYCLES_MODULE) \
 	$(SWARM_SYSTEM_MODULE) \
 	$(TEXTURE_VARIANTS_MODULE) \
+	$(ODF_VARIANTS_MODULE) \
 	$(STA1_COMPAT_MODULE) \
+	$(A1_FALLBACKS_MODULE) \
 	$(NEBULA_SHADER_ASSETS) \
 	$(NEBULA_LICENSE) \
 	$(TURRETS_MODULE) \
 	$(REFIT_YARDS_MODULE) \
+	$(SQUADRONS_MODULE) \
+	$(STATION_ROTATION_MODULE) \
+	$(TEAM_CHANGE_WEAPONS_MODULE) \
 	$(MODULE_DIR)/A2FORGBTextures.dll
 
 sta1-classic: release $(STA1_COMPAT_MODULE) $(STA1_CLASSIC_GUI_CFG) \
-		$(STA1_CLASSIC_SPRITE_REGISTRY)
+		$(STA1_CLASSIC_SPRITE_REGISTRY) $(STA1_CLASSIC_MISSION_SELECTOR)
 	rm -rf $(STA1_CLASSIC_DIR)/modules
 	mkdir -p $(STA1_CLASSIC_DIR)/AI $(STA1_CLASSIC_DIR)/bzn \
 		$(STA1_CLASSIC_DIR)/misc $(STA1_CLASSIC_DIR)/odf \
@@ -162,6 +196,7 @@ sta1-classic: release $(STA1_COMPAT_MODULE) $(STA1_CLASSIC_GUI_CFG) \
 		$(STA1_CLASSIC_DIR)/textures
 	cp mods/STA1Classic/info.ini $(STA1_CLASSIC_DIR)/info.ini
 	cp mods/STA1Classic/a1compat.ini $(STA1_CLASSIC_DIR)/a1compat.ini
+	cp $(STA1_CLASSIC_MISSION_SELECTOR) $(STA1_CLASSIC_DIR)/mission_selector.ini
 	cp mods/STA1Classic/README.md $(STA1_CLASSIC_DIR)/README.md
 	cp $(STA1_CLASSIC_GUI_CFG) $(STA1_CLASSIC_DIR)/misc/
 	cp $(STA1_CLASSIC_SPRITE_REGISTRY) $(STA1_CLASSIC_DIR)/sprites/
@@ -175,6 +210,10 @@ $(MODULE_DIR):
 	mkdir -p $@
 
 $(BUILD_DIR)/A2FOExtensions.dll: $(CORE_SOURCES) \
+		core/build_identity.hpp \
+		core/game_monitor.hpp \
+		core/game_monitor_policy.hpp \
+		core/renderer_draw_policy.hpp \
 		sdk/include/a2fo_supported_armada.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
 		-o $@ $(CORE_SOURCES) -lcomctl32 -lgdi32
@@ -195,7 +234,35 @@ $(ALWAYS_SHOW_SHIELDS_MODULE): \
 		modules/A2FOAlwaysShowShields/shield_visibility.cpp \
 		modules/A2FOAlwaysShowShields/thiscall_bridge.S
 
-$(ANIMATED_HARDPOINTS_MODULE): \
+$(ANIMATIONS_MODULE): modules/A2FOAnimations/module.cpp \
+		modules/A2FOAnimations/playback.hpp modules/A2FOAnimations/api.hpp \
+		sdk/include/a2fo_module_api.h sdk/include/a2fo_supported_armada.hpp | $(MODULE_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) -o $@ modules/A2FOAnimations/module.cpp
+
+$(BUILD_DIR)/animations_test: tests/animations_test.cpp modules/A2FOAnimations/playback.hpp | $(BUILD_DIR)
+	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic -o $@ tests/animations_test.cpp
+
+$(BUILD_DIR)/animations_native_test.exe: tests/animations_native_test.cpp \
+		modules/A2FOAnimations/module.cpp modules/A2FOAnimations/playback.hpp \
+		modules/A2FOAnimations/api.hpp sdk/include/a2fo_module_api.h | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) -std=c++17 -O2 -Wall -Wextra -static -o $@ tests/animations_native_test.cpp
+
+$(BUILD_DIR)/animations_runtime_init_smoke.exe: tests/animations_runtime_init_smoke.cpp \
+		modules/A2FOAnimations/module.cpp modules/A2FOAnimations/playback.hpp \
+		modules/A2FOAnimations/api.hpp sdk/include/a2fo_supported_armada.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) -std=c++17 -O2 -Wall -Wextra -static -o $@ tests/animations_runtime_init_smoke.cpp
+
+$(BUILD_DIR)/muzzle_animation_bridge_test.exe: tests/muzzle_animation_bridge_test.cpp \
+		modules/A2FOMuzzleFlashes/module.cpp modules/A2FOMuzzleFlashes/thiscall_bridge.S \
+		modules/A2FOAnimations/api.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) -std=c++17 -O2 -Wall -Wextra -static -o $@ \
+		tests/muzzle_animation_bridge_test.cpp modules/A2FOMuzzleFlashes/thiscall_bridge.S
+
+.PHONY: animations-test
+animations-test: $(BUILD_DIR)/animations_test
+	./$(BUILD_DIR)/animations_test
+
+$(ANIMATED_HARDPOINTS_MODULE): modules/A2FOAnimations/api.hpp \
 		modules/A2FOAnimatedHardpoints/module.cpp \
 		modules/A2FOAnimatedHardpoints/thiscall_bridge.S \
 		sdk/include/a2fo_module_api.h \
@@ -294,6 +361,68 @@ $(REFIT_YARDS_MODULE): \
 		modules/A2FORefitYards/refit_policy.cpp \
 		modules/A2FORefitYards/thiscall_bridge.S
 
+$(SQUADRONS_MODULE): modules/A2FOSquadrons/native_repair.inl \
+		modules/A2FOSquadrons/native_economics.inl \
+		modules/A2FOSquadrons/api.hpp \
+		modules/A2FOFeaturePack/refit_queue_bridge_api.hpp \
+		modules/A2FOSquadrons/module.cpp \
+		modules/A2FOSquadrons/squadron_config.cpp \
+		modules/A2FOSquadrons/squadron_config.hpp \
+		modules/A2FOSquadrons/squadron_state.cpp \
+		modules/A2FOSquadrons/squadron_state.hpp \
+		modules/A2FOSquadrons/thiscall_bridge.S \
+		sdk/include/a2fo_module_api.h \
+		sdk/include/a2fo_supported_armada.hpp | $(MODULE_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
+		-o $@ \
+		modules/A2FOSquadrons/module.cpp \
+		modules/A2FOSquadrons/squadron_config.cpp \
+		modules/A2FOSquadrons/squadron_state.cpp \
+		modules/A2FOSquadrons/thiscall_bridge.S
+
+$(TEAM_CHANGE_WEAPONS_MODULE): modules/A2FOTeamChangeWeapons/module.cpp \
+		modules/A2FOTeamChangeWeapons/thiscall_bridge.S \
+		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) -o $@ \
+		modules/A2FOTeamChangeWeapons/module.cpp \
+		modules/A2FOTeamChangeWeapons/thiscall_bridge.S
+
+$(TEAM_CHANGE_WEAPONS_SMOKE): tests/team_change_weapons_smoke.cpp \
+		modules/A2FOTeamChangeWeapons/module.cpp \
+		modules/A2FOTeamChangeWeapons/thiscall_bridge.S \
+		core/hook.cpp core/hook.hpp sdk/include/a2fo_module_api.h | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+		-static -static-libgcc -static-libstdc++ -Wl,--image-base,0x10000000 -o $@ $< \
+		core/hook.cpp modules/A2FOTeamChangeWeapons/thiscall_bridge.S
+
+$(STATION_ROTATION_MODULE): modules/A2FOStationRotation/module.cpp \
+		modules/A2FOStationRotation/rotation.hpp \
+		modules/A2FOStationRotation/footprint.hpp \
+		modules/A2FOStationRotation/footprint_runtime.inl \
+		modules/A2FOStationRotation/thiscall_bridge.S \
+		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) -o $@ \
+		modules/A2FOStationRotation/module.cpp \
+		modules/A2FOStationRotation/thiscall_bridge.S
+
+$(STATION_ROTATION_TEST): tests/station_rotation_test.cpp \
+		modules/A2FOStationRotation/rotation.hpp \
+		modules/A2FOStationRotation/footprint.hpp | $(BUILD_DIR)
+	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic -o $@ $<
+
+$(STATION_ROTATION_SMOKE): tests/station_rotation_smoke.cpp \
+		tests/station_rotation_smoke_bridge.S \
+		modules/A2FOStationRotation/module.cpp \
+		modules/A2FOStationRotation/rotation.hpp \
+		modules/A2FOStationRotation/footprint.hpp \
+		modules/A2FOStationRotation/footprint_runtime.inl \
+		modules/A2FOStationRotation/thiscall_bridge.S \
+		sdk/include/a2fo_module_api.h | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+		-static -static-libgcc -static-libstdc++ -Wl,--image-base,0x10000000 -o $@ $< \
+		tests/station_rotation_smoke_bridge.S \
+		modules/A2FOStationRotation/thiscall_bridge.S
+
 $(MODULE_DIR)/A2FOInfoIni.dll: \
 		modules/A2FOInfoIni/module.cpp \
 		core/extension_roots.cpp core/extension_roots.hpp \
@@ -311,10 +440,21 @@ $(CHEATS_MODULE): \
 
 $(CRAFT_IDENTITY_MODULE): \
 		modules/A2FOCraftIdentity/module.cpp \
+		modules/A2FOCraftIdentity/selected_panel_anchor.hpp \
+		modules/A2FOCraftIdentity/object_editor.cpp \
+		modules/A2FOCraftIdentity/object_editor.hpp \
+		modules/A2FOCraftIdentity/fleetops_object_editor.cpp \
+		modules/A2FOCraftIdentity/fleetops_object_editor.hpp \
+		modules/A2FOCraftIdentity/object_editor_state.cpp \
+		modules/A2FOCraftIdentity/object_editor_state.hpp \
+		sdk/include/a2fo_shield_values.hpp \
+		sdk/include/a2fo_supported_armada.hpp \
 		modules/A2FOCraftIdentity/directional_shield_display_config.cpp \
 		modules/A2FOCraftIdentity/directional_shield_display_config.hpp \
 		modules/A2FOCraftIdentity/directional_shield_fill.cpp \
 		modules/A2FOCraftIdentity/directional_shield_fill.hpp \
+		modules/A2FOCraftIdentity/extended_weapon_icons.cpp \
+		modules/A2FOCraftIdentity/extended_weapon_icons.hpp \
 		modules/A2FOCraftIdentity/identity_selection.cpp \
 		modules/A2FOCraftIdentity/identity_selection.hpp \
 		modules/A2FOCraftIdentity/system_icon_state.cpp \
@@ -324,10 +464,22 @@ $(CRAFT_IDENTITY_MODULE): \
 		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
 		-o $@ modules/A2FOCraftIdentity/module.cpp \
+		modules/A2FOCraftIdentity/object_editor.cpp \
+		modules/A2FOCraftIdentity/object_editor_state.cpp \
+		modules/A2FOCraftIdentity/fleetops_object_editor.cpp \
 		modules/A2FOCraftIdentity/directional_shield_display_config.cpp \
 		modules/A2FOCraftIdentity/directional_shield_fill.cpp \
+		modules/A2FOCraftIdentity/extended_weapon_icons.cpp \
 		modules/A2FOCraftIdentity/identity_selection.cpp \
 		modules/A2FOCraftIdentity/system_icon_state.cpp \
+		modules/A2FOCraftIdentity/thiscall_bridge.S
+
+$(BUILD_DIR)/craft_identity_panel_smoke.exe: tests/craft_identity_panel_smoke.cpp \
+		$(CRAFT_IDENTITY_MODULE) core/hook.cpp core/hook.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+		-static -static-libgcc -static-libstdc++ -Wl,--image-base,0x10000000 -o $@ $< \
+		core/hook.cpp $(filter-out modules/A2FOCraftIdentity/module.cpp,\
+		$(wildcard modules/A2FOCraftIdentity/*.cpp)) \
 		modules/A2FOCraftIdentity/thiscall_bridge.S
 
 $(EDIT_MENU_MODULE): \
@@ -390,8 +542,17 @@ $(ENERGY_SYSTEMS_MODULE): \
 		modules/A2FOEnergySystems/energy_systems.cpp \
 		modules/A2FOEnergySystems/thiscall_bridge.S
 
+$(MUZZLE_FLASHES_MODULE): modules/A2FOAnimations/api.hpp \
+		modules/A2FOMuzzleFlashes/module.cpp \
+		modules/A2FOMuzzleFlashes/thiscall_bridge.S \
+		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
+		-o $@ modules/A2FOMuzzleFlashes/module.cpp \
+		modules/A2FOMuzzleFlashes/thiscall_bridge.S
+
 $(DIRECTIONAL_SHIELDS_MODULE): \
 		modules/A2FODirectionalShields/module.cpp \
+		sdk/include/a2fo_shield_values.hpp \
 		modules/A2FODirectionalShields/directional_shields.cpp \
 		modules/A2FODirectionalShields/directional_shields.hpp \
 		modules/A2FODirectionalShields/api.hpp \
@@ -458,6 +619,21 @@ $(BUILD_DIR)/Shaders/dx8/pixel/%.nvv: \
 	mkdir -p $(dir $@)
 	cp $< $@
 
+$(BUILD_DIR)/Shaders/dx8/vertex/%.nvv: \
+		modules/A2FONebulaRenderer/Shaders/dx8/vertex/%.nvv | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	cp $< $@
+
+$(BUILD_DIR)/Shaders/dot3_amd.nvv: \
+		modules/A2FONebulaRenderer/Shaders/dot3_amd.nvv | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	cp $< $@
+
+$(BUILD_DIR)/Shaders/dot3_amd9.nvv: \
+		modules/A2FONebulaRenderer/Shaders/dot3_amd9.nvv | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	cp $< $@
+
 $(NEBULA_LICENSE): third_party/armada-nebula-patch/LICENSE.txt | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	cp $< $@
@@ -496,7 +672,17 @@ $(TEXTURE_VARIANTS_MODULE): \
 		modules/A2FOTextureVariants/texture_variants.cpp \
 		modules/A2FOTextureVariants/thiscall_bridge.S
 
+$(ODF_VARIANTS_MODULE): \
+		modules/A2FOODFVariants/module.cpp \
+		modules/A2FOODFVariants/thiscall_bridge.S \
+		sdk/include/a2fo_faction_suffix.hpp \
+		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
+		-o $@ modules/A2FOODFVariants/module.cpp \
+		modules/A2FOODFVariants/thiscall_bridge.S
+
 $(RESOURCES_MODULE): \
+		modules/A2FOSquadrons/api.hpp \
 		modules/A2FOResources/module.cpp \
 		modules/A2FOResources/additional_resources.cpp \
 		modules/A2FOResources/additional_resources.hpp \
@@ -535,9 +721,32 @@ $(STA1_COMPAT_MODULE): \
 		modules/A1Compat/team_color_policy.cpp \
 		modules/A1Compat/thiscall_bridge.S
 
+$(A1_FALLBACKS_MODULE): \
+		modules/A1Fallbacks/module.cpp \
+		modules/A1Fallbacks/fallback_policy.cpp \
+		modules/A1Fallbacks/fallback_policy.hpp \
+		modules/A1Fallbacks/thiscall_bridge.S \
+		sdk/include/a2fo_module_api.h | $(MODULE_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DLLFLAGS) \
+		-o $@ modules/A1Fallbacks/module.cpp \
+		modules/A1Fallbacks/fallback_policy.cpp \
+		modules/A1Fallbacks/thiscall_bridge.S
+
 $(SMOKE_TEST): tests/dll_load_smoke.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -static -static-libgcc -static-libstdc++ \
 		-o $@ $<
+
+$(BUILD_DIR)/supported_armada_smoke.exe: tests/supported_armada_smoke.cpp \
+		sdk/include/a2fo_supported_armada.hpp | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -static -static-libgcc -static-libstdc++ \
+		-o $@ $<
+
+$(GAME_MONITOR_SMOKE): tests/game_monitor_win32_smoke.cpp \
+		core/game_monitor.cpp core/game_monitor.hpp \
+		core/game_monitor_policy.cpp core/game_monitor_policy.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -static -static-libgcc -static-libstdc++ \
+		-Icore -o $@ tests/game_monitor_win32_smoke.cpp \
+		core/game_monitor.cpp core/game_monitor_policy.cpp
 
 $(FPQ_PATHS_TEST): tests/fpq_paths_test.cpp \
 		core/fpq_paths.cpp core/fpq_paths.hpp | $(BUILD_DIR)
@@ -586,6 +795,15 @@ $(A1_UI_POLICY_TEST): \
 		modules/A1Compat/a1_ui_policy.hpp | $(BUILD_DIR)
 	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
 		-Imodules/A1Compat -o $@ tests/a1_ui_policy_test.cpp
+
+$(A1_FALLBACK_POLICY_TEST): \
+		tests/a1_fallback_policy_test.cpp \
+		modules/A1Fallbacks/fallback_policy.cpp \
+		modules/A1Fallbacks/fallback_policy.hpp | $(BUILD_DIR)
+	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+		-Imodules/A1Fallbacks -o $@ \
+		tests/a1_fallback_policy_test.cpp \
+		modules/A1Fallbacks/fallback_policy.cpp
 
 $(ODF_PATHS_TEST): tests/odf_paths_test.cpp \
 		core/odf_paths.cpp core/odf_paths.hpp | $(BUILD_DIR)
@@ -646,10 +864,12 @@ $(TURRET_MATH_TEST): tests/turret_math_test.cpp \
 		modules/A2FOTurrets/turret_math.cpp
 
 $(CRAFT_IDENTITY_TEST): tests/craft_identity_test.cpp \
+		modules/A2FOCraftIdentity/selected_panel_anchor.hpp \
 		modules/A2FOCraftIdentity/directional_shield_display_config.cpp \
 		modules/A2FOCraftIdentity/directional_shield_display_config.hpp \
 		modules/A2FOCraftIdentity/directional_shield_fill.cpp \
 		modules/A2FOCraftIdentity/directional_shield_fill.hpp \
+		modules/A2FOCraftIdentity/extended_weapon_icons.hpp \
 		modules/A2FOCraftIdentity/identity_selection.cpp \
 		modules/A2FOCraftIdentity/identity_selection.hpp \
 		modules/A2FOCraftIdentity/system_icon_state.cpp \
@@ -740,6 +960,57 @@ $(REFIT_POLICY_TEST): tests/refit_policy_test.cpp \
 		tests/refit_policy_test.cpp \
 		modules/A2FORefitYards/refit_policy.cpp
 
+# Policy tests are host-only. The separate x86 harness exercises the native
+# adapter against mocked gateways; in-game acceptance remains a manual step.
+.PHONY: squadrons-test
+squadrons-test: $(SQUADRONS_TEST)
+	$(SQUADRONS_TEST)
+
+$(SQUADRONS_TEST): tests/squadrons_test.cpp $(SQUADRONS_SOURCES) \
+		$(SQUADRONS_HEADERS) | $(BUILD_DIR)
+	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+		-Imodules/A2FOSquadrons -o $@ tests/squadrons_test.cpp $(SQUADRONS_SOURCES)
+
+$(SQUADRONS_X86_TEST): tests/squadrons_test.cpp $(SQUADRONS_SOURCES) \
+		$(SQUADRONS_HEADERS) | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) -std=gnu++17 -O2 -Wall -Wextra -Wpedantic \
+		-static -static-libgcc -static-libstdc++ -Imodules/A2FOSquadrons \
+		-o $@ tests/squadrons_test.cpp $(SQUADRONS_SOURCES)
+
+$(BUILD_DIR)/squadrons_native_test.exe: tests/squadrons_native_test.cpp \
+		tests/squadrons_native_economics_test.inl \
+		modules/A2FOSquadrons/native_economics.inl \
+		modules/A2FOSquadrons/api.hpp \
+		modules/A2FOFeaturePack/refit_queue_bridge_api.hpp \
+		tests/squadrons_native_repair_test.inl \
+		modules/A2FOSquadrons/module.cpp modules/A2FOSquadrons/thiscall_bridge.S \
+		modules/A2FOSquadrons/native_repair.inl \
+		$(SQUADRONS_SOURCES) $(SQUADRONS_HEADERS) | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) -std=gnu++17 -O2 -Wall -Wextra -Wpedantic \
+		-static -static-libgcc -static-libstdc++ -o $@ \
+		tests/squadrons_native_test.cpp $(SQUADRONS_SOURCES) \
+		modules/A2FOSquadrons/thiscall_bridge.S
+
+$(BUILD_DIR)/squadrons_resources_test.exe: tests/squadrons_resources_test.cpp \
+		modules/A2FOResources/module.cpp modules/A2FOResources/api.hpp \
+		modules/A2FOResources/additional_resources.cpp modules/A2FOResources/additional_resources.hpp \
+		modules/A2FOSquadrons/api.hpp modules/A2FOResources/thiscall_bridge.S | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) -std=gnu++17 -O2 -Wall -Wextra -Wpedantic \
+		-static -static-libgcc -static-libstdc++ -o $@ tests/squadrons_resources_test.cpp \
+		modules/A2FOResources/additional_resources.cpp modules/A2FOResources/thiscall_bridge.S
+
+$(BUILD_DIR)/squadrons_queue_bridge_test.exe: tests/squadrons_queue_bridge_test.cpp \
+		modules/A2FOFeaturePack/buildyard_pseudo_technology.cpp \
+		modules/A2FOFeaturePack/queue_enhancement.cpp modules/A2FOFeaturePack/queue_enhancement.hpp \
+		modules/A2FOFeaturePack/refit_queue_bridge_api.hpp \
+		modules/A2FOFeaturePack/refit_queue_bridge_client.cpp \
+		modules/A2FOFeaturePack/hybrid_bridge_client.cpp modules/A2FOFeaturePack/delphi_bridge.S | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) -std=gnu++17 -O2 -Wall -Wextra -Wpedantic \
+		-static -static-libgcc -static-libstdc++ -o $@ tests/squadrons_queue_bridge_test.cpp \
+		modules/A2FOFeaturePack/buildyard_pseudo_technology.cpp \
+		modules/A2FOFeaturePack/refit_queue_bridge_client.cpp \
+		modules/A2FOFeaturePack/hybrid_bridge_client.cpp modules/A2FOFeaturePack/delphi_bridge.S
+
 $(WEAPON_DAMAGE_CONTROLS_TEST): tests/weapon_damage_controls_test.cpp \
 		modules/A2FOWeaponDamageControls/damage_controls.hpp | $(BUILD_DIR)
 	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
@@ -755,14 +1026,26 @@ $(SHIELD_VISIBILITY_TEST): tests/shield_visibility_test.cpp \
 		modules/A2FOAlwaysShowShields/shield_visibility.cpp
 
 $(NEBULA_EMISSIVE_TEST): tests/nebula_emissive_test.cpp \
-		core/nebula_emissive.cpp core/nebula_emissive.hpp | $(BUILD_DIR)
+		core/nebula_emissive.cpp core/nebula_emissive.hpp \
+		core/renderer_draw_policy.hpp | $(BUILD_DIR)
 	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
 		-Icore -o $@ tests/nebula_emissive_test.cpp \
 		core/nebula_emissive.cpp
 
+$(AMD_DOT3_COMPAT_TEST): tests/amd_dot3_compat_test.cpp \
+		core/amd_dot3_compat.hpp | $(BUILD_DIR)
+	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+		-Icore -o $@ tests/amd_dot3_compat_test.cpp
+
 $(COM_OWNER_TEST): tests/com_owner_test.cpp core/com_owner.hpp | $(BUILD_DIR)
 	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
 		-Icore -o $@ tests/com_owner_test.cpp
+
+$(GAME_MONITOR_POLICY_TEST): tests/game_monitor_policy_test.cpp \
+		core/game_monitor_policy.cpp core/game_monitor_policy.hpp | $(BUILD_DIR)
+	$(CXX_HOST) -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+		-Icore -o $@ tests/game_monitor_policy_test.cpp \
+		core/game_monitor_policy.cpp
 
 $(ART_TEXTURE_SUFFIX_CONFIG_TEST): tests/art_texture_suffix_config_test.cpp \
 		modules/A2FONebulaRenderer/art_texture_suffix_config.cpp \
@@ -804,7 +1087,7 @@ $(TEXTURE_VARIANTS_TEST): tests/texture_variants_test.cpp \
 verify: release
 	@echo "A2FOExtensions exports:"
 	@$(OBJDUMP) -p $(BUILD_DIR)/A2FOExtensions.dll | \
-		grep -E "A2FO_Initialize|A2FO_NebulaRendererStatus|A2FO_NebulaSet(EmissiveBumpMultiplier|BumpLightBias|EmissiveDiffuseRestore)|A2FO_NebulaRegister(Emissive(Class|Materials)|SpecularMaterials)|A2FO_NebulaBeginCraftRender|A2FO_NebulaEndCraftRender|DLL Name" || true
+		grep -E "A2FO_Initialize|A2FO_NebulaRendererStatus|A2FO_NebulaSet(EmissiveBumpMultiplier|BumpLightBias|EmissiveDiffuseRestore|FastNonBumpEnabled)|A2FO_NebulaRegister(Emissive(Class|Materials)|SpecularMaterials)|A2FO_NebulaBeginCraftRender|A2FO_NebulaEndCraftRender|DLL Name" || true
 	@echo
 	@echo "Proxy exports:"
 	@$(OBJDUMP) -p $(BUILD_DIR)/Win2kDisableTaskSwitch.dll | \
@@ -898,6 +1181,10 @@ verify: release
 	@$(OBJDUMP) -p $(TEXTURE_VARIANTS_MODULE) | \
 		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|A2FOTextureVariants_RegisterClass|DLL Name" || true
 	@echo
+	@echo "A2FOODFVariants module exports:"
+	@$(OBJDUMP) -p $(ODF_VARIANTS_MODULE) | \
+		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|DLL Name" || true
+	@echo
 	@echo "A2FOTurrets module exports:"
 	@$(OBJDUMP) -p $(TURRETS_MODULE) | \
 		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|DLL Name" || true
@@ -906,8 +1193,20 @@ verify: release
 	@$(OBJDUMP) -p $(REFIT_YARDS_MODULE) | \
 		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|DLL Name" || true
 	@echo
+	@echo "A2FOTeamChangeWeapons module exports:"
+	@$(OBJDUMP) -p $(TEAM_CHANGE_WEAPONS_MODULE) | \
+		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|DLL Name" || true
+	@echo
+	@echo "A2FOStationRotation module exports:"
+	@$(OBJDUMP) -p $(STATION_ROTATION_MODULE) | \
+		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|DLL Name" || true
+	@echo
 	@echo "A2FORGBTextures module exports:"
 	@$(OBJDUMP) -p $(MODULE_DIR)/A2FORGBTextures.dll | \
+		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|DLL Name" || true
+	@echo
+	@echo "A1Fallbacks module exports:"
+	@$(OBJDUMP) -p $(A1_FALLBACKS_MODULE) | \
 		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|DLL Name" || true
 	@echo
 	@echo "A2FOWreckage module exports:"
@@ -921,6 +1220,7 @@ verify: release
 		$(A2FO_RENDERER_HELPER) \
 		$(ALWAYS_SHOW_SHIELDS_MODULE) \
 		$(ANIMATED_HARDPOINTS_MODULE) \
+		$(ANIMATIONS_MODULE) \
 		$(BUILD_TOOLTIPS_MODULE) \
 		$(MODULE_DIR)/A2FOFeaturePack.dll \
 		$(MODULE_DIR)/A2FOHybridBuild.dll \
@@ -941,9 +1241,13 @@ verify: release
 		$(POINT_DEFENSE_CYCLES_MODULE) \
 		$(SWARM_SYSTEM_MODULE) \
 		$(TEXTURE_VARIANTS_MODULE) \
+		$(ODF_VARIANTS_MODULE) \
 		$(STA1_COMPAT_MODULE) \
+		$(A1_FALLBACKS_MODULE) \
 		$(TURRETS_MODULE) \
 		$(REFIT_YARDS_MODULE) \
+		$(STATION_ROTATION_MODULE) \
+		$(TEAM_CHANGE_WEAPONS_MODULE) \
 		$(MODULE_DIR)/A2FORGBTextures.dll; do \
 		if $(OBJDUMP) -p "$$dll" | \
 			grep -Eiq 'DLL Name: (libgcc|libstdc\+\+|libwinpthread)'; then \
@@ -969,6 +1273,15 @@ verify-sta1-classic: sta1-classic
 		$(OBJDUMP) -p $(STA1_COMPAT_MODULE) | grep -Ei 'DLL Name:' >&2; \
 		exit 1; \
 	fi
+	@echo "A1Fallbacks module exports:"
+	@$(OBJDUMP) -p $(A1_FALLBACKS_MODULE) | \
+		grep -E "A2FO_ModuleInit|A2FO_ModuleShutdown|DLL Name" || true
+	@if $(OBJDUMP) -p $(A1_FALLBACKS_MODULE) | \
+		grep -Eiq 'DLL Name: (libgcc|libstdc\+\+|libwinpthread)'; then \
+		echo "Unexpected MinGW runtime dependency in $(A1_FALLBACKS_MODULE)" >&2; \
+		$(OBJDUMP) -p $(A1_FALLBACKS_MODULE) | grep -Ei 'DLL Name:' >&2; \
+		exit 1; \
+	fi
 	@echo "STA1 Classic selects its centrally installed modules through info.ini."
 
 verify-sdk: sdk-examples
@@ -982,12 +1295,16 @@ test: $(FPQ_PATHS_TEST) $(ODF_PATHS_TEST) $(EXTENSION_ROOTS_TEST) \
 	$(ENERGY_SYSTEMS_TEST) $(DIRECTIONAL_SHIELDS_TEST) \
 	$(BUILD_TIME_TEXT_TEST) $(ADDITIONAL_RESOURCES_TEST) $(FIRE_ARC_TEST) \
 	$(A1_RACE_MENU_TEST) $(A1_TEAM_COLOR_TEST) $(A1_BZN_POLICY_TEST) \
-	$(A1_UI_POLICY_TEST) \
+	$(A1_UI_POLICY_TEST) $(A1_FALLBACK_POLICY_TEST) \
 	$(UPGRADE_POD_CONFIG_TEST) \
 	$(WRECKAGE_POLICY_TEST) \
 	$(REFIT_POLICY_TEST) \
+	$(SQUADRONS_TEST) \
+	$(STATION_ROTATION_TEST) \
 	$(WEAPON_DAMAGE_CONTROLS_TEST) \
-	$(SHIELD_VISIBILITY_TEST) $(NEBULA_EMISSIVE_TEST) $(COM_OWNER_TEST) \
+	$(SHIELD_VISIBILITY_TEST) $(NEBULA_EMISSIVE_TEST) \
+	$(AMD_DOT3_COMPAT_TEST) $(COM_OWNER_TEST) \
+	$(GAME_MONITOR_POLICY_TEST) \
 	$(ART_TEXTURE_SUFFIX_CONFIG_TEST) $(DECAL_MATH_TEST) \
 	$(POINT_DEFENSE_CYCLE_TEST) $(SWARM_MOTION_TEST) \
 	$(TEXTURE_VARIANTS_TEST)
@@ -1010,14 +1327,19 @@ test: $(FPQ_PATHS_TEST) $(ODF_PATHS_TEST) $(EXTENSION_ROOTS_TEST) \
 	$(A1_TEAM_COLOR_TEST)
 	$(A1_BZN_POLICY_TEST)
 	$(A1_UI_POLICY_TEST)
+	$(A1_FALLBACK_POLICY_TEST)
 	$(FIRE_ARC_TEST)
 	$(UPGRADE_POD_CONFIG_TEST)
 	$(WRECKAGE_POLICY_TEST)
 	$(REFIT_POLICY_TEST)
+	$(SQUADRONS_TEST)
+	$(STATION_ROTATION_TEST)
 	$(WEAPON_DAMAGE_CONTROLS_TEST)
 	$(SHIELD_VISIBILITY_TEST)
 	$(NEBULA_EMISSIVE_TEST)
+	$(AMD_DOT3_COMPAT_TEST)
 	$(COM_OWNER_TEST)
+	$(GAME_MONITOR_POLICY_TEST)
 	$(ART_TEXTURE_SUFFIX_CONFIG_TEST)
 	$(DECAL_MATH_TEST)
 	$(POINT_DEFENSE_CYCLE_TEST)
@@ -1026,8 +1348,9 @@ test: $(FPQ_PATHS_TEST) $(ODF_PATHS_TEST) $(EXTENSION_ROOTS_TEST) \
 	python3 -m unittest tests/test_odf_formatter.py \
 		tests/test_modder_documentation.py
 
-smoke: release $(SMOKE_TEST)
+smoke: release $(SMOKE_TEST) $(GAME_MONITOR_SMOKE)
 	cd $(BUILD_DIR) && wine dll_load_smoke.exe
+	cd $(BUILD_DIR) && wine game_monitor_win32_smoke.exe
 
 odf-module-smoke: release $(STA1_COMPAT_MODULE) $(ODF_MODULE_SMOKE)
 	@test -f $(BUILD_DIR)/FleetOpsHook.fixture.dll || \
@@ -1043,3 +1366,21 @@ extension-root-smoke: $(EXTENSION_ROOT_SMOKE)
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+# Included implementation for automatic non-bump MeshVB preparation.
+build/A2FOExtensions.dll: core/renderer_unmapped_meshvb.inl
+
+# Hardware-lit Phong support shares native MeshVB buffer ownership.
+build/A2FOExtensions.dll: core/renderer_phong_meshvb.inl
+
+# Cloak lighting is composited once, without opaque framebuffer accumulation.
+build/A2FOExtensions.dll: core/renderer_cloak_composite.inl
+
+# Standard shell button artwork and interaction in the mission selector.
+$(MISSION_SELECTOR_MODULE): modules/A2FOMissionSelector/standard_buttons.inl
+
+# Shared visible/cloaked mesh compositor integration.
+build/A2FOExtensions.dll: core/renderer_general_meshvb.inl
+
+# Alpha MeshVB dynamic index-stream sorting.
+build/A2FOExtensions.dll: core/renderer_transparent_indices.inl

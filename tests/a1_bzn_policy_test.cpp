@@ -97,10 +97,14 @@ void append_object_prefix(std::vector<std::uint8_t>& data,
     append_field(data, 2, name, sizeof(name));
 }
 
-void append_empty_mission(std::vector<std::uint8_t>& data) {
+void append_mission(std::vector<std::uint8_t>& data, const char* mission) {
     std::uint8_t name[40]{};
-    std::memcpy(name, "EmptyMission", sizeof("EmptyMission"));
+    std::memcpy(name, mission, std::strlen(mission));
     append_field(data, 2, name, sizeof(name));
+}
+
+void append_empty_mission(std::vector<std::uint8_t>& data) {
+    append_mission(data, "EmptyMission");
 }
 
 }  // namespace
@@ -204,8 +208,18 @@ int main() {
     assert(tail_layout.mission_offset == expected_mission_offset);
     assert(tail_layout.object_count == 2);
 
+    std::vector<std::uint8_t> campaign_tail(96, 0xbb);
+    append_object_prefix(campaign_tail, "mnebula", "mnebula51");
+    const std::size_t expected_campaign_mission_offset = campaign_tail.size();
+    append_mission(campaign_tail, "Inst4XMission");
+    assert(a1compat::locate_a1_bzn_object_tail(
+        campaign_tail.data(), campaign_tail.size(), &tail_layout));
+    assert(tail_layout.first_object_offset == 96);
+    assert(tail_layout.mission_offset == expected_campaign_mission_offset);
+    assert(tail_layout.object_count == 1);
+
     std::vector<std::uint8_t> ambiguous_tail = object_tail;
-    append_empty_mission(ambiguous_tail);
+    append_mission(ambiguous_tail, "Inst4XMission");
     assert(!a1compat::locate_a1_bzn_object_tail(
         ambiguous_tail.data(), ambiguous_tail.size(), &tail_layout));
 

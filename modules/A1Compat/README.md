@@ -42,6 +42,17 @@ The same missing-only class-default mechanism supplies `research = 1` and
 creates their outer Research command and exposes the existing pod list without
 rewriting `fresear.odf`, `fresear2.odf`, or any converted-mod ODF.
 
+Raw A1 construction ships and freighters likewise recover the common
+`ship`, `has_hitpoints`, `has_crew`, and `transporter` commands which their A1
+include tree supplied before the final A2 classlabel was selected. This lets
+Fleet Operations create their native Transport action without replacing any
+explicit converted-mod value.
+
+It also supplies A2's missing `transporter`, `alert`, and
+`resourcesCanHandle = "dilithium"` contract to raw A1 `mining` stations. A1
+treated Dilithium handling as implicit; Armada 2 otherwise lets the freighter
+dock without crediting its cargo. Explicit and inherited values still win.
+
 The retained A1 `scout = 1` command controls AI/default behaviour and does not
 create A2's Scout/Search button. A shared completed-class callback detects that
 legacy marker and adds only the missing A2 ScoutBase menu capabilities:
@@ -50,13 +61,37 @@ values, including zero, are never replaced.
 
 A1 also names its shared scout ship ODF `scout.odf`, which can shadow A2's
 Explore command ODF of the same basename. A checked CommandInfo bridge repairs
-only the collision case where normal parsing leaves `buttonName` empty. A real
-command definition remains authoritative, and neither A1 ODF is rewritten.
+only the collision case where normal parsing leaves `buttonName` empty, and
+assigns the repaired Explore command to Orders menu `1` rather than the root
+page. A real command definition remains authoritative, and neither A1 ODF is
+rewritten.
 
 The same callback detects A1's inherited `is_starbase = 1` marker and supplies
-only missing `facility`, `has_crew`, and `has_hitpoints` capability bits. This
-restores A2/Fleet Operations' Recrew command on raw A1 stations while preserving
-any explicit or inherited converted-mod choice, including zero.
+only missing `transporter`, `facility`, `has_crew`, and `has_hitpoints`
+capability bits. This restores A2/Fleet Operations' Transport and Recrew
+commands on raw A1 stations while preserving any explicit or inherited
+converted-mod choice, including zero.
+
+Some converted A1 starbases, including Future Tense's `fedbase`, complete ODF
+loading without entering Armada 2's native `StarbaseClass::BuildClass` hook.
+At the completed-class boundary A1Compat requires an effective starbase or
+constructor classlabel, detects its populated Producer table, adds the missing
+A2 `builder_ship` capability, and retains inherited
+`maximumUpgrades`, `officerGain`, and `race` as the ordinary starbase policy.
+This excludes research pods which merely inherit `is_starbase`; guarded or
+foreign class fields are rejected through non-faulting memory-region checks.
+An explicit `builder_ship` declaration, including zero, remains authoritative.
+
+For a selected A1-policy starbase, A1Compat also restores the race-matched
+officer-quarter upgrade as A1's separate root command at grid slot 9. Its
+compatibility binding is supplied before native input dispatch and restored
+again after Fleet Operations consumes and compacts a successful click, so the
+next upgrade appears without a menu refresh. Because native compaction copies
+ModeInfo between ControlButtons, ownership follows the compatibility ModeInfo
+rather than a stale button address and any duplicate copy is cleared. The same
+upgrade is removed from Fleet Operations' nested Build palette so it is not
+offered twice; the native target, queue admission, costs, and completion path
+remain authoritative.
 
 Raw A1 ODFs remain unchanged. Where Armada 2 added constructor state that an
 inherited A2 map serializes, A1Compat supplies the corresponding A2 Classic
@@ -119,6 +154,14 @@ Connections are not invented because `showmethemoney` defines no matching
 grant. Explicit or inherited Race ODF commands remain authoritative, and no
 A1 faction ODF is changed on disk.
 
+If the effective A1 `RTS_CFG.h` uses the legacy `cfgMaxDilithium`,
+`cfgMaxCrew`, or `cfgMaxOfficers` names without their modern `MAX_*`
+counterparts, A1Compat copies those values into Armada 2's validated native
+maximum fields and reaffirms them at the first Race-loaded event after Armada
+has parsed `RTS_CFG.h`. This prevents every later construction, mining, or
+cheat mutation from being clamped to zero. Explicit modern maxima take
+precedence.
+
 Armada 1's `teamcolor.odf` names its thirteen player colours `white`, `red`,
 `blue`, `green`, `yellow`, `purple`, `cyan`, `brown`, `orange`, `pink`,
 `magenta`, `gray`, and `black`. Fleet Operations instead initializes the
@@ -171,6 +214,24 @@ but is redundant once A1Compat owns the essential load. New A1 compatibility
 parents should keep the file in their inherited `Sprites` chain and let the
 module load it directly.
 
+Some original A1 mods declare `standard_cursor`, `c_arrow`, and `c_select` as
+unflagged 64x64 sprites. Fleet Operations does not create a displayable cursor
+from those records, while merely adding `@cursor` to the oversized definition
+can leave its input renderer with an invalid cursor object. A1Compat examines
+the winning `Sprites/cursor.spr` without changing it. When `standard_cursor`
+is missing `@cursor`, exceeds Fleet Operations' supported 40x40 overview size,
+or has invalid dimensions, A1Compat hooks the shared post-load GUI cursor
+resolver and returns the already-loaded valid `c_build` cursor record. The
+main tactical view bypasses that GUI resolver and caches `c_select` directly,
+so A1Compat repairs its two `c_select` cache pointers and the active visual
+cursor pointer from the already-active A1 ShipDisplay render boundary, after
+Fleet Operations has completed its own initialization. Valid move, attack,
+transport, and other command cursors remain native. The
+normal single `sprites.spr` parse and every sprite database remain untouched,
+so model, nebula, and other world-sprite registries cannot be replaced. This is
+a visual fallback only; it does not hook mouse input or change the system
+cursor. Compatible A1 and A2 cursor tables retain the native resolver path.
+
 Raw Armada 1 gameplay CFGs are also recognized at runtime. After the native
 gameplay `ParameterDB` constructor has loaded the selected Race CFG, A1Compat
 checks for both `speedPanelArea` and `controlPanelArea`. When those legacy
@@ -182,10 +243,68 @@ screen scale without editing the CFG. A modern or partially converted CFG
 that declares either screen-size key remains authoritative and follows the
 native A2 path.
 
+Because Armada 2 removed A1's `SpeedRail`, A1Compat also draws its
+race-specific background mosaic directly from `speedPanelArea` and the
+`speedBackgroundPanel*` CFG/SPR records before native ShipDisplay rendering,
+so its construction-queue children remain above the artwork. It also restores
+A1's original seven-position control rule from
+`speedSingleButtonArea`, `speedSeparatorArea`, and
+`speedSingleButtonGap`: the first five entries receive the first five native
+ShipDisplay construction-queue icons, followed by the data-defined separator
+sprite and the live ordinary Transport command at the far right. When the
+selection exposes native special-weapon controls instead of producer queue
+entries, up to five type-2 special actions (or explicit `SPECIAL_ATTACK`
+actions) occupy those same leading slots. The remaining five A2-only queue icons are hidden for the
+legacy layout. Transport is
+identified by its native ModeInfo/AiCommand rather than a compacted popup-array
+index or retained popup-parent pointer, so its callback and contextual
+availability remain owned by Fleet Operations. ShipDisplay owns cursor input
+across the restored rail, preventing queue clicks from passing through to the
+world and deselecting the unit; PopupPalette separately includes the relocated
+Transport rectangle in its cursor boundary.
+Construction progress, cancellation, and queue synchronization likewise
+remain native. Armada's actual ConstructionBar at `ShipDisplay+0xb0` is
+distinct from the adjacent EnergyText child at `+0x110`; both receive A1's
+shared `infoSingleConstructionBarArea`, including the A2-only outer key
+`infoSingleConstructionArea`. For a selected ConstructionRig, the
+ConstructionBar's native render boundary points its `+0x428` object field at
+the live ConstructionObject returned by Armada's own checked
+`ConstructionRig::GetConstructionObject` helper (with the rig's object ID as
+a compatible-wrapper fallback), so
+the bar reads and draws the engine's real construction progress rather than a
+compatibility timer.
+
+`CinematicView` is likewise kept data-driven. For a raw-A1 gameplay layout,
+A1Compat reads `cinematicPanelArea`, `cinematicBackgroundPanelArea`,
+`cinematicBackgroundArea`, and `cinematicDisplayArea` from the winning race
+CFG rather than accepting inherited A2 child dimensions. Immediately before
+the native render path it restores the screen-relative parent plus the
+parent-local background and live 3D viewport. The already configured native
+frame follows that parent normally, preventing the cinematic object from
+rendering across the adjacent Status Report panel.
+
+The native COMM and MENU callbacks still exist in A2's top ButtonPanel.
+A1Compat relocates those real StandardButtons into the raw CFG's
+`cinematicCommButtonArea` and `cinematicMenuButtonArea` (converting the CFG's
+parent-local values to the screen-space rectangles expected by these retained
+children), rebinds their active-race `cinematic*Button`/`cinematic*Border`
+sprites, restores their `COMM`/`MENU` captions with native GUI font state, and
+hides the unrelated A2-only ButtonPanel children. The buttons therefore keep
+native menu, communications, hover, and click behavior instead of becoming
+decorative A1 labels.
+
 This scaling bridge is the first gameplay-UI compatibility layer, not an A1/A2
 hybrid skin. The intended A1Compat policy is to reproduce the A1 gameplay UI's
 styling and behavior from its CFG/SPR data. A modder who wants A2-only interface
 features can instead provide an A2-compatible gameplay UI.
+
+Raw A1 race CFGs predate A2's `tooltipBackgroundColor` and
+`tooltipTextColor` fields and its seven framed-tooltip rectangle keys. At the
+stable Tooltip render boundaries, the module supplies A1's opaque `#808080`
+background and black text only for missing colour fields. If the complete A2
+frame contract is absent, verbose text is sent through Armada's native
+cursor-relative popup helper instead of the collapsed frame path. Explicit
+and inherited colours or a complete modern frame remain authoritative.
 
 A2's ShipDisplay asks for separate low, middle, and tall panel/background
 names, while A1 supplies one Status Report panel for all selection modes.
@@ -193,7 +312,67 @@ For a detected raw-A1 gameplay database, A1Compat maps only those A2-only
 names back to A1's `infoPanelArea`, `infoBlackArea`,
 `infoBackgroundPanelArea`, and `infoBackgroundPanel` entries. The adapter runs
 through the shared ArmadaL loaders, preserves the original CFG/SPR assets, and
-does not affect a modern gameplay database.
+does not affect a modern gameplay database. Because Fleet Operations can keep
+three independent A2 black-mask fields after loading, the common ShipDisplay
+render hook also restores all three from A1's one `infoBlackArea` before the
+native mode dispatcher draws them. Fleet Operations supplies `0.5` opacity
+for that fill; the checked StandardBackground boundary redraws the active A1
+mask with `1.0` opacity before the frame and children. The same boundary
+restores both the ordinary and build/station WireframeIcon local rectangles from
+`infoSingleWireframeIconArea`, read directly from the winning legacy race CFG
+and scaled with the verified A1 panel factors. This prevents the same-named
+Fleet Operations ParameterDB value from moving the wireframe outside the
+Status Report panel. The retained native RaceIcon at `ShipDisplay+0x9c` also
+receives A1's `infoSingleRaceIconArea` component rectangle and nested
+`infoSingleRaceIconDisplayArea` at `RaceIcon+0x30`. Fleet Operations removed
+A1's separate background pass, so the same checked StandardBackground hook
+draws RaceIcon's stored `race_icon_bar` sprite from `+0x2c`, tinted by native
+`GameObject::GetTeamColour`, before the smaller native insignia is drawn on
+top. It likewise maps A2's normal and build class, name, Crew,
+and Officer children onto A1's `infoSingle*Text*Area` entries. Because A2
+removed A1's inner identity background component, a checked
+`StandardBackground::Render` post-pass draws the original numbered
+`infoSingleBackground` pieces and name/Crew/Officer label sprites after the
+outer panel but before native text rendering. The numbered rectangles are
+already Status Report-local; `infoSingleBackgroundArea` is retained as the
+component bound and is not added to them a second time. A1's localized
+Crew/Officer label objects and `current/max` Crew formatter also have no A2
+equivalent, so A1Compat draws those strings after the native pass using the
+validated live ShipDisplay text components for font state. Amounts use A1's
+green status colour instead of A2's inherited black-on-light-bar colour.
+Current and maximum Crew are taken from the selected object rather than
+treating the class initial-Crew field as the maximum. The normal and station CrewDisplay
+children keep their native logic, with A1's `infoSingleCrewDotArea` applied to
+their internal icon rectangle and the race CFG's `infoSingleCrewDot` replacing
+the A2 `crew_amt` sprite so the status dot retains native Crew-level colour
+coding. A2 also splits each selected system into a numeric
+`infoSystem_N` value and a separate `infoSystemIcon_N`; A1's five
+`infoSystem_N` entries are the icon strip itself. A1Compat therefore redirects
+the A2 normal and `infoBuildSystemIcon_N` station rectangles to those A1
+entries and parks only the ten redundant normal/build numeric SystemValue
+children off-screen through both their generic bounds and the embedded text
+rectangle used by the specialised native renderer, restoring the graphical
+system strip between the craft identity and wireframe for both ships and stations.
+For multi-selection, Fleet Operations' 16 native `MultiShipIcon` controls are
+kept behind the pointer-array field at `ShipDisplay+0x148`. The first eight
+tiles and their shield/wireframe children are restored from the winning raw A1
+race CFG's `infoMultiShipIcon_0..7`,
+`infoMultiShieldBarArea`, and `infoMultiWireframeIconArea`. A2's separate
+`infoMultiShipShield_0..7` constructor lookups receive exact cached nested
+shield rectangles rather than the full A1 tiles. A2's reused
+`infoMultiShipIcon_N` request is distinguished at the nested WireframeIcon
+constructor call site and receives the exact A1 wireframe rectangle. The
+post-pass follows the extra array indirection to each live tile, then invokes
+its retained child's verified wireframe renderer, tolerating a Fleet Operations
+replacement of the outer MultiShipIcon vtable. The race-defined
+`infoMultiCrewDot` sprite is drawn in each live tile because A2 removed that
+child control, tinted green/yellow/red from the selected object's live Crew
+percentage; `small_crew_dot` is used when that string lookup is absent.
+Controls 8 through 15 are hidden to preserve A1's 4-by-2 limit.
+PopupPalette likewise draws a usable
+`controlBlackArea` with Armada's native solid-rectangle helper before its
+data-defined frame and buttons; zero-sized race masks remain intentionally
+disabled.
 
 The module additionally owns a signature-checked inline guard for
 `NebulaClass::s_SetTexturesRecursive` at Armada RVA `0x0009dd40`. A legacy SOD

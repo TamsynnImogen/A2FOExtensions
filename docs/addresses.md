@@ -1,5 +1,10 @@
 # Hook and address register
 
+Ownership-triggered weapon activation is recorded in
+[`team-change-weapons.md`](team-change-weapons.md): checked
+`GameObject::SwapTeam`, `SwapRaceAndTeam`, and `Weapon::SimulateAll` hooks,
+with unchanged native trigger/target/owner lookup callees.
+
 This is the compatibility ledger for every binary address currently used by
 A2FOExtensions. It separates locations that A2FO **modifies** from engine
 functions, globals, return sites, vtables, and object-layout offsets that it
@@ -44,11 +49,20 @@ on-disk bytes are used because Fleet Ops can modify the loaded read-only image
 before the extension core attaches. The same shared identity check is used by
 core renderer hooks and optional native modules which depend on Armada code.
 Every runtime patch still has its own exact instruction signature check.
+The Jan_B September 2026 build is also accepted with `SizeOfImage`
+`0x00405000` and `.test` virtual size `0x0000a999`. Its original section RVAs,
+entry point, image base, and timestamp remain fixed. This profile checks three
+on-disk CRC-32 fingerprints: `.text` (`0x002ac6c4` bytes, `0x5458da70`),
+`.rdata` (`0x0003de90` bytes, `0xcd47b19c`), and `.test` (`0x0000a999` bytes,
+`0x785c09e4`). This does not relax validation for arbitrary enlarged images.
+The native CraftIdentity object editor uses the same shared identity gate.
 SHA-256 and file size identify the exact local reference binaries used for this
 audit; they are not otherwise runtime checks.
 
 | Image | PE timestamp | `SizeOfImage` | Preferred base | File size | Reference SHA-256 |
 | --- | ---: | ---: | ---: | ---: | --- |
+| `ArmadaL.exe` (Jan_B September 2026) | `0x3c4c76bd` | `0x00405000` | `0x00400000` | `4,816,251` | `63bd645d82aec75cdd7ee3e3271fb67bb54f4ae1d1636a736b0db620bd997e36` |
+| `FleetOpsHook.dll` (Jan_B September 2026) | `0x51f6475c` | `0x00322000` | `0x5a800000` | `3,043,840` | `0843058788c6ffd1138d69871e2d9b1911bb6be8ee06db42f59f56b9a4494a97` |
 | `ArmadaL.exe` (Armada II 1.1) | `0x3c4c76bd` | `0x00403999` | `0x00400000` | `4,810,516` | `9752cd058ea47090009f86836327a3d71f1c73dcdb923b62b0b6cba53bf85191` |
 | `FleetOpsHook.dll` (supported Fleet Ops build) | `0x51f6475c` | `0x00322000` | `0x5a800000` | `3,043,840` | `30b4265c792cf5b53edafd9c25b694a051d6a7ba5a61c5c6d768a9addbdc67b2` |
 | stock `Win2kDisableTaskSwitch.dll` | `0x2a425e19` | `0x0000a000` | `0x4a800000` | `16,384` | `db6071ae53ed0e5ca2855ba729b763ec7b68eba8c2cae95f61e3f7199548b035` |
@@ -117,13 +131,13 @@ Sources: [`../core/dllmain.cpp`](../core/dllmain.cpp),
 | Fleet Ops | `0x1063ee` | CALL | 5 | `e8 21 38 00 00` | same dispatcher for project-ID lookup |
 | Fleet Ops | `0x109cc8` | inline | 6 | `55 8b ec 83 c4 f8` | A1Compat `fofs_get_virtual_directory_hook`; normalize legacy `.\\` virtual-directory prefixes before the native lookup |
 | Fleet Ops | `0x10ab98` | inline | 5 | `53 56 57 8b f2` | `mod_user_directory_hook`; semantic `SettingsDirectory` override |
-| Fleet Ops | `0x13e744` | inline | 5 | `55 8b ec 6a 00` | `fo_settings_get_instance_hook`; apply/save the first-run `Settings.xml` speed |
+| Fleet Ops | `0x13e744` | inline | 5 | `55 8b ec 6a 00` | `fo_settings_get_instance_hook`; apply/save the first-run `Settings.xml` speed and repair the impossible positive display width left by the superseded Game Monitor prototype. `FoSettings+0x30/+0x34` are display width/height, never adapter ordinals. |
 | Fleet Ops | `0x13e93c` | inline | 5 | `55 8b ec 51 53` | `game_configuration_new_hook`; initialize new configuration defaults |
 | Fleet Ops | `0x13ea8c` | inline | 5 | `55 8b ec 51 53` | `game_configuration_load_profile_hook`; preserve the configured runtime default across profile loading |
 | Fleet Ops | `0x10b98b` | CALL | 5 | `e8 98 72 0d 00` | `a2fo_race_parameter_db_dispatch_bridge`; dispatch registered completed-Race observers with Race in EBX and ParameterDB in EAX, then call the original Delphi destructor wrapper |
 | Fleet Ops | `0x1bf89c` | inline | 5 | `55 8b ec 33 c9` | `a2fo_mod_settings_form_show_bridge`; call the native `TModSettingsForm.FormShow`, then add the main-DLL-owned Modules button |
 | Fleet Ops | `0x1bef2c` | inline | 10 | `53 56 8b d8 8b b3 70 03 00 00` | `a2fo_mod_settings_launch_bridge`; validate required/rejected module policy before chaining `actLaunchNowExecute` |
-| Fleet Ops | `0x1bd00c` | inline | 8 | `55 8b ec b9 09 00 00 00` | `a2fo_graphics_options_form_show_bridge`; preserve EAX=self and EDX=sender, call the complete `TGraphicOptionsForm.FormShow`, then add the restart-applied renderer controls |
+| Fleet Ops | `0x1bd00c` | inline | 8 | `55 8b ec b9 09 00 00 00` | `a2fo_graphics_options_form_show_bridge`; preserve EAX=self and EDX=sender, call the complete `TGraphicOptionsForm.FormShow`, then add the restart-applied renderer and Game Monitor controls |
 | Fleet Ops | `0x166d0c` | inline | 5 | `53 56 57 8b f0` | `a2fo_jvg_checkbox_set_checked_bridge`; preserve the native `TJvgCheckBox.SetChecked` behaviour and persist changes made to the two extension-owned map-effect checkboxes only |
 
 The class-capture site at `0x0cd1f0` is installed when a completed-class or
@@ -156,9 +170,26 @@ event dispatch; it installs no input-device hook or capture.
 
 The Graphics Options bridge uses the supported form HWND at `+0x1c4` and adds
 form-owned VCL label and combo-box controls in the unused space between the
-display-device row and the existing check boxes. It constructs them from the
-exact native label and device-combo classes already stored on that form, so the
-background-image repaint does not cover them. Emissive and specular controls
+display-device row and the existing check boxes. Alongside the renderer list,
+the Game Monitor list enumerates attached non-mirroring desktop devices through
+Win32, shows their friendly names/current resolutions, and persists the stable
+`\\.\DISPLAYn` device name rather than a hot-plug-sensitive ordinal. It is
+repopulated on every FormShow and reasserted after the other cloned controls
+finish constructing, before its change-observation timer is armed. At startup
+the stable name resolves to an attached desktop monitor; a missing device falls
+back to the current primary monitor. A worker waits for the visible
+`TMainWindowForm` rectangle and style to stabilize after Fleet Operations'
+display-mode transition, then keeps observing that form across later switch,
+menu, and gameplay geometry changes. A settled window whose greatest monitor
+intersection is not the selected device receives a position-only
+`SetWindowPos` call with `SWP_NOSIZE`, `SWP_NOACTIVATE`, `SWP_NOZORDER`, and
+`SWP_NOOWNERZORDER`; the observer never intercepts Fleet Operations' own window
+messages or changes its display mode. Startup retains a conservative stable
+interval; later transitions use a short settle interval and log both source and
+destination coordinates. The
+controls are constructed from the exact native label and device-combo classes
+already stored on that form, so
+the background-image repaint does not cover them. Emissive and specular controls
 are genuine `TJvgCheckBox` instances cloned from the form's native
 `BumpMappingCheck` class and placed immediately below it. Every constructed
 control is rejected if its resulting class pointer differs from its exemplar.
@@ -196,9 +227,10 @@ The live graphics module is never mutated.
 When the active extension-root chain contains `a1compat.ini`, `A1Compat.dll`
 transactionally registers `wingman -> craft` with the core-owned classlabel
 dispatcher plus the 13 missing-only values from STA1 Classic's `a2craft.odf`.
-It also registers the six `a2const.odf` defaults for the native
-`constructionrig` classlabel and the seven `a2freight.odf` defaults for the
-native `freighter` classlabel. The native `research` classlabel receives
+It also registers the ten `a2const.odf` defaults for the native
+`constructionrig` classlabel and the eleven `a2freight.odf` defaults for the
+native `freighter` classlabel, including the common craft/Transport
+capabilities that A1 supplied through its include tree. The native `research` classlabel receives
 missing-only `research = 1` and `transporter = 1`, restoring Fleet Operations'
 outer Research command for raw A1 research facilities. The core remains the sole owner of the seven
 checked ParameterDB sites, and no A1 default policy is active when STA1
@@ -214,19 +246,41 @@ an inherited `scout = 1` marker to missing A2 ScoutBase capabilities at
 `can_sandd` (`0x04000000`), and `can_explore` (`0x08000000`). Captured ODF
 fields prevent the callback from replacing any explicitly declared value.
 The same callback maps inherited `is_starbase = 1` to missing A2 station
-capabilities `facility` (`0x00000004`), `has_hitpoints` (`0x00000800`), and
-`has_crew` (`0x00001000`), restoring Recrew under the same missing-only rule.
+capabilities `transporter` (`0x00000010`), `facility` (`0x00000004`),
+`has_hitpoints` (`0x00000800`), and `has_crew` (`0x00001000`), restoring
+Transport and Recrew under the same missing-only rule.
+For a completed station with a populated Producer table, it also restores a
+missing `builder_ship` bit (`0x00000080`) and records inherited
+`maximumUpgrades`, `officerGain`, and `race` when the class bypassed the native
+Starbase build-class hook. This second path covers converted Addon bases such
+as Future Tense `fedbase`; explicit `builder_ship`, including zero, is not
+overridden.
 A1's shared ship base and A2's Explore command are both named `scout.odf`.
 A1Compat therefore also checks the completed CommandInfo: only an empty
 `buttonName` collision is populated with the native `SCOUT` ID, Orders slot
-`(1,1)`, and source mask `ship | can_explore` (`0x08000002`).
+`(1,1)`, menu ID `1`, and source mask `ship | can_explore` (`0x08000002`).
+
+For an effective A1-era `RTS_CFG.h`, A1Compat validates the native Team
+resource-mutator prologues and their relocated maximum operands before
+bridging legacy maxima. `Team::AddDilithium` at Armada RVA `0x00096e30`
+references the float at `0x00338df0`; `Team::AddCrew` at `0x00096f20`
+references `0x00338dec`; and `Team::AddOfficers` at `0x00097010` references
+`0x00338de8`. The bridge writes only when the effective file declares the
+matching `cfgMax*` value and omits its modern `MAX_*` counterpart.
 
 `A2FOCheats.dll` owns the global Fleet Operations cheat extension:
 
 | Image | RVA | Kind | Bytes | Expected bytes | Handler and purpose |
 | --- | ---: | --- | ---: | --- | --- |
-| Fleet Ops | `0x001fc320` | inline | 6 | `53 a1 <relocated current-player link>` | `show_me_the_money_hook`; retain Fleet Operations' registered command and multiplayer-cheat gate, then grant the current team the five Data/parent/active-mod `RTS_CFG.h` amounts (10,000 defaults) through the native Dilithium, Tritanium, Metal, Supplies, and Crew mutators |
-| Fleet Ops | `0x001fccc8` | inline | 5 | `ba <relocated chat callback>` | `chat_hook_init_hook`; chain native chat initialization, then register `m`, `dis`, and `crash` and replace the incorrect `elim -> expl` registry entry with true selected-team elimination |
+| Fleet Ops (legacy) | `0x001fc320` | inline | 6 | `53 a1 <relocated current-player link>` | `show_me_the_money_hook`; grant the current team the five Data/parent/active-mod `RTS_CFG.h` amounts (10,000 defaults) through the native Dilithium, Tritanium, Metal, Supplies, and Crew mutators |
+| Fleet Ops | `0x001fccc8` | inline | 5 | `ba <relocated chat callback>` | `chat_hook_init_hook`; chain native chat initialization, then register `showmethemoney`, `m`, `dis`, and `crash` and replace the incorrect `elim -> expl` registry entry with true selected-team elimination; all five commands retain the multiplayer restriction |
+
+Jan_B's September build repurposes `0x001fc320` for ShipSystemIcon rendering
+and skips the native money-cheat registration. Its eight-byte signature is
+`53 a1 <relocated RVA 0x00212c50> eb 0c`. A2FOCheats recognizes this variant
+without hooking that entry and publishes its own money handler through the
+chat registry instead. The old inline path remains supported for earlier
+Fleet Ops builds; unknown signatures still disable the module.
 
 The handler validates the identical seven-byte prologues of the resource
 mutators at Fleet Ops RVAs `0x001e35d0`, `0x001e35ec`, `0x001e3608`,
@@ -255,9 +309,16 @@ extension:
 | Image | RVA | Kind | Bytes | Expected bytes | Handler and purpose |
 | --- | ---: | --- | ---: | --- | --- |
 | Armada | `0x000bf090` | inline/JMP chain | 5/6 | stock `55 8b ec 6a ff`, or Fleet Ops' live `68 <handler> c3` resolving exactly to RVA `0x0010d6e4` whose handler begins `55 8b ec 83 c4 f8 53` | `craft_class_constructor_hook`; chain Fleet Operations' CraftClass enhancement, then copy the final `possibleCraftNames`, `possibleCaptainNames`, and `possibleCraftRegistry` string vectors from the completed ParameterDB |
-| Armada | `0x000f3560` | inline | 6 | `55 8b ec 83 ec 08` | `selected_builder_info_render_hook`; retain the stock tall producer/build-queue panel renderer, then draw ammunition and directional shields through its live `infoBuildName`/`infoBuildClass` text and display context |
+| Armada | `0x000f3560` | inline | 6 | `55 8b ec 83 ec 08` | `selected_builder_info_render_hook`; retain the stock tall producer/build-queue panel renderer, then draw aligned captain/registry, ammunition and directional shields through the shared initialized captain text context, with configured `infoBuildName`/`infoBuildClass` anchors as fallbacks |
 | Armada | `0x000f3770` | inline | 6 | `55 8b ec 83 ec 08` | `selected_info_render_hook`; retain the complete stock ordinary single-object panel renderer, notify the bounded EnergySystems observer, and draw aligned captain/registry, ammunition, directional-shield, shield-tooltip, and XP elements in the native component's local rectangle/display/scissor state |
 | Armada | `0x000eed2e`, `0x000eedd7`, `0x000eee43`, `0x000eef00`, `0x000eefd8`, `0x000ef24e` | CALL | 6 x 5 | direct calls to `ST3D_Sprite::SetColour` at `0x0023a4d0` | `a2fo_identity_system_icon_set_colour_bridge`; preserve Fleet Operations' existing `SystemIcon::Render` entry detour and forward its live ESI icon context to the per-state colour policy |
+| FleetOpsHook | `0x001ed8f7`, `0x001ed99d` | CALL | 2 x 5 | `e8 b8 5b ff ff`, `e8 12 5b ff ff` | `a2fo_identity_weapon_icon_set_colour_bridge`; forward the `ShipSystemIcon` retained at caller `[EBP-4]` while preserving its Delphi EAX/EDX sprite ABI, then tint both native weapon-icon layers from the independent `weaponIcon*Color` state palette (with `systemIcon*Color` fallback), unavailable-weapon disabled status, or fixed `passiveWeaponIconColor`/neutral `UtilityWeapon` policy |
+| FleetOpsHook | `0x0011eb6c` | native call | 16 checked | `53 56 57 55 51 8b f0 b3 01 80 7e 09 00 74 47 8b` | call `TTechItemImp.shouldShowButton` through the Delphi register bridge so `weaponXiconpos` observes the exact native `buttonHideUnavailable` requirement policy |
+| FleetOpsHook | vtable `0x0021110c` + `0x10` | pointer | 4 | `0x001ed458` | `ship_system_icon_render_policy_hook`; preserve the render entry used by A2FOFireArcs while hiding an unavailable normal or special weapon only when Fleet Operations' native button policy says not to show it |
+| FleetOpsHook | `0x001edfa0`, `0x001ee05c` | inline | 7, 9 | `55 8b ec 51 53 56 57`; `55 8b ec 83 c4 c4 53 56 57` | `cleanup_hook`, `post_load_hook`; destroy and recreate 96 sidecar `ShipSystemIcon` objects for zero-based weapon indices 32 through 127 without extending ShipDisplay's fixed array into the following buff fields |
+| FleetOpsHook | `0x001ee868`, `0x001ee9bc` | inline | 2 x 7 | `55 8b ec 51 53 56 57` | selected-object and selected-builder display hooks; retain native drawing, then render sidecar weapon controls through their live vtable |
+| FleetOpsHook | `0x001eeb14`, `0x001eec14`, `0x001eed14` | inline | 7, 7, 8 | two `55 8b ec 51 53 56 57`; `55 8b ec 51 53 89 4d fc` | selected-object/builder simulate and always-simulate hooks; retain native UI input/tooltips and advance the matching disabled-flash state for slots 33 through 128 |
+| FleetOpsHook | `0x001ed6d6` | bytes | 2 | `84 c2` -> `84 d2` | retain the native sprite-presence test but stop combining it with special-weapon research availability at the early exit; the renderer's later existing branch then draws an unavailable special weapon disabled |
 | Armada | `0x000ec748` | CALL | 5 | `e8 83 dd 14 00` | `a2fo_identity_system_text_set_colour_bridge`; colour the value icon from the live ESI `SystemValue`, `HullText`, `ShieldText`, `CrewNumText`, `EnergyText`, or `OfficerTextAndSprite` context while rejecting every unrelated component |
 | Armada | `0x0010c393` | CALL chain | 5 | stock `e8 c8 ed 00 00`, or a live relative CALL resolving inside Fleet Operations | `a2fo_identity_value_text_draw_bridge`; replace the RGB fields in the temporary native value-text record only for live `SystemValue`, `HullText`, `ShieldText`, `CrewNumText`, `EnergyText`, and `OfficerTextAndSprite` components, then tail-chain the resolved native/Fleet Operations draw handler with its original seven-argument thiscall ABI |
 
@@ -267,13 +328,24 @@ or the untouched stock prologue. The companion fields read Craft's native
 existing random selection and save/load state without advancing the
 synchronized RNG or changing the native save stream.
 
+Weapon-icon technology presentation reads `WeaponClass+0x208`,
+`Craft+0xec`, FleetOpsHook's team-tree pointer at `0x00212f08`, and the same
+recursive evaluator at `0x00120680` used by `A2FONormalWeaponTech`. Missing
+tree entries remain available. The core's completed WeaponClass event supplies
+the inherited `classLabel`; `UtilityWeapon` takes priority over special/normal
+status and is always presented in neutral white/grey.
+
 The ordinary selected layout stores class/name/captain/wireframe components at
 InfoDisplay offsets `+0x90`, `+0x94`, `+0xbc`, and `+0xac`. The tall producer
 layout instead renders class/name/wireframe components at `+0x100`, `+0x104`,
-and `+0x114`. Its name or class live rectangle is translated from the native
-`infoBuildName`/`infoBuildClass` CFG rectangle to
-`infoSingleCaptainTextArea`; this preserves one set of modder-configured A2FO
-target rectangles across both native panel variants.
+and `+0x114`. Both render hooks prefer the captain GUIText at `+0xbc`: Armada
+initializes it unconditionally in the common constructor path at
+`0x000f07d5..0x000f0880`, including its live rectangle at `+0x58`, even when
+the tall panel never renders a captain name. This preserves the same anchor
+and text/display state across both native panel variants. Only when that
+component is unusable does the tall panel translate a name or class rectangle
+from its matching `infoBuildName`/`infoBuildClass` CFG rectangle to
+`infoSingleCaptainTextArea`; missing source configuration is skipped.
 
 Supporting calls are signature-preflighted at Armada RVAs `0x001358f0`
 (`ParameterDB::Get(DBRectangle)`), `0x00135ba0`
@@ -390,19 +462,46 @@ runtime hooks:
 | Image | RVA | Kind | Bytes | Expected bytes | Handler and purpose |
 | --- | ---: | --- | ---: | --- | --- |
 | Armada | `0x0026f8c0` | inline/JMP chain | 6 | stock `55 8b ec 83 ec 1c`, or Fleet Ops' live `68 <handler> c3` resolving exactly to RVA `0x001358ac` whose handler begins `55 8b ec 83 c4 f4 53` | `weapon_can_fire_at_hook`; chain Fleet Operations' target filter, preserve native target/range/obstruction authorization, replace the stock directional gate, and apply the complete configured 3D volume |
+| Armada | `0x002b4abc` (`SystemIcon` vtable `0x002b4aac` + `0x10`) | vtable pointer | 4 | native `SystemIcon::Render` at RVA `0x000eec90` | `system_icon_render_hook`; chain the native entry, including Fleet Operations' existing entry detour and range visualization, then detect exact cursor ownership on subsystem index 2 and draw every configured weapon arc on the selected Craft |
 | FleetOpsHook | `0x001ed458` | inline | 7 | `55 8b ec 83 c4 bc 53` | `ship_system_icon_render_hook`; preserve native `ShipSystemIcon` rendering, detect exact cursor ownership, resolve its live weapon-slot index, and draw the configured arc from every linked hardpoint |
 
 The target simulation hook accepts only Fleet Operations' exact checked handler
-or the untouched stock prologue, while the UI hook accepts only the exact
-supported Fleet Operations render prologue. The UI hook is installed first,
-but remains a pass-through until every site is ready. A weapon ODF without any
+or the untouched stock prologue, while the per-weapon UI hook accepts only the
+exact supported Fleet Operations render prologue. The aggregate subsystem hook
+owns only the stable native vtable slot and deliberately chains the live
+`SystemIcon::Render` entry rather than replacing Fleet Operations' entry
+detour. The UI hooks are installed first, but remain pass-throughs until every
+site is ready. A weapon ODF without any
 new arc commands never enters module policy: its existing `restrictFireArc`
 byte and native `fireArc` path remain unchanged. For a valid custom policy, the
 hook temporarily clears `WeaponClass+0x1b7` only while chaining native `CanFireAt`,
 then restores it. This preserves target validity, range, and obstruction while
 letting the custom box/cone own the directional decision, including pitch.
 The same full decision is registered at the core's shared late trigger
-boundary, closing any gap between target authorization and the actual shot.
+boundary, closing any gap between target authorization and the actual shot for
+ordinary and primary-only weapons.
+
+Fleet Operations' `CannonImp::Simulate` at RVA `0x001388e0` reads native
+`CannonImpClass+0x28c` as `usePrimaryTarget`. In the primary-only branch, a
+null best-hardpoint/`CanFireAt` result deactivates that Weapon update and
+returns, allowing Craft's native weapon iteration to continue. In the
+automatic branch, each candidate reaches the same authorization result before
+the accepted-target counter advances; a rejected custom arc therefore resumes
+the native spatial scan without consuming `baseTargets` or
+`maxExtraTargets`. A2FO deliberately leaves this target loop unhooked and
+supplies only the directional authorization result, preserving native search
+order and multiplayer determinism.
+
+The core's shared hook at Armada RVA `0x00271290` is
+`Weapon::Trigger(GameObject*)`: it activates the Weapon using the craft's
+current primary target before `CannonImp::Simulate` performs its own search.
+For a configured `CannonImp` whose native `usePrimaryTarget` byte is zero,
+FireArcs therefore accepts this preliminary trigger regardless of that
+primary target's custom arc. Candidate authorization remains enforced by the
+hooked `CanFireAt` path above. Without this narrow deferral, an out-of-arc
+primary target suppresses activation and the automatic candidate loop never
+runs. Primary-only CannonImp and all other configured weapon classes retain
+the shared trigger-time arc check.
 
 The module reads numeric ODF angles through `ParameterDB::GetFloat` at Armada
 RVA `0x00134df0`, with the active `ParameterDB::GetString` entry at
@@ -828,8 +927,9 @@ selection globals, arms the one-shot acceptance bridge, and enters
 state, and closes the modal dialog. For an INI-defined custom BZN, the module
 temporarily replaces exactly one checked cell in that table with the selected
 filename, calls `SetupMission`, and restores the original pointer before
-returning to its dialog procedure. It never expands or indexes past the native
-four-by-ten allocation. The replacement resolves the same native shell host
+the next mission launch or module shutdown, after Armada's deferred map hand-off
+has consumed it. The replacement filename lives in stable module-owned storage.
+It never expands or indexes past the native four-by-ten allocation. The replacement resolves the same native shell host
 as `DoSingle` through the display-engine pointer at `0x003ad508` and its
 no-argument thiscall at `0x0022bc70`, then opens Armada dialog resource `115`.
 That resource's borderless popup/clip/control-parent styles keep the selector
@@ -887,6 +987,12 @@ effect's native colour. Module-owned effect IDs deliberately never enter
 Craft+`0x208`, which remains reserved for native impact/collapse effects.
 Missing or zero `alwaysShowShields` values never enter module policy.
 
+`A1Fallbacks.dll` owns one missing-only presentation hook:
+
+| Image | RVA | Kind | Bytes | Expected bytes | Handler and purpose |
+| --- | ---: | --- | ---: | --- | --- |
+| Armada | `0x000f7a60` | inline | 10 | `55 8b ec 6a ff 68 2d f9 69 00` | `wireframe_sprite_set_hook`; chain the native cached `w1..w5`/`_s` resolver and preserve it when any layer exists. For an entirely empty set on exact WireframeIcon or BuildQueueIcon instances, return one interface sprite resolved as `b_<target class basename>`, then `<current owner Race name>_icon`. Interface lookup uses the checked native database at RVA `0x00365030` and getter at `0x00220750`. |
+
 `A1Compat.dll` also owns these A1-scoped compatibility hooks:
 
 | Image | RVA | Kind | Bytes | Expected bytes | Handler and purpose |
@@ -895,11 +1001,11 @@ Missing or zero `alwaysShowShields` values never enter module policy.
 | Armada | `0x0008ac70` | checked CALL | 5 | `e8 7b 9f 0a 00` | `a2fo_a1_race_count_lookup_hook`; preserve `Race::InitAll`'s native `numberOfRaces` lookup, then add one runtime-only record when an A1 registry omits A2's neutral `norace` and the next index is unoccupied |
 | Armada | `0x0008acc5` | checked CALL | 5 | `e8 86 a6 0a 00` | `a2fo_a1_race_entry_lookup_hook`; preserve native `raceN` resolution and supply inherited `norace.odf` only for the synthetic final index published by the matching count lookup |
 | Armada | `0x000954b0` | inline | 5 | `55 8b ec 6a ff` | `team_color_init_hook`; chain Fleet Operations' native `TeamColor_Init`, then reapply the A1 named-colour translation to the Instant Action/minimap player palette |
-| Armada | `0x00119070` | inline | 5 | `55 8b ec 6a ff` | `command_info_build_class_hook`; after normal `CommandInfoClass::BuildClass`, repair only A1's `scout.odf` basename collision when the selected ship-base ODF left `buttonName` empty, restoring A2's Explore identity, Orders slot, and `ship + can_explore` source mask while preserving a valid command definition |
+| Armada | `0x00119070` | inline | 5 | `55 8b ec 6a ff` | `command_info_build_class_hook`; after normal `CommandInfoClass::BuildClass`, repair only A1's `scout.odf` basename collision when the selected ship-base ODF left `buttonName` empty, restoring A2's Explore identity, Orders menu ID `1`, Orders slot, and `ship + can_explore` source mask while preserving a valid command definition |
 | Armada | `0x000ab710` | inline | 5 | `55 8b ec 6a ff` | `starbase_class_build_class_hook`; call native `StarbaseClass::BuildClass`, then parse A1 `maximumUpgrades` and `officerGain` as strings through the validated `ParameterDB::GetString` entry at RVA `0x00135350`; RVA `0x00135200` is `GetProjectId` and must not be detoured as an integer getter |
 | Armada | `0x000bbd90` | vtable target | 5 | `53 56 57 8b f1` | `starbase_finish_build_hook`; reproduce A1's `Starbase::FinishBuild` OfficerUpgradeClass branch before A2's derived object/output-queue post-processing, while chaining the native gateway for every ordinary build |
 | Armada | `0x000bbe90` | Starbase vtable `+0x16c` | 8 | `8b 81 c0 02 00 00 85 c0` | `starbase_start_construction_effect_hook`; suppress the non-renderable OfficerUpgradeClass cosmetic instance even when optional Producer-event emitters are absent, while chaining the derived Starbase override for every ordinary build |
-| FleetOps | `0x00210d40` | writable native target cell (carrier `0x00212c44`) | 6-byte target check | Armada `0x000b7930`: `55 8b ec 56 8b f1` | `producer_push_build_queue_item_hook`; compose with FeaturePack's public queue wrapper while independently rejecting wrong-race or over-maximum A1 officer orders before native queue insertion |
+| FleetOps | `0x00210d40` | writable native target cell (carrier `0x00212c44`) | 6-byte target check | Armada `0x000b7930`: `55 8b ec 56 8b f1` | `producer_push_build_queue_item_hook`; compose with FeaturePack's public queue wrapper while independently rejecting wrong-race or over-maximum A1 officer orders before native queue insertion. A compatibility-owned root-button press enters this same checked wrapper directly; the older native-popup fallback can still publish a pending Root-menu return when the admitted producer/target pair matches the binding snapshotted at the popup input boundary. |
 | Armada | `0x000bda00` | inline | 6 | `55 8b ec 8b 45 08` | `a2fo_a1_starbase_initialize_geometry_hook`; before Fleet Operations initializes Starbase geometry, set node flag bit 0 on exact numbered `oqN` branches according to compatibility-owned completion state |
 | Armada | `0x000bda30` | inline | 5 | `55 8b ec 51 56` | `starbase_clear_team_hook`; remove A1 base/quarter officer capacity and reset completed quarters before native `Starbase::ClearTeam` |
 | Armada | `0x000bda70` | inline | 6 | `55 8b ec 8b 45 08` | `starbase_set_team_hook`; after native `Starbase::SetTeam`, credit the new owner with the A1 base and retained-quarter officer capacity |
@@ -913,10 +1019,31 @@ Missing or zero `alwaysShowShields` values never enter module policy.
 | Armada | `0x000a94dd` | checked CALL | 5 | `e8 0e d4 08 00` | `a2fo_a1_translate_smooth_integer`; preserve native `turnControlSquared`, then supply the A2 Classic zero default for a legacy shared physics record |
 | Armada | `0x000ccebb` | checked CALL | 5 | `e8 90 84 06 00` | `a2fo_a1_game_object_resource_lookup_hook`; preserve normal/core `ParameterDB::GetString` resolution, then supply the matching A2 Classic `ResourceMoon` or `ResourceMoonInf` value only when `resource` is missing from the exact raw-A1 `mdmoon[digits]` or `mmooninf[digits]` family. ODF identity chains the live `cPrjID::GetOdfName` entry at RVA `0x002593a0`, accepting Fleet Operations' existing checked detour as well as the stock prologue; it deliberately does not query the completed-class/class-label cache during early `BuildClass`. |
 | Armada | `0x0011a776` | checked CALL | 5 | `e8 85 5f 12 00` | `a2fo_a1_gui_sprite_read_table_hook`; replace only `DisplayInterface::PostLoadAll`'s initial `ST3D_TextFileParser::ReadTable` call so `a2_gui_global.spr` enters the fresh GUI database before the winning `gui_global.spr`, then verify `buttonBackgroundPanel.0` before component initialization |
+| Armada | `0x0011b3f0` | inline | 6 | `55 8b ec 8b 45 0c` | `legacy_default_cursor_lookup_hook`; preserve the configured GUI cursor lookup for compatible tables. When the winning A1 `standard_cursor` is unflagged, oversized, or invalid, resolve the already-loaded valid `c_build` record from the world-sprite database at owner RVA `0x003ad508`, offset `+0x44`, and return it as the visual default cursor without reparsing SPR files or intercepting input. |
+| Armada | `0x0030fbe4`, `0x0030fc0c`, `0x003643d4` | late runtime data | pointer-sized | native `c_select` cache slots and active visual-cursor pointer | `repair_legacy_tactical_cursor_pointers`; from the already-active A1 ShipDisplay render boundary, replace only the two incompatible cached `c_select` records and an active pointer that still equals either original record with the already-loaded valid `c_build` record. This runs after Fleet Operations' cursor initialization, leaves all other command cursors native, and does not intercept input. |
 | Armada | `0x0011a80f` | inline | 5 | `a3 2c 50 76 00` | `a2fo_a1_gui_parameter_db_post_construct_hook`; compose after any Fleet Operations ownership of the preceding constructor CALL, inspect the completed database still in EAX, detect the raw-A1 `speedPanelArea` plus `controlPanelArea` signature with no modern screen dimensions, and set only that database's integer reference width/height at `+0x2c/+0x30` to 640x480 before the gateway publishes it and component PostLoad begins. Detection uses native `Get(int)` at RVA `0x00134bf0` and `Get(DBRectangle)` at `0x001358f0`; explicit A2 dimensions remain authoritative. |
-| Armada | `0x000e64e0` | inline | 6 | `55 8b ec 83 ec 34` | `control_button_render_hook`; for a detected raw-A1 gameplay layout, scan Fleet Operations' compacted 64-entry PopupPalette control array at Fleet Ops RVA `0x00247ef4` and reapply the selected race's native-scaled `controlButton1..12` areas at `ControlButton+0x08` immediately before the native render. `ParameterDB::GetRectangle` yields CFG `x, y, width, height`, which the adapter converts to the inclusive `left, top, right, bottom` representation stored by `ControlButton`. This composes after Fleet Ops/HybridBuild popup updates and does not alter command modes, input callbacks, or controls outside the twelve A1 slots. |
-| Armada | `0x0011b430` | inline | 9 | `55 8b ec 8a 0d b8 4e 76 00` | `display_interface_load_rectangle_hook`; only for the currently published raw-A1 gameplay database, translate A2 ShipDisplay's `infoPanelArea_0..2`, `infoBlackArea_0..2`, and low/middle background-area names to A1's single Status Report rectangle keys before chaining the native ArmadaL loader. This is the supported Fleet Operations ArmadaL entry; the retail Armada II map address is not interchangeable. |
-| Armada | `0x00135350` | inline | 9 | `55 8b ec 81 ec 00 01 00 00` | `parameter_db_get_string_hook`; installed last inside A1Compat, match the exact live legacy gameplay ParameterDB, and translate only `infoLowBackgroundPanel`/`infoMiddleBackgroundPanel` to `infoBackgroundPanel` before chaining the original four-argument thiscall. Other databases, keys, defaults, and output buffers remain native. |
+| Armada | `0x00105380` | inline | 6 | `56 8b f1 8b 46 38` | `tooltip_render_hook`; at the stable Tooltip render boundary, supply A1's exact solid `#808080` background and black text for missing raw-A1 colour vectors. Explicit/inherited colours remain authoritative. Tooltip background/text RGB fields are `+0x40/+0x4c`. |
+| Armada | `0x00105720` | inline | 6 | `55 8b ec 83 ec 58` | `tooltip_render_verbose_hook`; when a raw-A1 GUI omits A2's complete seven-key framed-tooltip contract, bypass the collapsed A2 frame and invoke the checked native cursor-relative popup helper at RVA `0x00105430` with the verbose string at Tooltip `+0x38`. Modern/configured A2 frames remain native. |
+| Armada | `0x000fa990` | optional inline | 5 | `55 8b ec 6a ff` | `popup_palette_post_load_hook`; when Fleet Operations leaves the entry installable, eagerly apply the detected raw-A1 `controlPanelArea` to the popup parent, apply `controlButton1..12` as parent-local child rectangles, and construct a native 0x34-byte `StandardBackground` from `controlBackgroundPanelArea`/`controlBackgroundPanel*`. Fleet Operations may retain ownership of this entry; render/input/cursor then perform the same setup lazily. The background uses the supported constructor/initializer at RVAs `0x0010a750`/`0x0010aaa0`; its MSVCP60 string prefix is built through the executable's imported string methods rather than crossing CRT ABIs. |
+| Fleet Ops | `0x001e7970` | inline | 6 | `55 8b ec 53 56 57` | `popup_palette_focus_game_simulate_hook`; restore the A1 parent/local geometry before Fleet Operations' replacement `PopupPaletteImp::FocusGameSimulate` walks its expanded 64-button array and dispatches native control callbacks, then repeat the layout pass after the gateway because a class-target click can consume and compact the live palette. The passes identify Transport through either ControlButton's direct Action pointer at `+0x88`, or its ModeInfo pointer at `+0x84`, type 2 at ModeInfo `+0x04`, and Action pointer at ModeInfo `+0x10`; the live Fleet Operations binding may expose AiCommand 12 or 13 at Action `+0x1a0`. They move Transport after A1's five shared queue/special slots and separator, while other type-2 Action ModeInfo controls (or an explicit AiCommand 6 `SPECIAL_ATTACK`) occupy those leading slots. Matching deliberately does not require Fleet Operations to retain the popup as the button's parent. The passes also bind a selected A1 starbase's race-matched officer target as the separate root-menu slot 9 command. Fleet Operations compacts valid controls with Armada's shallow `ControlButton::CopyModes`, so ownership follows the compatibility ModeInfo pointer across button objects, stale duplicate copies are cleared, and the owned payload is rebuilt before each native state call; the duplicate Build-submenu control is removed. The pre-pass snapshots the displayed officer producer/target before ControlButton can consume ModeInfo. The dedicated checked ControlButton vtable hook normally dispatches that binding without changing menus; if a native popup route nevertheless accepts the snapshotted pair, the queue hook publishes ownership and the next popup boundary calls the verified Fleet Ops `PopupPaletteImp::SetCurrentMenu` wrapper at RVA `0x001e232c`. A genuine Build-button transition never matches that accepted officer pair and remains on Build. Fleet Operations installs this Delphi routine in the popup vtable, so Armada's original implementation at RVA `0x000fbc70` is dormant and must not be used as the input boundary. |
+| Fleet Ops | `0x001e232c` | checked native helper | 10-byte target check | `55 8b ec 51 89 45 fc 8b 45 fc` | `PopupPaletteImp::SetCurrentMenu`; return an accepted compatibility-owned officer target from Fleet Operations' transient Build state to A1's Root palette while leaving genuine Build-button transitions untouched |
+| Fleet Ops | `0x001e23ec` | checked native helper | 9-byte target check | `55 8b ec 51 53 8b d9 89 45` | bind the compatibility-owned type-1 ModeInfo for the A1 officer root command through Fleet Operations' own ControlButton state updater, preserving native target dispatch |
+| Armada | `0x002b486c` | vtable slot (`ControlButton` vtable `0x002b484c` + `0x20`) | 4 | original target `Armada+0x000e69e0`: `8b c1 56 8b 90 88 00 00 00` | `control_button_press_vtable_hook`; intercept only the enabled compatibility-owned officer root button and send its resolved target through the checked Producer queue wrapper without invoking Fleet Operations' generic type-1 Build-menu route; every other ControlButton chains its current native entry, including later inline composition by HybridBuild |
+| Armada | `0x000e6ad0` | checked native helper | 8-byte target check | `56 8b f1 8b 8e 84 00 00` | `ControlButton::Clear`; release the compatibility-owned A1 officer root binding and remove the duplicate officer target from Fleet Operations' Build submenu without disturbing other controls |
+| Armada | `0x000fbce0` | inline | 6 | `39 0d cc 43 76 00` | `popup_palette_render_hook`; restore the same geometry, including relocated live special controls and Transport after Fleet Ops compaction, draw any usable A1 `controlBlackArea` through native `DisplayInterface::DrawRectangle` at RVA `0x0011b2c0` with the engine black colour at RVA `0x003a8f98` and opaque `1.0` fill, render the adjacent A1 `controlBackgroundPanel` through native `StandardBackground::Render` at RVA `0x0010a820`, then chain the native popup-button renderer. The SpeedRail shell is deliberately drawn at the earlier ShipDisplay boundary so this later pass cannot cover its queue icons. This composes after Fleet Ops' compaction and HybridBuild's mode binding without replacing either updater. |
+| Armada | `0x000fbd30` | inline | 6 | `55 8b ec 83 ec 08` | `popup_palette_cursor_over_hook`; restore the A1 popup rectangle and twelve local popup child hit rectangles before native cursor testing, then explicitly accept the relocated special-control and Transport screen rectangles because they lie outside the popup parent. Fleet Operations' compacted 64-entry control array remains at Fleet Ops RVA `0x00247ef4`; unrelated controls remain native. |
+| Armada | `0x000e5d30` | inline | 6 | `55 8b ec 83 ec 24` | `cinematic_view_render_hook`; for a detected raw-A1 gameplay database, read the highest-precedence race CFG's cinematic rectangles directly, then restore `CinematicView`'s screen-relative parent at `+0x04`, parent-local default-background rectangle at `+0x38`, and parent-local live 3D viewport at `+0x48` before native rendering. The owned `StandardBackground` is not mutated; its `+0x04` field is a parent pointer, not a rectangle. This keeps the active cinematic image inside each race's data-defined Viewscreen rather than allowing inherited A2 child geometry to spill it across ShipDisplay. |
+| Armada | `0x000fef80` | inline | 6 | `56 8b f1 8b 4e 28` | `button_panel_focus_game_simulate_hook`; for raw A1 layouts, move ButtonPanel's retained MENU (`+0x2c`) and COMM (`+0x30`) StandardButtons into the race-defined CinematicView areas before native input dispatch. These two child fields are screen-coordinate rectangles even though their CFG source is parent-local, so the adapter adds the restored CinematicView origin before writing them. The ButtonPanel and StandardButton vtables must match RVAs `0x002b50e4` and `0x002b5684`; other A2-only children are parked off-screen. |
+| Armada | `0x000fefe0` | inline | 6 | `a1 cc 43 76 00 56` | `button_panel_render_hook`; restore the same A1 cinematic-button geometry and rebind each live StandardButton's border/surface through native `DisplayInterface::LoadSprite` and `StandardButton::SetSprites` at RVAs `0x0011b3b0`/`0x0010ba80`, preserving native state and callbacks while using the active race's `cinematic*Button`/`cinematic*Border` assets. Native render restores ButtonPanel's compact top-bar parent, so the adapter reapplies the A1 parent after the gateway; a cached ResourceDisplay text child then supplies font state to draw centred `COMM`/`MENU` captions from their parent-local CFG rectangles through the restored bottom-panel origin. |
+| Armada | `0x000ff050` | inline | 5 | `a1 18 50 76 00` | `button_panel_cursor_over_hook`; restore ButtonPanel's A1 CinematicView parent before native panel cursor testing so COMM and MENU own their screen area instead of clicks falling through to the world. |
+| Armada | `0x002b51cc` | vtable slot (`ResourcePanel` vtable `0x002b5174` + `0x58`) | 4 | original target `Armada+0x000ffa40` | `resource_panel_render_vtable_hook`; draw A1Compat's three independent resource backgrounds/icons before chaining native resource text. The vtable ownership leaves `ResourcePanel::Render`'s function entry available to optional `A2FOResources`; a recursion guard makes that module's exported A1 bridge acknowledge the already-drawn strip without duplicating it. |
+| Armada | `0x000f2bb0` | inline | 8 | `55 8b ec 83 ec 08 53 56` | `ship_display_render_hook`; for a detected raw-A1 gameplay database, first draw A1's removed SpeedRail mosaic and resolved separator sprite so the later native queue children remain visible, then restore the one active `infoBlackArea` into ShipDisplay's retained low/middle/tall local mask fields at `+0x188`/`+0x198`/`+0x1a8`, and restore both the ordinary WireframeIcon at `ShipDisplay+0xac` and build/station WireframeIcon at `+0x114` to the highest-precedence legacy race CFG's raw `infoSingleWireframeIconArea`, scaled with the verified A1 panel factors, through their DisplayComponent rectangles at `+0x08`, before the native mode dispatcher. Direct CFG resolution avoids Fleet Operations' retained same-named A2 ParameterDB value. The children must retain the native WireframeIcon vtable at Armada RVA `0x002b4f18` and their ShipDisplay parent pointer at `+0x04`; otherwise the optional write is skipped. The same pass restores RaceIcon at `ShipDisplay+0x9c` after checking its native vtable at RVA `0x002b4a6c`: `infoSingleRaceIconArea` goes to its DisplayComponent rectangle at `+0x08`, while `infoSingleRaceIconDisplayArea` goes to its embedded live-insignia rectangle at `+0x30`, returning the native team-coloured stripe to the A1 Status Report. This boundary also restores the normal/build class (`+0x90`/`+0x100`), name (`+0x94`/`+0x104`), Crew (`+0x88`/`+0x10c`), and Officer (`+0x98`/`+0x108`) children after exact vtable/parent validation. CrewDisplay's internal icon rectangle at `+0x10c` receives `infoSingleCrewDotArea` while its component bound covers both dot and text, preserving native Crew-level colour coding. Because A2 lacks A1's separate localized Crew/Officer labels and `current/max` Crew formatter, the two native amount strings are hidden and their checked text state is reused after the gateway with `DisplayInterface::DrawTextInRectangle` at RVA `0x0011b160`; current and maximum Crew are read from the selected object at `+0x1dc`/`+0x1c4`, with class initial Crew `+0x84` only a guarded fallback, while Officers come from class `+0x88`. It validates the exact SystemValue vtable at RVA `0x002b4c88` and ShipDisplay parent before parking all ten A2-only normal/build numeric children at pointer fields `+0x74..+0x84` and `+0xec..+0xfc` off-screen. The true normal/build SystemIcon arrays remain at `+0xc4..+0xd4` and `+0xd8..+0xe8`; aliased `infoSystemIcon_0..4` and `infoBuildSystemIcon_0..4` rectangles let both render A1's `infoSystem_0..4` sprite strip. The actual ConstructionBar at `+0xb0` (vtable RVA `0x002b4d48`) and adjacent EnergyText at `+0x110` (vtable RVA `0x002b4adc`) are both restored to A1's shared `infoSingleConstructionBarArea`. For multi-selection, `ShipDisplay+0x148` is followed to its live 16-entry MultiShipIcon pointer array; the first eight tiles are restored to the raw A1 `infoMultiShipIcon_0..7` 4-by-2 grid, their structurally checked shield-bar children at `+0x3c` receive nested `infoMultiShieldBarArea`, and their checked WireframeIcon children at `+0x30` receive nested `infoMultiWireframeIconArea`; tiles 8..15 are hidden. After the native pass binds each live tile, each wireframe's cached nested rectangle is restored and the retained child renders the selected object already bound at `+0x28`; the race-defined `infoMultiCrewDot` sprite is drawn at its cached nested `infoMultiCrewDotArea`, tinted green above 50% live Crew, yellow above 25%, and red at or below 25%. Finally, BuildQueueIcon vtable RVA `0x002b4994` and the ShipDisplay parent are validated before moving the first five children in the ten-pointer array at `+0x120` into A1 SpeedRail's five leading slots and hiding children 5..9. Queue and progress state remain native; only presentation rectangles change. |
+| Armada | `0x000f2df0` | inline | 5 | `a1 18 50 76 00` | `ship_display_cursor_over_hook`; preserve native ShipDisplay hit testing, then accept the complete restored SpeedRail screen rectangle for a raw-A1 layout. This gives its five native queue controls and separator panel a UI owner so clicks cannot pass through to the world and deselect the current unit. |
+| Armada | `0x0010afd0` | optional inline | 6 | `55 8b ec 83 ec 28` | `construction_bar_render_hook`; this is the real ConstructionBar render entry (vtable RVA `0x002b4d48`), not EnergyText at vtable RVA `0x002b4adc`. When its selected-object field at `+0x428` contains an exact ConstructionRig (vtable RVA `0x002b22ec`), obtain the active ConstructionObject through checked native `ConstructionRig::GetConstructionObject` RVA `0x000afe80`; a compatible wrapped vtable falls back to its nonzero object ID at `+0x2b4` and checked `FindGameObjectById` RVA `0x000cfff0`. Bind that ConstructionObject at `+0x428`, then chain native ConstructionBar calculation and rendering. No progress value or timing is synthesized. |
+| Armada | `0x0010a820` | inline | 6 | `55 8b ec 83 ec 2c` | `standard_background_render_hook`; only when its `+0x04` parent has the exact ShipDisplay vtable at RVA `0x002b4bcc`, redraw the active A1 `infoBlackArea` through `DisplayInterface::DrawRectangle` with `1.0` opacity over Fleet Operations' earlier `0.5` fill, then chain the native StandardBackground frame. When ShipDisplay's selected-object field at `+0x1e8` is non-null, draw the raw-A1 numbered `infoSingleBackground` pieces and name/Crew/Officer label sprites, followed by RaceIcon's stored `race_icon_bar` sprite at `+0x2c` across `infoSingleRaceIconArea`. The bar uses the selected object's colour returned by checked native `GameObject::GetTeamColour` at RVA `0x000d5040`; the later native RaceIcon child draws the smaller insignia on top. All added sprites use the checked interface sprite helpers and unrelated backgrounds remain native. |
+| Armada | `0x000d5040` | checked native helper | 6-byte target check | `8b 81 ec 00 00 00` | `GameObject::GetTeamColour`; return the live team-colour vector used to tint A1 RaceIcon's stored `race_icon_bar` background layer. |
+| Armada | `0x0011b430` | inline | 9 | `55 8b ec 8a 0d b8 4e 76 00` | `display_interface_load_rectangle_hook`; only for the currently published raw-A1 gameplay database, translate A2 ShipDisplay's `infoPanelArea_0..2`, `infoBlackArea_0..2`, low/middle background-area names, normal/build Crew amounts and Crew-icon rectangles, Officer amounts, build class/name/wireframe/shield, `infoSingleConstructionArea`, `infoProgressBar`, and both `infoSystemIcon_0..4` and `infoBuildSystemIcon_0..4` requests into A1's single Status Report identity, Crew-dot, construction-bar, and graphical-system keys. Multi-selection construction is handled directly from the cached raw-A1 layout: outer `infoMultiShipIcon_0..7` calls receive the exact 4-by-2 tile rectangles, the same keys requested from return RVA `0x000f7127` receive nested `infoMultiWireframeIconArea` rectangles, `infoMultiShipShield_0..7` receive nested `infoMultiShieldBarArea` rectangles, and A2-only slots 8..15 are parked off-screen. It also synthesizes `resourcePanelArea` as the union of A1's Crew, Officer, and Dilithium panels, maps native `resource_0..2` to their text rectangles, and parks unused native `resource_3..5` off-screen. This is the supported Fleet Operations ArmadaL entry; the retail Armada II map address is not interchangeable. |
+| Armada | `0x0010aaa0` | inline | 5 | `55 8b ec 6a ff` | `standard_background_initialize_hook`; installed last inside A1Compat, translate only the legacy ShipDisplay prefixes `infoLowBackgroundPanel`/`infoMiddleBackgroundPanel` to `infoBackgroundPanel` before native `StandardBackground::InitializeConfiguration` derives the sprite, size, and numbered rectangle keys. For a raw-A1 `ResourcePanel`, leave the nonexistent A2 composite `resourcePanel` background uninitialized because A1Compat draws each data-defined legacy panel piece directly through the interface sprite database at Armada RVAs `0x00365030`/`0x00220750` and Fleet Operations sprite helpers at RVAs `0x001e34b4`/`0x001e3498`. The Delphi scaled-draw wrapper takes height and width in the reverse stack order from Armada's forwarded method, which the assembly bridge normalizes to `(width, height)`. Direct positioning avoids native `StandardBackground::Render` overlapping all three panels at their shared parent origin. This avoids competing for core's shared `ParameterDB::GetString` detour and leaves unrelated backgrounds native. |
 | Armada | `0x00025a50` | inline | 5 | `55 8b ec 51 53` | `a2fo_a1_aip_lookup_hook`; for `<race>_instant_action_build_list` and numbered variants, prefer a loaded `<race>_build_list` supplied by the highest relevant A1 mod layer when that layer has no explicit modern counterpart; all other names retain native `AIP_Manager::Look_Up_New_AIP` |
 | Armada | `0x000248a6` | checked JMP | 6 | `8b 4d f8 8b 42 6c` | `a2fo_a1_aip_technology_unit_guard_hook`; preserve `AIP::m_UpdateTechnologyLevel` for resolved `Build_List_Element` classes, but when its retry still returns null, report the AIP/unit and advance to the next element at RVA `0x00024903` instead of performing the native null dereference at RVA `0x000248a9`. This tolerates legacy plans whose unit is absent from the active A2 tech tree without editing the AIP or ODF. |
 | Armada | `0x00147a59`, `0x001b7da9` | checked CALL | 5 each | `e8 a2 3f 00 00`, `e8 52 3c f9 ff` | `a2fo_a1_load_selected_map_details` / `a2fo_a1_load_map_details`; intercept both GameSetup's selected-map load and `KnownMaps::AddMapsWithMask` discovery while preserving `MapDetailsFactory::Load` at RVA `0x0014ba00`. Resolution accepts bare BZN names, `bzn\\...`, and already-qualified paths. For a validated A1 BZN, preserve its X/Z header bounds and widen Y only as needed to include A2's native `-1250..1250` scanner envelope, then publish the result at `MapDetails+0x6c` `MPDMinExtent` and `MapDetails+0x78` `MPDSize`. Its companion MDF `StartN = X Y` entries are converted from A1's `0..117` minimap grid into the native `StartLocationDetails+0x00` world position array at `MapDetails+0xc4`; `MapDetails+0xc0` receives the count and surplus records receive native `TYPE_EMPTY`. This fixes the Instant Action `0x0` size, keeps low moons/wormholes visible in gameplay, and carries starts into launch without rewriting either file. Native string assignment uses the supported MSVCP60 IAT slot at RVA `0x003b7c6c`, with `TYPE_EMPTY`/`TYPE_PLAYER` at RVAs `0x0036b760`/`0x0036b770`. |
@@ -1181,16 +1308,29 @@ This is the DX8 portion of armadaNebulaPatch, ported from its custom loader,
 hook toolkit, and MinHook detours into checked core primitives. Armada creates
 its shared DOT3 shader before deferred modules load, so the core owns these
 sites during process attach when the managed DXVK payload is active. The
-Windows system-renderer path installs none of these DX8 hooks and the controller
-does not mutate SOD texture slots there. This full isolation follows an AMD
-driver crash reached through Fleet Operations' otherwise unintercepted native
-DOT3 draw after an adjacent A2FO material hook retained the shared device.
-On DXVK, every replacement remains disabled/pass-through until the first DOT3
-compilation finds the controller DLL and all assets.
+Windows system-renderer path installs none of the material, draw, state, reset,
+or device-lifetime hooks and the controller does not mutate SOD texture slots
+there. It may install only shader-creation hooks for the AMD native-DOT3
+candidate: two Armada entries on the normal D3D8 route, or one Fleet Ops entry
+on `/d3d9`. They query the active adapter and, on AMD, substitute an exact
+matched declaration/source pair before creation; they never intercept a draw.
+On DXVK, every mapped-material
+replacement remains disabled/pass-through until the first DOT3 compilation
+finds the controller DLL and all assets.
 
 | Image | RVA | Kind | Bytes | Expected bytes/value | Handler and purpose |
 | --- | ---: | --- | ---: | --- | --- |
-| Armada | `0x226e50` | inline | 10 | `55 8b ec 6a ff 68 cb ba 6a 00` | `compile_dot3_mesh_hook`; preserve native DOT3 mesh/vertex compilation and activate mapped-texture loading outside loader lock |
+| Armada | `0x2327cf` | jump | 8 | `8b 8e 28 01 00 00 85 c9` | `ST3D_Mesh::Render` selector replay on managed DXVK; preserve the native MeshVB pointer, virtual eligibility, polygon-sort, and external-renderer decisions, except that active fast non-bump compatibility applies `ST3D_TextureMaterial::SetRenderState_ZSort` at RVA `0x244880` and retains MeshVB according to `FastAlphaMeshVB`: `0` native sort, `1` native-opaque fades plus additive blends, or `2` every transparent blend with approximate index ordering; the final Fleet Ops DOT3 draw reapplies that blend state after its internal opaque reset and copies Storm3D device-wrapper material alpha at `+0x48` into vertex constant `c0.w`; `RendererRouteCounts=1` additionally counts each outcome, then resumes at `0x2327f2` (fast) or `0x232808` (legacy) |
+| Armada | `0x226f63` | bytes | 2 | `75 15` | `NeutralBumpWhenDisabled=1`: after `Settings.xml` and the self-contained flat-normal shader asset preflight, replace this `ST3D_Dot3_MeshVB::CanRender` bump-disabled rejection branch with `90 90`; the following capability-bit `0x10` test remains native and material texture assignments remain unchanged; D3DX assembly stays deferred to the first safe DOT3 boundary |
+| Armada | `0x3ad508` -> renderer `+0x104`, byte `+0x05` | runtime data fallback | 1 | nonzero only when native DOT3 is disabled | fallback for older compatible cores which expose the graphics-options object during module initialization; the persisted setting is never changed |
+| Armada | `0x226e50` | inline | 10 | `55 8b ec 6a ff 68 cb ba 6a 00` | `compile_dot3_mesh_hook`; on DXVK, preserve native DOT3 mesh/vertex compilation and activate mapped-texture loading outside loader lock; on System D3D9, query/apply the isolated AMD declaration candidate before entering the same native compiler |
+| Armada | `0x227200` | inline | 6 | `55 8b ec 83 ec 08` | System D3D9 only: `ensure_dot3_shader_hook`; cover Armada's second lazy shared-shader creation route with the same one-time AMD preflight, then execute its original gateway unchanged |
+| Armada | `0x32b52c` | data | 4 | `ffffffff` | shared DOT3 vertex-shader handle; the AMD candidate applies only while this retains Armada's uncreated sentinel |
+| Armada | `0x32b530` | data | 32 | `20000000 40020000 40020001 40010002 40020003 40020004 40020005 ffffffff` | AMD System-D3D9 candidate only: transactionally remap the five non-position stream fields from `v1-v5` to `v7-v11`, preserving every field type, offset, and the 68-byte stride |
+| Armada | `0x32b580` | data | 29 | `shaders\\dot3_directional.nvv\0` | AMD System-D3D9 candidate only: transactionally select the matched declaration-free `Shaders\\dot3_amd.nvv` D3D8 source; full-path bytes, replacement asset, D3DX8 assembly, adapter vendor, and the declaration above must all preflight before either data patch remains active |
+| Fleet Ops | `0x1f1474` | inline | 7 | `55 8b ec 53 8b 5d 08` | System `/d3d9` only: create the stock objects unchanged on non-AMD adapters; on AMD, assemble `dot3_amd9.nvv`, create a neutral `TEXCOORD0-TEXCOORD4` declaration and matched shader into temporary COM pointers, and publish them only after both succeed |
+| Fleet Ops | `0x249278`, `0x24927c` | data | 4 each | null shared COM slots before creation | `/d3d9` DOT3 vertex-shader and vertex-declaration slots; the compatibility callback preserves Fleet Ops' release/reset ownership |
+| Fleet Ops | `0x1e62ec` | inline | 6 | `ff 90 1c 01 00 00` | DXVK bump-off only: replace the native per-light DOT3 draw's vertex shader with `Shaders\\dx8\\vertex\\vs_flat_lighting.nvv`, select the normalized tangent-space light against a fixed +Z flat normal instead of stage-0 `D3DTOP_DOTPRODUCT3`, execute the displaced indexed draw once, then restore the native shader and combiner state |
 | Armada | `0x2279af` | inline | 6 | `ff 92 1c 01 00 00` | DXVK only: `a2fo_nebula_dot3_draw_hook`; bind the active emissive composite to stage 2 and an optional specular map to stage 3 after Armada's final material setup, execute the displaced DOT3 indexed draw exactly once, restore both stages, and preserve its HRESULT; the system renderer keeps this native draw unintercepted |
 | Armada | `0x223ce4` | inline | 7 | `8b 10 51 50 ff 52 38` | DXVK only: `a2fo_nebula_device_reset_hook`; retain the live COM device and invalidate extension shaders, bound auxiliary stages, mapped-texture caches, decals, and private default-pool bloom targets immediately before the native device reset |
 | Fleet Ops | `0x1fd0a0` | inline | 7 | `55 8b ec 51 89 4d fc` | `a2fo_nebula_device_destroy_hook`; enter Fleet Operations' existing `ST3D_DeviceDirectX8__DestroyDevice_Callback`, invalidate extension GPU state and drop A2FO's retained COM reference while dxwrapper's device is still callable, then replay the native callback prologue and destruction route |
@@ -1562,7 +1702,10 @@ Source: [`../core/nebula_renderer.cpp`](../core/nebula_renderer.cpp)
 | Storm3D shader renderer | `+0x44` | owning `ST3D_Engine*`; its texture-object registry sentinel is at engine `+0x84` |
 | `ST3D_Texture` | `+0x08`, `+0x40 + index * 4` | original texture-name pointer and per-device `ST3D_DeviceTexture*` |
 | `ST3D_DeviceTextureDirectX8` | `+0x04` | native `IDirect3DTexture8*`, compared with live texture stage 0 to bind an indexed emissive set |
-| `D3DX81ab.dll` | `D3DXAssembleShaderFromFileA` | retained for the dormant experimental pixel-shader path; the bump-safe runtime does not assemble or select it |
+| `D3DX81ab.dll` | `D3DXAssembleShaderFromFileA` | lazily assemble mapped-material shader assets on DXVK; on System D3D9, preflight the matched AMD DOT3 source before changing the native declaration/path pair |
+| FleetOpsHook | `0x1f1474` | checked `/d3d9` callback which creates the shared DOT3 vertex declaration and shader; the AMD compatibility hook substitutes a matched pair only here |
+| FleetOpsHook | `0x249278`, `0x24927c` | `/d3d9` shared DOT3 vertex-shader and vertex-declaration COM slots published only after both compatibility objects are created successfully |
+| `d3dx9_43.dll` | `D3DXAssembleShaderFromFileA` | lazily assemble `dot3_amd9.nvv` for the AMD `/d3d9` creation callback |
 | `D3DX81ab.dll` | `D3DXCreateTextureFromFileExA` | lazily load and scale loose subsystem emissive images into managed A8R8G8B8 textures |
 
 Motion-dependent emissive reads use the supported Fleet Operations layout:
@@ -1844,7 +1987,9 @@ Armada exposes `5` ship-upgrade systems. A2FO's policy hard-cap is tier `16`.
 | ControlButton state / ModeInfo | `+0x34` / `+0x84` |
 | ModeInfo size; type / target class / action index | `0x18`; `+0x04` / `+0x0c` / `+0x14` |
 | update-build-buttons vtable slot / popup current menu | `+0xe8` / `+0x124` |
-| ShipDisplay queue / selected object | `+0x120` / `+0x1e8` |
+| ShipDisplay BuildQueueIcon pointer array / selected object | `+0x120` (`10` pointers; native vtable RVA `0x002b4994`) / `+0x1e8` |
+| selected object current / maximum Crew | `+0x1dc` / `+0x1c4` |
+| CrewDisplay sprite / icon / text render fields | `+0x104` / `+0x10c` / `+0x11c` |
 | BuildWireframe owner / target class; RaceIcon owner | `+0x28` / `+0x3c`; `+0x28` |
 | ResearchPod class flag / level / family | `+0x450` / `+0x454` / `+0x458` |
 | Evolver protected tail / size | `+0x2ac` / `0x1c` |
@@ -1961,6 +2106,15 @@ Low-level hooks are process-lifetime changes. Each feature validates all of
 its required byte signatures before its first patch wherever its architecture
 allows; an unsupported binary disables the affected feature instead of using
 wildcard signatures.
+
+## Station placement rotation
+
+`A2FOStationRotation.dll` owns the checked placement command, preview, keyboard,
+clearance and footprint-call hooks in the complete
+[station rotation address audit](2026-09-19-station-rotation.md#hook-ledger).
+It preserves HybridBuild interface selection and Fleet Ops placement/planner
+policy. All 24 mutations must complete before rotated commands are sent.
+The construction transform supplies the native shipyard rally facing.
 
 ## Address provenance and maintenance rule
 

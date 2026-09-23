@@ -54,6 +54,7 @@ bool wingman_alias_registered = false;
 bool wingman_odf_defaults_registered = false;
 bool constructionrig_odf_defaults_registered = false;
 bool freighter_odf_defaults_registered = false;
+bool mining_odf_defaults_registered = false;
 bool shipyard_odf_defaults_registered = false;
 bool research_odf_defaults_registered = false;
 bool addon_odf_overlay_registered = false;
@@ -63,13 +64,17 @@ bool a1_race_defaults_registered = false;
 bool a1_scout_class_handler_registered = false;
 bool a1_scout_command_collision_hooked = false;
 bool a1_gui_sprite_loader_patched = false;
+bool a1_default_cursor_fallback_hooked = false;
 bool a1_gui_parameter_db_constructor_patched = false;
-bool a1_control_button_render_hooked = false;
+unsigned a1_tooltip_hook_count = 0;
+unsigned a1_control_panel_hook_count = 0;
 bool a1_ship_display_rectangle_hooked = false;
-bool a1_ship_display_string_hooked = false;
+bool a1_ship_display_background_hooked = false;
+bool a1_construction_bar_hooked = false;
 bool a1_aip_name_lookup_hooked = false;
 bool a1_bzn_map_bounds_patched = false;
 bool a1_bzn_ai_mission_patched = false;
+unsigned a1_bzn_ai_mission_patch_count = 0;
 bool a1_bzn_runtime_class_patched = false;
 bool a1_moon_resource_lookup_patched = false;
 bool a1_physics_combat_speed_patched = false;
@@ -82,6 +87,8 @@ bool a1_smooth_integer_patched = false;
 bool a1_neutral_race_count_patched = false;
 bool a1_neutral_race_entry_patched = false;
 bool a1_team_color_init_hooked = false;
+bool a1_wireframe_fallback_hooked = false;
+bool a1_completed_starbase_policy_recovered = false;
 A2FO_RaceLoadedHandler a1_race_handler = nullptr;
 void* a1_race_user_data = nullptr;
 A2FO_GameObjectClassLoadedHandler a1_scout_class_handler = nullptr;
@@ -152,6 +159,7 @@ bool fire_arc_weapon_class_handler_registered = false;
 bool fire_arc_trigger_handler_registered = false;
 bool fire_arc_target_check_chained = false;
 bool fire_arc_icon_hover_hooked = false;
+bool fire_arc_system_icon_hover_hooked = false;
 bool fire_arc_rts_config_loaded = false;
 unsigned weapon_damage_hook_count = 0;
 bool weapon_damage_class_handler_registered = false;
@@ -171,12 +179,13 @@ static_assert(sizeof(FixtureCheatRegistration) == 12,
 
 struct FixtureCheatRegistry {
     std::uint32_t reference_count = 0xffffffffu;
-    std::uint32_t length = 4;
-    FixtureCheatRegistration registrations[4]{
+    std::uint32_t length = 5;
+    FixtureCheatRegistration registrations[5]{
         {"m", 1, {0, 0, 0}, nullptr},
         {"dis", 1, {0, 0, 0}, nullptr},
         {"crash", 1, {0, 0, 0}, nullptr},
         {"elim", 1, {0, 0, 0}, nullptr},
+        {"showmethemoney", 1, {0, 0, 0}, nullptr},
     };
 };
 FixtureCheatRegistry cheat_registry_fixture{};
@@ -242,8 +251,10 @@ bool A2FO_CALL register_game_object_class_loaded_handler(
     if (module_name && std::strcmp(module_name, "A1Compat") == 0) {
         constexpr const char* expected[] = {
             "scout", "combat", "alert", "can_sandd", "can_explore",
-            "is_starbase", "facility", "has_crew", "has_hitpoints",
-            "spatial_object", "has_resource"};
+            "is_starbase", "transporter", "facility", "has_crew",
+            "has_hitpoints",
+            "spatial_object", "has_resource", "builder_ship",
+            "maximumUpgrades", "officerGain", "race", "classLabel"};
         a1_scout_class_handler_registered = handler && fields &&
             field_count == static_cast<std::uint32_t>(
                 sizeof(expected) / sizeof(expected[0]));
@@ -271,6 +282,8 @@ bool A2FO_CALL register_game_object_class_loaded_handler(
             "maxPhotonTorpedoes", "photonTorpedoRate",
             "photonTorpedoRechargeMode", "maxQuantumTorpedoes",
             "quantumTorpedoRate", "quantumTorpedoRechargeMode",
+            "maxShuttleCraft", "shuttleCraftRate",
+            "shuttleCraftRechargeMode",
             "torpedoResupply", "torpedoResupplyRange", "classLabel"};
         energy_class_handler_registered = handler && fields &&
             field_count == static_cast<std::uint32_t>(
@@ -329,11 +342,16 @@ bool A2FO_CALL register_weapon_class_loaded_handler(
     }
     if (std::strcmp(module_name, "A2FOEnergySystems") == 0) {
         constexpr const char* expected[]{
-            "photonTorpedoCost", "quantumTorpedoCost"};
+            "photonTorpedoCost", "quantumTorpedoCost",
+            "shuttleCraftCost"};
         energy_weapon_class_handler_registered = fields &&
-            field_count == 2 && fields[0] && fields[1] &&
-            std::strcmp(fields[0], expected[0]) == 0 &&
-            std::strcmp(fields[1], expected[1]) == 0;
+            field_count == 3;
+        for (std::uint32_t index = 0;
+             energy_weapon_class_handler_registered && index < field_count;
+             ++index) {
+            energy_weapon_class_handler_registered = fields[index] &&
+                std::strcmp(fields[index], expected[index]) == 0;
+        }
         return energy_weapon_class_handler_registered;
     }
     if (std::strcmp(module_name, "A2FOWeaponDamageControls") == 0) {
@@ -772,12 +790,42 @@ void prepare_armada_signatures() {
         {0x55, 0x8b, 0xec, 0x56, 0x8b, 0x75, 0x08};
     const std::uint8_t a1_gui_sprite_read_table_call[] =
         {0xe8, 0x85, 0x5f, 0x12, 0x00};
+    const std::uint8_t a1_default_cursor_lookup[] =
+        {0x55, 0x8b, 0xec, 0x8b, 0x45, 0x0c};
     const std::uint8_t a1_gui_parameter_db_post_construct[] =
         {0xa3, 0x2c, 0x50, 0x76, 0x00};
-    const std::uint8_t a1_control_button_render[] =
-        {0x55, 0x8b, 0xec, 0x83, 0xec, 0x34};
+    const std::uint8_t a1_popup_palette_post_load[] =
+        {0x55, 0x8b, 0xec, 0x6a, 0xff};
+    const std::uint8_t a1_popup_palette_render[] =
+        {0x39, 0x0d, 0xcc, 0x43, 0x76, 0x00};
+    const std::uint8_t a1_popup_palette_cursor_over[] =
+        {0x55, 0x8b, 0xec, 0x83, 0xec, 0x08};
+    const std::uint8_t a1_standard_background_constructor[] =
+        {0x55, 0x8b, 0xec, 0x6a, 0xff};
+    const std::uint8_t a1_standard_background_destructor[] =
+        {0x53, 0x56, 0x57, 0x8b, 0xf9};
+    const std::uint8_t a1_standard_background_render[] =
+        {0x55, 0x8b, 0xec, 0x83, 0xec, 0x2c};
+    const std::uint8_t a1_standard_background_initialize[] =
+        {0x55, 0x8b, 0xec, 0x6a, 0xff};
     const std::uint8_t a1_parameter_db_get_rectangle[] =
         {0x55, 0x8b, 0xec, 0x81, 0xec, 0x04, 0x01, 0x00, 0x00};
+    const std::uint8_t a1_parameter_db_get_vector[] =
+        {0x55, 0x8b, 0xec, 0x81, 0xec, 0x00, 0x01, 0x00, 0x00};
+    const std::uint8_t a1_tooltip_render[] =
+        {0x56, 0x8b, 0xf1, 0x8b, 0x46, 0x38};
+    const std::uint8_t a1_tooltip_draw_popup[] =
+        {0x55, 0x8b, 0xec, 0x6a, 0xff};
+    const std::uint8_t a1_tooltip_render_verbose[] =
+        {0x55, 0x8b, 0xec, 0x83, 0xec, 0x58};
+    const std::uint8_t a1_construction_bar_render[] =
+        {0x55, 0x8b, 0xec, 0x83, 0xec, 0x28};
+    const std::uint8_t a1_construction_rig_get_object[] =
+        {0x8b, 0x89, 0xb4, 0x02, 0x00, 0x00};
+    const std::uint8_t a1_game_object_team_colour[] =
+        {0x8b, 0x81, 0xec, 0x00, 0x00, 0x00};
+    const std::uint8_t a1_find_game_object_by_id[] =
+        {0x55, 0x8b, 0xec, 0x8b, 0x4d, 0x08, 0x8b, 0xc1};
     const std::uint8_t a1_game_object_resource_lookup_call[] =
         {0xe8, 0x90, 0x84, 0x06, 0x00};
     const std::uint8_t a1_physics_combat_speed_validation_call[] =
@@ -836,7 +884,10 @@ void prepare_armada_signatures() {
     const std::uint8_t a1_text_file_parser_read_table[] =
         {0x55, 0x8b, 0xec, 0x6a, 0xff};
     const std::uint8_t a1_sprite_database_find[] =
-        {0x55, 0x8b, 0xec, 0x8b, 0x45, 0x08};
+        {0x55, 0x8b, 0xec, 0x8b, 0x45, 0x08, 0x53, 0x56, 0x57};
+    const std::uint8_t a1_wireframe_sprite_set[] =
+        {0x55, 0x8b, 0xec, 0x6a, 0xff,
+         0x68, 0x2d, 0xf9, 0x69, 0x00};
     const std::uint8_t a1_starbase_geometry[] =
         {0x55, 0x8b, 0xec, 0x8b, 0x45, 0x08};
     const std::uint8_t a1_starbase_class_build[] =
@@ -1160,6 +1211,23 @@ void prepare_armada_signatures() {
     set_signature(0x0007e8a0, cheats_eliminate_team);
     set_signature(0x0009dd40, a1_nebula_set_textures_recursive);
     set_signature(0x000954b0, a1_team_color_init);
+
+    const std::uint8_t a1_resource_mutator[] = {
+        0x55, 0x8b, 0xec, 0x83, 0xec, 0x08, 0x8a};
+    const auto prepare_resource_maximum = [=](
+        std::uintptr_t mutator_rva, std::size_t operand_offset,
+        std::uintptr_t maximum_rva) {
+        set_signature(mutator_rva, a1_resource_mutator);
+        auto* mutator = static_cast<std::uint8_t*>(fake_armada) +
+            mutator_rva;
+        mutator[operand_offset - 1] = 0xa1;
+        const std::uint32_t maximum = static_cast<std::uint32_t>(
+            reinterpret_cast<std::uintptr_t>(fake_armada) + maximum_rva);
+        std::memcpy(mutator + operand_offset, &maximum, sizeof(maximum));
+    };
+    prepare_resource_maximum(0x00096e30, 0x32, 0x00338df0);
+    prepare_resource_maximum(0x00096f20, 0x32, 0x00338dec);
+    prepare_resource_maximum(0x00097010, 0x35, 0x00338de8);
     set_signature(0x00119070, a1_command_info_build_class);
     set_signature(0x0013c2c3, a1_rtime_read_name_call);
     set_signature(0x00202581, a1_game_objects_load_call);
@@ -1174,10 +1242,25 @@ void prepare_armada_signatures() {
     set_signature(0x001b7da9, a1_known_maps_load_details_call);
     set_signature(0x0012d6e0, a1_file_in_fixed_chars);
     set_signature(0x0011a776, a1_gui_sprite_read_table_call);
+    set_signature(0x0011b3f0, a1_default_cursor_lookup);
     set_signature(
         0x0011a80f, a1_gui_parameter_db_post_construct);
-    set_signature(0x000e64e0, a1_control_button_render);
+    set_signature(0x000fa990, a1_popup_palette_post_load);
+    set_signature(0x000fbce0, a1_popup_palette_render);
+    set_signature(0x000fbd30, a1_popup_palette_cursor_over);
+    set_signature(0x0010a750, a1_standard_background_constructor);
+    set_signature(0x0010a7c0, a1_standard_background_destructor);
+    set_signature(0x0010a820, a1_standard_background_render);
+    set_signature(0x0010aaa0, a1_standard_background_initialize);
     set_signature(0x001358f0, a1_parameter_db_get_rectangle);
+    set_signature(0x00135ba0, a1_parameter_db_get_vector);
+    set_signature(0x00105380, a1_tooltip_render);
+    set_signature(0x00105430, a1_tooltip_draw_popup);
+    set_signature(0x00105720, a1_tooltip_render_verbose);
+    set_signature(0x0010afd0, a1_construction_bar_render);
+    set_signature(0x000afe80, a1_construction_rig_get_object);
+    set_signature(0x000d5040, a1_game_object_team_colour);
+    set_signature(0x000cfff0, a1_find_game_object_by_id);
     set_signature(0x000ccebb, a1_game_object_resource_lookup_call);
     set_signature(0x000c073f, a1_physics_combat_speed_validation_call);
     set_signature(0x000c0774, a1_physics_combat_speed_value_call);
@@ -1208,6 +1291,7 @@ void prepare_armada_signatures() {
     set_signature(0x002593a0, a1_project_id_get_odf_name);
     set_signature(0x00240700, a1_text_file_parser_read_table);
     set_signature(0x00220750, a1_sprite_database_find);
+    set_signature(0x000f7a60, a1_wireframe_sprite_set);
     set_signature(0x000bda00, a1_starbase_geometry);
     set_signature(0x000ab710, a1_starbase_class_build);
     set_signature(0x000bbd90, a1_starbase_finish_build);
@@ -1227,6 +1311,14 @@ void prepare_armada_signatures() {
         static_cast<std::uint8_t*>(fake_armada) + 0x000bbd90;
     *reinterpret_cast<void**>(a1_starbase_vtable + 0x16c) =
         static_cast<std::uint8_t*>(fake_armada) + 0x000bbe90;
+    auto* a1_resource_panel_vtable =
+        static_cast<std::uint8_t*>(fake_armada) + 0x002b5174;
+    *reinterpret_cast<void**>(a1_resource_panel_vtable + 0x58) =
+        static_cast<std::uint8_t*>(fake_armada) + 0x000ffa40;
+    auto* a1_control_button_vtable =
+        static_cast<std::uint8_t*>(fake_armada) + 0x002b484c;
+    *reinterpret_cast<void**>(a1_control_button_vtable + 0x20) =
+        static_cast<std::uint8_t*>(fake_armada) + 0x000e69e0;
     set_signature(0x000cc480, turret_game_object_class_constructor);
     set_signature(0x000c1fd0, turret_craft_cleanup);
     set_signature(0x000c2870, turret_craft_post_load);
@@ -1248,6 +1340,12 @@ void prepare_armada_signatures() {
     set_signature(0x000cff90, fire_arc_world_transform);
     set_signature(0x0011b130, fire_arc_draw_line);
     set_signature(0x0010c140, fire_arc_mouse_over);
+    auto** fire_arc_system_icon_render_slot = reinterpret_cast<void**>(
+        static_cast<std::uint8_t*>(fake_armada) + 0x002b4abc);
+    void* const fire_arc_native_system_icon_render =
+        static_cast<std::uint8_t*>(fake_armada) + 0x000eec90;
+    *fire_arc_system_icon_render_slot =
+        fire_arc_native_system_icon_render;
     set_signature(0x00135ba0, parameter_db_get_color);
     set_signature(0x00134f50, parameter_db_get_bool);
     set_signature(0x00135630, parameter_db_get_lookup);
@@ -1331,6 +1429,12 @@ void A2FO_CALL log_line(const char* module, const char* message) {
             "Normal-weapon technology-tree filter initialized; unlisted weapons default to 0 (available)") == 0) {
         normal_weapon_tech_initialized = true;
     }
+    if (module && message && std::strcmp(module, "A1Compat") == 0 &&
+        std::strstr(
+            message,
+            "Recovered A1 Starbase policy at completed-class boundary")) {
+        a1_completed_starbase_policy_recovered = true;
+    }
     if (message && (std::strstr(message, "signature") ||
                     std::strstr(message, "disabled") ||
                     (module && std::strcmp(
@@ -1394,6 +1498,10 @@ bool A2FO_CALL register_classlabel_odf_defaults(
     constexpr A2FO_ClasslabelOdfDefault constructionrig_expected[] = {
         {"shipclass", "construction"},
         {"builder_facility", "1"},
+        {"ship", "1"},
+        {"has_hitpoints", "1"},
+        {"has_crew", "1"},
+        {"transporter", "1"},
         {"SHOW_MOVEMENT_AUTONOMY", "1"},
         {"SHOW_SW_AUTONOMY", "1"},
         {"shipType", "N"},
@@ -1404,9 +1512,18 @@ bool A2FO_CALL register_classlabel_odf_defaults(
         {"maxDilithium", "150"},
         {"alert", "1"},
         {"miner", "1"},
+        {"ship", "1"},
+        {"has_hitpoints", "1"},
+        {"has_crew", "1"},
+        {"transporter", "1"},
         {"SHOW_MOVEMENT_AUTONOMY", "1"},
         {"resourcesCanHandle", "dilithium"},
         {"hotkeyLabel", "HOTKEY_F2"},
+    };
+    constexpr A2FO_ClasslabelOdfDefault mining_expected[] = {
+        {"transporter", "1"},
+        {"alert", "0"},
+        {"resourcesCanHandle", "dilithium"},
     };
     constexpr A2FO_ClasslabelOdfDefault shipyard_expected[] = {
         {"builder_ship", "1"},
@@ -1449,6 +1566,11 @@ bool A2FO_CALL register_classlabel_odf_defaults(
         expected_count = static_cast<std::uint32_t>(
             sizeof(freighter_expected) / sizeof(freighter_expected[0]));
         registered = &freighter_odf_defaults_registered;
+    } else if (std::strcmp(classlabel, "mining") == 0) {
+        expected = mining_expected;
+        expected_count = static_cast<std::uint32_t>(
+            sizeof(mining_expected) / sizeof(mining_expected[0]));
+        registered = &mining_odf_defaults_registered;
     } else if (std::strcmp(classlabel, "shipyard") == 0) {
         expected = shipyard_expected;
         expected_count = static_cast<std::uint32_t>(
@@ -1621,6 +1743,10 @@ bool A2FO_CALL install_hook(void* target, void* replacement,
         hybrid_race_icon_render_hooked = true;
     }
     if (fake_armada && target == static_cast<std::uint8_t*>(fake_armada) +
+            0x000f7a60) {
+        a1_wireframe_fallback_hooked = true;
+    }
+    if (fake_armada && target == static_cast<std::uint8_t*>(fake_armada) +
             0x0b0210) {
         hybrid_producer_is_busy_hooked = true;
     }
@@ -1788,16 +1914,36 @@ bool A2FO_CALL install_hook(void* target, void* replacement,
         a1_gui_parameter_db_constructor_patched = true;
     }
     if (fake_armada && target ==
-            static_cast<std::uint8_t*>(fake_armada) + 0x000e64e0) {
-        a1_control_button_render_hooked = true;
+            static_cast<std::uint8_t*>(fake_armada) + 0x0011b3f0) {
+        a1_default_cursor_fallback_hooked = true;
+    }
+    if (fake_armada &&
+        (target == static_cast<std::uint8_t*>(fake_armada) + 0x00105380 ||
+         target == static_cast<std::uint8_t*>(fake_armada) + 0x00105720)) {
+        ++a1_tooltip_hook_count;
+    }
+    if (fake_armada &&
+        (target == static_cast<std::uint8_t*>(fake_armada) + 0x000fa990 ||
+         target == static_cast<std::uint8_t*>(fake_armada) + 0x000fbce0 ||
+         target == static_cast<std::uint8_t*>(fake_armada) + 0x000fbd30)) {
+        ++a1_control_panel_hook_count;
+    }
+    if (fleet_ops && target ==
+            static_cast<std::uint8_t*>(static_cast<void*>(fleet_ops)) +
+                0x001e7970) {
+        ++a1_control_panel_hook_count;
     }
     if (fake_armada && target ==
             static_cast<std::uint8_t*>(fake_armada) + 0x0011b430) {
         a1_ship_display_rectangle_hooked = true;
     }
     if (fake_armada && target ==
-            static_cast<std::uint8_t*>(fake_armada) + 0x00135350) {
-        a1_ship_display_string_hooked = true;
+            static_cast<std::uint8_t*>(fake_armada) + 0x0010aaa0) {
+        a1_ship_display_background_hooked = true;
+    }
+    if (fake_armada && target ==
+            static_cast<std::uint8_t*>(fake_armada) + 0x0010afd0) {
+        a1_construction_bar_hooked = true;
     }
     if (fake_armada && target ==
             static_cast<std::uint8_t*>(fake_armada) + 0x00025a50) {
@@ -1860,9 +2006,15 @@ bool A2FO_CALL patch_call(void* target, void* replacement,
     } else if (fake_armada && target ==
             static_cast<std::uint8_t*>(fake_armada) + 0x13c2c3) {
         a1_bzn_runtime_class_patched = true;
-    } else if (fake_armada && target ==
+    } else if (fake_armada &&
+        (target == static_cast<std::uint8_t*>(fake_armada) + 0x202581 ||
+         target == static_cast<std::uint8_t*>(fake_armada) + 0x2025c0 ||
+         target == static_cast<std::uint8_t*>(fake_armada) + 0x202608)) {
+        ++a1_bzn_ai_mission_patch_count;
+        if (target ==
             static_cast<std::uint8_t*>(fake_armada) + 0x202608) {
-        a1_bzn_ai_mission_patched = true;
+            a1_bzn_ai_mission_patched = true;
+        }
     } else if (fake_armada && target ==
             static_cast<std::uint8_t*>(fake_armada) + 0x1b7da9) {
         a1_bzn_map_bounds_patched = true;
@@ -1995,6 +2147,10 @@ int main() {
         std::string(extension_root_path) + "\\odf";
     const std::string active_other_odf_path =
         active_odf_path + "\\other";
+    const std::string active_sprites_path =
+        std::string(extension_root_path) + "\\Sprites";
+    const std::string legacy_cursor_path =
+        active_sprites_path + "\\cursor.spr";
     const std::string parent_team_color_path =
         parent_system_odf_path + "\\teamcolor.odf";
     const std::string active_team_color_path =
@@ -2008,6 +2164,9 @@ int main() {
     constexpr char active_rts_config[] =
         "// Per-field active-mod overrides.\r\n"
         "int firearc = 1;\r\n"
+        "int cfgMaxDilithium = 900001;\r\n"
+        "int cfgMaxCrew = 90002;\r\n"
+        "int cfgMaxOfficers = 103;\r\n"
         "int SHOWMETHEMONEY_METAL = 7777;\r\n"
         "int SHOWMETHEMONEY_SUPPLIES = -5; // rejected\r\n"
         "int SHOWMETHEMONEY_CREW = 8888;\r\n";
@@ -2020,8 +2179,20 @@ int main() {
     if (!CreateDirectoryA(parent_odf_path.c_str(), nullptr) ||
         !CreateDirectoryA(parent_system_odf_path.c_str(), nullptr) ||
         !CreateDirectoryA(active_odf_path.c_str(), nullptr) ||
-        !CreateDirectoryA(active_other_odf_path.c_str(), nullptr)) {
+        !CreateDirectoryA(active_other_odf_path.c_str(), nullptr) ||
+        !CreateDirectoryA(active_sprites_path.c_str(), nullptr)) {
         return 128;
+    }
+    constexpr char incompatible_legacy_cursor_table[] =
+        "sprite_table\r\n"
+        "@reference=64\r\n"
+        "standard_cursor curs_24 0 0 64 64\r\n"
+        "c_arrow curs_24 0 0 64 64\r\n"
+        "c_select curs_24 0 0 64 64\r\n";
+    if (!write_fixture_file(
+            legacy_cursor_path, incompatible_legacy_cursor_table,
+            sizeof(incompatible_legacy_cursor_table))) {
+        return 139;
     }
     constexpr char parent_team_colors[] =
         "mpcolor01 = 0.11 0.21 0.31\r\n"
@@ -2247,9 +2418,12 @@ int main() {
         wreckage_replacement.owner != A2FO_REPLACEMENT_OWNER_NEUTRAL) {
         return 127;
     }
+    const bool money_entry_repurposed =
+        *(static_cast<const std::uint8_t*>(static_cast<void*>(fleet_ops)) +
+          0x1fc326) == 0xeb;
     HMODULE cheats = initialize_module(
         "modules\\A2FOCheats.dll");
-    if (!cheats || !cheats_show_me_the_money_hooked ||
+    if (!cheats || cheats_show_me_the_money_hooked == money_entry_repurposed ||
         !cheats_chat_init_hooked || !cheats_rts_config_loaded) return 102;
     for (const FixtureCheatRegistration& registration :
          cheat_registry_fixture.registrations) {
@@ -2320,9 +2494,19 @@ int main() {
         !GetProcAddress(
             energy_systems, "A2FOEnergySystems_GetQuantumTorpedoes") ||
         !GetProcAddress(
+            energy_systems, "A2FOEnergySystems_GetShuttleCraft") ||
+        !GetProcAddress(
+            energy_systems, "A2FOEnergySystems_GetMaximumShuttleCraft") ||
+        !GetProcAddress(
+            energy_systems, "A2FOEnergySystems_GetShuttleCraftReloadSeconds") ||
+        !GetProcAddress(
             energy_systems, "A2FOEnergySystems_SetPhotonTorpedoes") ||
         !GetProcAddress(
-            energy_systems, "A2FOEnergySystems_SetQuantumTorpedoes")) {
+            energy_systems, "A2FOEnergySystems_SetQuantumTorpedoes") ||
+        !GetProcAddress(
+            energy_systems, "A2FOEnergySystems_SetShuttleCraft") ||
+        !GetProcAddress(
+            energy_systems, "A2FOEnergySystems_AddShuttleCraft")) {
         return 122;
     }
     // Exercise the same order as the active test mod: damage controls first,
@@ -2492,24 +2676,33 @@ int main() {
         static_cast<const std::uint8_t*>(static_cast<void*>(fleet_ops)) +
             0x001358ac);
 
+    auto** fire_arc_system_icon_render_slot = reinterpret_cast<void**>(
+        static_cast<std::uint8_t*>(fake_armada) + 0x002b4abc);
+    void* const fire_arc_native_system_icon_render =
+        static_cast<std::uint8_t*>(fake_armada) + 0x000eec90;
     HMODULE fire_arcs = initialize_module(
         "modules\\A2FOFireArcs.dll");
+    fire_arc_system_icon_hover_hooked =
+        *fire_arc_system_icon_render_slot !=
+        fire_arc_native_system_icon_render;
     if (!fire_arcs || fire_arc_hook_count != 2 ||
         !fire_arc_weapon_class_handler_registered ||
         !fire_arc_trigger_handler_registered ||
         !fire_arc_target_check_chained ||
         !fire_arc_icon_hover_hooked ||
+        !fire_arc_system_icon_hover_hooked ||
         !fire_arc_rts_config_loaded ||
         !GetProcAddress(
             fire_arcs, "A2FOFireArcs_AllowWeaponTrigger")) {
         std::fprintf(
             stderr,
-            "A2FOFireArcs smoke state: module=%p hooks=%u classHandler=%d triggerHandler=%d targetCheckChained=%d iconHover=%d rtsConfig=%d\n",
+            "A2FOFireArcs smoke state: module=%p hooks=%u classHandler=%d triggerHandler=%d targetCheckChained=%d weaponIconHover=%d systemIconHover=%d rtsConfig=%d\n",
             static_cast<void*>(fire_arcs), fire_arc_hook_count,
             fire_arc_weapon_class_handler_registered ? 1 : 0,
             fire_arc_trigger_handler_registered ? 1 : 0,
             fire_arc_target_check_chained ? 1 : 0,
             fire_arc_icon_hover_hooked ? 1 : 0,
+            fire_arc_system_icon_hover_hooked ? 1 : 0,
             fire_arc_rts_config_loaded ? 1 : 0);
         return 107;
     }
@@ -2552,22 +2745,34 @@ int main() {
     }
     HMODULE inactive_a1 = initialize_module(
         "modules\\A1Compat.dll");
+    const auto native_resource_maximum = [](std::uintptr_t rva) {
+        float value = -1.0f;
+        std::memcpy(
+            &value, static_cast<std::uint8_t*>(fake_armada) + rva,
+            sizeof(value));
+        return value;
+    };
     if (inactive_a1 || wingman_alias_registered ||
         wingman_odf_defaults_registered ||
         constructionrig_odf_defaults_registered ||
         freighter_odf_defaults_registered ||
+        mining_odf_defaults_registered ||
         shipyard_odf_defaults_registered ||
         research_odf_defaults_registered ||
         addon_odf_overlay_registered || a1_race_handler_registered ||
         a1_race_defaults_registered || a1_scout_class_handler_registered ||
         a1_scout_command_collision_hooked ||
+        a1_default_cursor_fallback_hooked ||
         a1_gui_parameter_db_constructor_patched ||
-        a1_control_button_render_hooked ||
+        a1_tooltip_hook_count != 0 ||
+        a1_control_panel_hook_count != 0 ||
         a1_ship_display_rectangle_hooked ||
-        a1_ship_display_string_hooked ||
+        a1_ship_display_background_hooked ||
+        a1_construction_bar_hooked ||
         a1_aip_name_lookup_hooked ||
         a1_bzn_map_bounds_patched ||
         a1_bzn_ai_mission_patched ||
+        a1_bzn_ai_mission_patch_count != 0 ||
         a1_bzn_runtime_class_patched ||
         a1_moon_resource_lookup_patched ||
         a1_physics_combat_speed_patched ||
@@ -2579,7 +2784,10 @@ int main() {
         a1_smooth_integer_patched ||
         a1_neutral_race_count_patched ||
         a1_neutral_race_entry_patched ||
-        a1_team_color_init_hooked) return 25;
+        a1_team_color_init_hooked ||
+        native_resource_maximum(0x00338df0) != 0.0f ||
+        native_resource_maximum(0x00338dec) != 0.0f ||
+        native_resource_maximum(0x00338de8) != 0.0f) return 25;
     constexpr char a1_marker[] = "[A1Compat]\r\nEnabled=1\r\n";
     if (!write_fixture_file(a1_marker_path, a1_marker,
                             sizeof(a1_marker))) return 26;
@@ -2593,12 +2801,21 @@ int main() {
         static_cast<std::uint8_t*>(fake_armada) + 0x000bbd90;
     void* const a1_native_start_effect =
         static_cast<std::uint8_t*>(fake_armada) + 0x000bbe90;
+    auto** a1_resource_panel_render_slot = reinterpret_cast<void**>(
+        static_cast<std::uint8_t*>(fake_armada) + 0x002b5174 + 0x58);
+    void* const a1_native_resource_panel_render =
+        static_cast<std::uint8_t*>(fake_armada) + 0x000ffa40;
+    auto** a1_control_button_press_slot = reinterpret_cast<void**>(
+        static_cast<std::uint8_t*>(fake_armada) + 0x002b484c + 0x20);
+    void* const a1_native_control_button_press =
+        static_cast<std::uint8_t*>(fake_armada) + 0x000e69e0;
     HMODULE a1_compat = initialize_module(
         "modules\\A1Compat.dll");
     if (!a1_compat || !wingman_alias_registered ||
         !wingman_odf_defaults_registered ||
         !constructionrig_odf_defaults_registered ||
         !freighter_odf_defaults_registered ||
+        !mining_odf_defaults_registered ||
         !shipyard_odf_defaults_registered ||
         !research_odf_defaults_registered ||
         !addon_odf_overlay_registered ||
@@ -2608,12 +2825,16 @@ int main() {
         !a1_scout_command_collision_hooked ||
         !a1_aip_name_lookup_hooked ||
         !a1_gui_sprite_loader_patched ||
+        !a1_default_cursor_fallback_hooked ||
         !a1_gui_parameter_db_constructor_patched ||
-        !a1_control_button_render_hooked ||
+        a1_tooltip_hook_count != 2 ||
+        a1_control_panel_hook_count != 4 ||
         !a1_ship_display_rectangle_hooked ||
-        !a1_ship_display_string_hooked ||
+        !a1_ship_display_background_hooked ||
+        !a1_construction_bar_hooked ||
         !a1_bzn_map_bounds_patched ||
         !a1_bzn_ai_mission_patched ||
+        a1_bzn_ai_mission_patch_count != 3 ||
         !a1_bzn_runtime_class_patched ||
         !a1_moon_resource_lookup_patched ||
         !a1_physics_combat_speed_patched ||
@@ -2626,6 +2847,9 @@ int main() {
         !a1_neutral_race_count_patched ||
         !a1_neutral_race_entry_patched ||
         !a1_team_color_init_hooked ||
+        native_resource_maximum(0x00338df0) != 900001.0f ||
+        native_resource_maximum(0x00338dec) != 90002.0f ||
+        native_resource_maximum(0x00338de8) != 103.0f ||
         !producer_event_handler_registered ||
         !*a1_producer_push_target_slot ||
         *a1_producer_push_target_slot == a1_native_producer_push ||
@@ -2633,16 +2857,24 @@ int main() {
         *a1_finish_build_slot == a1_native_finish_build ||
         !*a1_start_effect_slot ||
         *a1_start_effect_slot == a1_native_start_effect ||
+        !*a1_resource_panel_render_slot ||
+        *a1_resource_panel_render_slot ==
+            a1_native_resource_panel_render ||
+        !*a1_control_button_press_slot ||
+        *a1_control_button_press_slot ==
+            a1_native_control_button_press ||
         a1_officer_system_hook_count != 6) {
         std::fprintf(
             stderr,
             "A1Compat smoke state: module=%p alias=%d wingmanDefaults=%d "
-            "constructionrigDefaults=%d freighterDefaults=%d "
+            "constructionrigDefaults=%d freighterDefaults=%d miningDefaults=%d "
             "shipyardDefaults=%d researchDefaults=%d overlay=%d "
             "raceHandler=%d raceDefaults=%d scoutHandler=%d exploreBridge=%d "
             "aipNameBridge=%d "
-            "guiSpriteLoader=%d guiParameterDb=%d controlPanel=%d "
-            "shipDisplay=%d/%d "
+            "guiSpriteLoader=%d defaultCursorFallback=%d guiParameterDb=%d "
+            "tooltip=%u "
+            "controlPanel=%u "
+            "shipDisplay=%d/%d constructionBar=%d "
             "a1BznBounds=%d "
             "a1BznAiMission=%d "
             "a1BznClassWidth=%d "
@@ -2657,6 +2889,7 @@ int main() {
             wingman_odf_defaults_registered ? 1 : 0,
             constructionrig_odf_defaults_registered ? 1 : 0,
             freighter_odf_defaults_registered ? 1 : 0,
+            mining_odf_defaults_registered ? 1 : 0,
             shipyard_odf_defaults_registered ? 1 : 0,
             research_odf_defaults_registered ? 1 : 0,
             addon_odf_overlay_registered ? 1 : 0,
@@ -2666,10 +2899,13 @@ int main() {
             a1_scout_command_collision_hooked ? 1 : 0,
             a1_aip_name_lookup_hooked ? 1 : 0,
             a1_gui_sprite_loader_patched ? 1 : 0,
+            a1_default_cursor_fallback_hooked ? 1 : 0,
             a1_gui_parameter_db_constructor_patched ? 1 : 0,
-            a1_control_button_render_hooked ? 1 : 0,
+            a1_tooltip_hook_count,
+            a1_control_panel_hook_count,
             a1_ship_display_rectangle_hooked ? 1 : 0,
-            a1_ship_display_string_hooked ? 1 : 0,
+            a1_ship_display_background_hooked ? 1 : 0,
+            a1_construction_bar_hooked ? 1 : 0,
             a1_bzn_map_bounds_patched ? 1 : 0,
             a1_bzn_ai_mission_patched ? 1 : 0,
             a1_bzn_runtime_class_patched ? 1 : 0,
@@ -2689,6 +2925,16 @@ int main() {
             *a1_producer_push_target_slot,
             *a1_finish_build_slot, *a1_start_effect_slot);
         return 27;
+    }
+    HMODULE a1_fallbacks = initialize_module(
+        "modules\\A1Fallbacks.dll");
+    if (!a1_fallbacks || !a1_wireframe_fallback_hooked) {
+        std::fprintf(
+            stderr,
+            "A1Fallbacks smoke state: module=%p resolver=%d\n",
+            static_cast<void*>(a1_fallbacks),
+            a1_wireframe_fallback_hooked ? 1 : 0);
+        return 138;
     }
 
     std::array<std::uint8_t, 0x200> legacy_scout_class{};
@@ -2739,8 +2985,9 @@ int main() {
     }
 
     std::array<std::uint8_t, 0x200> legacy_station_class{};
-    const std::array<A2FO_OdfFieldView, 1> legacy_station_fields{{
+    const std::array<A2FO_OdfFieldView, 2> legacy_station_fields{{
         odf_field("is_starbase", "1"),
+        odf_field("classLabel", "pod"),
     }};
     A2FO_GameObjectClassLoadedEvent legacy_station_event{};
     legacy_station_event.struct_size = sizeof(legacy_station_event);
@@ -2755,15 +3002,16 @@ int main() {
     a1_scout_class_handler(
         &legacy_station_event, a1_scout_class_user_data);
     if (*reinterpret_cast<const std::uint32_t*>(
-            legacy_station_class.data() + 0x1d4) != 0x00001804u) {
-        std::fprintf(stderr, "A1 missing station Recrew defaults failed\n");
+            legacy_station_class.data() + 0x1d4) != 0x00001814u) {
+        std::fprintf(stderr, "A1 missing station command defaults failed\n");
         return 135;
     }
 
     std::array<std::uint8_t, 0x200> explicit_station_class{};
-    const std::array<A2FO_OdfFieldView, 4> explicit_station_fields{{
-        odf_field("is_starbase", "1"), odf_field("facility", "0"),
-        odf_field("has_crew", "0"), odf_field("has_hitpoints", "0"),
+    const std::array<A2FO_OdfFieldView, 5> explicit_station_fields{{
+        odf_field("is_starbase", "1"), odf_field("transporter", "0"),
+        odf_field("facility", "0"), odf_field("has_crew", "0"),
+        odf_field("has_hitpoints", "0"),
     }};
     A2FO_GameObjectClassLoadedEvent explicit_station_event{};
     explicit_station_event.struct_size = sizeof(explicit_station_event);
@@ -2777,8 +3025,123 @@ int main() {
     if (*reinterpret_cast<const std::uint32_t*>(
             explicit_station_class.data() + 0x1d4) != 0) {
         std::fprintf(
-            stderr, "A1 explicit station Recrew policy was overwritten\n");
+            stderr, "A1 explicit station command policy was overwritten\n");
         return 136;
+    }
+
+    // Future Tense bases expose inherited A1 is_starbase/officerGain fields
+    // and a populated Producer table, but can bypass the native
+    // StarbaseClass::BuildClass interception. The completed-class fallback
+    // must restore the outer Build category and retain the officer policy.
+    std::array<std::uint8_t, 0x500> completed_starbase_class{};
+    std::array<void*, 1> completed_starbase_vtable{{
+        static_cast<std::uint8_t*>(static_cast<void*>(fleet_ops)) +
+            0x001226ec}};
+    std::array<void*, 57> completed_starbase_build_items{};
+    void* completed_starbase_vtable_pointer =
+        completed_starbase_vtable.data();
+    void* completed_starbase_pointer = completed_starbase_class.data();
+    completed_starbase_build_items[0] = completed_starbase_pointer;
+    void* completed_starbase_build_items_pointer =
+        completed_starbase_build_items.data();
+    std::memcpy(
+        completed_starbase_class.data(),
+        &completed_starbase_vtable_pointer,
+        sizeof(completed_starbase_vtable_pointer));
+    std::memcpy(
+        completed_starbase_class.data() + 0x450,
+        &completed_starbase_build_items_pointer,
+        sizeof(completed_starbase_build_items_pointer));
+    const std::array<A2FO_OdfFieldView, 5> completed_starbase_fields{{
+        odf_field("is_starbase", "1"),
+        odf_field("maximumUpgrades", "6"),
+        odf_field("officerGain", "20"),
+        odf_field("race", "federation"),
+        odf_field("classLabel", "starbase"),
+    }};
+    A2FO_GameObjectClassLoadedEvent completed_starbase_event{};
+    completed_starbase_event.struct_size =
+        sizeof(completed_starbase_event);
+    completed_starbase_event.object_class = completed_starbase_pointer;
+    constexpr char completed_starbase_name[] = "fedbase.odf";
+    completed_starbase_event.source_odf = A2FO_StringView{
+        completed_starbase_name,
+        static_cast<std::uint32_t>(
+            sizeof(completed_starbase_name) - 1)};
+    completed_starbase_event.odf_fields =
+        completed_starbase_fields.data();
+    completed_starbase_event.odf_field_count =
+        static_cast<std::uint32_t>(completed_starbase_fields.size());
+    a1_scout_class_handler(
+        &completed_starbase_event, a1_scout_class_user_data);
+    if (*reinterpret_cast<const std::uint32_t*>(
+            completed_starbase_class.data() + 0x1d4) != 0x00001894u ||
+        !a1_completed_starbase_policy_recovered) {
+        std::fprintf(
+            stderr,
+            "A1 completed starbase fallback failed: capabilities=0x%08lx "
+            "policy=%d\n",
+            static_cast<unsigned long>(
+                *reinterpret_cast<const std::uint32_t*>(
+                    completed_starbase_class.data() + 0x1d4)),
+            a1_completed_starbase_policy_recovered ? 1 : 0);
+        return 137;
+    }
+
+    // A completed legacy class may inherit is_starbase without being a
+    // Producer, and malformed/foreign +0x450 data can also name a guarded
+    // page. Compatibility inspection must reject that entry without touching
+    // the guard page or inventing builder_ship.
+    void* guarded_build_item = VirtualAlloc(
+        nullptr, 0x1000, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!guarded_build_item) {
+        std::fprintf(stderr, "A1 guarded build-item fixture allocation failed\n");
+        return 180;
+    }
+    DWORD guarded_old_protect = 0;
+    if (!VirtualProtect(
+            guarded_build_item, 0x1000, PAGE_READWRITE | PAGE_GUARD,
+            &guarded_old_protect)) {
+        VirtualFree(guarded_build_item, 0, MEM_RELEASE);
+        std::fprintf(stderr, "A1 guarded build-item fixture setup failed\n");
+        return 181;
+    }
+    std::array<std::uint8_t, 0x500> guarded_starbase_class{};
+    std::array<void*, 57> guarded_starbase_build_items{};
+    void* guarded_starbase_vtable_pointer = completed_starbase_vtable.data();
+    void* guarded_starbase_build_items_pointer =
+        guarded_starbase_build_items.data();
+    guarded_starbase_build_items[0] = guarded_build_item;
+    std::memcpy(
+        guarded_starbase_class.data(), &guarded_starbase_vtable_pointer,
+        sizeof(guarded_starbase_vtable_pointer));
+    std::memcpy(
+        guarded_starbase_class.data() + 0x450,
+        &guarded_starbase_build_items_pointer,
+        sizeof(guarded_starbase_build_items_pointer));
+    const std::array<A2FO_OdfFieldView, 2> guarded_starbase_fields{{
+        odf_field("is_starbase", "1"),
+        odf_field("classLabel", "starbase"),
+    }};
+    A2FO_GameObjectClassLoadedEvent guarded_starbase_event{};
+    guarded_starbase_event.struct_size = sizeof(guarded_starbase_event);
+    guarded_starbase_event.object_class = guarded_starbase_class.data();
+    guarded_starbase_event.source_odf = completed_starbase_event.source_odf;
+    guarded_starbase_event.odf_fields = guarded_starbase_fields.data();
+    guarded_starbase_event.odf_field_count =
+        static_cast<std::uint32_t>(guarded_starbase_fields.size());
+    a1_scout_class_handler(
+        &guarded_starbase_event, a1_scout_class_user_data);
+    const std::uint32_t guarded_starbase_capabilities =
+        *reinterpret_cast<const std::uint32_t*>(
+            guarded_starbase_class.data() + 0x1d4);
+    VirtualFree(guarded_build_item, 0, MEM_RELEASE);
+    if (guarded_starbase_capabilities != 0x00001814u) {
+        std::fprintf(
+            stderr,
+            "A1 guarded build-item scan invented builder_ship: 0x%08lx\n",
+            static_cast<unsigned long>(guarded_starbase_capabilities));
+        return 182;
     }
 
     // Fleet Operations redirects TeamColor_Init and every IA/minimap consumer
@@ -2833,7 +3196,26 @@ int main() {
         odf_field("interfaceConfiguration", "gui_fed.cfg"),
         odf_field("displayName", "Federation"),
     }};
+    // Armada parses RTS_CFG.h after extension modules initialize. Simulate
+    // that late native reset and require the first Race-loaded callback to
+    // restore the legacy cfgMax* values at the stable post-config boundary.
+    const float reset_resource_maximum = 0.0f;
+    for (const std::uintptr_t rva : {
+             std::uintptr_t{0x00338df0}, std::uintptr_t{0x00338dec},
+             std::uintptr_t{0x00338de8}}) {
+        std::memcpy(static_cast<std::uint8_t*>(fake_armada) + rva,
+                    &reset_resource_maximum,
+                    sizeof(reset_resource_maximum));
+    }
     dispatch_a1_race_fixture(legacy_borg, legacy_borg_fields);
+    if (native_resource_maximum(0x00338df0) != 900001.0f ||
+        native_resource_maximum(0x00338dec) != 90002.0f ||
+        native_resource_maximum(0x00338de8) != 103.0f) {
+        std::fprintf(
+            stderr,
+            "A1 legacy post-config resource-maximum bridge failed\n");
+        return 132;
+    }
     dispatch_a1_race_fixture(legacy_npc, legacy_npc_fields);
     dispatch_a1_race_fixture(
         legacy_federation, legacy_federation_fields);
@@ -2948,10 +3330,20 @@ int main() {
         rgb_path + "\\LegacyMip.TGA";
     const std::string manual_mip_level_path =
         rgb_path + "\\LegacyMip_1.TGA";
+    const std::string flexible_mip_base_path =
+        rgb_path + "\\FlexibleMip.TGA";
+    const std::string flexible_mip_level_path =
+        rgb_path + "\\FlexibleMip_1.TGA";
     const std::string animation_base_path =
         rgb_path + "\\Animation.TGA";
     const std::string animation_frame_path =
         rgb_path + "\\Animation_1.TGA";
+    const std::string inherited_mip_base_path =
+        parent_rgb_path + "\\InheritedMip.TGA";
+    const std::string inherited_mip_level_path =
+        parent_rgb_path + "\\InheritedMip_1.TGA";
+    const std::string child_mip_base_path =
+        rgb_path + "\\InheritedMip.TGA";
     if (!CreateDirectoryA(parent_textures_path.c_str(), nullptr) ||
         !CreateDirectoryA(parent_rgb_path.c_str(), nullptr) ||
         !CreateDirectoryA(textures_path.c_str(), nullptr) ||
@@ -3006,10 +3398,20 @@ int main() {
         make_true_colour_tga(4, 4, 0xa1);
     const std::vector<std::uint8_t> manual_mip_level_contents =
         make_true_colour_tga(2, 2, 0xb1);
+    const std::vector<std::uint8_t> flexible_mip_base_contents =
+        make_true_colour_tga(8, 4, 0xb2);
+    const std::vector<std::uint8_t> flexible_mip_level_contents =
+        make_true_colour_tga(6, 3, 0xb3);
     const std::vector<std::uint8_t> animation_base_contents =
         make_true_colour_tga(4, 4, 0xc1);
     const std::vector<std::uint8_t> animation_frame_contents =
         make_true_colour_tga(4, 4, 0xd1);
+    const std::vector<std::uint8_t> inherited_mip_base_contents =
+        make_true_colour_tga(4, 4, 0xe1);
+    const std::vector<std::uint8_t> inherited_mip_level_contents =
+        make_true_colour_tga(2, 2, 0xe2);
+    const std::vector<std::uint8_t> child_mip_base_contents =
+        make_true_colour_tga(16, 16, 0xf1);
     if (!write_fixture_file(rgb_file_path, rgb_contents,
                             sizeof(rgb_contents))) return 15;
     if (!write_fixture_file(index8_file_path, index8_contents,
@@ -3035,12 +3437,27 @@ int main() {
     if (!write_fixture_file(manual_mip_level_path,
                             manual_mip_level_contents.data(),
                             manual_mip_level_contents.size())) return 117;
+    if (!write_fixture_file(flexible_mip_base_path,
+                            flexible_mip_base_contents.data(),
+                            flexible_mip_base_contents.size())) return 128;
+    if (!write_fixture_file(flexible_mip_level_path,
+                            flexible_mip_level_contents.data(),
+                            flexible_mip_level_contents.size())) return 129;
     if (!write_fixture_file(animation_base_path,
                             animation_base_contents.data(),
                             animation_base_contents.size())) return 118;
     if (!write_fixture_file(animation_frame_path,
                             animation_frame_contents.data(),
                             animation_frame_contents.size())) return 119;
+    if (!write_fixture_file(inherited_mip_base_path,
+                            inherited_mip_base_contents.data(),
+                            inherited_mip_base_contents.size())) return 123;
+    if (!write_fixture_file(inherited_mip_level_path,
+                            inherited_mip_level_contents.data(),
+                            inherited_mip_level_contents.size())) return 124;
+    if (!write_fixture_file(child_mip_base_path,
+                            child_mip_base_contents.data(),
+                            child_mip_base_contents.size())) return 125;
 
     // Reproduce Fleet Operations' startup rewrite of Armada's original
     // Textures\RGB\ prefix. The callback route now deliberately requires the
@@ -3168,9 +3585,10 @@ int main() {
 
     // Fleet Operations can request an A1 manual mip companion through its
     // flattened root route while retaining the base texture dimensions. An
-    // exact half-size chain must therefore return the base pixels, while a
-    // direct RGB request and an ordinary same-size animation frame remain
-    // byte-for-byte native.
+    // progressively smaller same-aspect chain must therefore return the base
+    // pixels even when its level is not an exact half-size, while a direct RGB
+    // request and an ordinary same-size animation frame remain byte-for-byte
+    // native.
     const auto verify_tga_route = [&](const char* filename,
                                       std::uint16_t expected_width,
                                       std::uint8_t marker) -> bool {
@@ -3190,8 +3608,26 @@ int main() {
     if (!verify_tga_route("Textures\\RGB\\legacymip_1.tga", 2, 0xb1)) {
         return 121;
     }
+    if (!verify_tga_route("Textures\\flexiblemip_1.tga", 8, 0xb2)) {
+        return 130;
+    }
+    if (!verify_tga_route(
+            "Textures\\RGB\\flexiblemip_1.tga", 6, 0xb3)) {
+        return 131;
+    }
     if (!verify_tga_route("Textures\\animation_1.tga", 4, 0xd1)) {
         return 122;
+    }
+    // A higher-precedence mod can replace only the base image and inherit an
+    // undersized manual mip chain from its parent. The flattened companion
+    // must be synthesized from the 16x16 winner at the expected 8x8 size;
+    // the direct folder-qualified route remains the parent's named 2x2 file.
+    if (!verify_tga_route("Textures\\inheritedmip_1.tga", 8, 0xf1)) {
+        return 126;
+    }
+    if (!verify_tga_route(
+            "Textures\\RGB\\inheritedmip_1.tga", 2, 0xe2)) {
+        return 127;
     }
 
     // Never feed TGA bytes to Fleet Ops' DDS enhancement path. Its failed DDS
@@ -3226,6 +3662,15 @@ int main() {
         !buildyard_configuration_destroy_hooked ||
         !buildyard_technology_available_hooked ||
         !buildyard_required_technology_call_patched) {
+        std::fprintf(
+            stderr,
+            "hybrid build hook smoke mismatch: bink=%u parse=%d "
+            "destroy=%d technology=%d requiredTechnology=%d\n",
+            bink_call_patch_count,
+            buildyard_configuration_parse_hooked ? 1 : 0,
+            buildyard_configuration_destroy_hooked ? 1 : 0,
+            buildyard_technology_available_hooked ? 1 : 0,
+            buildyard_required_technology_call_patched ? 1 : 0);
         return 6;
     }
     if (!hybrid_research_start_hooked ||
@@ -3317,10 +3762,16 @@ int main() {
     FreeLibrary(energy_systems);
     FreeLibrary(edit_menu);
     FreeLibrary(cheats);
+    shutdown_module(a1_fallbacks);
+    FreeLibrary(a1_fallbacks);
     shutdown_module(a1_compat);
     if (*a1_producer_push_target_slot != a1_native_producer_push ||
         *a1_finish_build_slot != a1_native_finish_build ||
-        *a1_start_effect_slot != a1_native_start_effect) {
+        *a1_start_effect_slot != a1_native_start_effect ||
+        *a1_resource_panel_render_slot !=
+            a1_native_resource_panel_render ||
+        *a1_control_button_press_slot !=
+            a1_native_control_button_press) {
         return 132;
     }
     FreeLibrary(a1_compat);
@@ -3341,6 +3792,7 @@ int main() {
     DeleteFileA(active_rts_config_path.c_str());
     DeleteFileA(parent_team_color_path.c_str());
     DeleteFileA(active_team_color_path.c_str());
+    DeleteFileA(legacy_cursor_path.c_str());
     RemoveDirectoryA(rgb_path.c_str());
     RemoveDirectoryA(index8_path.c_str());
     RemoveDirectoryA(compressed_path.c_str());
@@ -3351,6 +3803,7 @@ int main() {
     RemoveDirectoryA(active_odf_path.c_str());
     RemoveDirectoryA(parent_system_odf_path.c_str());
     RemoveDirectoryA(parent_odf_path.c_str());
+    RemoveDirectoryA(active_sprites_path.c_str());
     RemoveDirectoryA(extension_root_path);
     RemoveDirectoryA(parent_extension_root_path);
 }

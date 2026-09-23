@@ -47,6 +47,26 @@ campaign is selected; a subtle dark overlay preserves text readability.
 Mission thumbnails also auto-resolve beside the corresponding BZN in the same
 image formats.
 
+### Authoritative INI catalogs
+
+The default catalog includes Armada's four native campaigns and treats the INI
+as metadata and extensions. A replacement campaign menu can instead make the
+INI the complete source of its visible campaign tree:
+
+```ini
+[selector]
+catalogMode = ini
+```
+
+In this mode, only explicitly configured `campaignN` and `.missionM` sections
+are displayed; the native `mshell.set` filename table is not enumerated into
+the browser. Define replacement trees as custom campaigns (`campaign4` and
+higher) when their layout should be independent of Armada's four fixed native
+campaigns. The selector still borrows a native launch cell temporarily and
+retains the configured filename through Armada's deferred map hand-off. It
+restores that cell before the next mission launch or module shutdown. An
+INI-mode file containing no campaigns safely falls back to the native catalog.
+
 ## Custom campaigns and missions
 
 `campaign4` and higher are custom campaigns. A custom mission must provide
@@ -81,7 +101,9 @@ The supported display fields are:
 By default a custom BZN borrows native launch cell Federation mission 1. The
 advanced `nativeCampaign = 0..3` and `nativeMission = 0..9` fields may choose a
 different temporary cell if a mission depends on native campaign identity.
-The selected pointer is restored as soon as `SetupMission` returns.
+The selected pointer targets stable module-owned storage and remains installed
+through Armada's deferred map resolution. It is restored before the next
+mission launch or module shutdown.
 
 Setting `file` on `campaign0` through `campaign3` also replaces that displayed
 mission's native BZN for the launch only. This is a simpler alternative to

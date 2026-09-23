@@ -55,6 +55,13 @@ struct A1BznObjectTailLayout {
     std::uint32_t object_count = 0;
 };
 
+// Recognize the fixed-width AiMission runtime-class records observed in A1
+// maps. Campaign maps can serialize Inst4XMission instead of EmptyMission, so
+// callers must not use the skirmish-only marker as their resync boundary.
+bool serialized_a1_mission_record_at(
+    const std::uint8_t* candidate,
+    const std::uint8_t* stream_end) noexcept;
+
 // Recognize only the Armada 1 front matter. A numeric version alone is not
 // enough because an inherited or malformed A2 stream must retain A2's
 // 40-byte RtimeClass record contract.
@@ -69,7 +76,7 @@ bool a2_compatible_map_bounds(const A1BznHeader& header,
                               float map_size[3]) noexcept;
 
 // Locate an A1 neutral-object block between the A2 primary-object cursor and
-// the serialized EmptyMission record. Some A1 classes leave a serialized tail
+// the serialized AiMission record. Some A1 classes leave a serialized tail
 // from the final primary object before the first neutral-object prefix, so the
 // first object need not begin at offset zero. The locator remains strict: it
 // requires one unique mission marker and complete object-prefix signatures.

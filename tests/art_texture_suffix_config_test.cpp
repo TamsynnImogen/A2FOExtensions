@@ -7,6 +7,7 @@ int main() {
     using a2fo::nebula::ArtTextureSuffixConfig;
     using a2fo::nebula::emissive_texture_name;
     using a2fo::nebula::parse_art_texture_suffix_config;
+    using a2fo::nebula::settings_disable_bump;
     using a2fo::nebula::texture_name_with_suffix;
 
     ArtTextureSuffixConfig config;
@@ -77,5 +78,19 @@ int main() {
     assert(emissive_texture_name(
                "fbattle.dds", "_emissive_", "warp") ==
            "fbattle_emissive_warp.dds");
+
+    bool setting_found = false;
+    assert(settings_disable_bump(
+        "<settings><disable_bump> True </disable_bump></settings>",
+        &setting_found));
+    assert(setting_found);
+    setting_found = false;
+    assert(!settings_disable_bump(
+        "<disable_bump>False</disable_bump>", &setting_found));
+    assert(setting_found);
+    setting_found = true;
+    assert(!settings_disable_bump(
+        "<disable_bump>maybe</disable_bump>", &setting_found));
+    assert(!setting_found);
     return 0;
 }

@@ -9,6 +9,7 @@
 #include "../../sdk/include/a2fo_module_api.h"
 #include "api.hpp"
 #include "directional_shields.hpp"
+#include "../../sdk/include/a2fo_shield_values.hpp"
 
 #include <windows.h>
 
@@ -108,6 +109,7 @@ A2FO_InlineHook g_create_shield_hit_hook{};
 A2FO_InlineHook g_stop_shield_effect_hook{};
 A2FO_InlineHook g_update_shield_effect_hook{};
 std::unordered_map<void*, ShieldPolicy> g_class_policies;
+std::unordered_map<void*, ShieldPolicy> g_craft_policy_overrides;
 std::unordered_map<void*, CraftState> g_craft_states;
 std::unordered_map<std::int32_t, ImpactEffectState> g_impact_effects;
 std::array<ActiveDamageEffectScope, 8> g_active_damage_effect_scopes{};
@@ -471,7 +473,10 @@ const ShieldPolicy* policy_for_craft(const void* craft) noexcept {
     const void* object_class = read_at<const void*>(
         craft, kObjectClassOffset, nullptr);
     const auto found = g_class_policies.find(const_cast<void*>(object_class));
-    return found == g_class_policies.end() ? nullptr : &found->second;
+    if (found == g_class_policies.end()) return nullptr;
+    const auto override = g_craft_policy_overrides.find(const_cast<void*>(craft));
+    return override == g_craft_policy_overrides.end()
+        ? &found->second : &override->second;
 }
 
 CraftState* state_for_craft(void* craft, bool create) noexcept {
@@ -629,6 +634,23 @@ bool resolve_hit_facing(void* craft, const void* source_damage_info,
         target_copy, &attacker_copy.values[9], facing);
 }
 
+bool set_editor_state(void* craft, const A2FO_DirectionalShieldState* values) noexcept;
+
+bool restore_editor_shields(void* craft) noexcept {
+    HMODULE identity = GetModuleHandleA("A2FOCraftIdentity.dll");
+    FARPROC exported = identity ? GetProcAddress(
+        identity, "A2FOCraftIdentity_TakeLoadedDirectionalShields") : nullptr;
+    A2FO_CraftIdentityTakeLoadedShieldsFn take = nullptr;
+    static_assert(sizeof(take) == sizeof(exported), "function pointer size");
+    std::memcpy(&take, &exported, sizeof(take));
+    A2FO_DirectionalShieldState values{};
+    values.struct_size = sizeof(values);
+    if (!take || !take(craft, &values)) return false;
+    if (set_editor_state(craft, &values)) return true;
+    log_line("Could not restore saved per-object directional shields");
+    return false;
+}
+
 void A2FO_CALL craft_event_handler(
     const A2FO_CraftEvent* event, void*) {
     if (!event || event->struct_size < sizeof(*event) || !event->craft) {
@@ -637,19 +659,22 @@ void A2FO_CALL craft_event_handler(
     if (event->kind == A2FO_CRAFT_EVENT_CLEANUP) {
         forget_impact_effects_for_craft(event->craft);
         g_craft_states.erase(event->craft);
+        g_craft_policy_overrides.erase(event->craft);
         return;
     }
     if (!g_runtime_ready || !g_damage_bridge_connected ||
         g_class_policies.empty()) {
         return;
     }
-    const ShieldPolicy* policy = policy_for_craft(event->craft);
-    if (!policy) return;
     if (event->kind == A2FO_CRAFT_EVENT_POST_LOAD) {
         g_craft_states.erase(event->craft);
+        g_craft_policy_overrides.erase(event->craft);
+        if (restore_editor_shields(event->craft)) return;
         state_for_craft(event->craft, true);
         return;
     }
+    const ShieldPolicy* policy = policy_for_craft(event->craft);
+    if (!policy) return;
     if (event->kind != A2FO_CRAFT_EVENT_SIMULATE_PRE &&
         event->kind != A2FO_CRAFT_EVENT_SIMULATE_POST) {
         return;
@@ -730,6 +755,33 @@ void end_damage(A2FO_DirectionalShieldDamageScope* scope) noexcept {
     }
     remove_active_damage_effect_scope(scope);
     scope->active = 0;
+}
+
+bool set_editor_state(void* craft, const A2FO_DirectionalShieldState* values) noexcept {
+    if (!g_runtime_ready || !g_damage_bridge_connected || !craft || !values ||
+        values->struct_size < sizeof(*values) ||
+        g_active_damage_effect_scope_count != 0 || !policy_for_craft(craft) ||
+        !a2fo::valid_shield_values(values->current, values->maximum) ||
+        !readable_range(static_cast<std::uint8_t*>(craft) +
+                            kCurrentShieldsOffset, sizeof(float) * 2)) return false;
+    // All allocations finish before publishing any maximum/current values.
+    CraftState* state = state_for_craft(craft, true);
+    if (!state) return false;
+    ShieldPolicy policy{};
+    std::copy_n(values->maximum, 4, policy.maximum.begin());
+    try {
+        g_craft_policy_overrides.insert_or_assign(craft, policy);
+    } catch (...) {
+        return false;
+    }
+    std::copy_n(values->current, 4, state->stores.current.begin());
+    state->pending_effect = false;
+    const float maximum = a2fo::directional_shields::total_capacity(policy);
+    const float current = a2fo::directional_shields::total_current(state->stores);
+    std::memcpy(static_cast<std::uint8_t*>(craft) + kMaximumShieldsOffset,
+                &maximum, sizeof(maximum));
+    write_current_shields(craft, current);
+    return true;
 }
 
 float shield_value(void* craft, std::uint32_t facing,
@@ -974,4 +1026,25 @@ extern "C" __declspec(dllexport)
 float A2FO_CALL A2FODirectionalShields_GetMaximum(
     void* craft, std::uint32_t facing) {
     return shield_value(craft, facing, true);
+}
+
+extern "C" __declspec(dllexport)
+bool A2FO_CALL A2FODirectionalShields_GetState(
+    void* craft, A2FO_DirectionalShieldState* values) {
+    if (!values || values->struct_size < sizeof(*values) ||
+        !g_runtime_ready || !g_damage_bridge_connected ||
+        g_active_damage_effect_scope_count != 0) return false;
+    const ShieldPolicy* policy = policy_for_craft(craft);
+    CraftState* state = policy ? state_for_craft(craft, true) : nullptr;
+    if (!state) return false;
+    reconcile_craft(craft, state, *policy);
+    std::copy_n(state->stores.current.begin(), 4, values->current);
+    std::copy_n(policy->maximum.begin(), 4, values->maximum);
+    return a2fo::valid_shield_values(values->current, values->maximum);
+}
+
+extern "C" __declspec(dllexport)
+bool A2FO_CALL A2FODirectionalShields_SetState(
+    void* craft, const A2FO_DirectionalShieldState* values) {
+    return set_editor_state(craft, values);
 }

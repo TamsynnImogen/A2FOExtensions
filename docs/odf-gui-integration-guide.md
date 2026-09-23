@@ -56,8 +56,8 @@ Dependencies and optional companions are:
 | --- | --- |
 | Four additional resources | `A2FOResources` plus `A2FOFeaturePack` for exact Producer cancellation/refund events |
 | Added costs and build time in build-button tooltips | `A2FOBuildTooltips`; select `A2FOResources` too for added-resource costs |
-| Photon/Quantum simulation | `A2FOEnergySystems` |
-| Photon/Quantum selected-panel UI | `A2FOEnergySystems` plus `A2FOCraftIdentity` |
+| Photon/Quantum/Shuttle Craft simulation | `A2FOEnergySystems` |
+| Photon/Quantum/Shuttle Craft selected-panel UI | `A2FOEnergySystems` plus `A2FOCraftIdentity` |
 | Directional-shield gameplay | `A2FODirectionalShields` plus `A2FOWeaponDamageControls` |
 | Directional-shield selected-panel UI | Add `A2FOCraftIdentity` |
 | Captain/registry, shield hover, and XP bar | `A2FOCraftIdentity` |
@@ -209,7 +209,7 @@ A2FO appends the live result, for example
 `Shield Integrity at 100% 875/875`. The GUI must define
 `infoSingleShieldBarArea`; A2FO uses the existing bar and does not redraw it.
 
-### Photon and Quantum Torpedo stores
+### Photon Torpedo, Quantum Torpedo, and Shuttle Craft stores
 
 Put capacities, recharge, and presentation on the Craft ODF:
 
@@ -221,6 +221,10 @@ photonTorpedoRechargeMode = 1
 maxQuantumTorpedoes = 20
 quantumTorpedoRate = 0.25
 quantumTorpedoRechargeMode = 2
+
+maxShuttleCraft = 6
+shuttleCraftRate = 0.05
+shuttleCraftRechargeMode = 2
 
 photonTorpedoDisplayMode = 1
 photonTorpedoValueDisplayMode = 1
@@ -234,14 +238,20 @@ quantumTorpedoIcon = "all_interface"
 quantumTorpedoIconPos = 71 151 34 34
 quantumTorpedoTooltip = "GUI_A2FO_QUANTUM_TOOLTIP"
 quantumTorpedoVerboseTooltip = "GUI_A2FO_QUANTUM_VTOOLTIP"
+
+shuttleCraftDisplayMode = 1
+shuttleCraftValueDisplayMode = 1
+shuttleCraftLabel = "GUI_A2FO_SHUTTLE_LABEL"
+shuttleCraftTooltip = "GUI_A2FO_SHUTTLE_TOOLTIP"
+shuttleCraftVerboseTooltip = "GUI_A2FO_SHUTTLE_VTOOLTIP"
 ```
 
 Store commands are:
 
 | Command | Meaning |
 | --- | --- |
-| `maxPhotonTorpedoes`, `maxQuantumTorpedoes` | Capacity. Missing or zero disables that store. New stores begin full. |
-| `photonTorpedoRate`, `quantumTorpedoRate` | Fractional ammunition restored per game second. |
+| `maxPhotonTorpedoes`, `maxQuantumTorpedoes`, `maxShuttleCraft` | Capacity. Missing or zero disables that store. New stores begin full. |
+| `photonTorpedoRate`, `quantumTorpedoRate`, `shuttleCraftRate` | Fractional units restored per game second. |
 | `*RechargeMode = 0` | No recharge. |
 | `*RechargeMode = 1` | Automatic recharge. |
 | `*RechargeMode = 2` | Recharge only within range of a same-team provider. |
@@ -270,9 +280,15 @@ or:
 quantumTorpedoCost = 1
 ```
 
+or:
+
+```cpp
+shuttleCraftCost = 1
+```
+
 The cost is paid once per successfully launched projectile. A four-shot volley
-with cost `1` consumes four units. A weapon declaring both costs is invalid and
-uses neither store.
+with cost `1` consumes four units. A weapon declaring more than one cost is
+invalid and uses none of the stores.
 
 Shipyards and `classLabel = "RepairShip"` provide mode-2 resupply within 200
 world units by default. Any Craft can override that policy:
@@ -389,23 +405,34 @@ infoSingleRegistryTextArea = 386 154 340 20
 captainNameColor = 1.0 0.0 1.0
 shipRegistryColor = 1.0 0.0 1.0
 
-// Photon and Quantum Torpedo rows
+// Photon Torpedo, Quantum Torpedo, and Shuttle Craft rows
 infoSinglePhotonTorpedoesTextArea = 386 186 340 20
 infoSingleQuantumTorpedoesTextArea = 386 214 340 20
+infoSingleShuttleCraftTextArea = 386 242 340 20
 photonTorpedoColor = 0.0 1.0 0.0
 photonTorpedoLowColor = 1.0 1.0 0.0
 photonTorpedoCriticalColor = 1.0 0.0 0.0
 quantumTorpedoColor = 0.0 1.0 0.0
 quantumTorpedoLowColor = 1.0 1.0 0.0
 quantumTorpedoCriticalColor = 1.0 0.0 0.0
+shuttleCraftColor = 0.0 1.0 0.0
+shuttleCraftLowColor = 1.0 1.0 0.0
+shuttleCraftCriticalColor = 1.0 0.0 0.0
 
 // Directional-shield text fallback and graphical origin
-infoSingleDirectionalShieldsForwardAftTextArea = 386 238 340 18
-infoSingleDirectionalShieldsPortStarboardTextArea = 386 258 340 18
+infoSingleDirectionalShieldsForwardAftTextArea = 386 270 340 18
+infoSingleDirectionalShieldsPortStarboardTextArea = 386 290 340 18
 infoSingleDirectionalShieldsGraphicArea = 26 56 128 128
+infoSingleDirectionalShieldsForwardValueTextArea = 58 78 64 18
+infoSingleDirectionalShieldsAftValueTextArea = 58 144 64 18
+infoSingleDirectionalShieldsPortValueTextArea = 46 111 44 18
+infoSingleDirectionalShieldsStarboardValueTextArea = 90 111 44 18
 directionalShieldColor = 0.1 1.0 0.1
 directionalShieldLowColor = 1.0 0.5 0.0
 directionalShieldCriticalColor = 1.0 0.05 0.02
+directionalShieldValueColor = 0.8 1.0 0.8
+directionalShieldValueLowColor = 1.0 0.7 0.1
+directionalShieldValueCriticalColor = 1.0 0.15 0.05
 
 // Existing native shield bar hover region and optional XP bar
 infoSingleShieldBarArea = 26 126 103 10
@@ -420,6 +447,14 @@ systemIconCriticalColor = 1.00 0.15 0.00
 systemIconDisabledColor = 0.25 0.55 1.00
 systemIconDestroyedColor = 1.00 0.00 1.00
 
+// Per-weapon weaponXiconpos icons by weapons-system state
+weaponIconColor = 0.30 1.00 1.00
+weaponIconLowColor = 1.00 0.65 0.00
+weaponIconCriticalColor = 1.00 0.05 0.05
+weaponIconDisabledColor = 0.45 0.45 0.75
+weaponIconDestroyedColor = 0.55 0.10 0.10
+passiveWeaponIconColor = 1.00 0.75 0.10
+
 // Fixed special-energy and officer icon/value colours, independent of live state
 specialEnergyIconColor = 1.00 1.00 0.00
 officerIconColor = 1.00 0.50 0.00
@@ -430,19 +465,38 @@ Keep it defined even if the Craft does not use `possibleCaptainNames`.
 Without it, custom ammunition rectangles, the native shield hover region, and
 the XP bar cannot be translated into the selected panel reliably.
 
-Stations with a build queue use Armada's separate tall producer panel. A2FO
-hooks that renderer too: ammunition and directional shields use the panel's
-live `infoBuildName` or `infoBuildClass` component, then rebase it onto
-`infoSingleCaptainTextArea`. The `infoSinglePhoton*`, `infoSingleQuantum*`, and
+Stations with a build queue, including repair-only shipyards, use Armada's
+separate tall producer panel. A2FO hooks that renderer too: captain/registry
+text, ammunition and directional shields prefer the same initialized captain text component and
+`infoSingleCaptainTextArea` anchor used for ships. If it is unavailable,
+the native `infoBuildName` or `infoBuildClass` component is rebased only when
+its matching CFG rectangle is known. The `infoSingleRegistryTextArea`,
+`infoSinglePhoton*`, `infoSingleQuantum*`, `infoSingleShuttleCraft*`, and
 `infoSingleDirectionalShields*` rectangles above therefore remain the one
 authoritative set; do not duplicate them. Preserve the native `infoBuildName`
-and `infoBuildClass` rectangles in the same GUI CFG.
+and `infoBuildClass` rectangles for the station's own labels and fallback.
+Registry entries accept free-form text and do not require a captain-name ODF
+list; keep the captain GUI rectangle defined as the coordinate anchor.
 
 The directional graphic area should remain 128 by 128. When all four sprites
 load, the ring replaces the two numeric directional-shield rows. When any
 sprite is unavailable, the numeric rows remain as the safe fallback. The
 first directional text row is also used to draw the arc tooltip, so give it
 enough width for verbose text.
+
+To show four values around the ring, add one of these to each directional
+Craft ODF:
+
+```cpp
+directionalShieldValueDisplayMode = 1 // rounded percentage, no % sign
+// directionalShieldValueDisplayMode = 2 // current/maximum
+```
+
+An explicit mode `0` hides the labels. Modes `1` and `2` use the four
+`...ValueTextArea` rectangles and the three `directionalShieldValue*Color`
+settings above, independently of the ring colours. Missing value rectangles
+use the example positions relative to the 128-by-128 graphic area. If the ODF
+command is omitted entirely, the legacy ring-or-two-row fallback remains.
 
 Ammunition and directional colours use these thresholds:
 
@@ -451,12 +505,23 @@ Ammunition and directional colours use these thresholds:
 - critical: 25% or below;
 - a mode-2 directional arc at exactly zero is black.
 
-Native subsystem icons and their adjacent numeric value text use the same
-healthy/low/critical thresholds while operational. Their disabled and
-destroyed colours are separate: timed or control-forced outages are disabled,
-while zero-hitpoint and damaged not-yet-operational systems are destroyed.
-Each of the five colour commands is optional; a missing command preserves the
-native colour for that state.
+Native subsystem icons and their adjacent numeric value text use the
+`systemIcon*Color` palette. Per-weapon icons exposed by `weaponXiconpos` use
+the parallel `weaponIcon*Color` palette. Both use the same healthy/low/critical
+thresholds while operational, and each weapon icon follows system index 2
+(the selected craft's weapons system). Timed or control-forced outages are
+disabled, while zero-hitpoint and damaged not-yet-operational systems are
+destroyed. Each weapon colour is optional and falls back to its matching
+system colour, then to the native colour. Weapon cooldown and availability
+shading remains native. An unavailable weapon icon is hidden when its
+unsatisfied technology-tree requirement uses
+`buttonHideUnavailable="true"`; otherwise it remains visible with the
+disabled colour. Passive `UtilityWeapon` icons use the fixed
+`passiveWeaponIconColor` instead of either state palette, or neutral
+white/grey when it is absent.
+`A2FOCraftIdentity` supplies selected-panel controls through
+`weapon128iconpos`; stock Fleet Operations stops creating them after
+`weapon32iconpos`.
 `specialEnergyIconColor` is a separate optional fixed colour for the native
 selected-panel special-energy icon and adjacent value. It never follows the
 subsystem, hull, shield, or crew health palette.
@@ -643,7 +708,7 @@ ordinary sprite declarations may be ignored, and LF-only inserted lines can be
 merged with adjacent directives by Armada's parser. Keep custom sprite names
 at 27 characters or fewer.
 
-Custom Photon/Quantum icon sprites may be registered in the same GUI table.
+Custom Photon/Quantum/Shuttle Craft icon sprites may be registered in the same GUI table.
 The Craft's `*Icon` field names the first `.spr` column and `*IconPos` selects
 the crop within that sprite's texture.
 
@@ -760,7 +825,16 @@ If a feature does not appear, check these conditions before changing hooks:
 - Added resources are integrated with production affordability, payment, and
   refunds, but not yet with mining, freighter cargo, trade routes,
   `ResourceWeapon`, scripted grants, gifting, or AI economy planning.
-- Photon and Quantum current values are appended to new Craft save data. Start
-  a new game after first enabling the module for a mod.
+- Photon, Quantum, and Shuttle Craft current values are appended to new Craft
+  save data. Previous two-store saves retain Photon/Quantum and initialize the
+  Shuttle Craft store full.
 - Directional-facing distribution is not yet separately saved. A loaded
   aggregate shield percentage is redistributed proportionally across facings.
+
+## Independent medium and tall extension controls
+
+See [selected-panel customisation](selected-panel-customisation.md) for the
+`infoSingle<Element><Property>` / `infoBuild<Element><Property>` key families,
+independent ammunition label/value/icon/bar rectangles, per-facing shield
+controls, and fill/background sprites. Tall properties inherit medium fields
+individually; existing ODF modes and GUI colours remain compatible.

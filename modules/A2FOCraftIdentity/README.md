@@ -21,10 +21,20 @@ missing or out-of-range companion row is left blank; indices never wrap.
 An intentionally empty quoted entry may be used to leave one field blank
 without shifting later rows.
 
+## Medium and tall layouts
+
+All extension elements support independent medium (`infoSingle…`) and tall
+(`infoBuild…`) layout and colour properties, with field-by-field inheritance.
+Ammunition labels, values, icons and bars can be placed separately. XP and
+shield status now work in both panels; capacity bars can use individual fill
+and background sprites. See [the full key reference and examples](../../docs/selected-panel-customisation.md).
+
 ## Selected-object GUI configuration
 
-The identities are drawn only in the ordinary panel for the single selected
-object, not the low `SDInfoBar` mouse-over strip. Armada already reads
+The identities are drawn for a single selected object in both the ordinary
+panel and the tall producer panel (including repair-only shipyards), not the
+low `SDInfoBar` mouse-over strip. Registry entries are free-form text; they
+can describe a facility or any other row-aligned detail. Armada already reads
 `infoSingleCaptainTextArea`; the module adds the matching registry rectangle:
 
 ```text
@@ -56,9 +66,19 @@ variants; the ship-class row continues to use Fleet Operations'
 `classTextColor`/`infoTextColor` path. The original low mouse-over strip keeps
 its native `shipNameColor` behaviour.
 
+Fleet Operations creates only 32 `ShipSystemIcon` controls even though its
+craft and `weaponXiconpos` ODF data are dynamically sized. This module keeps
+those controls and ShipDisplay's fixed layout unchanged, then creates 96
+native-compatible sidecar controls for weapon slots 33 through 128. Their
+rendering, simulation, hover input, tooltips, disabled flashing, technology
+availability, status colours, and A2FOFireArcs hover previews use the same
+native virtual methods as slots 1 through 32. `weapon129iconpos` and higher
+remain unsupported.
+
 The five native subsystem icons, their adjacent numeric value text, and the
-native mouse-over hull/shield/crew icon-values can also receive independent
-colours for their live condition:
+native mouse-over hull/shield/crew icon-values can receive one live-condition
+palette. Fleet Operations' per-weapon icons created by `weaponXiconpos` have
+their own parallel palette:
 
 ```text
 systemIconHealthyColor = 0.20 1.00 0.20
@@ -66,25 +86,47 @@ systemIconLowColor = 1.00 0.90 0.00
 systemIconCriticalColor = 1.00 0.15 0.00
 systemIconDisabledColor = 0.25 0.55 1.00
 systemIconDestroyedColor = 1.00 0.00 1.00
+weaponIconColor = 0.30 1.00 1.00
+weaponIconLowColor = 1.00 0.65 0.00
+weaponIconCriticalColor = 1.00 0.05 0.05
+weaponIconDisabledColor = 0.45 0.45 0.75
+weaponIconDestroyedColor = 0.55 0.10 0.10
+passiveWeaponIconColor = 1.00 0.75 0.10
 specialEnergyIconColor = 1.00 1.00 0.00
 officerIconColor = 1.00 0.50 0.00
 ```
 
 The implementation leaves Fleet Operations' existing `SystemIcon::Render`
-detour in place and redirects only the six native icon sprite-colour calls,
-the specialised `SystemValue` icon-colour call, and the shared value-text draw
-call after verifying that its live component is `SystemValue` or
+and `ShipSystemIcon::Render` detours in place and redirects only their checked
+sprite-colour calls, the specialised `SystemValue` icon-colour call, and the
+shared value-text draw call after verifying that its live component is `SystemValue` or
 `HullText`, `ShieldText`, `CrewNumText`, `EnergyText`, or
 `OfficerTextAndSprite`. When Fleet Operations has already replaced that draw
 call, the bridge preserves and tail-chains its live handler.
+
+Ordinary available `weaponXiconpos` icons follow the selected craft's live
+weapons-system record (system index 2), but resolve their colour from
+`weaponIconColor`, `weaponIconLowColor`, `weaponIconCriticalColor`,
+`weaponIconDisabledColor`, or `weaponIconDestroyedColor`. If the matching
+weapon command is absent, the corresponding `systemIcon*Color` is used for
+backward compatibility; if both are absent, the native colour is retained. A
+weapon whose inherited `classLabel` is `UtilityWeapon` is treated as passive:
+its icon uses the fixed optional `passiveWeaponIconColor` and does not inherit
+weapon or subsystem damage status. When that command is absent, the icon
+remains neutral white/grey. Technology-tree availability follows Fleet
+Operations' native button policy: when an unsatisfied requirement declares
+`buttonHideUnavailable="true"`, the matching `weaponXiconpos` icon is hidden.
+Otherwise an unavailable normal or special weapon remains visible with the
+weapon disabled colour or its system fallback. An absent technology-tree
+entry still means available (`0`), matching `A2FONormalWeaponTech`. Native
+brightness, cooldown shading, and the fire-arc hover renderer are preserved.
 
 Healthy is above 50% hitpoints, low is above 25% through 50%, and critical is
 25% or below while the native system remains operational. A timed or
 control-forced outage is disabled; zero hitpoints, or a damaged system which
 has not returned to operational state, is destroyed. Every command is
-optional and independent: when the current state's command is absent, Armada's
-native colour is left unchanged. The configured hue retains the stock icon's
-fill intensity, repair animation, black background, and disabled flash.
+optional and independent. The configured hue retains the stock icon's fill
+intensity, repair animation, black background, and disabled flash.
 Hull, shields, and crew use their native live percentages with the same
 healthy/low/critical thresholds, so the mouse-over strip and selected-panel
 crew presentation use one consistent palette; zero uses the destroyed colour.
@@ -106,8 +148,9 @@ experienceBarBackgroundColor = 0.25 0.25 0.25
 ```
 
 `infoSingleShieldBarArea` remains Fleet Operations' normal selected shield-bar
-rectangle; A2FO does not redraw or alter that bar. It uses the rectangle only
-to add the missing shield tooltip. By default it displays the live and maximum
+rectangle. A2FO adds the missing shield tooltip in both panels; tall panels
+use their native `infoBuildShieldBar` rectangle when present. The native shield
+renderer and `infoSingleShieldBar` SPR skin remain unchanged. By default it displays the live and maximum
 shield pools as whole numbers after their percentage, matching the native hull
 format—for example `Shield Integrity at 100% 875/875`. A Craft ODF may
 customize the text before those values:
@@ -131,21 +174,27 @@ are `GUI_SD_EXPERIENCE_TOOLTIP` and `GUI_SD_EXPERIENCE_VTOOLTIP`; missing keys
 fall back to `Experience` and an English explanation. Unranked and maximum-rank
 Craft do not show the XP bar.
 
-Photon/Quantum ammunition and directional shields are also submitted from
+Captain/registry text, Photon/Quantum/Shuttle Craft stores and directional shields are also submitted from
 Armada's separate tall producer-panel renderer used by stations with build
-queues. The module uses the live native `infoBuildName` or `infoBuildClass`
-component as its text/display anchor, rebases that rectangle onto
-`infoSingleCaptainTextArea`, and then reuses the same `infoSinglePhoton*`,
-`infoSingleQuantum*`, and `infoSingleDirectionalShields*` coordinates. Mods do
-not need duplicate build-panel versions of those A2FO fields. Keep the stock
-`infoBuildName` and `infoBuildClass` rectangles defined in interfaces which
-show producer queues.
+queues, including repair-only shipyards. Both panels prefer the same native
+captain text component, which Armada initializes even when the station panel
+does not draw a captain name. This keeps the text/display state and
+`infoSingleCaptainTextArea` anchor consistent when switching between ships
+and shipyards, and reuses `infoSingleRegistryTextArea` and the same `infoSinglePhoton*`,
+`infoSingleQuantum*`, `infoSingleShuttleCraft*`, and
+`infoSingleDirectionalShields*` coordinates. Mods do
+not need duplicate build-panel versions of those A2FO fields. If the captain
+component is unavailable, the module can rebase the native `infoBuildName` or
+`infoBuildClass` component, provided its matching CFG rectangle is defined.
+An unconfigured build-name rectangle is never treated as the captain origin.
 
 The selected-panel observer also presents A2FOEnergySystems ammunition. Its
-automatic Photon and Quantum rows use offsets `+16` and `+40` from the live
+automatic Photon, Quantum, and Shuttle Craft rows use offsets `+16`, `+40`,
+and `+64` from the live
 name anchor; GUI files may override them with
 `infoSinglePhotonTorpedoesTextArea` and
-`infoSingleQuantumTorpedoesTextArea`. Craft ODFs may customize either row:
+`infoSingleQuantumTorpedoesTextArea`, and
+`infoSingleShuttleCraftTextArea`. Craft ODFs may customize any row:
 
 ```cpp
 photonTorpedoDisplayMode = 1
@@ -160,6 +209,12 @@ quantumTorpedoIcon = "all_interface"
 quantumTorpedoIconPos = 71 151 34 34
 quantumTorpedoTooltip = "Quantum Torpedo Ammunition"
 quantumTorpedoVerboseTooltip = "Quantum torpedoes require resupply."
+
+shuttleCraftDisplayMode = 1
+shuttleCraftValueDisplayMode = 1
+shuttleCraftLabel = "Shuttle Craft"
+shuttleCraftTooltip = "Shuttle Craft"
+shuttleCraftVerboseTooltip = "Embarked shuttlecraft complement."
 ```
 
 Mode `1` displays the per-Craft label followed by integer
@@ -184,7 +239,8 @@ bar while retaining the selected label or icon presentation.
 Text and icons share capacity colours: green above 50%, yellow from 25% through
 50%, and red at or below 25%. `photonTorpedoColor`,
 `photonTorpedoLowColor`, `photonTorpedoCriticalColor` and their `quantum*`
-counterparts may override the defaults in the GUI configuration.
+and `shuttleCraft*` counterparts may override the defaults in the GUI
+configuration.
 
 The same selected-panel draw path can show directional-shield diagnostics
 when `A2FODirectionalShields.dll` is active on the selected Craft:
@@ -193,9 +249,16 @@ when `A2FODirectionalShields.dll` is active on the selected Craft:
 infoSingleDirectionalShieldsForwardAftTextArea = 386 238 340 18
 infoSingleDirectionalShieldsPortStarboardTextArea = 386 258 340 18
 infoSingleDirectionalShieldsGraphicArea = 26 56 128 128
+infoSingleDirectionalShieldsForwardValueTextArea = 58 78 64 18
+infoSingleDirectionalShieldsAftValueTextArea = 58 144 64 18
+infoSingleDirectionalShieldsPortValueTextArea = 46 111 44 18
+infoSingleDirectionalShieldsStarboardValueTextArea = 90 111 44 18
 directionalShieldColor = 0.1 1.0 0.1
 directionalShieldLowColor = 1.0 0.5 0.0
 directionalShieldCriticalColor = 1.0 0.05 0.02
+directionalShieldValueColor = 0.8 1.0 0.8
+directionalShieldValueLowColor = 1.0 0.7 0.1
+directionalShieldValueCriticalColor = 1.0 0.15 0.05
 ```
 
 The first row displays forward/aft current and maximum strength; the second
@@ -205,6 +268,13 @@ above 50% use the healthy colour, facings from 25% through 50% use the low
 colour, and facings at or below 25% use the critical colour. Their defaults are
 green, orange, and red respectively. The numeric fallback continues to use
 `directionalShieldColor`, then the selected panel's shared text colour.
+
+Craft ODFs may add `directionalShieldValueDisplayMode = 0`, `1`, or `2`.
+Mode `0` hides the four value labels, mode `1` draws rounded percentages
+without `%` signs, and mode `2` draws `current/maximum`. Modes `1` and `2`
+draw alongside the ring using the four independently configurable rectangles
+and the separate `directionalShieldValue*Color` health colours above. Omitting
+the ODF command retains the legacy ring-or-two-row fallback behaviour.
 
 The optional 128-by-128 graphic area supplies the origin for a four-arc ring.
 Its width and height should remain `128` because the current renderer uses the

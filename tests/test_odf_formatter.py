@@ -54,6 +54,8 @@ class OdfFormatterTests(unittest.TestCase):
         first = output.index('"first.odf" 10')
         second = output.index('"second.odf" 15')
         runtime = output.index('classlabel = "cannonimp"')
+        self.assertIn("\r\n", output)
+        self.assertNotIn("\n", output.replace("\r\n", ""))
         self.assertLess(damage, first)
         self.assertLess(first, second)
         self.assertLess(second, runtime)

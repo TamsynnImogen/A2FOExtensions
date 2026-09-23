@@ -19,6 +19,7 @@ struct StorePolicy {
 struct Stores {
     float photon = 0.0f;
     float quantum = 0.0f;
+    float shuttle_craft = 0.0f;
 };
 
 StorePolicy normalize_policy(StorePolicy policy) noexcept;

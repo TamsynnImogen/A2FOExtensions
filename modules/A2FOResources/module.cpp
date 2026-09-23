@@ -8,6 +8,7 @@
 #include "../../sdk/include/a2fo_module_api.h"
 #include "additional_resources.hpp"
 #include "api.hpp"
+#include "../A2FOSquadrons/api.hpp"
 
 #include <windows.h>
 
@@ -47,6 +48,9 @@ using a2fo::resources::Resource;
 using a2fo::resources::kResourceCount;
 
 constexpr char kModuleName[] = "A2FOResources";
+constexpr char kA1CompatModuleName[] = "A1Compat.dll";
+constexpr char kA1LegacyResourcePanelExport[] =
+    "a2fo_a1_render_legacy_resource_panel";
 constexpr std::uint32_t kFirstAdditionalResource = A2FO_RESOURCE_TRITANIUM;
 constexpr std::uint32_t kTotalResourceCount = A2FO_RESOURCE_COUNT;
 constexpr std::size_t kNativeResourceCount = 6;
@@ -297,6 +301,7 @@ A2FO_InlineHook g_resource_component_tooltip_hook{};
 A2FO_InlineHook g_resource_component_verbose_tooltip_hook{};
 std::unordered_map<void*, Amounts> g_team_amounts;
 std::unordered_map<void*, Costs> g_class_costs;
+A2FOSquadronsGetAdditionalCostsFn g_squad_costs = nullptr;
 std::unordered_map<void*, RaceStartingResources> g_race_starting_resources;
 std::unordered_map<void*, ResourcePresentation> g_race_presentations;
 std::uint32_t g_presentation_generation = 0;
@@ -304,6 +309,9 @@ PanelConfiguration g_panel_configuration{};
 void* g_panel_tooltip_component = nullptr;
 void* g_panel_tooltip_team = nullptr;
 std::int32_t g_panel_tooltip_resource = -1;
+using A1LegacyResourcePanelRender = bool (__cdecl*)(void* panel);
+A1LegacyResourcePanelRender g_a1_legacy_resource_panel_render = nullptr;
+bool g_a1_legacy_resource_panel_bridge_reported = false;
 
 struct PresentationCache {
     void* team = nullptr;
@@ -766,6 +774,16 @@ Amounts team_snapshot(void* team) {
 
 Costs class_costs(void* object_class) {
     if (!object_class || !g_lock_ready) return {};
+    // Resolve lazily: Resources may initialize before Squadrons. The provider
+    // only reads cached totals, avoiding class-load recursion under this lock.
+    if (!g_squad_costs) {
+        const auto module = GetModuleHandleA("A2FOSquadrons.dll");
+        const auto exported = module ? GetProcAddress(module, "A2FOSquadrons_GetAdditionalCosts") : nullptr;
+        static_assert(sizeof(exported) == sizeof(g_squad_costs));
+        std::memcpy(&g_squad_costs, &exported, sizeof(g_squad_costs));
+    }
+    Costs aggregate{};
+    if (g_squad_costs && g_squad_costs(object_class, aggregate.data(), aggregate.size())) return aggregate;
     LockGuard lock;
     const auto found = g_class_costs.find(object_class);
     return found == g_class_costs.end() ? Costs{} : found->second;
@@ -1118,11 +1136,34 @@ void update_added_resource_tooltip(
             A2FO_RESOURCE_PRESENTATION_VERBOSE_TOOLTIP));
 }
 
+void resolve_a1_legacy_resource_panel_bridge() noexcept {
+    if (g_a1_legacy_resource_panel_render) return;
+    HMODULE a1_compat = GetModuleHandleA(kA1CompatModuleName);
+    FARPROC exported = a1_compat
+        ? GetProcAddress(a1_compat, kA1LegacyResourcePanelExport)
+        : nullptr;
+    static_assert(
+        sizeof(exported) == sizeof(g_a1_legacy_resource_panel_render),
+        "unexpected function-pointer size");
+    std::memcpy(
+        &g_a1_legacy_resource_panel_render, &exported,
+        sizeof(g_a1_legacy_resource_panel_render));
+    if (g_a1_legacy_resource_panel_render &&
+        !g_a1_legacy_resource_panel_bridge_reported) {
+        g_a1_legacy_resource_panel_bridge_reported = true;
+        log_line("A1Compat legacy resource-strip renderer linked");
+    }
+}
+
 void __attribute__((fastcall)) resource_panel_render_hook(
     void* panel, void*) noexcept {
+    resolve_a1_legacy_resource_panel_bridge();
+    const bool legacy_a1_panel =
+        g_a1_legacy_resource_panel_render &&
+        g_a1_legacy_resource_panel_render(panel);
     a2fo_resources_call_thiscall_0(
         g_resource_panel_render_hook.gateway, panel);
-    if (!g_runtime_alive || !panel) return;
+    if (!g_runtime_alive || !panel || legacy_a1_panel) return;
 
     void* team = local_team_object();
     if (!team) return;
@@ -1471,6 +1512,8 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     g_api = api;
     g_armada = static_cast<HMODULE>(api->armada_module());
     g_fleet_ops = static_cast<HMODULE>(api->fleetops_module());
+    g_a1_legacy_resource_panel_render = nullptr;
+    g_a1_legacy_resource_panel_bridge_reported = false;
     if (!g_armada || !g_fleet_ops ||
         !GetModuleHandleA("A2FOFeaturePack.dll")) {
         log_line("A2FOFeaturePack.dll is required for shared Producer refunds");
@@ -1529,4 +1572,6 @@ void A2FO_CALL A2FO_ModuleShutdown() {
     // unload initialized modules during normal play.
     g_runtime_alive = false;
     g_production_integration_ready = false;
+    g_a1_legacy_resource_panel_render = nullptr;
+    g_a1_legacy_resource_panel_bridge_reported = false;
 }

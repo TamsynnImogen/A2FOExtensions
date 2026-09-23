@@ -3,6 +3,19 @@
 
 	.text
 
+	# Craft::Save's first FileOutFloat call retains its Craft in EBX. Add it
+	# as a fourth cdecl argument without taking ownership of Save's entry.
+	.extern _a2fo_editor_write_first_field
+	.globl _a2fo_editor_save_prefix_bridge
+_a2fo_editor_save_prefix_bridge:
+	pushl %ebx
+	pushl 16(%esp)
+	pushl 16(%esp)
+	pushl 16(%esp)
+	call _a2fo_editor_write_first_field
+	addl $16, %esp
+	ret
+
 	.globl _a2fo_identity_call_thiscall_0
 _a2fo_identity_call_thiscall_0:
 	pushl %ebp
@@ -74,6 +87,68 @@ _a2fo_identity_call_thiscall_7:
 	leave
 	ret
 
+	# FleetOpsHook's technology-tree evaluator uses Delphi's register ABI:
+	# EAX = team tree and EDX = weapon project ID.
+	.globl _a2fo_identity_call_delphi_2
+_a2fo_identity_call_delphi_2:
+	pushl %ebp
+	movl %esp, %ebp
+	movl 16(%ebp), %edx
+	movl 12(%ebp), %eax
+	call *8(%ebp)
+	leave
+	ret
+
+	# The object inspector also uses Delphi's EAX/EDX register convention.
+	.extern _a2fo_fo_editor_build_cpp
+	.globl _a2fo_fo_editor_build_bridge
+_a2fo_fo_editor_build_bridge:
+	pushl %edx
+	pushl %eax
+	call _a2fo_fo_editor_build_cpp
+	addl $8, %esp
+	ret
+
+	.extern _a2fo_fo_editor_ok_cpp
+	.globl _a2fo_fo_editor_ok_bridge
+_a2fo_fo_editor_ok_bridge:
+	pushl %edx
+	pushl %eax
+	call _a2fo_fo_editor_ok_cpp
+	addl $8, %esp
+	ret
+
+	.extern _a2fo_fo_editor_destroy_cpp
+	.globl _a2fo_fo_editor_destroy_bridge
+_a2fo_fo_editor_destroy_bridge:
+	pushl %edx
+	pushl %eax
+	call _a2fo_fo_editor_destroy_cpp
+	addl $8, %esp
+	ret
+
+	# Native AddProperty(form=EAX, type=DL, caption=ECX), with eight
+	# callee-cleaned stack arguments. Descriptors own their inspector rows;
+	# backing values remain in the extension's current dialog draft.
+	.globl _a2fo_fo_editor_add_property
+_a2fo_fo_editor_add_property:
+	pushl %ebp
+	movl %esp, %ebp
+	pushl 32(%ebp)            # writable
+	pushl $0                 # advanced-only
+	pushl 28(%ebp)            # backing value
+	pushl 24(%ebp)            # parent Craft node
+	pushl $0                 # custom read callback
+	pushl $0                 # custom write callback
+	pushl $0                 # optional item class
+	pushl $0                 # native text option
+	movl 12(%ebp), %eax
+	movl 16(%ebp), %edx
+	movl 20(%ebp), %ecx
+	call *8(%ebp)
+	leave
+	ret
+
 	# Fleet Ops sprite helpers use Delphi's EAX/EDX/ECX convention and then
 	# forward to Armada's ST3D sprite implementation.
 	.globl _a2fo_identity_fo_sprite_set_colour
@@ -110,6 +185,20 @@ _a2fo_identity_system_icon_set_colour_bridge:
 	call _a2fo_identity_system_icon_set_colour_hook_cpp
 	addl $12, %esp
 	ret $4
+
+	# Fleet Operations' Delphi ShipSystemIcon renderer passes its sprite in EAX
+	# and colour in EDX. Its caller frame keeps the live ShipSystemIcon pointer
+	# at [EBP-4], allowing weaponXiconpos to share the native system-state palette
+	# without detouring the render entry used by A2FOFireArcs.
+	.extern _a2fo_identity_weapon_icon_set_colour_hook_cpp
+	.globl _a2fo_identity_weapon_icon_set_colour_bridge
+_a2fo_identity_weapon_icon_set_colour_bridge:
+	pushl %edx
+	pushl -4(%ebp)
+	pushl %eax
+	call _a2fo_identity_weapon_icon_set_colour_hook_cpp
+	addl $12, %esp
+	ret
 
 	# SystemValue::Render likewise retains its component in ESI while issuing
 	# the checked sprite-colour call for the adjacent numeric value.

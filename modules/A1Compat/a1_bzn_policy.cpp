@@ -82,16 +82,25 @@ bool read_serialized_field(const std::uint8_t* data, std::size_t size,
 }
 
 constexpr char kSerializedEmptyMissionName[] = "EmptyMission";
+constexpr char kSerializedInstantMissionName[] = "Inst4XMission";
 constexpr std::size_t kMaximumObjectTailLeadingResidualSize = 64 * 1024;
 
-bool serialized_empty_mission_at(
+bool serialized_mission_name_equals(
+    const std::uint8_t* value, const char* expected) noexcept {
+    if (!value || !expected) return false;
+    const std::size_t length = std::strlen(expected);
+    return length < kA2SerializedRtimeClassNameSize &&
+           std::memcmp(value, expected, length) == 0 && value[length] == 0;
+}
+
+bool serialized_known_a1_mission_at(
     const std::uint8_t* candidate,
     const std::uint8_t* stream_end) noexcept {
-    constexpr std::size_t kMissionRecordPrefixSize =
-        8 + sizeof(kSerializedEmptyMissionName);
+    constexpr std::size_t kMissionRecordSize =
+        8 + kA2SerializedRtimeClassNameSize;
     if (!candidate || !stream_end || stream_end < candidate ||
         static_cast<std::size_t>(stream_end - candidate) <
-            kMissionRecordPrefixSize) {
+            kMissionRecordSize) {
         return false;
     }
     std::uint32_t field_type = 0;
@@ -100,8 +109,10 @@ bool serialized_empty_mission_at(
     std::memcpy(&field_size, candidate + 4, sizeof(field_size));
     return (field_type & 0xffu) == 2u &&
            field_size == kA2SerializedRtimeClassNameSize &&
-           std::memcmp(candidate + 8, kSerializedEmptyMissionName,
-                       sizeof(kSerializedEmptyMissionName)) == 0;
+           (serialized_mission_name_equals(
+                candidate + 8, kSerializedEmptyMissionName) ||
+            serialized_mission_name_equals(
+                candidate + 8, kSerializedInstantMissionName));
 }
 
 bool serialized_game_object_prefix_at(
@@ -342,6 +353,12 @@ bool parse_assignment(std::string_view line, std::string_view* key,
 
 }  // namespace
 
+bool serialized_a1_mission_record_at(
+    const std::uint8_t* candidate,
+    const std::uint8_t* stream_end) noexcept {
+    return serialized_known_a1_mission_at(candidate, stream_end);
+}
+
 bool parse_a1_bzn_header(const std::uint8_t* data, std::size_t size,
                          A1BznHeader* header) noexcept {
     if (!data || !size) return false;
@@ -393,13 +410,13 @@ bool locate_a1_bzn_object_tail(
 
     A1BznObjectTailLayout located;
     const auto* end = data + size;
-    constexpr std::size_t kMissionRecordPrefixSize =
-        8 + sizeof(kSerializedEmptyMissionName);
+    constexpr std::size_t kMissionRecordSize =
+        8 + kA2SerializedRtimeClassNameSize;
 
     std::uint32_t mission_markers = 0;
     for (std::size_t offset = 0;
-         offset + kMissionRecordPrefixSize <= size; ++offset) {
-        if (!serialized_empty_mission_at(data + offset, end)) continue;
+         offset + kMissionRecordSize <= size; ++offset) {
+        if (!serialized_a1_mission_record_at(data + offset, end)) continue;
         ++mission_markers;
         located.mission_offset = offset;
         if (mission_markers > 1) return false;

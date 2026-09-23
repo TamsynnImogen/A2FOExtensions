@@ -7,7 +7,6 @@
 #include "hybrid_bridge_client.hpp"
 
 #include "hybrid_bridge_api.hpp"
-
 #include <windows.h>
 
 #include <cstring>

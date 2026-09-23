@@ -13,11 +13,13 @@ enum class Identity {
     unsupported,
     canonical,
     normalized,
+    janb_20260905,
 };
 
 constexpr std::uint32_t kCanonicalTimestamp = 0x3c4c76bd;
 constexpr std::uint32_t kCanonicalImageSize = 0x00403999;
 constexpr std::uint32_t kNormalizedImageSize = 0x00404000;
+constexpr std::uint32_t kJanb20260905ImageSize = 0x00405000;
 constexpr std::uint32_t kRdataRva = 0x002ae000;
 constexpr std::uint32_t kRdataSize = 0x0003de90;
 constexpr std::uint32_t kRdataFileOffset = 0x002ae000;
@@ -107,16 +109,23 @@ inline Identity identify(HMODULE module) noexcept {
         return Identity::canonical;
     }
 
-    constexpr std::array<SectionLayout, 7> expected_sections{{
+    // Jan_B's September build extends .test by one page. Its engine RVAs
+    // remain fixed, but the image size and read-only/code fingerprints differ.
+    // Never accept an arbitrary larger image just because its timestamp agrees.
+    const bool janb_20260905 =
+        nt->FileHeader.TimeDateStamp == kCanonicalTimestamp &&
+        nt->OptionalHeader.SizeOfImage == kJanb20260905ImageSize;
+    const std::array<SectionLayout, 7> expected_sections{{
         {".text", 0x00001000, 0x002ac6c4},
         {".rdata", 0x002ae000, 0x0003de90},
         {".data", 0x002ec000, 0x000ca1b8},
         {".idata", 0x003b7000, 0x000055fa},
         {".rsrc", 0x003bd000, 0x00006bb0},
         {".reloc", 0x003c4000, 0x00036000},
-        {".test", 0x003fa000, 0x00009999},
+        {".test", 0x003fa000, janb_20260905 ? 0x0000a999u : 0x00009999u},
     }};
-    if (nt->OptionalHeader.SizeOfImage != kNormalizedImageSize ||
+    if ((!janb_20260905 &&
+         nt->OptionalHeader.SizeOfImage != kNormalizedImageSize) ||
         nt->OptionalHeader.ImageBase != 0x00400000 ||
         nt->OptionalHeader.AddressOfEntryPoint != 0x002733c0 ||
         nt->OptionalHeader.SectionAlignment != 0x00001000 ||
@@ -144,8 +153,27 @@ inline Identity identify(HMODULE module) noexcept {
     std::uint32_t rdata_crc32 = 0;
     if (!file_range_crc32(module, sections[1].PointerToRawData,
                           kRdataSize, rdata_crc32) ||
-        rdata_crc32 != kRdataCrc32) {
+        rdata_crc32 != (janb_20260905 ? 0xcd47b19cu : kRdataCrc32)) {
         return Identity::unsupported;
+    }
+    if (janb_20260905) {
+        // Read the file, not live memory: FleetOpsHook has already detoured
+        // Armada before most callers reach this shared identity check.
+        std::uint32_t text_crc32 = 0;
+        std::uint32_t patch_crc32 = 0;
+        if (sections[0].PointerToRawData != 0x00001000 ||
+            sections[0].SizeOfRawData < 0x002ac6c4 ||
+            sections[6].PointerToRawData != 0x00378000 ||
+            sections[6].SizeOfRawData < 0x0000a999 ||
+            !file_range_crc32(module, sections[0].PointerToRawData,
+                              0x002ac6c4, text_crc32) ||
+            text_crc32 != 0x5458da70 ||
+            !file_range_crc32(module, sections[6].PointerToRawData,
+                              0x0000a999, patch_crc32) ||
+            patch_crc32 != 0x785c09e4) {
+            return Identity::unsupported;
+        }
+        return Identity::janb_20260905;
     }
     return Identity::normalized;
 }

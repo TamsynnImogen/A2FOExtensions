@@ -43,6 +43,8 @@ hooks, reusable semantic dispatch, and optional native feature modules.
   pitch, slew rates, ownership changes, and save/load reconnection.
 - Optional `A1Compat.dll` support for the Armada 1 `wingman` classlabel,
   mapped safely to `craft` only through the `STA1 Classic` mod chain.
+- Optional `A1Fallbacks.dll` missing-wireframe presentation, preserving native
+  wireframes before trying the object's build button and current faction icon.
 - Armada 1 `Addon` ODF overlay support through `A1Compat.dll`, preserving A1's
   within-root rule that `Addon` wins over a same-basename structured ODF.
 - Runtime translation of Armada 1's named `teamcolor.odf` entries into Fleet
@@ -58,8 +60,14 @@ hooks, reusable semantic dispatch, and optional native feature modules.
   protected native construction/evolution sidecars.
 - Per-Evolver and HybridBuild `cocoon` ODF command for custom cocoon models.
 - Native ODF-driven wreckage or replacement objects when units are destroyed.
+- Optional weapon `activateOnTeamChange` command for automatic activation
+  after a ship or station changes owner. See
+  [`A2FOTeamChangeWeapons`](modules/A2FOTeamChangeWeapons/README.md).
 - Deterministic `wreckageChance` support suitable for synchronized games.
 - Ctrl-click to fill all ten native construction-queue slots.
+- Experimental R/Shift+R station placement in 90-degree steps, including
+  rotated clearance/pathfinding footprints and native hardpoint/rally facing.
+  See [`A2FOStationRotation`](modules/A2FOStationRotation/README.md).
 - Ctrl+Alt-click for continuous production and automatic queue refilling.
 - Continuous production stops when the queue is manually altered or the yard
   is destroyed.
@@ -67,6 +75,8 @@ hooks, reusable semantic dispatch, and optional native feature modules.
 - Experimental save/load markers for continuous-production state.
 - Automatic aspect-correct scaling of Fleet Operations' D3D9 intro and
   Armada's GDI and menu/campaign Bink movie paths to the active viewport.
+- Restart-applied **Game Monitor** selection, detected from the attached
+  Windows/Wine desktop displays with automatic primary-monitor fallback.
 - `DefaultGameSpeed` field in `info.ini`, accepting speeds 1–6.
 - `SettingsDirectory` field for redirecting mod configuration and profile
   files.
@@ -101,6 +111,14 @@ hooks, reusable semantic dispatch, and optional native feature modules.
 - Checked hook signatures and supported-binary validation.
 
 ## Current modding commands
+
+- [SOD event animations](modules/A2FOAnimations/README.md): numbered frame-range
+  clips, forward/hold/reverse states, weapon events, and construction doors that
+  wait for worker bees to return before closing.
+- [Squadrons](modules/A2FOSquadrons/README.md): multi-member production, selection,
+  member-summed costs and build time, and paid repair reinforcement.
+- [Directional shields reference](docs/directional-shields-reference.md): full
+  command reference, configuration examples, and display options.
 
 The exhaustive index is
 [`docs/modder-command-reference.md`](docs/modder-command-reference.md). It
@@ -217,7 +235,8 @@ the top resource panel itself renders numbers without a native label. These
 pools do not alias latinum, metal, officers, or biomatter. See
 [`modules/A2FOResources/README.md`](modules/A2FOResources/README.md).
 
-`A2FOEnergySystems.dll` adds independent Photon and Quantum Torpedo capacity
+`A2FOEnergySystems.dll` adds independent Photon Torpedo, Quantum Torpedo, and
+Shuttle Craft capacity
 to Craft ODFs. Each store has its own maximum, fractional recharge rate, and
 mode: disabled recharge, automatic recharge, or resupply-only recharge near a
 same-team shipyard, `RepairShip`, or explicit provider. Weapon ODF costs are
@@ -236,10 +255,15 @@ The same selected-panel module can independently recolour the five native
 subsystem icons and their adjacent value text for healthy, low, critical,
 disabled, and destroyed states. The native hull/shield/crew icon-values use
 that same live-state palette in the mouse-over strip, as does crew in the
-selected presentation. The native officer icon/value has its own independent
-`officerIconColor` command, while the native special-energy icon/value has an
-independent `specialEnergyIconColor`; neither inherits those health colours.
-Omitted colours retain Armada's native presentation.
+selected presentation. `weaponXiconpos` controls have a parallel palette
+beginning with `weaponIconColor`; each omitted weapon-state colour falls back
+to its matching subsystem colour for compatibility. Passive `UtilityWeapon`
+icons instead use the optional fixed `passiveWeaponIconColor`, with neutral
+white/grey as its fallback. The native officer
+icon/value has its own independent `officerIconColor` command, while the
+native special-energy icon/value has an independent `specialEnergyIconColor`;
+neither inherits those health colours. Omitted colours retain Armada's native
+presentation.
 
 `A2FODirectionalShields.dll` adds strictly opt-in forward, aft, port, and
 starboard shield stores while retaining Armada's aggregate shield display and
@@ -253,8 +277,11 @@ their facing collapses. It composes through the checked
 The selected-panel UI supports a four-sprite arc ring with per-Craft segment
 placement, proportional-drain or colour-only display, configurable compass
 mapping, green/orange/red/black states, and localized per-facing tooltips with
-live strength. Numeric F/A and P/S rows remain available when the sprite ring
-cannot be drawn. See
+live strength. Craft ODFs can additionally select hidden, percentage, or
+current/maximum value labels; all four positions and their health colours are
+independently configurable in the GUI CFG. Numeric F/A and P/S rows remain
+available as the backward-compatible fallback when the sprite ring cannot be
+drawn. See
 [`modules/A2FODirectionalShields/README.md`](modules/A2FODirectionalShields/README.md).
 
 ### `RTS_CFG.h` cheat amounts
@@ -385,6 +412,16 @@ Use `box` for most arrays and hemispheres. Use `cone` with `fireArcAngle` only
 when a circular fixed-cannon or barrel-shaped volume is wanted. Native range,
 target-validity, and obstruction checks remain active.
 
+Fleet Operations' native `CannonImp` targeting policy remains authoritative.
+With `usePrimaryTarget = 1`, an out-of-arc primary target skips that weapon and
+the craft continues with its next weapon. With `usePrimaryTarget = 0`, the
+weapon continues its native candidate search, ignores targets outside its
+configured arc, and fires at the next otherwise-valid target inside the arc.
+FireArcs permits CannonImp's initial primary-target activation in that second
+mode so its candidate loop can actually run; each candidate is still checked
+against the complete custom arc. An arc rejection does not consume the
+weapon's native target quota.
+
 Custom fire arcs are globally enabled by default. `int firearc = 0;` in
 `RTS_CFG.h` disables both custom firing enforcement and its hover preview;
 `int firearc = 1;` explicitly enables them. Data, parent, and active-mod files
@@ -395,6 +432,9 @@ hovering that icon projects the live arc from every linked hardpoint into the
 tactical view. Cyan lines show the boundary and a gold line shows its centre;
 the complete wireframe turns green when the weapon's live target enters the
 arc. The hover preview does not alter the icon's normal input or tooltip.
+With `A2FOCraftIdentity.dll` active, these selected-panel controls support
+weapon slots 1 through 128; stock Fleet Operations creates controls only for
+slots 1 through 32.
 
 Those defaults can be changed in the active interface `.cfg` with
 `fireArcBoundaryColor`, `fireArcCenterColor`, and
@@ -671,7 +711,7 @@ The combined campaign and mission browser is documented in
 [`modules/A2FOMissionSelector/README.md`](modules/A2FOMissionSelector/README.md).
 Three-dimensional weapon firing volumes are documented in
 [`modules/A2FOFireArcs/README.md`](modules/A2FOFireArcs/README.md).
-Photon and Quantum Torpedo ammunition is documented in
+Photon Torpedo, Quantum Torpedo, and Shuttle Craft stores are documented in
 [`modules/A2FOEnergySystems/README.md`](modules/A2FOEnergySystems/README.md).
 Native destroyed-craft wreckage replacement is documented in
 [`modules/A2FOWreckage/README.md`](modules/A2FOWreckage/README.md).
@@ -729,13 +769,17 @@ Armada II/
 │   ├── A2FOPointDefenseCycles.dll
 │   ├── A2FOResources.dll
 │   ├── A2FORGBTextures.dll
+│   ├── A2FOStationRotation.dll
 │   ├── A2FOSwarmSystem.dll
 │   ├── A2FOTextureVariants.dll
 │   ├── A2FOTurrets.dll
 │   ├── A2FOWeaponDamageControls.dll
 │   ├── A2FOWreckage.dll
-│   └── A1Compat.dll
+│   ├── A1Compat.dll
+│   └── A1Fallbacks.dll
 ├── Shaders/
+│   ├── dot3_amd.nvv
+│   ├── dot3_amd9.nvv
 │   └── dx8/
 │       └── pixel/
 │           ├── ps.nvv
@@ -784,6 +828,7 @@ build/modules/A2FOAlwaysShowShields.dll
 build/modules/A2FOAnimatedHardpoints.dll
 build/modules/A2FOBuildTooltips.dll
 build/modules/A1Compat.dll
+build/modules/A1Fallbacks.dll
 build/modules/A2FOCheats.dll
 build/modules/A2FOFeaturePack.dll
 build/modules/A2FOHybridBuild.dll
@@ -800,11 +845,14 @@ build/modules/A2FONormalWeaponTech.dll
 build/modules/A2FOPointDefenseCycles.dll
 build/modules/A2FOResources.dll
 build/modules/A2FORGBTextures.dll
+build/modules/A2FOStationRotation.dll
 build/modules/A2FOSwarmSystem.dll
 build/modules/A2FOTextureVariants.dll
 build/modules/A2FOTurrets.dll
 build/modules/A2FOWeaponDamageControls.dll
 build/modules/A2FOWreckage.dll
+build/Shaders/dot3_amd.nvv
+build/Shaders/dot3_amd9.nvv
 build/Shaders/dx8/pixel/ps.nvv
 build/Shaders/dx8/pixel/ps_specular.nvv
 build/licenses/armada-nebula-patch.txt
@@ -842,6 +890,38 @@ Then copy the newly built `Win2kDisableTaskSwitch.dll`,
 `A2FOExtensions.dll`, `A2FORendererHelper.exe`, the `modules` directory, and
 the `Shaders` directory into the Fleet Operations `Data` directory.
 
+## Game monitor selection
+
+A2FOExtensions adds a **Game Monitor** list to Fleet Operations' native
+Graphics Options screen. The list is rebuilt whenever the screen opens, shows
+each attached monitor's friendly name and current resolution, and marks the
+primary display. A selection applies after fully exiting and relaunching Fleet
+Operations.
+
+The stable Win32 display name is stored as
+`[Display] GameMonitorDevice` in `Data/A2FORenderer.ini`. On the next launch,
+A2FO waits until Fleet Operations has completed its initial window/display-mode
+transition, then monitors its top-level game window across the later switch,
+menu, and gameplay display transitions. Whenever Fleet Operations leaves the
+settled window on another display, A2FO moves it back onto the selected display
+without changing its dimensions, style, resolution, activation, or z-order.
+If the selected monitor is disconnected, the current primary monitor is used
+without discarding the saved preference.
+
+The initial startup move retains a conservative stabilization delay. Once the
+window has first reached the selected monitor, later screen transitions use a
+short settle interval so Fleet Operations' primary-monitor window recreation is
+corrected without the earlier visible pause.
+
+Early test builds incorrectly treated `FoSettings+0x30` as an adapter index;
+that field is actually the saved display width. The settings hook recognizes
+the impossible positive ordinal left by those builds and resets the affected
+width/height pair to Fleet Operations' automatic mode once.
+
+This setting chooses the single monitor used for the game. It does not span
+gameplay across displays or enable Fleet Operations' separate secondary
+cinematic-display path.
+
 ## Renderer selection
 
 A2FOExtensions adds a **Renderer** list to Fleet Operations' native Graphics
@@ -869,6 +949,41 @@ payload. That file state is authoritative over stale `AppliedBackend` metadata
 when selecting the DXVK-specific DOT3/bloom safety path, and the Graphics page
 reconciles its applied-state display from the same files.
 
+On System Direct3D 9, A2FO can apply a narrowly scoped AMD compatibility fix
+to Fleet Operations' native bump renderer. Both Roots' D3D8-to-D3D9
+translation and its separate `/d3d9` declaration label the stock DOT3 stream's
+normal, UV, and tangent-basis inputs with legacy blend, normal, point-size, and
+colour D3D9 semantics. The route-specific candidate remaps the identical
+stream fields to neutral texture-coordinate inputs before the shared shader is
+created. It does not replace the normal map, lighting math, render states, or
+native draw sequence. The default
+`[Compatibility] AmdNativeDot3Fix=1` enables it automatically only when the
+active adapter reports AMD vendor ID `0x1002`; use `0` to disable or `2` to
+force an A/B test. A restart is required.
+
+When Fleet Operations' native **Bump Mapping** option is off, the default
+`[Compatibility] NeutralBumpWhenDisabled=1` avoids its native non-VB
+performance cliff. A2FONebulaRenderer preserves the DOT3 MeshVB fast path and,
+on DXVK, replaces Fleet Operations' per-light normal-map operation with the
+equivalent fixed flat-normal lighting in its normalized tangent space. It
+retains each material's original texture assignments but does not sample its
+bump texture, and has no dependency on `all_bump.dds`. The shader is
+preflighted before the native eligibility guard changes. Use `0` to restore
+Fleet Operations' original bump-off renderer. This setting is restart-applied.
+
+`[Compatibility] FastAlphaMeshVB` controls the bump-off path during Fleet
+Operations' polygon-sorted alpha pass. `0` preserves native sorting, `1`
+(default) keeps opaque whole-model fades and order-independent additive
+materials on MeshVB, and `2` also keeps ordinary transparent materials on
+MeshVB for maximum performance. Mode `2` preserves the authored blend state
+but not exact per-triangle ordering, so intersecting transparent surfaces may
+display differently. Immediately before the final material draw, the fast path
+reapplies Storm3D's z-sort blend state after Fleet Operations' internal opaque
+reset and supplies its live material/object alpha in vertex constant `c0.w`.
+This preserves cloak, decloak, construction, and other whole-model fades despite
+the static MeshVB vertex colours. Mode `2` is intended for A/B testing and the
+setting requires a restart.
+
 The same screen adds **Emissive Maps** and **Specular Maps** switches beside
 Fleet Operations' native **Bump Mapping** switch. These two effects apply
 immediately, default to enabled, and are persisted in the `[Effects]` section
@@ -882,3 +997,50 @@ DXVK is optional and is not produced by this source build. Install the 32-bit
 DXVK D3D9 DLL in the payload location above before selecting it. Wine launchers
 should retain a native-then-builtin D3D9 override such as `d3d9=n,b`: with the
 managed DLL present Wine loads DXVK, and without it Wine falls back to WineD3D.
+
+### Non-bump Phong MeshVB support
+
+`FastUnmappedMeshVB=1` now also covers compatible Phong (`lightModel=2`)
+meshes, including the Classic Mod Warbird. This extends the Lambert-only
+coverage described above: Phong is no longer excluded solely by its light
+model. Lambert-only meshes still use the geometric DOT3 replacement;
+meshes containing Phong use Armada's native standard MeshVB buffers with
+D3D8 GPU vertex lighting. No SOD edits or dummy bump textures are required.
+
+The Phong route supplies authored diffuse/specular colours and shininess,
+scene ambient and native team-colour overrides. It retains the existing
+`FastAlphaMeshVB` admission policy and forwards the native material alpha
+and blend state for admitted cloak draws. It does not force sorted alpha
+materials into an opaque pass or promise exact per-triangle transparency.
+
+This first Phong implementation supports native directional lights, up to
+eight, and material powers in the D3D8 range of 0 through 128. Point/spot
+lights, custom light affectors, unsupported device capabilities and invalid
+materials retain native rendering rather than silently losing lighting.
+Constant-lit effects, meshes with bump maps and non-craft draws are unchanged.
+Material and lighting overrides are restored after each indexed draw.
+
+Diagnostics report `Prepared native MeshVB buffers for a non-bump Phong
+model` and `Phong craft GPU MeshVB draw active while visible` (or `while
+cloaked or transitioning`). Actual Phong draws count under `standard MeshVB`
+in the existing renderer-route samples, not `Fleet Ops DOT3`.
+
+### Single-pass neutral-bump cloak composition
+
+Eligible neutral-bump cloak draws on the Fleet Ops DOT3 route now collect
+native light vectors and attenuated colours without submitting the opaque
+lighting-only passes to the scene framebuffer. A small GPU vertex shader
+combines those lights with the hull texture in the final transparent draw.
+This avoids exposing raw white lighting behind the cloaked texture and removes
+one indexed submission per contributing light. Shader variants contain only
+as many light terms as the scene needs, up to eight.
+
+The existing alpha admission policy, native blend/depth state, texture binding
+and mapped-material hooks remain in place. The alpha material is re-armed for
+each mesh group. Uncloaked DOT3 rendering and the standard Phong route are not
+changed. More than eight lights or unavailable shader support retain native
+sorted rendering. GPU shader handles follow the core device-reset lifecycle.
+
+The runtime log reports `Single-pass textured cloak lighting active; opaque
+DOT3 light draws suppressed` when the new composition actually executes.
+Visual appearance and frame-rate changes still need an in-game comparison.

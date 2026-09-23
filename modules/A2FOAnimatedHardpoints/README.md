@@ -19,3 +19,8 @@ animation remains native, and emitter nodes are not changed by this module.
 The module supports the repository's checked ArmadaL.exe 1.1/Fleet Operations
 Roots image. Unsupported executables leave both native transform functions
 unchanged and log that the runtime is disabled.
+
+When [A2FOAnimations](../A2FOAnimations/README.md) is enabled, this module uses
+its per-instance selected matrix samples for controlled clips. It bypasses the
+native-time cache for those queries because rendering another instance can
+change the shared visible database. Use the updated versions of both DLLs.

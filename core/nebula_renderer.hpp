@@ -4,8 +4,12 @@
  * The hook sites must be claimed during A2FOExtensions process attach because
  * Armada creates its shared DOT3 shader before deferred modules are loaded.
  * Heavy D3DX/file work remains lazy and occurs at the first DOT3 compilation,
- * outside the Windows loader lock. Fleet Operations' stock DOT3 vertex shader
- * and its source path remain untouched.
+ * outside the Windows loader lock. Fleet Operations' stock DOT3 draw sequence
+ * remains untouched. On an AMD system-D3D9 adapter, an exact checked
+ * source/declaration pair may be substituted before the shared shader is
+ * created to avoid legacy special-purpose D3D9 input semantics. Fleet
+ * Operations' separate /d3d9 creation callback receives the same isolated
+ * treatment without enabling any mapped-material or draw hook on that route.
  */
 
 #pragma once
@@ -19,8 +23,10 @@ namespace a2fo {
 
 using NebulaRendererLog = void (*)(const std::string& message);
 
-// Installs checked pass-through hooks only. The feature activates lazily when
-// A2FONebulaRenderer.dll and its pixel shaders are present at first DOT3 use.
+// Installs checked pass-through hooks only. The mapped-material feature
+// activates lazily when A2FONebulaRenderer.dll and its pixel shaders are
+// present at first DOT3 use. System D3D9 may instead arm the isolated AMD DOT3
+// source/declaration compatibility path for either system-renderer route.
 bool install_nebula_renderer_early(HMODULE armada, HMODULE fleet_ops,
                                    const std::string& root_directory,
                                    NebulaRendererLog log);
@@ -42,6 +48,16 @@ bool set_nebula_bump_light_bias(float bias) noexcept;
 
 // Restores unlit diffuse RGB under the combined shader's emissive pixels.
 bool set_nebula_emissive_diffuse_restore(float amount) noexcept;
+
+// Selects the DXVK-only fixed flat-normal pass for DOT3 MeshVB materials.
+// The optional controller enables it only while native bump mapping is off.
+bool set_nebula_fast_nonbump_enabled(bool enabled) noexcept;
+
+// Registers a normalized ownership/faction texture suffix (for example _b
+// or _k) so draw-time mapped-lighting lookup can safely fall back from a
+// faction diffuse to the base CraftClass material when no exact override is
+// registered.
+bool register_nebula_faction_texture_suffix(const char* suffix) noexcept;
 
 // Called by the optional controller after a CraftClass has consumed its ODF.
 // All six paths are copied immediately in warp/impulse/shields/life-support/

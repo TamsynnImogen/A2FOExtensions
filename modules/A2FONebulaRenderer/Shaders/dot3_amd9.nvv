@@ -1,0 +1,39 @@
+; Fleet Operations direct-D3D9 DOT3 vertex shader with neutral input
+; semantics for the AMD compatibility path.
+;
+; Fleet Operations' stock declaration labels the normal, UV, and tangent
+; basis as BLENDWEIGHT, BLENDINDICES, NORMAL, PSIZE, and COLOR. The matched
+; declaration used with this shader preserves the stream offsets and types but
+; labels those fields TEXCOORD0-TEXCOORD4. Lighting math and outputs are
+; otherwise identical to dot3_directional9.nvv.
+
+vs.1.0
+
+dcl_position v0;
+dcl_texcoord v7;
+dcl_texcoord1 v8;
+dcl_texcoord2 v9;
+dcl_texcoord3 v10;
+dcl_texcoord4 v11;
+
+; Transform position to clip space and output it.
+dp4 oPos.x, v0, c2
+dp4 oPos.y, v0, c3
+dp4 oPos.z, v0, c4
+dp4 oPos.w, v0, c5
+
+; Transform the light by the tangent basis into texture space.
+dp3 r3.x, v9.xyzz, c6
+dp3 r3.y, v10.xyzz, c6
+dp3 r3.z, v11.xyzz, c6
+
+; Normalize and encode the light vector from [-1,1] to [0,1].
+dp3 r3.w, r3, r3
+rsq r3.w, r3.w
+mul r3, r3, r3.w
+add r3, r3, c0
+mul oD0, r3, c1
+mov oD0.w, c0.w
+
+; Output the unchanged material UV.
+mov oT0, v8

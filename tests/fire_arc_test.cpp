@@ -260,6 +260,15 @@ int main() {
         return 21;
     }
 
+    if (a2fo::fire_arcs::defer_arc_to_candidate_selection(false, false) ||
+        a2fo::fire_arcs::defer_arc_to_candidate_selection(false, true) ||
+        a2fo::fire_arcs::defer_arc_to_candidate_selection(true, true) ||
+        !a2fo::fire_arcs::defer_arc_to_candidate_selection(true, false)) {
+        std::fprintf(stderr,
+                     "CannonImp trigger/candidate targeting policy failed\n");
+        return 22;
+    }
+
     std::puts("fire arc tests passed");
     return 0;
 }

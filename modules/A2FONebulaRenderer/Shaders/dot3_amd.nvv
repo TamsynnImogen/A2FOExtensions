@@ -1,0 +1,36 @@
+; Fleet Operations native D3D8 DOT3 vertex shader with neutral translated
+; D3D9 input semantics for the AMD/system-renderer compatibility path.
+;
+; The stock D3D8 declaration stores position, normal, UV and the tangent basis
+; in v0-v5. d3d8to9 consequently labels v1-v5 as BLENDWEIGHT, BLENDINDICES,
+; NORMAL, PSIZE and COLOR. This matched source/declaration variant moves the
+; same stream fields to v0 and v7-v11, which d3d8to9 exposes as POSITION and
+; TEXCOORD0-TEXCOORD4. The lighting math and outputs are otherwise identical
+; to Fleet Operations' dot3_directional.nvv.
+;
+; Input declarations deliberately remain outside this D3D8 source. d3d8to9
+; generates the matching D3D9 dcl instructions from Armada's declaration.
+
+vs.1.0
+
+; Transform position to clip space and output it.
+dp4 oPos.x, v0, c[2]
+dp4 oPos.y, v0, c[3]
+dp4 oPos.z, v0, c[4]
+dp4 oPos.w, v0, c[5]
+
+; Transform the light by the tangent basis into texture space.
+dp3 r3.x, v9.xyz, c[6]
+dp3 r3.y, v10.xyz, c[6]
+dp3 r3.z, v11.xyz, c[6]
+
+; Normalize and encode the light vector from [-1,1] to [0,1].
+dp3 r3.w, r3, r3
+rsq r3.w, r3.w
+mul r3, r3, r3.w
+add r3, r3, c[0]
+mul oD0, r3, c[1]
+mov oD0.w, c[0].w
+
+; Output the unchanged material UV.
+mov oT0, v8

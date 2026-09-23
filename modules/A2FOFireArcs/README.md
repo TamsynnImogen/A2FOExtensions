@@ -244,13 +244,19 @@ in normal overlay order. A later valid `0` or `1` overrides an earlier value.
 An absent setting inherits the previous value; an invalid value is ignored and
 reported in `A2FOExtensions.log`.
 
-## In-game weapon-icon preview
+## In-game weapon previews
 
 When a selected craft exposes a weapon through `weaponXiconpos`, move the mouse
 over that existing system icon to preview the weapon's configured A2FO arc in
 the tactical view. The preview disappears as soon as the pointer leaves the
 icon; clicking is not required and the icon's normal tooltip/click behaviour is
 unchanged.
+
+Hovering the craft's ordinary weapons subsystem icon instead draws every valid
+custom arc on that craft. Fleet Operations' native weapons-range visualization
+still renders first, so the combined hover shows the existing ranges together
+with all configured three-dimensional firing volumes. A `weaponXiconpos` hover
+remains scoped to that one weapon.
 
 The DLL reads the hovered icon's real zero-based weapon slot, then walks that
 live Weapon instance's linked hardpoint list. It draws one wireframe volume from
@@ -312,9 +318,38 @@ The custom volume replaces only Armada's stock two-dimensional
 WeaponClass with a valid custom policy and remains untouched for every other
 weapon.
 
-The complete volume is checked during target authorisation and again just
-before `Weapon::Trigger`. The second check prevents a shot if the owner or
-target moves across the boundary between those two engine stages.
+The complete volume is checked during target authorisation and normally again
+at `Weapon::Trigger`. The second check prevents a shot if the owner or target
+moves across the boundary between those two engine stages. `CannonImp` in
+automatic-target mode is the deliberate exception described below, because
+its first trigger is only what starts target selection.
+
+### `CannonImp` target selection
+
+The existing Fleet Operations `usePrimaryTarget` command selects how a
+`CannonImp` weapon reacts when target authorisation rejects an out-of-arc
+target:
+
+- `usePrimaryTarget = 1` tries only the craft's primary target. If that target
+  is outside the weapon's arc, this weapon does not fire during the update and
+  the craft continues with its next weapon.
+- `usePrimaryTarget = 0` retains CannonImp's automatic candidate scan. A
+  candidate outside the arc is skipped without consuming the weapon's target
+  quota; the scan continues until it finds an otherwise-valid target inside
+  the arc or exhausts the native search.
+
+Fleet Operations first calls `Weapon::Trigger` with the craft's primary target
+to activate the weapon, even when `usePrimaryTarget = 0`. FireArcs lets that
+activation through for an automatic-target `CannonImp`; otherwise an
+out-of-arc primary target would prevent `CannonImp::Simulate` and its search
+loop from running at all. The custom arc is then applied through the native
+`CanFireAt` result for every candidate, at exactly the point CannonImp already
+continues after an automatic-candidate rejection.
+
+No replacement target-search hook is used. Range, obstruction, hostility,
+target limits, `baseTargets`, `maxExtraTargets`, and deterministic native
+search order remain unchanged. Primary-only and non-CannonImp weapons retain
+the normal trigger-time repeat check.
 
 The core owns the shared trigger hook used by this last check, so FireArcs no
 longer depends on Turrets. A linked hull turret is itself the weapon

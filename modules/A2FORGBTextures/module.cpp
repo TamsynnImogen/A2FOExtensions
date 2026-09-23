@@ -91,11 +91,16 @@ struct RootTgaCandidate {
     // Armada 1 stores manually authored mip levels as name_1.tga,
     // name_2.tga, and so on. Fleet Operations' flattened root lookup can
     // request those names while retaining the base texture dimensions. When
-    // an exact, same-format mip chain is present, serve the base image to that
-    // flattened request so the native row decoder receives the pixel count it
-    // expects. Direct RGB/Index8/Compressed requests remain unchanged.
+    // a decreasing, same-aspect and same-format mip chain is present, serve
+    // the base image to that flattened request so the native row decoder
+    // receives enough pixels. Direct RGB/Index8/Compressed requests remain
+    // unchanged.
     std::string legacy_mip_base;
     RootTgaRoute route = RootTgaRoute::none;
+    // Extension roots are enumerated from lowest to highest precedence. Keep
+    // the owner so an inherited mip chain cannot silently pair with a larger
+    // base image supplied by a child mod.
+    std::uint32_t root_index = 0;
 };
 
 extern "C" std::uintptr_t a2fo_rgb_call_thiscall_0(
@@ -143,6 +148,7 @@ volatile LONG g_scan_grid_guard_log_count = 0;
 volatile LONG g_conversion_log_count = 0;
 volatile LONG g_conversion_file_counter = 0;
 volatile LONG g_manual_mip_redirect_log_count = 0;
+volatile LONG g_cross_root_mip_synthesis_log_count = 0;
 
 template <typename T = void>
 T* at(HMODULE module, std::uintptr_t rva) {
@@ -521,9 +527,12 @@ std::string validated_manual_mip_base(
     TgaHeaderSummary base_header{};
     if (!read_tga_header_summary(base->second, base_header)) return {};
 
-    // Require the complete 1..N chain, exact power-of-two dimensions, and an
-    // identical TGA pixel format. This keeps ordinary animation frames such
-    // as explosion_1.tga on their original files.
+    // Require the complete 1..N chain, a matching aspect ratio, strictly
+    // decreasing dimensions, and an identical TGA pixel format. Legacy mods
+    // did not consistently use exact half-size levels, so the flattened route
+    // normalizes any smaller same-aspect chain. Same-sized animation frames
+    // such as explosion_1.tga remain on their original files.
+    TgaHeaderSummary previous_header = base_header;
     for (std::uint32_t current = 1; current <= level; ++current) {
         const std::string current_key =
             stem + "_" + std::to_string(current) + ".tga";
@@ -535,13 +544,16 @@ std::string validated_manual_mip_base(
             !same_tga_pixel_format(base_header, mip_header)) {
             return {};
         }
-        const std::uint32_t divisor = 1u << current;
-        if (base_header.width % divisor != 0 ||
-            base_header.height % divisor != 0 ||
-            mip_header.width != base_header.width / divisor ||
-            mip_header.height != base_header.height / divisor) {
+        const bool same_aspect =
+            static_cast<std::uint64_t>(mip_header.width) *
+                base_header.height ==
+            static_cast<std::uint64_t>(base_header.width) *
+                mip_header.height;
+        if (!same_aspect || mip_header.width >= previous_header.width ||
+            mip_header.height >= previous_header.height) {
             return {};
         }
+        previous_header = mip_header;
     }
     return base->second;
 }
@@ -603,6 +615,134 @@ bool write_prepared_tga(const std::vector<std::uint8_t>& bytes,
         return false;
     }
     path = candidate;
+    return true;
+}
+
+bool resize_true_colour_tga(const std::vector<std::uint8_t>& source,
+                            std::uint16_t target_width,
+                            std::uint16_t target_height,
+                            std::vector<std::uint8_t>& output) {
+    output.clear();
+    if (source.size() < 18 || target_width == 0 || target_height == 0 ||
+        !native_true_colour_tga_header(source.data(), source.size())) {
+        return false;
+    }
+
+    const std::uint16_t source_width = little_u16(source.data() + 12);
+    const std::uint16_t source_height = little_u16(source.data() + 14);
+    const std::size_t pixel_bytes = source[16] / 8u;
+    const std::size_t pixel_offset = 18u + source[0];
+    if (target_width > source_width || target_height > source_height ||
+        source_width % target_width != 0 ||
+        source_height % target_height != 0 ||
+        pixel_bytes < 3u || pixel_bytes > 4u) {
+        return false;
+    }
+
+    const std::size_t source_pixel_count =
+        static_cast<std::size_t>(source_width) * source_height;
+    if (pixel_offset > source.size() ||
+        source_pixel_count > (source.size() - pixel_offset) / pixel_bytes) {
+        return false;
+    }
+
+    constexpr std::size_t kMaximumPreparedTgaSize = 256u * 1024u * 1024u;
+    const std::size_t target_pixel_count =
+        static_cast<std::size_t>(target_width) * target_height;
+    if (target_pixel_count >
+        (kMaximumPreparedTgaSize - 18u) / pixel_bytes) {
+        return false;
+    }
+
+    output.assign(18u + target_pixel_count * pixel_bytes, 0);
+    output[2] = 2;
+    // Preserve the image origin and orientation while dropping any image-ID
+    // field. Pixel rows remain in the source's stored order.
+    std::memcpy(output.data() + 8, source.data() + 8, 4);
+    output[12] = static_cast<std::uint8_t>(target_width & 0xffu);
+    output[13] = static_cast<std::uint8_t>(target_width >> 8u);
+    output[14] = static_cast<std::uint8_t>(target_height & 0xffu);
+    output[15] = static_cast<std::uint8_t>(target_height >> 8u);
+    output[16] = source[16];
+    output[17] = source[17];
+
+    const std::size_t horizontal_scale = source_width / target_width;
+    const std::size_t vertical_scale = source_height / target_height;
+    const std::uint64_t sample_count =
+        static_cast<std::uint64_t>(horizontal_scale) * vertical_scale;
+    for (std::size_t y = 0; y < target_height; ++y) {
+        for (std::size_t x = 0; x < target_width; ++x) {
+            const std::size_t destination =
+                18u + (y * target_width + x) * pixel_bytes;
+            for (std::size_t channel = 0; channel < pixel_bytes; ++channel) {
+                std::uint64_t total = 0;
+                for (std::size_t source_y = 0;
+                     source_y < vertical_scale; ++source_y) {
+                    const std::size_t row =
+                        y * vertical_scale + source_y;
+                    for (std::size_t source_x = 0;
+                         source_x < horizontal_scale; ++source_x) {
+                        const std::size_t column =
+                            x * horizontal_scale + source_x;
+                        const std::size_t input = pixel_offset +
+                            (row * source_width + column) * pixel_bytes;
+                        total += source[input + channel];
+                    }
+                }
+                output[destination + channel] = static_cast<std::uint8_t>(
+                    (total + sample_count / 2u) / sample_count);
+            }
+        }
+    }
+    return true;
+}
+
+bool prepare_resized_legacy_tga(const std::string& source,
+                                std::uint16_t target_width,
+                                std::uint16_t target_height,
+                                std::string& prepared) {
+    prepared.clear();
+    ConversionLockGuard lock;
+    if (!lock.locked()) return false;
+
+    const std::string cache_key = lower_normalized(source) + "|mip=" +
+        std::to_string(target_width) + "x" +
+        std::to_string(target_height);
+    const auto cached = g_prepared_texture_files.find(cache_key);
+    if (cached != g_prepared_texture_files.end()) {
+        prepared = cached->second;
+        return true;
+    }
+    if (g_unusable_texture_files.find(cache_key) !=
+        g_unusable_texture_files.end()) {
+        return false;
+    }
+
+    std::vector<std::uint8_t> input;
+    std::vector<std::uint8_t> converted;
+    std::vector<std::uint8_t> resized;
+    if (!read_binary_file(source, input)) {
+        g_unusable_texture_files.insert(cache_key);
+        return false;
+    }
+    const TgaPreparation result =
+        prepare_tga_for_rgb_loader(input, converted);
+    const std::vector<std::uint8_t>* pixels = nullptr;
+    if (result == TgaPreparation::compatible) {
+        pixels = &input;
+    } else if (result == TgaPreparation::converted) {
+        pixels = &converted;
+    }
+    if (!pixels ||
+        !resize_true_colour_tga(*pixels, target_width, target_height,
+                                resized) ||
+        !write_prepared_tga(resized, prepared)) {
+        g_unusable_texture_files.insert(cache_key);
+        return false;
+    }
+
+    g_prepared_texture_files[cache_key] = prepared;
+    g_generated_texture_files.push_back(prepared);
     return true;
 }
 
@@ -823,7 +963,8 @@ bool discover_legacy_texture_files(LegacyTextureDiscovery& discovery) {
                 root_candidates[file.first] = {
                     file.second,
                     validated_manual_mip_base(files, file.first),
-                    route};
+                    route,
+                    index};
             }
         };
         publish(compressed_files, RootTgaRoute::compressed);
@@ -1051,6 +1192,33 @@ bool select_root_tga(const std::string& key, std::string& physical,
     route = RootTgaRoute::none;
     const auto found = g_flattened_tga_candidates.find(key);
     if (found == g_flattened_tga_candidates.end()) return false;
+
+    // Resolve the base independently from the requested companion. A child
+    // mod may replace name.tga without shipping name_1.tga, leaving the latter
+    // to resolve from a parent whose mip chain was authored for a much smaller
+    // base. Feeding that inherited buffer to the native row converter causes
+    // an out-of-bounds read. Preserve compatible inherited chains, but create
+    // the missing level from the effective child base when the inherited
+    // normalized source is too small.
+    std::string mip_stem;
+    std::uint32_t mip_level = 0;
+    const RootTgaCandidate* effective_base = nullptr;
+    TgaHeaderSummary effective_base_header{};
+    if (parse_manual_mip_key(key, mip_stem, mip_level)) {
+        const auto base =
+            g_flattened_tga_candidates.find(mip_stem + ".tga");
+        if (base != g_flattened_tga_candidates.end()) {
+            for (auto candidate = base->second.rbegin();
+                 candidate != base->second.rend(); ++candidate) {
+                if (read_tga_header_summary(candidate->physical,
+                                            effective_base_header)) {
+                    effective_base = &*candidate;
+                    break;
+                }
+            }
+        }
+    }
+
     for (auto candidate = found->second.rbegin();
          candidate != found->second.rend(); ++candidate) {
         // The retained fallback is Armada's true-colour loader regardless of
@@ -1059,6 +1227,50 @@ bool select_root_tga(const std::string& key, std::string& physical,
         // same bounded expansion already used by Index8 and Compressed.
         const std::string& source = candidate->legacy_mip_base.empty()
             ? candidate->physical : candidate->legacy_mip_base;
+
+        if (!candidate->legacy_mip_base.empty() && effective_base &&
+            effective_base->root_index > candidate->root_index) {
+            const std::uint32_t divisor = 1u << mip_level;
+            if (effective_base_header.width % divisor == 0 &&
+                effective_base_header.height % divisor == 0) {
+                const std::uint16_t expected_width =
+                    static_cast<std::uint16_t>(
+                        effective_base_header.width / divisor);
+                const std::uint16_t expected_height =
+                    static_cast<std::uint16_t>(
+                        effective_base_header.height / divisor);
+                TgaHeaderSummary inherited_header{};
+                const bool inherited_is_large_enough =
+                    read_tga_header_summary(source, inherited_header) &&
+                    inherited_header.width >= expected_width &&
+                    inherited_header.height >= expected_height;
+                if (!inherited_is_large_enough) {
+                    if (!prepare_resized_legacy_tga(
+                            effective_base->physical, expected_width,
+                            expected_height, physical)) {
+                        // Never fall back to the known-undersized inherited
+                        // buffer. A failed synthesis is a missing texture, not
+                        // a process-ending native pixel overread.
+                        continue;
+                    }
+                    route = effective_base->route;
+                    const LONG count = InterlockedIncrement(
+                        &g_cross_root_mip_synthesis_log_count);
+                    if (count <= 16) {
+                        log_line("Synthesized inherited manual mip from " +
+                                 effective_base->physical + " at " +
+                                 std::to_string(expected_width) + "x" +
+                                 std::to_string(expected_height) + " -> " +
+                                 physical);
+                    } else if (count == 17) {
+                        log_line("Further inherited manual-mip synthesis "
+                                 "logs suppressed");
+                    }
+                    return true;
+                }
+            }
+        }
+
         if (!prepare_legacy_tga(source, physical)) {
             continue;
         }
@@ -1914,6 +2126,7 @@ void clear_state() {
     InterlockedExchange(&g_conversion_log_count, 0);
     InterlockedExchange(&g_conversion_file_counter, 0);
     InterlockedExchange(&g_manual_mip_redirect_log_count, 0);
+    InterlockedExchange(&g_cross_root_mip_synthesis_log_count, 0);
     g_api = nullptr;
 }
 

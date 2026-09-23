@@ -76,6 +76,16 @@ native `borg` node toggle. Only the diffuse slot is changed by faction texture
 variants; faction node selection changes the same hidden/disabled flag pair
 used by Armada's native Borg node.
 
+When `A2FONebulaRenderer.dll` is active, its emissive/specular material policy
+also mirrors these ownership suffixes. A live `ship_b` or configured
+`ship_k` diffuse therefore continues to use mapped lighting. The naming rule
+is map role first and faction suffix last: `ship_emissive_warp_b`,
+`ship_specular_b`, `ship_emissive_warp_k`, `ship_specular_k`, etc. Missing
+faction maps fall back to the base maps. The native/global bump texture remains
+the base material's slot-1 texture for now; future faction bump variants follow
+the same convention (`ship_bump_b`, `ship_bump_k`) but require a separate
+draw-scoped slot-1 implementation.
+
 ## Subsystem damage meshes
 
 A ship or station ODF may give each native subsystem one or more numbered SOD

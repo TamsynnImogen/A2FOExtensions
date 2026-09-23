@@ -45,9 +45,17 @@ Armada 1 can also store manually authored mip companions as `name_1.tga`,
 names while its native texture object still retains the base image dimensions;
 passing the smaller file to that row decoder causes a pixel overread. For the
 flattened root route only, the module recognizes a complete, same-format chain
-whose dimensions halve exactly at every level and serves its base image. A
+whose levels are progressively smaller with the same aspect ratio and serves
+its base image. The levels do not need to use exact power-of-two dimensions. A
 folder-qualified request still receives the named mip file, and same-sized
 animation frames ending in `_1` are not classified as mip levels.
+
+Extension-root precedence is applied to the base and companion independently.
+If a child mod replaces the base but inherits a validated mip chain whose
+normalized source is too small for the child's expected mip dimensions, the
+module downsamples the winning child base into a temporary 24/32-bit TGA of the
+required size. This avoids native row-buffer overreads without modifying the
+mod, while compatible inherited chains continue to use their existing files.
 
 The root-TGA route hooks Armada's `ST3D_FileStream_FileExists` and
 `ST3D_BinaryFileStream::OpenRead` boundaries, leaving Fleet Operations'

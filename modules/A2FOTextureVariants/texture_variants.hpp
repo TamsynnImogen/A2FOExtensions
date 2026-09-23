@@ -5,9 +5,12 @@
 #include <string>
 #include <string_view>
 
+#include "../../sdk/include/a2fo_faction_suffix.hpp"
+
 namespace a2fo::texture_variants {
 
-constexpr std::size_t kMaximumFactionSuffixLength = 32;
+constexpr std::size_t kMaximumFactionSuffixLength =
+    a2fo::faction_suffix::kMaximumLength;
 constexpr std::size_t kMaximumFactionNodeNameLength = 63;
 
 enum class SubsystemCondition : std::uint8_t {

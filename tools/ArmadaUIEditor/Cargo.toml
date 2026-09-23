@@ -1,0 +1,28 @@
+[package]
+name = "armada_ui_editor"
+version = "0.1.0"
+edition = "2021"
+description = "Visual Star Trek Armada I and II CFG/SPR interface editor"
+
+[dependencies]
+anyhow = "1.0"
+bevy = { version = "0.13.2", default-features = false, features = [
+    "bevy_asset",
+    "bevy_winit",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "multi-threaded",
+    "png",
+    "jpeg",
+    "tga",
+    "dds",
+    "x11",
+] }
+bevy_egui = "0.27.1"
+rfd = "0.14"
+walkdir = "2.5"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

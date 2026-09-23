@@ -1,6 +1,8 @@
 #include "directional_shield_display_config.hpp"
 #include "directional_shield_fill.hpp"
+#include "extended_weapon_icons.hpp"
 #include "identity_selection.hpp"
+#include "selected_panel_anchor.hpp"
 #include "system_icon_state.hpp"
 
 #include <cassert>
@@ -8,6 +10,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 namespace {
 
@@ -15,9 +18,93 @@ bool close(float left, float right, float epsilon = 0.001f) {
     return std::fabs(left - right) <= epsilon;
 }
 
+void test_selected_panel_anchor() {
+    using namespace a2fo::craft_identity;
+    int captain_component = 0;
+    int name_component = 0;
+    int class_component = 0;
+    const RawRectangle captain_cfg{675, 91, 240, 20};
+    const RawRectangle photon_cfg{700, 40, 103, 10};
+    const RawRectangle quantum_cfg{700, 68, 103, 10};
+    const RawRectangle builder_name_cfg{29, 21, 240, 20};
+    const RawRectangle builder_class_cfg{29, 36, 240, 20};
+    // Native rectangles have inclusive right/bottom bounds and retain the
+    // interface's vertical text adjustment (10 pixels in this fixture).
+    const SelectedPanelAnchorCandidate captain{
+        &captain_component, {675, 81, 914, 100}, &captain_cfg};
+    const std::array<SelectedPanelAnchorCandidate, 2> builder{{
+        {&name_component, {29, 11, 268, 30}, &builder_name_cfg},
+        {&class_component, {29, 26, 268, 45}, &builder_class_cfg},
+    }};
+    const auto check_ammunition = [&](const SelectedPanelTextAnchor& anchor) {
+        const auto photon = translated_rectangle(
+            anchor.captain_rectangle, captain_cfg, photon_cfg);
+        assert(photon.left == 700 && photon.top == 30);
+        assert(photon.right == 802 && photon.bottom == 39);
+        const auto quantum = translated_rectangle(
+            anchor.captain_rectangle, captain_cfg, quantum_cfg);
+        assert(quantum.left == 700 && quantum.top == 58);
+        assert(quantum.right == 802 && quantum.bottom == 67);
+    };
+    const auto ship = resolve_selected_panel_anchor(captain, &captain_cfg, {});
+    const auto yard = resolve_selected_panel_anchor(captain, &captain_cfg, builder);
+    assert(ship.component == &captain_component);
+    assert(yard.component == ship.component);
+    check_ammunition(ship);
+    check_ammunition(yard);
+
+    // Repair-only yards still use the producer panel. A hidden build-name
+    // row or a different live build layout must not move/hide ammunition.
+    auto custom_builder = builder;
+    custom_builder[0].rectangle = {29, 2000, 29, 2000};
+    custom_builder[1].rectangle = {900, 900, 999, 919};
+    custom_builder[1].configured_rectangle = nullptr;
+    const auto custom = resolve_selected_panel_anchor(
+        captain, &captain_cfg, custom_builder);
+    assert(custom.component == &captain_component);
+    check_ammunition(custom);
+
+    // Custom interfaces without a usable captain component can rebase a
+    // build-name/class anchor, but only when its source rectangle is known.
+    const auto fallback = resolve_selected_panel_anchor({}, &captain_cfg, builder);
+    assert(fallback.component == &name_component);
+    check_ammunition(fallback);
+    auto missing_name_cfg = builder;
+    missing_name_cfg[0].configured_rectangle = nullptr;
+    const auto class_fallback = resolve_selected_panel_anchor(
+        {}, &captain_cfg, missing_name_cfg);
+    assert(class_fallback.component == &class_component);
+    check_ammunition(class_fallback);
+    assert(!resolve_selected_panel_anchor({}, &captain_cfg, custom_builder).component);
+    const auto automatic = resolve_selected_panel_anchor({}, nullptr, builder);
+    assert(automatic.component == &name_component);
+    assert(automatic.captain_rectangle.left == 29);
+    assert(automatic.captain_rectangle.top == 11);
+    auto hidden_captain = captain;
+    hidden_captain.rectangle = {};
+    assert(resolve_selected_panel_anchor(hidden_captain, &captain_cfg, builder)
+               .component == &name_component);
+}
+
 }  // namespace
 
 int main() {
+    test_selected_panel_anchor();
+    using a2fo::craft_identity::extended_weapon_icon_sidecar_index;
+    using a2fo::craft_identity::is_extended_weapon_icon_index;
+    using a2fo::craft_identity::kExtendedWeaponIconCount;
+    using a2fo::craft_identity::kExtendedWeaponIconLimit;
+    using a2fo::craft_identity::kNativeWeaponIconLimit;
+    static_assert(kNativeWeaponIconLimit == 32);
+    static_assert(kExtendedWeaponIconLimit == 128);
+    static_assert(kExtendedWeaponIconCount == 96);
+    assert(!is_extended_weapon_icon_index(31));
+    assert(is_extended_weapon_icon_index(32));
+    assert(is_extended_weapon_icon_index(127));
+    assert(!is_extended_weapon_icon_index(128));
+    assert(extended_weapon_icon_sidecar_index(32) == 0);
+    assert(extended_weapon_icon_sidecar_index(127) == 95);
+
     using a2fo::craft_identity::aligned_identity_index;
 
     std::size_t index = 99;
@@ -127,6 +214,31 @@ int main() {
         duplicate_positions, stock_positions, &unchanged));
     assert(close(unchanged[0].x, stock_positions[0].x));
 
+    using a2fo::craft_identity::DirectionalShieldValueDisplayMode;
+    using a2fo::craft_identity::format_directional_shield_value;
+    char shield_value[32]{};
+    assert(!format_directional_shield_value(
+        DirectionalShieldValueDisplayMode::none, 75.0f, 100.0f,
+        shield_value, sizeof(shield_value)));
+    assert(shield_value[0] == '\0');
+    assert(format_directional_shield_value(
+        DirectionalShieldValueDisplayMode::percent, 149.0f, 200.0f,
+        shield_value, sizeof(shield_value)));
+    assert(std::strcmp(shield_value, "75") == 0);
+    assert(std::strchr(shield_value, '%') == nullptr);
+    assert(format_directional_shield_value(
+        DirectionalShieldValueDisplayMode::amount, 149.0f, 200.0f,
+        shield_value, sizeof(shield_value)));
+    assert(std::strcmp(shield_value, "149/200") == 0);
+    assert(!format_directional_shield_value(
+        DirectionalShieldValueDisplayMode::percent, 10.0f, 0.0f,
+        shield_value, sizeof(shield_value)));
+    char too_small[3]{};
+    assert(!format_directional_shield_value(
+        DirectionalShieldValueDisplayMode::amount, 149.0f, 200.0f,
+        too_small, sizeof(too_small)));
+    assert(too_small[0] == '\0');
+
     using a2fo::craft_identity::classify_system_icon_state;
     using a2fo::craft_identity::SystemIconState;
     SystemIconState icon_state = SystemIconState::destroyed;
@@ -164,5 +276,53 @@ int main() {
         {{0.0f, 0.0f, 0.0f}}, {{1.0f, 0.0f, 1.0f}});
     assert(close(black_layer[0], 0.0f));
     assert(close(black_layer[2], 0.0f));
+
+    using a2fo::craft_identity::is_passive_weapon_classlabel;
+    assert(is_passive_weapon_classlabel("UtilityWeapon"));
+    assert(is_passive_weapon_classlabel(" utilityweapon\t"));
+    assert(!is_passive_weapon_classlabel("SpecialWeapon"));
+
+    using a2fo::craft_identity::WeaponIconKind;
+    using a2fo::craft_identity::WeaponIconColourSource;
+    using a2fo::craft_identity::WeaponIconPresentation;
+    using a2fo::craft_identity::WeaponTechnologyState;
+    using a2fo::craft_identity::weapon_icon_colour_source;
+    using a2fo::craft_identity::weapon_icon_presentation;
+    assert(weapon_icon_colour_source(true, true) ==
+        WeaponIconColourSource::weapon);
+    assert(weapon_icon_colour_source(true, false) ==
+        WeaponIconColourSource::weapon);
+    assert(weapon_icon_colour_source(false, true) ==
+        WeaponIconColourSource::system_fallback);
+    assert(weapon_icon_colour_source(false, false) ==
+        WeaponIconColourSource::native);
+    assert(weapon_icon_presentation(
+        WeaponIconKind::passive,
+        WeaponTechnologyState::unavailable, true) ==
+        WeaponIconPresentation::passive_neutral);
+    assert(weapon_icon_presentation(
+        WeaponIconKind::normal,
+        WeaponTechnologyState::unavailable, true) ==
+        WeaponIconPresentation::hidden);
+    assert(weapon_icon_presentation(
+        WeaponIconKind::normal,
+        WeaponTechnologyState::unavailable, false) ==
+        WeaponIconPresentation::disabled);
+    assert(weapon_icon_presentation(
+        WeaponIconKind::special,
+        WeaponTechnologyState::unavailable, true) ==
+        WeaponIconPresentation::hidden);
+    assert(weapon_icon_presentation(
+        WeaponIconKind::special,
+        WeaponTechnologyState::unavailable, false) ==
+        WeaponIconPresentation::disabled);
+    assert(weapon_icon_presentation(
+        WeaponIconKind::normal,
+        WeaponTechnologyState::available, true) ==
+        WeaponIconPresentation::live_status);
+    assert(weapon_icon_presentation(
+        WeaponIconKind::special,
+        WeaponTechnologyState::unknown, true) ==
+        WeaponIconPresentation::live_status);
     return 0;
 }

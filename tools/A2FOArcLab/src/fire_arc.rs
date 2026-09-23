@@ -92,7 +92,7 @@ impl ArcConfig {
                 );
             }
         }
-        output
+        output.replace('\n', "\r\n")
     }
 
     pub fn pitch_limits(self) -> (f32, f32) {
@@ -169,5 +169,7 @@ mod tests {
         let snippet = config.snippet();
         assert!(snippet.contains("fireArcPitch = 45"));
         assert!(snippet.contains("fireArcPitchAngle = 90"));
+        assert!(snippet.contains("\r\n"));
+        assert!(!snippet.replace("\r\n", "").contains('\n'));
     }
 }

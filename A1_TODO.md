@@ -400,6 +400,21 @@ FO lookup namespaces without physically reorganising the source mod.
     `GameObjectClass+0x1d4`) for A1-policy Starbases with parsed build items.
     A1 predates A2's context-sensitive menu commands, so the item buttons can
     all be valid while Fleet Ops omits their outer Build command.
+  * [x] Restore missing raw-A1 station `transporter` capability alongside the
+    Recrew prerequisites, preserving any explicit zero, so stations expose
+    both Transport and Recrew without ODF edits.
+  * [x] Keep the repaired A1 `scout.odf` Search/Explore collision inside the
+    Orders submenu (menu ID 1) rather than publishing it at command root.
+  * [x] Restore the race-matched officer upgrade as A1's separate root command
+    at grid slot 9, dispatch that compatibility-owned button directly through
+    the checked Producer queue boundary so Fleet Operations cannot reinterpret
+    its type-1 ModeInfo as Build navigation, follow the compatibility ModeInfo
+    when native `ControlButton::CopyModes` moves it, clear stale duplicate
+    copies, and suppress its duplicate Fleet Operations Build-submenu entry
+    while preserving native queue handling.
+  * [x] Recover `builder_ship`, `maximumUpgrades`, `officerGain`, and `race` at
+    the completed-class boundary for converted Addon bases such as Future
+    Tense `fedbase` which bypass the native Starbase policy hook.
   * [x] Normalise A1's selector to the conventional FO system namespace
     (`odf/system/techlvl.odf`). A fresh-process test produced no palette
     change, proving the previous recursive `odf/other` copy was already being
@@ -671,16 +686,59 @@ runtime.
   * [x] Apply A1's 640x480 reference size to the live gameplay ParameterDB
     before component PostLoad, allowing native rectangle scaling without
     rewriting a mod CFG.
-  * [x] Adapt Fleet Ops' PopupPalette controls to each raw A1 race's exact
-    `controlButton1` through `controlButton12` rectangles at render time,
+  * [x] Adapt Fleet Ops' PopupPalette to each raw A1 race's exact
+    `controlPanelArea` and parent-local `controlButton1` through
+    `controlButton12` rectangles at render, input, and cursor time. Render the
+    data-defined `controlBackgroundPanel` through a native StandardBackground,
+    and draw its usable `controlBlackArea` through Armada's native solid-fill
+    helper before the frame and buttons,
     composing after popup compaction without replacing HybridBuild's popup
     ownership or rewriting the CFG.
+  * [x] Restore raw-A1 tooltips at the stable render boundaries: supply the
+    original opaque `#808080` background and black text for missing colour
+    vectors, and route verbose text through the native cursor-relative popup
+    helper when A2's seven-key frame contract is absent. Preserve complete
+    modern frames and explicit or inherited colours.
   * [x] Adapt A2's three ShipDisplay layout/background names to A1's single
     `infoPanelArea`, `infoBlackArea`, and `infoBackgroundPanel` entries at the
-    shared runtime rectangle/string loaders. Keep all other ShipDisplay keys
-    native so the A1 single-selection data remains authoritative.
-  * [ ] Restore the A1 SpeedRail, ControlPanel, individual resource panels,
-    minimap, ship display, and cinematic behavior through A1Compat adapters.
+    shared runtime rectangle loader and StandardBackground prefix boundary.
+    Restore the one A1 `infoBlackArea` into all three retained A2 mask fields
+    at the common ShipDisplay render boundary, then replace Fleet Operations'
+    `0.5`-opacity fill with A1's opaque mask at the checked background
+    boundary. Restore both ordinary and
+    build/station WireframeIcon children from A1's
+    `infoSingleWireframeIconArea` at that same boundary. Restore the retained
+    RaceIcon's `infoSingleRaceIconArea` and nested
+    `infoSingleRaceIconDisplayArea`, and redraw its stored `race_icon_bar`
+    sprite in the selected object's native team colour so the missing stripe
+    returns behind the smaller insignia. Map the normal and
+    build class, name, Crew, and Officer amount children to A1's single-panel
+    rectangles, and redraw the removed `infoSingleBackground` and label
+    artwork between the outer panel and native text controls.
+    Map A2's five `infoSystemIcon_N` rectangles onto A1's `infoSystem_N`
+    icon strip and hide the redundant A2 numeric SystemValue children.
+    Keep all other ShipDisplay keys native so the remaining A1
+    single-selection data remains authoritative.
+  * [x] Route PopupPalette clicks through Fleet Operations' live replacement
+    `FocusGameSimulate` entry so the relocated A1 command buttons retain their
+    native callbacks as well as cursor hit testing.
+  * [x] Adapt A2's composite ResourcePanel to A1's independent Crew, Officer,
+    and Dilithium panels, preserving their backgrounds, icons, native values,
+    and text areas while suppressing A2FOResources' A2-only fallback row.
+  * [x] Restore the missing A1 SpeedRail visual shell from each raw CFG's
+    `speedPanelArea` and numbered `speedBackgroundPanel` SPR pieces at the
+    adjacent PopupPalette render boundary.
+  * [x] Restore the raw A1 CinematicView parent, frame, background, and live
+    3D viewport rectangles at the native render boundary so the rendered
+    object remains inside each race's data-defined Viewscreen.
+  * [x] Relocate A2's retained native COMM and MENU StandardButtons into the
+    A1 CinematicView header, using each race's original button/border sprites
+    while preserving their native callbacks and input state.
+  * [x] Restore A1's seven-slot SpeedRail interaction with five native build
+    queues, the race-defined separator, and the native ordinary Transport
+    control, while keeping all queue/callback state engine-owned.
+  * [ ] Restore the remaining A1 minimap, ship-display details, and cinematic
+    behavior through A1Compat adapters.
   * [ ] Audit A1 font-table selection separately after the panel adapters are
     functional.
   * Project rule: A1Compat targets faithful A1 gameplay UI styling and

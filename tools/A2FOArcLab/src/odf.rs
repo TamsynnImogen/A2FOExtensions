@@ -223,8 +223,9 @@ impl ResourceContext {
                 .push(format!("Include cycle ignored at {}", canonical.display()));
             return Ok(());
         }
-        let contents = fs::read_to_string(&canonical)
-            .with_context(|| format!("Read ODF {}", canonical.display()))?;
+        let bytes =
+            fs::read(&canonical).with_context(|| format!("Read ODF {}", canonical.display()))?;
+        let contents = decode_windows_text(&bytes);
         stack.push(canonical.clone());
         output.files.push(canonical.clone());
 
@@ -620,8 +621,31 @@ fn numeric_suffix(key: &str, prefix: &str) -> Option<u32> {
     suffix.parse().ok()
 }
 
+pub fn decode_windows_text(bytes: &[u8]) -> String {
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return text.to_string();
+    }
+    // Armada and many long-lived mods use Windows ANSI ODFs. Preserve valid
+    // UTF-8 exactly, but fall back to Windows-1252 for legacy punctuation such
+    // as the 0x92 curly apostrophe used in Klingon ship names.
+    const CP1252: [char; 32] = [
+        '\u{20ac}', '\u{0081}', '\u{201a}', '\u{0192}', '\u{201e}', '\u{2026}', '\u{2020}',
+        '\u{2021}', '\u{02c6}', '\u{2030}', '\u{0160}', '\u{2039}', '\u{0152}', '\u{008d}',
+        '\u{017d}', '\u{008f}', '\u{0090}', '\u{2018}', '\u{2019}', '\u{201c}', '\u{201d}',
+        '\u{2022}', '\u{2013}', '\u{2014}', '\u{02dc}', '\u{2122}', '\u{0161}', '\u{203a}',
+        '\u{0153}', '\u{009d}', '\u{017e}', '\u{0178}',
+    ];
+    bytes
+        .iter()
+        .map(|byte| match *byte {
+            0x80..=0x9f => CP1252[(*byte - 0x80) as usize],
+            value => value as char,
+        })
+        .collect()
+}
+
 fn read_parent_mod(path: &Path) -> Option<String> {
-    let contents = fs::read_to_string(path).ok()?;
+    let contents = decode_windows_text(&fs::read(path).ok()?);
     for line in contents.lines() {
         let statement = strip_line_comment(line).trim();
         let Some((key, value)) = parse_assignment(statement) else {
@@ -757,6 +781,35 @@ mod tests {
         let value = strip_line_comment("weaponHardpoints1 = \"hp01\" \"hp02\" // \"hp99\"");
         let (_, value) = parse_assignment(value).unwrap();
         assert_eq!(tokenize_value(&value), vec!["hp01", "hp02"]);
+    }
+
+    #[test]
+    fn windows_1252_odf_text_is_decoded() {
+        assert_eq!(
+            decode_windows_text(b"unitName = \"IKS Hurgh\x92ragh\"\r\n"),
+            "unitName = \"IKS Hurgh\u{2019}ragh\"\r\n"
+        );
+        assert_eq!(
+            decode_windows_text("unitName = \"IKS Hurgh’ragh\"\n".as_bytes()),
+            "unitName = \"IKS Hurgh’ragh\"\n"
+        );
+    }
+
+    #[test]
+    fn resolver_accepts_windows_1252_odfs() {
+        let root = temp_dir();
+        let odf = root.join("ship.odf");
+        fs::write(
+            &odf,
+            b"unitName = \"IKS Hurgh\x92ragh\"\r\nweapon1 = \"test_phaser\"\r\n",
+        )
+        .unwrap();
+        let resolved = ResourceContext::default().resolve(&odf).unwrap();
+        assert_eq!(
+            resolved.string("unitName").as_deref(),
+            Some("IKS Hurgh’ragh")
+        );
+        fs::remove_dir_all(root).ok();
     }
 
     #[test]

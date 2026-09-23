@@ -2,24 +2,29 @@
 
 ## Open issues
 
-- [ ] **AMD Windows driver crashes in Fleet Operations' native DOT3 draw**
-  - **Severity:** High
-  - **Expected:** A bumped Fleet Operations mesh renders through the system
-    Direct3D 9 chain without entering invalid driver state.
-  - **Observed:** On an RX 6800 with AMD driver `32.0.21043.12001`, gameplay
-    crashes at `AMDXN32.DLL+0x54510`, called directly by Fleet Ops'
-    `ST3D_Dot3_MeshVB_Render_Callback` at `FleetOpsHook+0x1e67c8`.
-    Disabling Bump Mapping avoids the failure.
-  - **Evidence:** Build `20260822-renderer-form-reuse-02` did not install either
-    A2FO DOT3 draw hook and the run never entered Graphics Settings. Its last
-    renderer event was A2FO retaining the shared DX8 device from an adjacent
-    ordinary-material boundary.
-  - **Candidate implementation:** Build
-    `20260822-renderer-system-isolation-03` installs no A2FO DX8 hooks on the
-    system backend and makes the controller skip all mapped-material SOD and
-    texture mutations. Fleet Operations' native bump pipeline remains enabled;
-    A2FO bump suffixes, emissive maps, specular maps, decals, and bloom require
-    managed DXVK. Manual AMD validation is required.
+- [ ] **Fleet Operations' native DOT3 bump lighting renders incorrectly on AMD**
+  - **Severity:** Medium
+  - **Expected:** A bumped Fleet Operations mesh has the same tangent-space
+    lighting shape and direction on AMD System Direct3D 9 as on other adapters.
+  - **Observed:** The game remains stable, but native bump lighting does not
+    display correctly on AMD. This is present in Fleet Operations' own DOT3
+    path rather than A2FO's map discovery or mapped-material draw hooks.
+  - **Root-cause candidate:** Armada's 68-byte DOT3 stream stores normal, UV,
+    and tangent-basis data in D3D8 registers `v1-v5`. Roots' D3D8-to-D3D9 path
+    exposes those registers as `BLENDWEIGHT`, `BLENDINDICES`, `NORMAL`, `PSIZE`,
+    and `COLOR`; the latter special-purpose semantics are a plausible vendor-
+    specific interpretation boundary even though the shader treats all five
+    fields as ordinary float vectors.
+  - **Candidate implementation:** On System D3D9 only, the core arms checked
+    hooks at both native lazy shader-creation routes. When the active adapter
+    reports AMD vendor `0x1002`, it validates and transactionally substitutes a
+    matched declaration/source pair which moves the same fields to `v7-v11`
+    (`TEXCOORD0-4`). Stream layout, shader math, maps, render states, and Fleet
+    Operations' complete draw sequence remain unchanged. Every mapped-material
+    draw/state hook remains disabled on the system backend. Configure with
+    `[Compatibility] AmdNativeDot3Fix=0/1/2` for off/automatic/forced. The
+    replacement source assembles successfully with Armada's
+    `D3DX81ab.dll`; manual AMD visual comparison is required.
 
 - [ ] **Reopening Graphics Settings can destabilize the renderer session**
   - **Severity:** High
@@ -54,11 +59,10 @@
     `A2FORenderer.log` even when no helper action is scheduled. This should
     distinguish a failed selection event, helper-launch failure, missing DXVK
     payload, and activation/restore failure when work resumes.
-  - **Related result:** The system renderer can still crash in AMD's native
-    DOT3 driver path, so Vulkan persistence now also blocks the preferred
-    mapped-material backend on that hardware.
-  - **Workaround:** Use System Direct3D 9 with Bump Mapping disabled until the
-    managed DXVK switch is reliable.
+  - **Related result:** Managed DXVK remains the preferred mapped-material
+    backend and also avoids the suspect system-D3D9 DOT3 translation path.
+  - **Workaround:** Use System Direct3D 9 with Bump Mapping disabled, or select
+    managed DXVK, until the AMD declaration candidate is visually validated.
 
 - [ ] **A2FO mapped-material shaders distort Fleet Operations bump maps**
   - **Severity:** High
@@ -156,6 +160,18 @@
     `A2FOExtensions.dll` is available.
 
 ## Resolved issues
+
+- [x] **Disabling native Bump Mapping collapses large-fleet frame rate**
+  - **Severity:** High
+  - **Observed:** Forty Topmey ships rendered above 100 FPS with bump mapping
+    enabled but approximately 6-12 FPS with bump mapping disabled because the
+    native selector fell back to legacy non-VB rendering.
+  - **Resolution:** `NeutralBumpWhenDisabled=1` retains checked DOT3 MeshVB
+    eligibility on DXVK and uses a fixed flat-normal vertex shader in place of
+    the per-light normal-map sample. Revision
+    `20260831-fast-nonbump-no-flat-map-04` retains original material textures,
+    does not require `all_bump.dds`, defers D3DX assembly to the first safe
+    DOT3 boundary, and restored the large-fleet test to more than 200 FPS.
 
 - [x] **shipNameColor does not affect ship name text**
   - **Severity:** Medium

@@ -132,6 +132,11 @@ void normalize_vector(float value[3]) noexcept {
 
 }  // namespace
 
+bool defer_arc_to_candidate_selection(
+    bool cannon_imp, bool use_primary_target) noexcept {
+    return cannon_imp && !use_primary_target;
+}
+
 float normalize_degrees(float value) noexcept {
     if (!std::isfinite(value)) return 0.0f;
     value = std::fmod(value, 360.0f);

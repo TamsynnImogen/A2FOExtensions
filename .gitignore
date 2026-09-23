@@ -2,7 +2,12 @@
 /dist/
 /.deployment-backups/
 /tools/A2FOArcLab/target/
+/tools/*/target
 rgb-module-fixture-*/
+rgb-parent-fixture-*/
+/Archive.zip
+/modules/*.zip
+*.rej
 __pycache__/
 *.pyc
 *.dll

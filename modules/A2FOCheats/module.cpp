@@ -58,6 +58,7 @@ constexpr std::uintptr_t kGameTypeGeneralTypeDescriptorRva = 0x002fa870;
 constexpr std::size_t kSelectionCountOffset = 0x00b8;
 constexpr std::size_t kSelectionHandlesOffset = 0x03d0;
 constexpr std::size_t kGameObjectTeamOffset = 0x00ec;
+constexpr std::size_t kTeamDilithiumOffset = 0x0028;
 constexpr std::int32_t kMaximumSelectionCount = 512;
 constexpr std::int32_t kMaximumTeamCount = 9;
 constexpr std::int32_t kMoveCommand = 4;
@@ -89,6 +90,7 @@ constexpr char kMoveCheat[] = "m";
 constexpr char kDisableCheat[] = "dis";
 constexpr char kCrashCheat[] = "crash";
 constexpr char kEliminateCheat[] = "elim";
+constexpr char kMoneyCheat[] = "showmethemoney";
 
 constexpr std::array<std::uint8_t, 9> kExpectedChatRegisterCheat{
     0x53, 0x56, 0x57, 0x8b, 0xf9, 0x8b, 0xda, 0x8b, 0xf0};
@@ -526,11 +528,22 @@ bool __cdecl show_me_the_money_hook() noexcept {
         linked_dispatch_function(kCurrentPlayerDispatchLinkRva));
     const auto team_lookup = function_pointer<TeamLookupFunction>(
         linked_dispatch_function(kTeamLookupDispatchLinkRva));
-    if (!current_player || !team_lookup) return false;
+    if (!current_player || !team_lookup) {
+        log_line("showmethemoney invocation could not resolve the player/team dispatch functions");
+        return false;
+    }
 
     void* player = current_player();
     void* team = player ? team_lookup(player) : nullptr;
-    if (!team) return false;
+    if (!team) {
+        log_line("showmethemoney invocation did not resolve a current Team");
+        return false;
+    }
+
+    float dilithium_before = 0.0f;
+    const bool read_before = read_value(
+        static_cast<const std::uint8_t*>(team) + kTeamDilithiumOffset,
+        dilithium_before);
 
     const auto add_resource = [team](
         std::uintptr_t rva, float amount) noexcept {
@@ -546,6 +559,21 @@ bool __cdecl show_me_the_money_hook() noexcept {
     a2fo_cheats_call_thiscall_float(
         at(g_armada, kAddCrewCapacityRva), team, g_grant_amounts.crew);
     add_resource(kAddCrewRva, g_grant_amounts.crew);
+
+    float dilithium_after = 0.0f;
+    const bool read_after = read_value(
+        static_cast<const std::uint8_t*>(team) + kTeamDilithiumOffset,
+        dilithium_after);
+    if (read_before && read_after) {
+        std::ostringstream message;
+        message << "showmethemoney invoked: Team=" << team
+                << ", Dilithium " << dilithium_before << " -> "
+                << dilithium_after << " (requested +"
+                << g_grant_amounts.dilithium << ')';
+        log_line(message.str());
+    } else {
+        log_line("showmethemoney invoked, but its Team balance could not be inspected");
+    }
     return true;
 }
 
@@ -608,6 +636,11 @@ bool ensure_cheat_registered(
 }
 
 bool register_debug_cheats() noexcept {
+    // September Roots no longer registers the native money cheat and reuses
+    // its old code for icon rendering. Register our independent handler by
+    // name so that the configured resource grant still has a chat command.
+    const bool money_registered =
+        ensure_cheat_registered(kMoneyCheat, &show_me_the_money_hook);
     const bool move_registered =
         ensure_cheat_registered(kMoveCheat, &move_selected_hook);
     const bool disable_registered = ensure_cheat_registered(
@@ -616,7 +649,7 @@ bool register_debug_cheats() noexcept {
         ensure_cheat_registered(kCrashCheat, &crash_hook);
     const bool eliminate_registered = ensure_cheat_registered(
         kEliminateCheat, &eliminate_selected_team_hook);
-    return move_registered && disable_registered && crash_registered &&
+    return money_registered && move_registered && disable_registered && crash_registered &&
         eliminate_registered;
 }
 
@@ -670,6 +703,16 @@ std::array<std::uint8_t, 6> show_me_the_money_signature() noexcept {
     return signature;
 }
 
+std::array<std::uint8_t, 8> repurposed_money_signature() noexcept {
+    // This entry now belongs to ShipSystemIcon rendering. Recognize it, but
+    // never detour it or copy its relative jump into an inline gateway.
+    std::array<std::uint8_t, 8> signature{0x53, 0xa1, 0, 0, 0, 0, 0xeb, 0x0c};
+    const auto dispatch_link = static_cast<std::uint32_t>(
+        reinterpret_cast<std::uintptr_t>(at(g_fleet_ops, 0x212c50)));
+    std::memcpy(signature.data() + 2, &dispatch_link, sizeof(dispatch_link));
+    return signature;
+}
+
 std::array<std::uint8_t, 5> chat_hook_init_signature() noexcept {
     std::array<std::uint8_t, 5> signature{0xba, 0, 0, 0, 0};
     const std::uint32_t chat_callback = static_cast<std::uint32_t>(
@@ -704,6 +747,8 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     }
     load_grant_amounts();
     const auto money_signature = show_me_the_money_signature();
+    const bool money_entry_repurposed = signature_matches(
+        g_fleet_ops, kShowMeTheMoneyRva, repurposed_money_signature());
     const auto chat_init_signature = chat_hook_init_signature();
     if (!signature_matches(g_fleet_ops, kChatRegisterCheatRva,
                            kExpectedChatRegisterCheat) ||
@@ -718,8 +763,9 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
         !signature_matches(g_armada, kEliminateTeamRva,
                            kExpectedEliminateTeam) ||
         !resource_mutator_signatures_match() ||
-        !signature_matches(g_fleet_ops, kShowMeTheMoneyRva,
-                           money_signature) ||
+        (!money_entry_repurposed &&
+         !signature_matches(g_fleet_ops, kShowMeTheMoneyRva,
+                            money_signature)) ||
         !signature_matches(g_fleet_ops, kChatHookInitRva,
                            chat_init_signature)) {
         log_line("Cheat dependency signature mismatch; extension disabled");
@@ -729,7 +775,7 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
         return false;
     }
 
-    if (!api->install_inline_hook(
+    if (!money_entry_repurposed && !api->install_inline_hook(
             at(g_fleet_ops, kShowMeTheMoneyRva),
             reinterpret_cast<void*>(&show_me_the_money_hook),
             money_signature.size(), money_signature.data(),
@@ -738,11 +784,20 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
                  "cheat extension disabled");
         return false;
     }
+    if (money_entry_repurposed) {
+        log_line("September Fleet Ops money entry is used by icon rendering; "
+                 "registering showmethemoney directly without detouring it");
+    }
     if (!api->install_inline_hook(
             at(g_fleet_ops, kChatHookInitRva),
             reinterpret_cast<void*>(&chat_hook_init_hook),
             chat_init_signature.size(), chat_init_signature.data(),
             &g_chat_hook_init_hook)) {
+        if (money_entry_repurposed) {
+            log_line("Chat initialization hook installation failed; "
+                     "cheat extension disabled");
+            return false;
+        }
         // The first hook is already process-lifetime state. Keep this DLL
         // loaded so that handler never points into an unloaded image.
         log_line("Chat initialization hook installation failed; restored "

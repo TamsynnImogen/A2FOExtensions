@@ -10,6 +10,7 @@
 
 #include "../../sdk/include/a2fo_module_api.h"
 #include "../../sdk/include/a2fo_supported_armada.hpp"
+#include "../A2FOAnimations/api.hpp"
 
 #include <windows.h>
 
@@ -76,6 +77,17 @@ A2FO_InlineHook g_world_transform_hook{};
 bool g_runtime_ready = false;
 bool g_inside_lookup = false;
 bool g_logged_first_animation = false;
+A2FO_AnimationsEvaluateFn g_controlled_evaluate = nullptr;
+A2FO_AnimationsControlledFn g_controlled_instance = nullptr;
+void resolve_animation_controller() noexcept {
+    if (g_controlled_evaluate && g_controlled_instance) return;
+    HMODULE module = GetModuleHandleA("A2FOAnimations.dll");
+    if (!module) return;
+    auto evaluate = GetProcAddress(module, "A2FO_AnimationsEvaluate");
+    auto controlled = GetProcAddress(module, "A2FO_AnimationsControlled");
+    std::memcpy(&g_controlled_evaluate, &evaluate, sizeof(evaluate));
+    std::memcpy(&g_controlled_instance, &controlled, sizeof(controlled));
+}
 
 struct MatrixChannel {
     void* channel = nullptr;
@@ -322,6 +334,20 @@ void* resolve_visible_node(DatabaseCache& cache, void* logical_node) noexcept {
 
 void evaluate_matrix_channels(
     void* instance, DatabaseCache& cache) noexcept {
+    resolve_animation_controller();
+    if (g_controlled_instance && g_controlled_evaluate && g_controlled_instance(instance)) {
+        // Shared database transforms may have been changed by another rendered
+        // instance since the last query. Reapply every controlled pose.
+        cache.evaluation_valid = false;
+        bool applied = true;
+        for (const MatrixChannel& channel : cache.matrix_channels) {
+            if (!g_controlled_evaluate(instance, channel.channel, nullptr)) {
+                applied = false;
+                break;
+            }
+        }
+        if (applied) return;
+    }
     const float saved_current = read_live_at<float>(
         at(g_armada, kAnimationCurrentTimeRva), 0, 0.0f);
     const float saved_start = read_live_at<float>(

@@ -294,6 +294,37 @@ ArtTextureSuffixParseReport parse_art_texture_suffix_config(
     return report;
 }
 
+bool settings_disable_bump(
+    std::string_view source, bool* setting_found) {
+    if (setting_found) *setting_found = false;
+    std::string lowered(source);
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(), lower_ascii);
+    constexpr std::string_view kOpen = "<disable_bump>";
+    constexpr std::string_view kClose = "</disable_bump>";
+    const std::size_t open = lowered.find(kOpen);
+    if (open == std::string::npos) return false;
+    const std::size_t value_begin = open + kOpen.size();
+    const std::size_t close = lowered.find(kClose, value_begin);
+    if (close == std::string::npos) return false;
+
+    std::size_t first = value_begin;
+    while (first < close && std::isspace(
+               static_cast<unsigned char>(lowered[first]))) {
+        ++first;
+    }
+    std::size_t last = close;
+    while (last > first && std::isspace(
+               static_cast<unsigned char>(lowered[last - 1]))) {
+        --last;
+    }
+    const std::string_view value(lowered.data() + first, last - first);
+    if (value != "true" && value != "false" && value != "1" && value != "0") {
+        return false;
+    }
+    if (setting_found) *setting_found = true;
+    return value == "true" || value == "1";
+}
+
 std::string texture_name_with_suffix(
     std::string_view diffuse_name, std::string_view suffix) {
     std::string result(diffuse_name);

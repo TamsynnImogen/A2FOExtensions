@@ -9,6 +9,7 @@
  */
 
 #include "../../sdk/include/a2fo_module_api.h"
+#include "../../sdk/include/a2fo_faction_suffix.hpp"
 #include "art_texture_suffix_config.hpp"
 
 #include <windows.h>
@@ -22,8 +23,10 @@
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -59,6 +62,14 @@ constexpr std::uintptr_t kMeshSetTextureRva = 0x002313b0;
 constexpr std::uintptr_t kMeshUpdateRva = 0x00231c10;
 constexpr std::uintptr_t kTextureFileExistsRva = 0x002400d0;
 constexpr std::uintptr_t kTextureFindRva = 0x00242870;
+constexpr std::uintptr_t kDot3CanRenderDisableBranchRva = 0x00226f63;
+constexpr std::uintptr_t kGraphicsEnginePointerRva = 0x003ad508;
+constexpr std::size_t kGraphicsOptionsOffset = 0x0104;
+// ST3D_Dot3_MeshVB::CanRender rejects the native fast path when this byte is
+// nonzero. Preserve the user's persisted bump-off choice separately; the
+// checked CanRender guard patch is preferred because this options object does
+// not exist yet during deferred module initialization.
+constexpr std::size_t kDisableDot3Offset = 0x0005;
 constexpr std::size_t kCraftClassGeometryOffset = 0x01d8;
 constexpr std::size_t kGeometryRootNodeOffset = 0x003c;
 constexpr std::size_t kNodeNameOffset = 0x0008;
@@ -115,11 +126,17 @@ constexpr std::array<std::uint8_t, 7> kExpectedMeshUpdate{
     0x55, 0x8b, 0xec, 0x83, 0xec, 0x0c, 0x53};
 constexpr std::array<std::uint8_t, 6> kExpectedTextureFind{
     0x55, 0x8b, 0xec, 0x64, 0xa1, 0x00};
+constexpr std::array<std::uint8_t, 2> kExpectedDot3DisableBranch{
+    0x75, 0x15};
+constexpr std::array<std::uint8_t, 2> kIgnoreDot3DisableBranch{
+    0x90, 0x90};
 
 using StatusFunction = int (__cdecl*)();
 using SetEmissiveBumpMultiplierFunction = int (__cdecl*)(float);
 using SetBumpLightBiasFunction = int (__cdecl*)(float);
 using SetEmissiveDiffuseRestoreFunction = int (__cdecl*)(float);
+using SetFastNonBumpEnabledFunction = int (__cdecl*)(int);
+using RegisterFactionTextureSuffixFunction = int (__cdecl*)(const char*);
 using TextureFileExistsFunction = bool (__cdecl*)(const char*);
 using TextureFindFunction = void* (__cdecl*)(
     void* database, const char* texture_name, std::uint32_t flags);
@@ -175,6 +192,8 @@ RegisterSpecularMaterialsFunction g_register_specular_materials = nullptr;
 SetEmissiveBumpMultiplierFunction g_set_emissive_bump_multiplier = nullptr;
 SetBumpLightBiasFunction g_set_bump_light_bias = nullptr;
 SetEmissiveDiffuseRestoreFunction g_set_emissive_diffuse_restore = nullptr;
+SetFastNonBumpEnabledFunction g_set_fast_nonbump_enabled = nullptr;
+RegisterFactionTextureSuffixFunction g_register_faction_texture_suffix = nullptr;
 RegisterDamageDecalClassFunction g_register_damage_decal_class = nullptr;
 RegisterLogoDecalClassFunction g_register_logo_decal_class = nullptr;
 TextureFileExistsFunction g_texture_file_exists = nullptr;
@@ -184,14 +203,94 @@ void* g_mesh_set_texture = nullptr;
 void* g_mesh_update = nullptr;
 bool g_mesh_texture_runtime_supported = false;
 bool g_core_renderer_available = false;
+bool g_neutral_bump_when_disabled_requested = true;
+bool g_native_bump_disabled = false;
+bool g_neutral_bump_compatibility_active = false;
+bool g_fast_nonbump_core_enabled = false;
 a2fo::nebula::ArtTextureSuffixConfig g_art_texture_suffix_config;
 std::vector<std::string> g_extension_roots;
 std::unordered_map<std::string, std::string> g_resolved_texture_cache;
 std::unordered_map<std::string, bool> g_native_texture_exists_cache;
 std::unordered_set<std::string> g_loose_texture_keys;
+std::unordered_map<void*, std::string> g_race_texture_suffixes;
 
 void log_line(const std::string& message) noexcept {
     if (g_api && g_api->log) g_api->log(kModuleName, message.c_str());
+}
+
+bool race_event_field(const A2FO_OdfFieldView* fields,
+                      std::uint32_t count, const char* name,
+                      std::string* value) {
+    if (!fields || !name || !value) return false;
+    const std::size_t name_size = std::strlen(name);
+    for (std::uint32_t index = 0; index < count; ++index) {
+        const A2FO_OdfFieldView& field = fields[index];
+        if (field.name.size != name_size || !field.name.data ||
+            _strnicmp(field.name.data, name, name_size) != 0 ||
+            (!field.value.data && field.value.size != 0)) {
+            continue;
+        }
+        value->assign(field.value.data ? field.value.data : "",
+                      field.value.size);
+        return true;
+    }
+    return false;
+}
+
+void A2FO_CALL race_loaded_handler(
+    const A2FO_RaceLoadedEvent* event, void*) {
+    if (!event || event->struct_size < sizeof(*event) || !event->race) {
+        return;
+    }
+    try {
+        std::string raw_suffix;
+        if (!race_event_field(
+                event->odf_fields, event->odf_field_count,
+                a2fo::faction_suffix::kCommand, &raw_suffix)) {
+            g_race_texture_suffixes.erase(event->race);
+            return;
+        }
+        std::string suffix;
+        if (!a2fo::faction_suffix::normalize(raw_suffix, &suffix) ||
+            suffix.empty()) {
+            g_race_texture_suffixes.erase(event->race);
+            return;
+        }
+        g_race_texture_suffixes[event->race] = suffix;
+        if (g_register_faction_texture_suffix) {
+            g_register_faction_texture_suffix(suffix.c_str());
+        }
+    } catch (...) {
+        g_race_texture_suffixes.erase(event->race);
+        log_line("Could not retain faction texture suffix for mapped materials");
+    }
+}
+
+std::vector<std::string> faction_texture_suffixes() {
+    // Stock Armada/Fleet Operations Borg alternate textures use `_b` even
+    // when borg.odf does not declare factionTextureSuffix.
+    std::vector<std::string> suffixes{"_b"};
+    std::unordered_set<std::string> seen{"_b"};
+    for (const auto& entry : g_race_texture_suffixes) {
+        if (!entry.second.empty() && seen.insert(entry.second).second) {
+            suffixes.push_back(entry.second);
+        }
+    }
+    return suffixes;
+}
+
+bool ends_with_case_insensitive(
+    std::string_view value, std::string_view suffix) noexcept {
+    if (suffix.empty() || value.size() < suffix.size()) return false;
+    const std::size_t start = value.size() - suffix.size();
+    for (std::size_t index = 0; index < suffix.size(); ++index) {
+        const unsigned char left =
+            static_cast<unsigned char>(value[start + index]);
+        const unsigned char right =
+            static_cast<unsigned char>(suffix[index]);
+        if (std::tolower(left) != std::tolower(right)) return false;
+    }
+    return true;
 }
 
 void* at(HMODULE module, std::uintptr_t rva) noexcept {
@@ -652,8 +751,8 @@ void cache_extension_roots() {
     }
 }
 
-bool read_small_art_config(const std::string& path,
-                           std::string* contents) {
+bool read_small_text_config(const std::string& path,
+                            std::string* contents) {
     if (!contents) return false;
     contents->clear();
     std::ifstream input(path, std::ios::binary);
@@ -661,7 +760,7 @@ bool read_small_art_config(const std::string& path,
     input.seekg(0, std::ios::end);
     const std::streamoff size = input.tellg();
     if (size < 0 || size > kMaximumArtConfigSize) {
-        log_line("Ignored oversized ART configuration: " + path);
+        log_line("Ignored oversized text configuration: " + path);
         return false;
     }
     input.seekg(0, std::ios::beg);
@@ -676,7 +775,7 @@ void load_art_texture_suffix_config() {
     for (const std::string& root : g_extension_roots) {
         const std::string path = join_path(root, kArtConfigFileName);
         std::string source;
-        if (!read_small_art_config(path, &source)) continue;
+        if (!read_small_text_config(path, &source)) continue;
         const auto report = a2fo::nebula::parse_art_texture_suffix_config(
             source, &g_art_texture_suffix_config);
         if (report.valid_assignments != 0) {
@@ -717,6 +816,60 @@ void load_art_texture_suffix_config() {
     }
 }
 
+void load_neutral_bump_compatibility_policy() noexcept {
+    g_neutral_bump_when_disabled_requested = true;
+    if (g_extension_roots.empty()) return;
+    const std::string ini = join_path(
+        g_extension_roots.front(), "A2FORenderer.ini");
+    g_neutral_bump_when_disabled_requested = GetPrivateProfileIntA(
+        "Compatibility", "NeutralBumpWhenDisabled", 1, ini.c_str()) != 0;
+}
+
+bool load_native_bump_disabled(bool* disabled) noexcept {
+    if (!disabled) return false;
+    try {
+        const auto read_setting = [disabled](const std::string& path) {
+            std::string source;
+            if (!read_small_text_config(path, &source)) return false;
+            bool setting_found = false;
+            const bool value = a2fo::nebula::settings_disable_bump(
+                source, &setting_found);
+            if (!setting_found) return false;
+            *disabled = value;
+            log_line(
+                "Native bump setting read from " + path + ": " +
+                (value ? "disabled" : "enabled"));
+            return true;
+        };
+
+        if (g_api && A2FO_MODULE_API_HAS(g_api, get_settings_directory) &&
+            g_api->get_settings_directory) {
+            std::array<char, 2048> directory{};
+            if (g_api->get_settings_directory(
+                    directory.data(),
+                    static_cast<std::uint32_t>(directory.size())) &&
+                directory[0] != '\0' &&
+                read_setting(join_path(directory.data(), "Settings.xml"))) {
+                return true;
+            }
+        }
+
+        // During module initialization Fleet Operations has not necessarily
+        // called the hooked SettingsDirectory getter yet, so revision 12 of
+        // the module API can legitimately have no directory to return.  The
+        // stock/no-mod directory is rooted beneath Data and is already known
+        // through the extension-root API at this point.
+        if (g_extension_roots.empty()) {
+            return false;
+        }
+        return read_setting(join_path(
+            g_extension_roots.front(),
+            "settings_saves_logs\\Settings.xml"));
+    } catch (...) {
+        return false;
+    }
+}
+
 std::string texture_name_without_extension(std::string value) {
     const std::size_t slash = value.find_last_of("\\/");
     const std::size_t dot = value.find_last_of('.');
@@ -736,6 +889,38 @@ std::string normalized_material_key(std::string value) {
                        return static_cast<char>(std::tolower(character));
                    });
     return value;
+}
+
+struct FactionDiffuseName {
+    std::string base_diffuse;
+    std::string faction_suffix;
+};
+
+FactionDiffuseName split_faction_diffuse_name(
+    const std::string& diffuse_name) {
+    FactionDiffuseName result{};
+    result.base_diffuse = texture_name_without_extension(diffuse_name);
+    const std::string key = normalized_material_key(result.base_diffuse);
+    if (key.empty()) return result;
+
+    std::vector<std::string> suffixes = faction_texture_suffixes();
+    std::sort(
+        suffixes.begin(), suffixes.end(),
+        [](const std::string& left, const std::string& right) {
+            return left.size() > right.size();
+        });
+    for (const std::string& suffix : suffixes) {
+        if (suffix.empty() ||
+            !ends_with_case_insensitive(key, suffix) ||
+            result.base_diffuse.size() < suffix.size()) {
+            continue;
+        }
+        result.base_diffuse.resize(
+            result.base_diffuse.size() - suffix.size());
+        result.faction_suffix = suffix;
+        break;
+    }
+    return result;
 }
 
 void index_loose_texture_names() {
@@ -824,6 +1009,60 @@ bool native_texture_exists(const std::string& texture_name,
     } catch (...) {
         return false;
     }
+}
+
+bool arm_neutral_bump_compatibility() noexcept {
+    if (!g_neutral_bump_when_disabled_requested ||
+        !g_native_bump_disabled) {
+        return false;
+    }
+    if (!g_core_renderer_available || !g_fast_nonbump_core_enabled) {
+        log_line("Neutral bump-off compatibility lacks the preflighted fast shader runtime");
+        return false;
+    }
+
+    // Module initialization precedes creation of Armada's graphics-options
+    // object, so writing its disable-DOT3 byte here is normally too early.
+    // Bypass the matching CanRender rejection branch instead. This is enabled
+    // only after the saved bump-off policy and shader have both passed their
+    // preflight, and leaves the capability test below that branch intact.
+    if (g_api && A2FO_MODULE_API_HAS(g_api, patch_bytes) &&
+        g_api->patch_bytes &&
+        g_api->patch_bytes(
+            at(g_armada, kDot3CanRenderDisableBranchRva),
+            kIgnoreDot3DisableBranch.data(),
+            kExpectedDot3DisableBranch.data(),
+            kExpectedDot3DisableBranch.size())) {
+        log_line("Neutral bump-off compatibility bypassed the checked DOT3 disable guard");
+        return true;
+    }
+
+    // Retain the data-write fallback for compatible cores which initialize
+    // late enough to expose the graphics-options object here.
+    void* graphics = read_at<void*>(
+        at(g_armada, kGraphicsEnginePointerRva), 0, nullptr);
+    void* options = read_at<void*>(
+        graphics, kGraphicsOptionsOffset, nullptr);
+    const std::uint8_t current = read_at<std::uint8_t>(
+        options, kDisableDot3Offset, 0xffu);
+    if (current == 0xffu) {
+        log_line("Neutral bump-off compatibility could not read the runtime DOT3 option");
+        return false;
+    }
+    const std::uint8_t enabled = 0;
+    if (current != 0 && !write_at(options, kDisableDot3Offset, enabled)) {
+        log_line("Neutral bump-off compatibility could not enable the runtime DOT3 path");
+        return false;
+    }
+    const std::uint8_t updated = read_at<std::uint8_t>(
+        options, kDisableDot3Offset, 0xffu);
+    char message[128]{};
+    std::snprintf(
+        message, sizeof(message),
+        "Neutral bump-off runtime DOT3 option: %u -> %u",
+        static_cast<unsigned>(current), static_cast<unsigned>(updated));
+    log_line(message);
+    return updated == 0;
 }
 
 void* find_native_texture_variant(
@@ -922,27 +1161,97 @@ void register_global_specular(
         return;
     }
     try {
+        const std::vector<std::string> faction_suffixes =
+            faction_texture_suffixes();
         std::unordered_set<std::string> registered_keys;
         std::vector<std::string> diffuse_names;
         std::vector<std::string> texture_paths;
-        diffuse_names.reserve(materials.size());
-        texture_paths.reserve(materials.size());
-        for (const ClassMeshMaterial& material : materials) {
-            const std::string key = normalized_material_key(
-                material.diffuse_name);
-            if (key.empty() || !registered_keys.insert(key).second) continue;
+
+        const auto resolve_specular = [&](const std::string& diffuse) {
             const std::string requested =
-                a2fo::nebula::texture_name_with_suffix(
-                    material.diffuse_name, suffix);
+                a2fo::nebula::texture_name_with_suffix(diffuse, suffix);
             if (g_loose_texture_keys.find(
                     normalized_material_key(requested)) ==
                 g_loose_texture_keys.end()) {
+                return std::string{};
+            }
+            return resolve_texture(requested);
+        };
+
+        const auto resolve_faction_specular = [&](
+                const std::string& base_diffuse,
+                const std::string& faction_suffix) {
+            if (base_diffuse.empty() || faction_suffix.empty()) {
+                return std::string{};
+            }
+            const std::string requested =
+                a2fo::nebula::texture_name_with_suffix(
+                    a2fo::nebula::texture_name_with_suffix(
+                        base_diffuse, suffix),
+                    faction_suffix);
+            if (g_loose_texture_keys.find(
+                    normalized_material_key(requested)) ==
+                g_loose_texture_keys.end()) {
+                return std::string{};
+            }
+            return resolve_texture(requested);
+        };
+
+        for (const ClassMeshMaterial& material : materials) {
+            const std::string live_key = normalized_material_key(
+                material.diffuse_name);
+            if (live_key.empty()) continue;
+
+            const FactionDiffuseName parsed =
+                split_faction_diffuse_name(material.diffuse_name);
+            const std::string base_specular =
+                resolve_specular(parsed.base_diffuse);
+
+            // A late-loaded ownership ODF may already reference a suffixed
+            // diffuse (for example fbattle_b).  Canonicalize that diffuse
+            // before deriving the auxiliary-map name so the final-suffix
+            // convention resolves fbattle_specular_b, not
+            // fbattle_b_specular.  Fall back to the base specular map.
+            if (!parsed.faction_suffix.empty()) {
+                std::string resolved = resolve_faction_specular(
+                    parsed.base_diffuse, parsed.faction_suffix);
+                if (resolved.empty()) resolved = base_specular;
+                if (!resolved.empty() &&
+                    registered_keys.insert(live_key).second) {
+                    diffuse_names.push_back(material.diffuse_name);
+                    texture_paths.push_back(std::move(resolved));
+                }
                 continue;
             }
-            std::string resolved = resolve_texture(requested);
-            if (resolved.empty()) continue;
-            diffuse_names.push_back(material.diffuse_name);
-            texture_paths.push_back(std::move(resolved));
+
+            if (!base_specular.empty() &&
+                registered_keys.insert(live_key).second) {
+                diffuse_names.push_back(material.diffuse_name);
+                texture_paths.push_back(base_specular);
+            }
+
+            for (const std::string& faction_suffix : faction_suffixes) {
+                if (faction_suffix.empty()) continue;
+                const std::string variant_diffuse =
+                    a2fo::nebula::texture_name_with_suffix(
+                        parsed.base_diffuse, faction_suffix);
+                const std::string variant_key =
+                    normalized_material_key(variant_diffuse);
+                if (variant_key.empty() || variant_key == live_key ||
+                    !registered_keys.insert(variant_key).second) {
+                    continue;
+                }
+
+                std::string resolved = resolve_faction_specular(
+                    parsed.base_diffuse, faction_suffix);
+                if (resolved.empty()) resolved = base_specular;
+                if (resolved.empty()) {
+                    registered_keys.erase(variant_key);
+                    continue;
+                }
+                diffuse_names.push_back(variant_diffuse);
+                texture_paths.push_back(std::move(resolved));
+            }
         }
         if (diffuse_names.empty()) return;
 
@@ -957,16 +1266,16 @@ void register_global_specular(
         if (g_register_specular_materials(
                 object_class, diffuse_pointers.data(), path_pointers.data(),
                 static_cast<std::uint32_t>(diffuse_pointers.size())) != 0) {
-            char message[224]{};
+            char message[256]{};
             std::snprintf(
                 message, sizeof(message),
-                "Registered %u global specular map%s for CraftClass %p",
+                "Registered %u global/faction specular map binding%s for CraftClass %p",
                 static_cast<unsigned>(diffuse_pointers.size()),
                 diffuse_pointers.size() == 1 ? "" : "s", object_class);
             log_line(message);
         }
     } catch (...) {
-        log_line("Could not register global specular maps for a CraftClass");
+        log_line("Could not register global/faction specular maps for a CraftClass");
     }
 }
 
@@ -1261,6 +1570,12 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     g_set_emissive_diffuse_restore =
         imported_function<SetEmissiveDiffuseRestoreFunction>(
             core, "A2FO_NebulaSetEmissiveDiffuseRestore");
+    g_set_fast_nonbump_enabled =
+        imported_function<SetFastNonBumpEnabledFunction>(
+            core, "A2FO_NebulaSetFastNonBumpEnabled");
+    g_register_faction_texture_suffix =
+        imported_function<RegisterFactionTextureSuffixFunction>(
+            core, "A2FO_NebulaRegisterFactionTextureSuffix");
     g_register_emissive_class =
         imported_function<RegisterEmissiveClassFunction>(
             core, "A2FO_NebulaRegisterEmissiveClass");
@@ -1279,6 +1594,7 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     if (!g_armada || !status || !g_set_emissive_bump_multiplier ||
         !g_set_bump_light_bias ||
         !g_set_emissive_diffuse_restore ||
+        !g_set_fast_nonbump_enabled ||
         !g_register_emissive_class ||
         !g_register_emissive_materials ||
         !g_register_specular_materials ||
@@ -1287,6 +1603,9 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
         return false;
     }
     cache_extension_roots();
+    load_neutral_bump_compatibility_policy();
+    const bool native_bump_setting_known =
+        load_native_bump_disabled(&g_native_bump_disabled);
     load_art_texture_suffix_config();
     if (g_set_emissive_bump_multiplier(
             g_art_texture_suffix_config.emissive_bump_multiplier) == 0) {
@@ -1304,6 +1623,27 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
         return false;
     }
     index_loose_texture_names();
+    if (g_register_faction_texture_suffix) {
+        g_register_faction_texture_suffix("_b");
+    } else {
+        log_line("Core faction-suffix mapped-lighting fallback export unavailable; exact material bindings only");
+    }
+
+    if (A2FO_MODULE_API_HAS(api, register_race_loaded_handler) &&
+        (api->capabilities & A2FO_CAP_RACE_LOADED) != 0 &&
+        api->register_race_loaded_handler) {
+        const char* race_fields[] = {a2fo::faction_suffix::kCommand};
+        if (api->register_race_loaded_handler(
+                kModuleName, race_fields,
+                static_cast<std::uint32_t>(std::size(race_fields)),
+                &race_loaded_handler, nullptr)) {
+            log_line("Faction texture suffixes linked to mapped emissive/specular materials");
+        } else {
+            log_line("Could not subscribe to factionTextureSuffix; stock Borg _b mapped-material compatibility remains available");
+        }
+    } else {
+        log_line("Race-loaded API unavailable; stock Borg _b mapped-material compatibility only");
+    }
 
     g_texture_file_exists =
         function_from_address<TextureFileExistsFunction>(
@@ -1345,6 +1685,33 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
             log_line("Core-owned early DX8 renderer hooks are unavailable");
             break;
     }
+    const bool fast_nonbump_requested =
+        g_neutral_bump_when_disabled_requested &&
+        native_bump_setting_known && g_native_bump_disabled;
+    g_fast_nonbump_core_enabled =
+        g_set_fast_nonbump_enabled(fast_nonbump_requested ? 1 : 0) != 0 &&
+        fast_nonbump_requested;
+    if (fast_nonbump_requested && !g_fast_nonbump_core_enabled) {
+        log_line("Core rejected the fast non-bump shader route; native bump-off rendering retained");
+    }
+    g_neutral_bump_compatibility_active =
+        native_bump_setting_known && arm_neutral_bump_compatibility();
+    if (g_fast_nonbump_core_enabled &&
+        !g_neutral_bump_compatibility_active) {
+        g_set_fast_nonbump_enabled(0);
+        g_fast_nonbump_core_enabled = false;
+    }
+    if (!g_neutral_bump_when_disabled_requested) {
+        log_line("Neutral bump-off compatibility disabled by NeutralBumpWhenDisabled=0");
+    } else if (!native_bump_setting_known) {
+        log_line("Neutral bump-off compatibility could not read disable_bump from Settings.xml");
+    } else if (!g_native_bump_disabled) {
+        log_line("Native bump mapping is enabled; authored bump maps retained");
+    } else if (g_neutral_bump_compatibility_active) {
+        log_line("Native bump-off compatibility active: self-contained fast flat-normal shader selected");
+    } else {
+        log_line("Neutral bump-off compatibility could not arm; native bump-off rendering retained");
+    }
     log_line("Mapped-lighting ODF/ART controller initialized");
     return true;
 }
@@ -1355,10 +1722,14 @@ void A2FO_CALL A2FONebulaRenderer_RegisterClass(
     if (!g_core_renderer_available ||
         !g_register_emissive_class || !g_register_emissive_materials ||
         !g_register_specular_materials ||
-        !g_register_logo_decal_class || !object_class || !parameter_db) {
+        !g_register_logo_decal_class || !object_class) {
         return;
     }
 
+    // parameter_db may be null for a late-loaded CraftClass refresh requested
+    // after GameObjectClass::Find has finished attaching cached SOD geometry.
+    // ODF-only policies are skipped in that case, while ART_CFG/SOD-derived
+    // bump, specular and emissive material policies are rebuilt safely.
     register_damage_decals(object_class, parameter_db);
     register_logo_decals(object_class, parameter_db);
 
@@ -1370,6 +1741,20 @@ void A2FO_CALL A2FONebulaRenderer_RegisterClass(
             log_line("Could not inspect CraftClass SOD materials; global texture suffixes skipped for that class");
         }
     }
+    if (!parameter_db) {
+        if (class_materials.empty()) {
+            log_line("Late-loaded CraftClass refresh found no SOD materials yet");
+        } else {
+            char message[192]{};
+            std::snprintf(
+                message, sizeof(message),
+                "Late-loaded CraftClass refresh found %u SOD material%s",
+                static_cast<unsigned>(class_materials.size()),
+                class_materials.size() == 1 ? "" : "s");
+            log_line(message);
+        }
+    }
+
     apply_global_bump_suffix(class_materials);
     register_global_specular(object_class, class_materials);
 
@@ -1413,6 +1798,45 @@ void A2FO_CALL A2FONebulaRenderer_RegisterClass(
         return resolve_texture(requested);
     };
 
+    const auto resolve_global_emissive_trailing_suffix = [](
+            const std::string& base_diffuse, std::size_t system_index,
+            const std::string& faction_suffix) {
+        if (faction_suffix.empty() ||
+            g_art_texture_suffix_config.emissive_suffix.empty() ||
+            system_index >= kGlobalEmissiveSystemTokens.size()) {
+            return std::string{};
+        }
+        const std::string requested =
+            a2fo::nebula::texture_name_with_suffix(
+                a2fo::nebula::emissive_texture_name(
+                    texture_name_without_extension(base_diffuse),
+                    g_art_texture_suffix_config.emissive_suffix,
+                    kGlobalEmissiveSystemTokens[system_index]),
+                faction_suffix);
+        if (g_loose_texture_keys.find(normalized_material_key(requested)) ==
+            g_loose_texture_keys.end()) {
+            return std::string{};
+        }
+        return resolve_texture(requested);
+    };
+
+    const auto resolve_global_emissive_for_live = [&](
+            const std::string& live_diffuse, std::size_t system_index) {
+        const FactionDiffuseName parsed =
+            split_faction_diffuse_name(live_diffuse);
+        if (!parsed.faction_suffix.empty()) {
+            std::string resolved =
+                resolve_global_emissive_trailing_suffix(
+                    parsed.base_diffuse, system_index,
+                    parsed.faction_suffix);
+            if (!resolved.empty()) return resolved;
+            return resolve_global_emissive(
+                parsed.base_diffuse, system_index);
+        }
+        return resolve_global_emissive(
+            parsed.base_diffuse, system_index);
+    };
+
     struct IndexedMaterial {
         std::string diffuse_name;
         std::array<std::string, kEmissiveSuffixes.size()> resolved{};
@@ -1446,7 +1870,8 @@ void A2FO_CALL A2FONebulaRenderer_RegisterClass(
                 &material.explicitly_declared[system_index]);
             if (!material.explicitly_declared[system_index]) {
                 material.resolved[system_index] =
-                    resolve_global_emissive(diffuse_name, system_index);
+                    resolve_global_emissive_for_live(
+                        diffuse_name, system_index);
             }
         }
         indexed_materials.push_back(std::move(material));
@@ -1508,10 +1933,81 @@ void A2FO_CALL A2FONebulaRenderer_RegisterClass(
             for (std::size_t system_index = 0;
                  system_index < material.resolved.size(); ++system_index) {
                 material.resolved[system_index] =
-                    resolve_global_emissive(
+                    resolve_global_emissive_for_live(
                         source.diffuse_name, system_index);
             }
             indexed_materials.push_back(std::move(material));
+        }
+    }
+
+    // Ownership texture variants replace only the live diffuse name. Mirror
+    // every indexed emissive policy onto the known faction diffuse names so
+    // `ship_b`/`ship_k` still resolves the material. Faction ownership is
+    // always the final filename suffix: `ship_emissive_warp_b`, not
+    // `ship_b_emissive_warp`. Fall back to the base map when the faction map
+    // is absent.
+    if (!indexed_materials.empty()) {
+        std::unordered_set<std::string> registered_keys;
+        for (const IndexedMaterial& material : indexed_materials) {
+            const std::string key =
+                normalized_material_key(material.diffuse_name);
+            if (!key.empty()) registered_keys.insert(key);
+        }
+
+        const std::vector<std::string> faction_suffixes =
+            faction_texture_suffixes();
+        const std::size_t base_material_count = indexed_materials.size();
+        for (std::size_t material_index = 0;
+             material_index < base_material_count; ++material_index) {
+            const IndexedMaterial base = indexed_materials[material_index];
+            const std::string base_key =
+                normalized_material_key(base.diffuse_name);
+            if (base_key.empty()) continue;
+
+            // If this SOD/ODF material is already a faction variant, its
+            // live policy was resolved above from the canonical base name.
+            // Do not manufacture chained aliases such as ship_b_k.
+            if (!split_faction_diffuse_name(
+                    base.diffuse_name).faction_suffix.empty()) {
+                continue;
+            }
+
+            for (const std::string& faction_suffix : faction_suffixes) {
+                if (faction_suffix.empty() ||
+                    ends_with_case_insensitive(base_key, faction_suffix)) {
+                    continue;
+                }
+
+                IndexedMaterial variant = base;
+                variant.diffuse_name =
+                    a2fo::nebula::texture_name_with_suffix(
+                        base.diffuse_name, faction_suffix);
+                const std::string variant_key =
+                    normalized_material_key(variant.diffuse_name);
+                if (variant_key.empty() ||
+                    !registered_keys.insert(variant_key).second) {
+                    continue;
+                }
+
+                if (!g_art_texture_suffix_config.emissive_suffix.empty()) {
+                    for (std::size_t system_index = 0;
+                         system_index < variant.resolved.size();
+                         ++system_index) {
+                        if (variant.explicitly_declared[system_index]) {
+                            continue;
+                        }
+                        std::string faction_map =
+                            resolve_global_emissive_trailing_suffix(
+                                base.diffuse_name, system_index,
+                                faction_suffix);
+                        if (!faction_map.empty()) {
+                            variant.resolved[system_index] =
+                                std::move(faction_map);
+                        }
+                    }
+                }
+                indexed_materials.push_back(std::move(variant));
+            }
         }
     }
 
@@ -1560,17 +2056,22 @@ void A2FO_CALL A2FONebulaRenderer_RegisterClass(
 extern "C" __declspec(dllexport)
 void A2FO_CALL A2FO_ModuleShutdown() {
     // The core copies every path and owns renderer-lifetime policy/cache data.
+    if (g_set_fast_nonbump_enabled) g_set_fast_nonbump_enabled(0);
     g_art_texture_suffix_config = {};
     g_extension_roots.clear();
     g_resolved_texture_cache.clear();
     g_native_texture_exists_cache.clear();
     g_loose_texture_keys.clear();
+    g_race_texture_suffixes.clear();
     g_mesh_texture_runtime_supported = false;
     g_core_renderer_available = false;
+    g_fast_nonbump_core_enabled = false;
     g_texture_file_exists = nullptr;
     g_texture_find = nullptr;
     g_register_specular_materials = nullptr;
     g_mesh_get_texture = nullptr;
     g_mesh_set_texture = nullptr;
     g_mesh_update = nullptr;
+    g_set_fast_nonbump_enabled = nullptr;
+    g_register_faction_texture_suffix = nullptr;
 }

@@ -62,6 +62,89 @@ _a2fo_a1_call_thiscall_4:
 	leave
 	ret
 
+	.globl _a2fo_a1_call_thiscall_6
+_a2fo_a1_call_thiscall_6:
+	pushl %ebp
+	movl %esp, %ebp
+	pushl 36(%ebp)
+	pushl 32(%ebp)
+	pushl 28(%ebp)
+	pushl 24(%ebp)
+	pushl 20(%ebp)
+	pushl 16(%ebp)
+	movl 12(%ebp), %ecx
+	call *8(%ebp)
+	leave
+	ret
+
+	.globl _a2fo_a1_call_thiscall_7
+_a2fo_a1_call_thiscall_7:
+	pushl %ebp
+	movl %esp, %ebp
+	pushl 40(%ebp)
+	pushl 36(%ebp)
+	pushl 32(%ebp)
+	pushl 28(%ebp)
+	pushl 24(%ebp)
+	pushl 20(%ebp)
+	pushl 16(%ebp)
+	movl 12(%ebp), %ecx
+	call *8(%ebp)
+	leave
+	ret
+
+	# StandardBar's two value providers use MSVC thiscall: the bar is in ECX,
+	# the output structure is the one callee-popped stack argument, and EAX
+	# returns that same output pointer. Adapt them to ordinary C++ helpers.
+	.globl _a2fo_a1_energy_bar_colour_hook
+_a2fo_a1_energy_bar_colour_hook:
+	pushl %ebp
+	movl %esp, %ebp
+	pushl 8(%ebp)
+	pushl %ecx
+	call _a2fo_a1_energy_bar_colour_value
+	addl $8, %esp
+	leave
+	ret $4
+
+	.globl _a2fo_a1_energy_bar_values_hook
+_a2fo_a1_energy_bar_values_hook:
+	pushl %ebp
+	movl %esp, %ebp
+	pushl 8(%ebp)
+	pushl %ecx
+	call _a2fo_a1_energy_bar_values_value
+	addl $8, %esp
+	leave
+	ret $4
+
+	# Fleet Operations' sprite helpers use Delphi's EAX/EDX register ABI and
+	# then forward into Armada's ST3D sprite implementation.
+	.globl _a2fo_a1_fo_sprite_set_colour
+_a2fo_a1_fo_sprite_set_colour:
+	pushl %ebp
+	movl %esp, %ebp
+	movl 12(%ebp), %eax
+	movl 16(%ebp), %edx
+	call *8(%ebp)
+	leave
+	ret
+
+	.globl _a2fo_a1_fo_sprite_draw_scaled_2d
+_a2fo_a1_fo_sprite_draw_scaled_2d:
+	pushl %ebp
+	movl %esp, %ebp
+	# The Delphi wrapper exposes height in its first stack slot and width in
+	# its second, the reverse of the Armada method it forwards to. Preserve a
+	# conventional C++ (width, height) interface by swapping them here.
+	pushl 20(%ebp)
+	pushl 24(%ebp)
+	movl 12(%ebp), %eax
+	movl 16(%ebp), %edx
+	call *8(%ebp)
+	leave
+	ret
+
 	# AIP::m_UpdateTechnologyLevel retries a missing unit-class lookup but then
 	# dereferences the null result. EDX is that result, EBX is the current
 	# 0x80-byte Build_List_Element, and [EBP-8] is the AIP object. Preserve the

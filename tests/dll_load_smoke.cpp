@@ -1,6 +1,14 @@
 #include <windows.h>
 
 int main() {
+    HMODULE team_change = LoadLibraryA("modules\\A2FOTeamChangeWeapons.dll");
+    if (!team_change || !GetProcAddress(team_change, "A2FO_ModuleInit") ||
+        !GetProcAddress(team_change, "A2FO_ModuleShutdown")) return 32;
+
+    HMODULE station_rotation = LoadLibraryA("modules\\A2FOStationRotation.dll");
+    if (!station_rotation || !GetProcAddress(station_rotation, "A2FO_ModuleInit") ||
+        !GetProcAddress(station_rotation, "A2FO_ModuleShutdown")) return 31;
+
     HMODULE core = LoadLibraryA("A2FOExtensions.dll");
     if (!core || !GetProcAddress(core, "A2FO_Initialize") ||
         !GetProcAddress(core, "A2FO_NebulaRendererStatus") ||
@@ -98,9 +106,19 @@ int main() {
         !GetProcAddress(
             energy_systems, "A2FOEnergySystems_GetQuantumTorpedoes") ||
         !GetProcAddress(
+            energy_systems, "A2FOEnergySystems_GetShuttleCraft") ||
+        !GetProcAddress(
+            energy_systems, "A2FOEnergySystems_GetMaximumShuttleCraft") ||
+        !GetProcAddress(
+            energy_systems, "A2FOEnergySystems_GetShuttleCraftReloadSeconds") ||
+        !GetProcAddress(
             energy_systems, "A2FOEnergySystems_SetPhotonTorpedoes") ||
         !GetProcAddress(
-            energy_systems, "A2FOEnergySystems_SetQuantumTorpedoes")) {
+            energy_systems, "A2FOEnergySystems_SetQuantumTorpedoes") ||
+        !GetProcAddress(
+            energy_systems, "A2FOEnergySystems_SetShuttleCraft") ||
+        !GetProcAddress(
+            energy_systems, "A2FOEnergySystems_AddShuttleCraft")) {
         return 11;
     }
 
@@ -138,6 +156,14 @@ int main() {
         !GetProcAddress(refit_yards, "A2FO_ModuleInit") ||
         !GetProcAddress(refit_yards, "A2FO_ModuleShutdown")) {
         return 14;
+    }
+
+    HMODULE a1_fallbacks = LoadLibraryA(
+        "modules\\A1Fallbacks.dll");
+    if (!a1_fallbacks ||
+        !GetProcAddress(a1_fallbacks, "A2FO_ModuleInit") ||
+        !GetProcAddress(a1_fallbacks, "A2FO_ModuleShutdown")) {
+        return 15;
     }
 
     // The proxy intentionally refuses to attach without the shipped renamed

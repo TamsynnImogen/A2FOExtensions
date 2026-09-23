@@ -53,6 +53,11 @@ struct ArtTextureSuffixParseReport {
 ArtTextureSuffixParseReport parse_art_texture_suffix_config(
     std::string_view source, ArtTextureSuffixConfig* config);
 
+// Reads Fleet Operations' persisted native bump switch. The XML stores the
+// inverse setting as <disable_bump>True/False</disable_bump>.
+bool settings_disable_bump(
+    std::string_view source, bool* setting_found = nullptr);
+
 // Inserts suffix before a final file extension, if present.
 std::string texture_name_with_suffix(
     std::string_view diffuse_name, std::string_view suffix);

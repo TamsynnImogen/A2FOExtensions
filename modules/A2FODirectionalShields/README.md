@@ -71,9 +71,16 @@ Their optional GUI definitions are:
 infoSingleDirectionalShieldsForwardAftTextArea = 386 238 340 18
 infoSingleDirectionalShieldsPortStarboardTextArea = 386 258 340 18
 infoSingleDirectionalShieldsGraphicArea = 26 56 128 128
+infoSingleDirectionalShieldsForwardValueTextArea = 58 78 64 18
+infoSingleDirectionalShieldsAftValueTextArea = 58 144 64 18
+infoSingleDirectionalShieldsPortValueTextArea = 46 111 44 18
+infoSingleDirectionalShieldsStarboardValueTextArea = 90 111 44 18
 directionalShieldColor = 0.1 1.0 0.1
 directionalShieldLowColor = 1.0 0.5 0.0
 directionalShieldCriticalColor = 1.0 0.05 0.02
+directionalShieldValueColor = 0.8 1.0 0.8
+directionalShieldValueLowColor = 1.0 0.7 0.1
+directionalShieldValueCriticalColor = 1.0 0.15 0.05
 ```
 
 Missing rectangles use positions relative to the live captain-name component.
@@ -85,11 +92,23 @@ forwardShieldPos = 26 0 76 20
 aftShieldPos = 26 108 76 20
 portShieldPos = 0 26 20 76
 starboardShieldPos = 108 26 20 76
+directionalShieldValueDisplayMode = 1
 ```
 
 The format is `x y width height`; the values shown are the defaults. Each
 command is optional and inherited independently. Positive width and height
 resize the corresponding segment as well as its depletion bounds.
+
+`directionalShieldValueDisplayMode` controls the four independently placed
+value labels: `0` hides them, `1` shows a rounded percentage number without a
+`%` sign, and `2` shows `current/maximum`. Modes 1 and 2 keep the labels visible
+alongside a successfully drawn ring. If the command is omitted, the previous
+behaviour remains: a working ring replaces the two diagnostic rows, while a
+missing ring falls back to those rows. Missing value rectangles use the
+positions shown above relative to the graphic area. The `directionalShieldValue*Color`
+commands colour the labels without changing the ring colours; omitted low or
+critical colours fall back to the normal value colour and then the panel's
+shared text colour.
 
 Use `ART_CFG.h` to choose how those rectangles are presented globally:
 
@@ -111,8 +130,8 @@ child mod can override individual parent settings without a per-frame parser.
 
 Each arc is green above 50%, orange from 25% through 50%, and red at or below
 25%; the three optional colour commands override those defaults independently.
-The numeric fallback uses `directionalShieldColor`, then the selected panel's
-text colour. The stock shield bar remains the aggregate of all four facings.
+The legacy numeric fallback uses `directionalShieldColor`, then the selected
+panel's text colour. The stock shield bar remains the aggregate of all four facings.
 The graphic area is an
 optional fixed-size 128-by-128 origin for four sprite definitions named
 `dsf`, `dsb`, `dsl`, and `dsr`, backed by the corresponding

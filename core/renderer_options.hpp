@@ -1,7 +1,7 @@
 /*
  * File: core/renderer_options.hpp
  * Module: A2FOHookExtensions (main-hook)
- * Purpose: Fleet Operations Graphics Options renderer selection.
+ * Purpose: Fleet Operations Graphics Options renderer and monitor selection.
  */
 
 #pragma once
@@ -12,9 +12,9 @@
 
 namespace a2fo {
 
-// Adds a restart-applied System Direct3D 9 / DXVK selector to Fleet Ops'
-// native Graphics Options form. The selected backend is installation-wide,
-// because d3d9.dll is chosen before any mod is loaded.
+// Adds restart-applied System Direct3D 9 / DXVK and Game Monitor selectors to
+// Fleet Ops' native Graphics Options form. Both selections are installation-
+// wide because the renderer and primary display are chosen before a mod loads.
 bool install_renderer_options(HMODULE fleet_ops, const std::string& data_root,
                               void (*log_line)(const std::string&));
 

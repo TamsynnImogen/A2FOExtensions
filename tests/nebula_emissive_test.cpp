@@ -1,4 +1,5 @@
 #include "../core/nebula_emissive.hpp"
+#include "../core/renderer_draw_policy.hpp"
 
 #include <array>
 #include <cassert>
@@ -6,6 +7,32 @@
 #include <vector>
 
 int main() {
+    using a2fo::renderer_extension_draw_required;
+    assert(!renderer_extension_draw_required(false, false, false));
+    assert(!renderer_extension_draw_required(false, false, true));
+    assert(renderer_extension_draw_required(false, true, false));
+    assert(!renderer_extension_draw_required(true, false, false));
+    assert(renderer_extension_draw_required(true, true, false));
+    assert(renderer_extension_draw_required(true, false, true));
+    using a2fo::renderer_fast_nonbump_alpha_meshvb_allowed;
+    assert(renderer_fast_nonbump_alpha_meshvb_allowed(
+        true, true, false, false, 1, 1));
+    assert(renderer_fast_nonbump_alpha_meshvb_allowed(
+        true, true, false, false, 2, 1));
+    assert(renderer_fast_nonbump_alpha_meshvb_allowed(
+        true, true, false, false, 6, 2));
+    assert(!renderer_fast_nonbump_alpha_meshvb_allowed(
+        false, true, false, false, 1, 1));
+    assert(!renderer_fast_nonbump_alpha_meshvb_allowed(
+        true, false, false, false, 1, 1));
+    assert(!renderer_fast_nonbump_alpha_meshvb_allowed(
+        true, true, true, false, 1, 1));
+    assert(!renderer_fast_nonbump_alpha_meshvb_allowed(
+        true, true, false, true, 1, 1));
+    assert(!renderer_fast_nonbump_alpha_meshvb_allowed(
+        true, true, false, false, 6, 1));
+    assert(!renderer_fast_nonbump_alpha_meshvb_allowed(
+        true, true, false, false, 1, 0));
     using namespace a2fo::nebula;
     const std::array<std::uint32_t, kEmissiveSystemCount> pixels{
         0xffc01020u, 0xff20d010u, 0xff1020e0u,

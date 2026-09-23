@@ -77,23 +77,7 @@ std::string normalized_path(std::string_view value) {
 
 bool normalize_faction_suffix(std::string_view input,
                               std::string* normalized) noexcept {
-    if (!normalized) return false;
-    try {
-        std::string candidate = trim(input);
-        if (candidate.size() > kMaximumFactionSuffixLength) return false;
-        for (char character : candidate) {
-            const unsigned char value =
-                static_cast<unsigned char>(character);
-            if (!std::isalnum(value) && character != '_' &&
-                character != '-') {
-                return false;
-            }
-        }
-        *normalized = std::move(candidate);
-        return true;
-    } catch (...) {
-        return false;
-    }
+    return a2fo::faction_suffix::normalize(input, normalized);
 }
 
 bool normalize_faction_node_name(std::string_view input,

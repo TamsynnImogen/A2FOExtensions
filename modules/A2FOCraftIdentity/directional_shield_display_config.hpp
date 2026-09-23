@@ -7,6 +7,7 @@
 #include "directional_shield_fill.hpp"
 
 #include <array>
+#include <cstddef>
 #include <string_view>
 
 namespace a2fo::craft_identity {
@@ -35,6 +36,19 @@ struct DirectionalShieldDisplayParseReport {
     bool display_mode_found = false;
     std::array<bool, 4> position_found{};
 };
+
+enum class DirectionalShieldValueDisplayMode : int {
+    none = 0,
+    percent = 1,
+    amount = 2,
+};
+
+// Formats one facing for the selected-Craft panel. Percentage mode emits a
+// rounded decimal without a percent sign; amount mode emits current/maximum.
+// Invalid values and mode 0 deliberately produce no text.
+bool format_directional_shield_value(
+    DirectionalShieldValueDisplayMode mode, float current, float maximum,
+    char* output, std::size_t output_size) noexcept;
 
 // Applies recognized assignments from one ART_CFG.h file to config. Calling
 // this repeatedly in extension-root order gives child roots normal override

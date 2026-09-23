@@ -1,5 +1,5 @@
 /*
- * ODF-driven Photon and Quantum Torpedo ammunition stores.
+ * ODF-driven Photon Torpedo, Quantum Torpedo, and Shuttle Craft stores.
  *
  * Weapon ODF costs are enforced once for each successfully launched projectile.
  * Craft stores recharge either continuously (mode 1) or only near an allied
@@ -50,8 +50,9 @@ using a2fo::energy_systems::Stores;
 
 constexpr char kModuleName[] = "A2FOEnergySystems";
 constexpr float kDefaultResupplyRange = 200.0f;
-constexpr std::uint32_t kSaveMagic = 0x45463241u;  // "A2FE"
-constexpr std::uint32_t kSaveVersion = 1;
+constexpr std::uint32_t kLegacySaveMagic = 0x45463241u;  // "A2FE"
+constexpr std::uint32_t kLegacySaveVersion = 1;
+constexpr std::uint32_t kSaveMagic = 0x33463241u;  // "A2F3"
 constexpr char kSaveLabel[] = "a2fo_torpedoStores";
 
 // ArmadaL.exe 1.1 / Fleet Operations Roots RVAs and stable object fields.
@@ -118,30 +119,36 @@ constexpr std::uint8_t kExpectedParameterDbGetColor[] = {
 constexpr std::uint8_t kExpectedDisplayInterfaceDrawTextInRectangle[] = {
     0x55, 0x8b, 0xec, 0x83, 0xec, 0x10};
 
-constexpr std::array<const char*, 9> kCraftFields{{
+constexpr std::array<const char*, 12> kCraftFields{{
     "maxPhotonTorpedoes",
     "photonTorpedoRate",
     "photonTorpedoRechargeMode",
     "maxQuantumTorpedoes",
     "quantumTorpedoRate",
     "quantumTorpedoRechargeMode",
+    "maxShuttleCraft",
+    "shuttleCraftRate",
+    "shuttleCraftRechargeMode",
     "torpedoResupply",
     "torpedoResupplyRange",
     "classLabel",
 }};
-constexpr std::array<const char*, 2> kWeaponFields{{
+constexpr std::array<const char*, 3> kWeaponFields{{
     "photonTorpedoCost",
     "quantumTorpedoCost",
+    "shuttleCraftCost",
 }};
 
 enum class Ammunition : std::uint8_t {
     photon,
     quantum,
+    shuttle_craft,
 };
 
 struct CraftPolicy {
     StorePolicy photon{};
     StorePolicy quantum{};
+    StorePolicy shuttle_craft{};
     bool provider = false;
     float provider_range = kDefaultResupplyRange;
 };
@@ -151,12 +158,22 @@ struct WeaponPolicy {
     float cost = 0.0f;
 };
 
+struct LegacySavedStores {
+    std::uint32_t magic;
+    std::uint32_t version;
+    float photon;
+    float quantum;
+};
+
 struct SavedStores {
     std::uint32_t magic = kSaveMagic;
-    std::uint32_t version = kSaveVersion;
     float photon = 0.0f;
     float quantum = 0.0f;
+    float shuttle_craft = 0.0f;
 };
+
+static_assert(sizeof(LegacySavedStores) == sizeof(SavedStores),
+              "ammunition save block must remain backward-compatible");
 
 struct RawRectangle {
     std::int32_t x = 0;
@@ -184,15 +201,19 @@ struct UiConfiguration {
     bool anchor_found = false;
     bool photon_rectangle_found = false;
     bool quantum_rectangle_found = false;
+    bool shuttle_craft_rectangle_found = false;
     RawRectangle anchor{};
     RawRectangle photon_rectangle{};
     RawRectangle quantum_rectangle{};
+    RawRectangle shuttle_craft_rectangle{};
     bool shared_colour_found = false;
     bool photon_colour_found = false;
     bool quantum_colour_found = false;
+    bool shuttle_craft_colour_found = false;
     Colour shared_colour{};
     Colour photon_colour{};
     Colour quantum_colour{};
+    Colour shuttle_craft_colour{};
 };
 
 using FileOutBytes = bool (__cdecl*)(
@@ -339,21 +360,29 @@ void refresh_ui_configuration(void* parameter_db) noexcept {
         loaded.quantum_rectangle_found = read_ui_rectangle(
             parameter_db, "infoSingleQuantumTorpedoesTextArea",
             &loaded.quantum_rectangle);
+        loaded.shuttle_craft_rectangle_found = read_ui_rectangle(
+            parameter_db, "infoSingleShuttleCraftTextArea",
+            &loaded.shuttle_craft_rectangle);
         loaded.shared_colour_found = read_ui_colour(
             parameter_db, "infoTextColor", &loaded.shared_colour);
         loaded.photon_colour_found = read_ui_colour(
             parameter_db, "photonTorpedoColor", &loaded.photon_colour);
         loaded.quantum_colour_found = read_ui_colour(
             parameter_db, "quantumTorpedoColor", &loaded.quantum_colour);
+        loaded.shuttle_craft_colour_found = read_ui_colour(
+            parameter_db, "shuttleCraftColor",
+            &loaded.shuttle_craft_colour);
     }
     g_ui_configuration = loaded;
 
     char message[256]{};
     std::snprintf(
         message, sizeof(message),
-        "Torpedo UI: Photon rectangle=%s, Quantum rectangle=%s",
+        "Ammunition UI: Photon rectangle=%s, Quantum rectangle=%s, Shuttle Craft rectangle=%s",
         loaded.photon_rectangle_found ? "configured" : "automatic",
-        loaded.quantum_rectangle_found ? "configured" : "automatic");
+        loaded.quantum_rectangle_found ? "configured" : "automatic",
+        loaded.shuttle_craft_rectangle_found
+            ? "configured" : "automatic");
     log_line(message);
 }
 
@@ -537,8 +566,17 @@ void A2FO_CALL craft_class_loaded_handler(
                 "quantumTorpedoRate", &policy.quantum.recharge_per_second);
     parse_mode(event->odf_fields, event->odf_field_count,
                "quantumTorpedoRechargeMode", &policy.quantum.mode);
+    parse_float(event->odf_fields, event->odf_field_count,
+                "maxShuttleCraft", &policy.shuttle_craft.maximum);
+    parse_float(event->odf_fields, event->odf_field_count,
+                "shuttleCraftRate",
+                &policy.shuttle_craft.recharge_per_second);
+    parse_mode(event->odf_fields, event->odf_field_count,
+               "shuttleCraftRechargeMode", &policy.shuttle_craft.mode);
     policy.photon = a2fo::energy_systems::normalize_policy(policy.photon);
     policy.quantum = a2fo::energy_systems::normalize_policy(policy.quantum);
+    policy.shuttle_craft = a2fo::energy_systems::normalize_policy(
+        policy.shuttle_craft);
     policy.provider = automatic_provider(
         event->odf_fields, event->odf_field_count);
     parse_bool(event->odf_fields, event->odf_field_count,
@@ -546,22 +584,26 @@ void A2FO_CALL craft_class_loaded_handler(
     parse_float(event->odf_fields, event->odf_field_count,
                 "torpedoResupplyRange", &policy.provider_range);
     if (policy.photon.maximum <= 0.0f && policy.quantum.maximum <= 0.0f &&
+        policy.shuttle_craft.maximum <= 0.0f &&
         !policy.provider) {
         return;
     }
     const bool has_store = a2fo::energy_systems::store_enabled(policy.photon) ||
-        a2fo::energy_systems::store_enabled(policy.quantum);
+        a2fo::energy_systems::store_enabled(policy.quantum) ||
+        a2fo::energy_systems::store_enabled(policy.shuttle_craft);
     if (has_store) {
         g_store_policies_present = true;
         if (a2fo::energy_systems::requires_resupply(policy.photon) ||
-            a2fo::energy_systems::requires_resupply(policy.quantum)) {
+            a2fo::energy_systems::requires_resupply(policy.quantum) ||
+            a2fo::energy_systems::requires_resupply(
+                policy.shuttle_craft)) {
             g_resupply_consumers_present = true;
         }
     }
     try {
         g_craft_policies[event->object_class] = policy;
     } catch (...) {
-        log_line("Could not retain a Craft torpedo-store policy");
+        log_line("Could not retain a Craft ammunition-store policy");
     }
 }
 
@@ -573,29 +615,40 @@ void A2FO_CALL weapon_class_loaded_handler(
     }
     float photon = 0.0f;
     float quantum = 0.0f;
+    float shuttle_craft = 0.0f;
     parse_float(event->odf_fields, event->odf_field_count,
                 "photonTorpedoCost", &photon);
     parse_float(event->odf_fields, event->odf_field_count,
                 "quantumTorpedoCost", &quantum);
-    if (photon <= 0.0f && quantum <= 0.0f) return;
-    if (photon > 0.0f && quantum > 0.0f) {
-        log_line("Ignored weapon with both Photon and Quantum torpedo costs");
+    parse_float(event->odf_fields, event->odf_field_count,
+                "shuttleCraftCost", &shuttle_craft);
+    const int configured_costs = (photon > 0.0f ? 1 : 0) +
+        (quantum > 0.0f ? 1 : 0) + (shuttle_craft > 0.0f ? 1 : 0);
+    if (configured_costs == 0) return;
+    if (configured_costs != 1) {
+        log_line("Ignored weapon with more than one ammunition cost");
         return;
     }
+    const Ammunition ammunition = photon > 0.0f
+        ? Ammunition::photon
+        : quantum > 0.0f
+            ? Ammunition::quantum : Ammunition::shuttle_craft;
+    const float cost = photon > 0.0f
+        ? photon : quantum > 0.0f ? quantum : shuttle_craft;
+    const char* name = photon > 0.0f
+        ? "Photon Torpedo" : quantum > 0.0f
+            ? "Quantum Torpedo" : "Shuttle Craft";
     try {
         g_weapon_policies[event->weapon_class] = WeaponPolicy{
-            photon > 0.0f ? Ammunition::photon : Ammunition::quantum,
-            photon > 0.0f ? photon : quantum};
+            ammunition, cost};
         char message[192]{};
         std::snprintf(
             message, sizeof(message),
-            "Registered %s torpedo cost %.3f on WeaponClass %p",
-            photon > 0.0f ? "Photon" : "Quantum",
-            photon > 0.0f ? photon : quantum,
-            event->weapon_class);
+            "Registered %s cost %.3f on WeaponClass %p",
+            name, cost, event->weapon_class);
         log_line(message);
     } catch (...) {
-        log_line("Could not retain a weapon torpedo-cost policy");
+        log_line("Could not retain a weapon ammunition-cost policy");
     }
 }
 
@@ -614,12 +667,14 @@ Stores* stores_for_craft(void* craft, bool create) noexcept {
     if (!create) return nullptr;
     const CraftPolicy* policy = policy_for_craft(craft);
     if (!policy || (policy->photon.maximum <= 0.0f &&
-                    policy->quantum.maximum <= 0.0f)) {
+                    policy->quantum.maximum <= 0.0f &&
+                    policy->shuttle_craft.maximum <= 0.0f)) {
         return nullptr;
     }
     try {
         const auto inserted = g_craft_stores.emplace(
-            craft, Stores{policy->photon.maximum, policy->quantum.maximum});
+            craft, Stores{policy->photon.maximum, policy->quantum.maximum,
+                          policy->shuttle_craft.maximum});
         return inserted.second ? &inserted.first->second : nullptr;
     } catch (...) {
         return nullptr;
@@ -665,7 +720,7 @@ void A2FO_CALL craft_event_handler(
         return;
     }
     // Automatic shipyard/repair providers are inert when the active mod has
-    // no configured torpedo stores. This avoids a class read and hash lookup
+    // no configured ammunition stores. This avoids a class read and hash lookup
     // for every craft on both sides of every simulation tick in stock mods.
     if ((event->kind == A2FO_CRAFT_EVENT_SIMULATE_PRE ||
          event->kind == A2FO_CRAFT_EVENT_SIMULATE_POST) &&
@@ -682,7 +737,8 @@ void A2FO_CALL craft_event_handler(
             }
         }
         if (!a2fo::energy_systems::store_enabled(policy->photon) &&
-            !a2fo::energy_systems::store_enabled(policy->quantum)) {
+            !a2fo::energy_systems::store_enabled(policy->quantum) &&
+            !a2fo::energy_systems::store_enabled(policy->shuttle_craft)) {
             return;
         }
         stores_for_craft(craft, true);
@@ -696,7 +752,8 @@ void A2FO_CALL craft_event_handler(
             }
         }
         if (!a2fo::energy_systems::store_enabled(policy->photon) &&
-            !a2fo::energy_systems::store_enabled(policy->quantum)) {
+            !a2fo::energy_systems::store_enabled(policy->quantum) &&
+            !a2fo::energy_systems::store_enabled(policy->shuttle_craft)) {
             return;
         }
         stores_for_craft(craft, true);
@@ -704,19 +761,24 @@ void A2FO_CALL craft_event_handler(
     }
     if (event->kind != A2FO_CRAFT_EVENT_SIMULATE_POST) return;
     if (!a2fo::energy_systems::store_enabled(policy->photon) &&
-        !a2fo::energy_systems::store_enabled(policy->quantum)) {
+        !a2fo::energy_systems::store_enabled(policy->quantum) &&
+        !a2fo::energy_systems::store_enabled(policy->shuttle_craft)) {
         return;
     }
     Stores* stores = stores_for_craft(craft, true);
     if (!stores) return;
     const bool requires_provider =
         policy->photon.mode == RechargeMode::resupply_only ||
-        policy->quantum.mode == RechargeMode::resupply_only;
+        policy->quantum.mode == RechargeMode::resupply_only ||
+        policy->shuttle_craft.mode == RechargeMode::resupply_only;
     const bool supplied = !requires_provider || in_resupply_range(craft);
     stores->photon = a2fo::energy_systems::recharge(
         stores->photon, policy->photon, event->elapsed_seconds, supplied);
     stores->quantum = a2fo::energy_systems::recharge(
         stores->quantum, policy->quantum, event->elapsed_seconds, supplied);
+    stores->shuttle_craft = a2fo::energy_systems::recharge(
+        stores->shuttle_craft, policy->shuttle_craft,
+        event->elapsed_seconds, supplied);
 }
 
 const WeaponPolicy* policy_for_weapon(const void* weapon) noexcept {
@@ -732,8 +794,15 @@ float* ammunition_amount_for_weapon(
         at(kWeaponGetOwnerRva), weapon));
     Stores* stores = stores_for_craft(owner, true);
     if (!stores) return nullptr;
-    return policy.ammunition == Ammunition::photon
-        ? &stores->photon : &stores->quantum;
+    switch (policy.ammunition) {
+        case Ammunition::photon:
+            return &stores->photon;
+        case Ammunition::quantum:
+            return &stores->quantum;
+        case Ammunition::shuttle_craft:
+            return &stores->shuttle_craft;
+    }
+    return nullptr;
 }
 
 bool ammunition_allows_selection(void* weapon) noexcept {
@@ -869,6 +938,7 @@ std::uintptr_t __attribute__((fastcall)) craft_save_hook(
     SavedStores saved{};
     saved.photon = stores->photon;
     saved.quantum = stores->quantum;
+    saved.shuttle_craft = stores->shuttle_craft;
     const auto out = reinterpret_cast<FileOutBytes>(at(kFileOutBytesRva));
     return out && out(writer, &saved, sizeof(saved), kSaveLabel) ? 1u : 0u;
 }
@@ -885,17 +955,35 @@ std::uintptr_t __attribute__((fastcall)) craft_load_hook(
     if (!stores) return native_loaded;
     SavedStores saved{};
     const auto in = reinterpret_cast<FileInBytes>(at(kFileInBytesRva));
-    if (!in || !in(reader, &saved, sizeof(saved)) ||
-        saved.magic != kSaveMagic || saved.version != kSaveVersion) {
-        log_line("Torpedo-store save data is missing or invalid");
+    if (!in || !in(reader, &saved, sizeof(saved))) {
+        log_line("Ammunition-store save data is missing or invalid");
         return 0u;
     }
     const CraftPolicy* policy = policy_for_craft(craft);
     if (!policy) return native_loaded;
-    stores->photon = a2fo::energy_systems::clamp_amount(
-        saved.photon, policy->photon);
-    stores->quantum = a2fo::energy_systems::clamp_amount(
-        saved.quantum, policy->quantum);
+    if (saved.magic == kSaveMagic) {
+        stores->photon = a2fo::energy_systems::clamp_amount(
+            saved.photon, policy->photon);
+        stores->quantum = a2fo::energy_systems::clamp_amount(
+            saved.quantum, policy->quantum);
+        stores->shuttle_craft = a2fo::energy_systems::clamp_amount(
+            saved.shuttle_craft, policy->shuttle_craft);
+    } else {
+        LegacySavedStores legacy{};
+        std::memcpy(&legacy, &saved, sizeof(legacy));
+        if (legacy.magic != kLegacySaveMagic ||
+            legacy.version != kLegacySaveVersion) {
+            log_line("Ammunition-store save data is missing or invalid");
+            return 0u;
+        }
+        stores->photon = a2fo::energy_systems::clamp_amount(
+            legacy.photon, policy->photon);
+        stores->quantum = a2fo::energy_systems::clamp_amount(
+            legacy.quantum, policy->quantum);
+        // Legacy blocks predate Shuttle Craft. stores_for_craft() initialized
+        // the new store at its configured maximum, which is the least
+        // surprising migration for an existing save.
+    }
     return native_loaded;
 }
 
@@ -984,15 +1072,29 @@ bool install_ammunition_shot_hooks() noexcept {
 float current_amount(void* craft, Ammunition ammunition) noexcept {
     Stores* stores = stores_for_craft(craft, true);
     if (!stores) return 0.0f;
-    return ammunition == Ammunition::photon
-        ? stores->photon : stores->quantum;
+    switch (ammunition) {
+        case Ammunition::photon:
+            return stores->photon;
+        case Ammunition::quantum:
+            return stores->quantum;
+        case Ammunition::shuttle_craft:
+            return stores->shuttle_craft;
+    }
+    return 0.0f;
 }
 
 float maximum_amount(void* craft, Ammunition ammunition) noexcept {
     const CraftPolicy* policy = policy_for_craft(craft);
     if (!policy) return 0.0f;
-    return ammunition == Ammunition::photon
-        ? policy->photon.maximum : policy->quantum.maximum;
+    switch (ammunition) {
+        case Ammunition::photon:
+            return policy->photon.maximum;
+        case Ammunition::quantum:
+            return policy->quantum.maximum;
+        case Ammunition::shuttle_craft:
+            return policy->shuttle_craft.maximum;
+    }
+    return 0.0f;
 }
 
 float remaining_reload_seconds(
@@ -1000,26 +1102,46 @@ float remaining_reload_seconds(
     Stores* stores = stores_for_craft(craft, true);
     const CraftPolicy* policy = policy_for_craft(craft);
     if (!stores || !policy) return -1.0f;
-    const StorePolicy& store_policy = ammunition == Ammunition::photon
-        ? policy->photon : policy->quantum;
-    const float amount = ammunition == Ammunition::photon
-        ? stores->photon : stores->quantum;
-    const bool supplied = store_policy.mode != RechargeMode::resupply_only ||
+    const StorePolicy* store_policy = nullptr;
+    float amount = 0.0f;
+    switch (ammunition) {
+        case Ammunition::photon:
+            store_policy = &policy->photon;
+            amount = stores->photon;
+            break;
+        case Ammunition::quantum:
+            store_policy = &policy->quantum;
+            amount = stores->quantum;
+            break;
+        case Ammunition::shuttle_craft:
+            store_policy = &policy->shuttle_craft;
+            amount = stores->shuttle_craft;
+            break;
+    }
+    if (!store_policy) return -1.0f;
+    const bool supplied = store_policy->mode != RechargeMode::resupply_only ||
         in_resupply_range(craft);
     return a2fo::energy_systems::reload_seconds(
-        amount, store_policy, supplied);
+        amount, *store_policy, supplied);
 }
 
 void set_amount(void* craft, Ammunition ammunition, float amount) noexcept {
     Stores* stores = stores_for_craft(craft, true);
     const CraftPolicy* policy = policy_for_craft(craft);
     if (!stores || !policy) return;
-    if (ammunition == Ammunition::photon) {
-        stores->photon = a2fo::energy_systems::clamp_amount(
-            amount, policy->photon);
-    } else {
-        stores->quantum = a2fo::energy_systems::clamp_amount(
-            amount, policy->quantum);
+    switch (ammunition) {
+        case Ammunition::photon:
+            stores->photon = a2fo::energy_systems::clamp_amount(
+                amount, policy->photon);
+            break;
+        case Ammunition::quantum:
+            stores->quantum = a2fo::energy_systems::clamp_amount(
+                amount, policy->quantum);
+            break;
+        case Ammunition::shuttle_craft:
+            stores->shuttle_craft = a2fo::energy_systems::clamp_amount(
+                amount, policy->shuttle_craft);
+            break;
     }
 }
 
@@ -1044,7 +1166,8 @@ void A2FO_CALL selected_info_render_handler(
     void* craft = selected_craft;
     const CraftPolicy* policy = policy_for_craft(craft);
     if (!policy || (policy->photon.maximum <= 0.0f &&
-                    policy->quantum.maximum <= 0.0f)) {
+                    policy->quantum.maximum <= 0.0f &&
+                    policy->shuttle_craft.maximum <= 0.0f)) {
         return;
     }
     Stores* stores = stores_for_craft(craft, true);
@@ -1065,10 +1188,13 @@ void A2FO_CALL selected_info_render_handler(
 
     NativeRectangle photon_rectangle = anchor;
     NativeRectangle quantum_rectangle = anchor;
+    NativeRectangle shuttle_craft_rectangle = anchor;
     photon_rectangle.top += 56;
     photon_rectangle.bottom += 56;
     quantum_rectangle.top += 84;
     quantum_rectangle.bottom += 84;
+    shuttle_craft_rectangle.top += 112;
+    shuttle_craft_rectangle.bottom += 112;
     if (g_ui_configuration.anchor_found &&
         g_ui_configuration.photon_rectangle_found) {
         photon_rectangle = translated_rectangle(
@@ -1081,6 +1207,12 @@ void A2FO_CALL selected_info_render_handler(
             anchor, g_ui_configuration.anchor,
             g_ui_configuration.quantum_rectangle);
     }
+    if (g_ui_configuration.anchor_found &&
+        g_ui_configuration.shuttle_craft_rectangle_found) {
+        shuttle_craft_rectangle = translated_rectangle(
+            anchor, g_ui_configuration.anchor,
+            g_ui_configuration.shuttle_craft_rectangle);
+    }
 
     const Colour native_colour = text_component_colour(text_component);
     const Colour shared_colour = g_ui_configuration.shared_colour_found
@@ -1089,10 +1221,14 @@ void A2FO_CALL selected_info_render_handler(
         ? g_ui_configuration.photon_colour : shared_colour;
     const Colour quantum_colour = g_ui_configuration.quantum_colour_found
         ? g_ui_configuration.quantum_colour : shared_colour;
+    const Colour shuttle_craft_colour =
+        g_ui_configuration.shuttle_craft_colour_found
+            ? g_ui_configuration.shuttle_craft_colour : shared_colour;
     const bool supplied = in_resupply_range(craft);
 
     char photon_text[128]{};
     char quantum_text[128]{};
+    char shuttle_craft_text[128]{};
     if (policy->photon.maximum > 0.0f) {
         std::snprintf(
             photon_text, sizeof(photon_text),
@@ -1112,6 +1248,17 @@ void A2FO_CALL selected_info_render_handler(
             recharge_status(policy->quantum.mode, supplied));
         draw_ammunition_text(
             quantum_text, quantum_rectangle, quantum_colour, text_component);
+    }
+    if (policy->shuttle_craft.maximum > 0.0f) {
+        std::snprintf(
+            shuttle_craft_text, sizeof(shuttle_craft_text),
+            "Shuttle Craft: %d/%d  [%s]",
+            whole_ammunition_amount(stores->shuttle_craft),
+            whole_ammunition_amount(policy->shuttle_craft.maximum),
+            recharge_status(policy->shuttle_craft.mode, supplied));
+        draw_ammunition_text(
+            shuttle_craft_text, shuttle_craft_rectangle,
+            shuttle_craft_colour, text_component);
     }
 }
 
@@ -1208,13 +1355,13 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     g_ui_ready = kSelectedInfoUiEnabled && native_ui_ready &&
         register_selected_info_observer();
     log_line(g_persistence_ready
-        ? "Per-shot Photon and Quantum torpedo stores initialized with save/load support"
-        : "Per-shot Photon and Quantum torpedo stores initialized; save/load hooks unavailable");
+        ? "Per-shot Photon Torpedo, Quantum Torpedo, and Shuttle Craft stores initialized with save/load support"
+        : "Per-shot Photon Torpedo, Quantum Torpedo, and Shuttle Craft stores initialized; save/load hooks unavailable");
     log_line(g_ui_ready
-        ? "Selected-craft Photon and Quantum torpedo UI initialized"
+        ? "Selected-craft three-store ammunition UI initialized"
         : kSelectedInfoUiEnabled
-            ? "Selected-craft torpedo UI unavailable; CraftIdentity observer or native draw signatures did not match"
-            : "Direct torpedo UI renderer disabled; CraftIdentity may display exported ammunition values");
+            ? "Selected-craft ammunition UI unavailable; CraftIdentity observer or native draw signatures did not match"
+            : "Direct ammunition UI renderer disabled; CraftIdentity may display exported ammunition values");
     return true;
 }
 
@@ -1229,6 +1376,11 @@ float A2FO_CALL A2FOEnergySystems_GetQuantumTorpedoes(void* craft) {
 }
 
 extern "C" __declspec(dllexport)
+float A2FO_CALL A2FOEnergySystems_GetShuttleCraft(void* craft) {
+    return current_amount(craft, Ammunition::shuttle_craft);
+}
+
+extern "C" __declspec(dllexport)
 float A2FO_CALL A2FOEnergySystems_GetMaximumPhotonTorpedoes(void* craft) {
     return maximum_amount(craft, Ammunition::photon);
 }
@@ -1239,6 +1391,11 @@ float A2FO_CALL A2FOEnergySystems_GetMaximumQuantumTorpedoes(void* craft) {
 }
 
 extern "C" __declspec(dllexport)
+float A2FO_CALL A2FOEnergySystems_GetMaximumShuttleCraft(void* craft) {
+    return maximum_amount(craft, Ammunition::shuttle_craft);
+}
+
+extern "C" __declspec(dllexport)
 float A2FO_CALL A2FOEnergySystems_GetPhotonTorpedoReloadSeconds(void* craft) {
     return remaining_reload_seconds(craft, Ammunition::photon);
 }
@@ -1246,6 +1403,11 @@ float A2FO_CALL A2FOEnergySystems_GetPhotonTorpedoReloadSeconds(void* craft) {
 extern "C" __declspec(dllexport)
 float A2FO_CALL A2FOEnergySystems_GetQuantumTorpedoReloadSeconds(void* craft) {
     return remaining_reload_seconds(craft, Ammunition::quantum);
+}
+
+extern "C" __declspec(dllexport)
+float A2FO_CALL A2FOEnergySystems_GetShuttleCraftReloadSeconds(void* craft) {
+    return remaining_reload_seconds(craft, Ammunition::shuttle_craft);
 }
 
 extern "C" __declspec(dllexport)
@@ -1261,6 +1423,12 @@ void A2FO_CALL A2FOEnergySystems_SetQuantumTorpedoes(
 }
 
 extern "C" __declspec(dllexport)
+void A2FO_CALL A2FOEnergySystems_SetShuttleCraft(
+    void* craft, float amount) {
+    set_amount(craft, Ammunition::shuttle_craft, amount);
+}
+
+extern "C" __declspec(dllexport)
 void A2FO_CALL A2FOEnergySystems_AddPhotonTorpedoes(
     void* craft, float amount) {
     set_amount(craft, Ammunition::photon,
@@ -1272,6 +1440,13 @@ void A2FO_CALL A2FOEnergySystems_AddQuantumTorpedoes(
     void* craft, float amount) {
     set_amount(craft, Ammunition::quantum,
                current_amount(craft, Ammunition::quantum) + amount);
+}
+
+extern "C" __declspec(dllexport)
+void A2FO_CALL A2FOEnergySystems_AddShuttleCraft(
+    void* craft, float amount) {
+    set_amount(craft, Ammunition::shuttle_craft,
+               current_amount(craft, Ammunition::shuttle_craft) + amount);
 }
 
 extern "C" __declspec(dllexport)

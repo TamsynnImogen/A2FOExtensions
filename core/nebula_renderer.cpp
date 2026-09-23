@@ -12,8 +12,10 @@
  */
 
 #include "nebula_renderer.hpp"
+#include "amd_dot3_compat.hpp"
 #include "com_owner.hpp"
 #include "nebula_emissive.hpp"
+#include "renderer_draw_policy.hpp"
 #include "renderer_options.hpp"
 #include "decal_math.hpp"
 #include "hook.hpp"
@@ -25,6 +27,7 @@
 #include <array>
 #include <algorithm>
 #include <cstdint>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -32,6 +35,8 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 #undef INTERFACE
@@ -46,6 +51,8 @@ DECLARE_INTERFACE_(ID3DXBuffer, IUnknown) {
 #undef INTERFACE
 
 extern "C" {
+std::uintptr_t __cdecl a2fo_nebula_call_thiscall_0(
+    void* function, void* self);
 std::uintptr_t __cdecl a2fo_nebula_call_thiscall_1(
     void* function, void* self, std::uintptr_t argument1);
 std::uintptr_t __cdecl a2fo_nebula_call_thiscall_2(
@@ -63,7 +70,9 @@ void a2fo_nebula_frame_bloom_hook();
 void a2fo_nebula_device_reset_hook();
 void a2fo_nebula_device_destroy_hook();
 void a2fo_nebula_dot3_draw_hook();
+void a2fo_nebula_fleetops_dot3_light_draw_hook();
 void a2fo_nebula_fleetops_dot3_draw_hook();
+void a2fo_nebula_mesh_selector_hook();
 
 // Read by the assembly continuation after its helper has restored all
 // registers and flags from the original Fleet Operations render function.
@@ -80,13 +89,19 @@ void* g_a2fo_nebula_device_reset_gateway = nullptr;
 void* g_a2fo_nebula_device_destroy_gateway = nullptr;
 void* g_a2fo_nebula_dot3_draw_gateway = nullptr;
 void* g_a2fo_nebula_dot3_draw_return = nullptr;
+void* g_a2fo_nebula_fleetops_dot3_light_draw_return = nullptr;
 void* g_a2fo_nebula_fleetops_dot3_draw_return = nullptr;
+void* g_a2fo_nebula_mesh_selector_fast = nullptr;
+void* g_a2fo_nebula_mesh_selector_legacy = nullptr;
 }
 
 namespace {
 
 using AssembleShaderFromFile = HRESULT (WINAPI*)(
     LPCSTR file_name, DWORD flags, ID3DXBuffer** constants,
+    ID3DXBuffer** compiled_shader, ID3DXBuffer** compilation_errors);
+using AssembleShaderFromFile9 = HRESULT (WINAPI*)(
+    LPCSTR file_name, const void* defines, void* include, DWORD flags,
     ID3DXBuffer** compiled_shader, ID3DXBuffer** compilation_errors);
 using CreateTextureFromFileEx = HRESULT (WINAPI*)(
     IDirect3DDevice8* device, LPCSTR file_name, UINT width, UINT height,
@@ -95,6 +110,10 @@ using CreateTextureFromFileEx = HRESULT (WINAPI*)(
     void* source_info, PALETTEENTRY* palette,
     IDirect3DTexture8** texture);
 using CompileDot3Mesh = void* (__cdecl*)(const void* mesh);
+using EnsureDot3Shader = void (__cdecl*)();
+using CreateDirectD3d9Dot3Shader = HRESULT (WINAPI*)(
+    void* device, const DWORD* declaration, const DWORD* function,
+    DWORD* handle, DWORD usage);
 
 constexpr const char* kModuleName = "A2FONebulaRenderer";
 constexpr std::uint32_t kFleetOpsTimestamp = 0x51f6475c;
@@ -102,14 +121,45 @@ constexpr std::uint32_t kFleetOpsImageSize = 0x00322000;
 
 // Supported Armada II 1.1 / Fleet Operations Roots renderer locations.
 constexpr std::uintptr_t kCompileDot3MeshRva = 0x00226e50;
+constexpr std::uintptr_t kEnsureDot3ShaderRva = 0x00227200;
+// ST3D_Mesh::Render selects MeshVB or RenderInternalNonVB here. The bridge
+// preserves the native decision except for the narrowly scoped fast non-bump
+// alpha transition described by kTextureMaterialSetRenderStateZSortRva.
+constexpr std::uintptr_t kMeshRenderSelectorRva = 0x002327cf;
+constexpr std::uintptr_t kMeshRenderSelectorFastRva = 0x002327f2;
+constexpr std::uintptr_t kMeshRenderSelectorLegacyRva = 0x00232808;
+// ST3D_TextureMaterial::SetRenderState_ZSort applies the engine's own alpha
+// transition multiplier and z-sort blend pair directly. It normally runs only
+// when the CPU sorter flushes; the compatibility selector invokes it before a
+// whole-material MeshVB draw for native-opaque materials.
+constexpr std::uintptr_t kTextureMaterialSetRenderStateZSortRva = 0x00244880;
 constexpr std::uintptr_t kGetShaderHandleRva = 0x0022c270;
 constexpr std::uintptr_t kGetShaderHandleRouteRva = 0x00210bb4;
 constexpr std::uintptr_t kGraphicsEnginePointerRva = 0x003ad508;
+constexpr std::uintptr_t kDot3ShaderHandleRva = 0x0032b52c;
+constexpr std::uintptr_t kDot3DeclarationRva = 0x0032b530;
+// Armada's two native DOT3 assembly calls share this source path. The AMD
+// compatibility path changes it only as a matched pair with
+// kDot3DeclarationRva, before the shared shader is created. Fleet Ops' direct
+// D3D9 `dot3_directional9.nvv` callback is deliberately outside this path.
+constexpr std::uintptr_t kDot3ShaderPathRva = 0x0032b580;
+// Fleet Operations' /d3d9 implementation creates its shared DOT3
+// IDirect3DVertexDeclaration9 and IDirect3DVertexShader9 together here. This
+// is separate from Armada's D3D8 declaration and from the external d3d8to9
+// wrapper used by the normal System backend.
+constexpr std::uintptr_t kDirectD3d9Dot3CreateRva = 0x001f1474;
+constexpr std::uintptr_t kDirectD3d9VertexShaderRva = 0x00249278;
+constexpr std::uintptr_t kDirectD3d9VertexDeclarationRva = 0x0024927c;
 constexpr std::uintptr_t kAlphaTransitionRva = 0x001e67d1;
 // Fleet Operations replaces ST3D_Dot3_MeshVB::Render and submits its primary
 // indexed draw here. Its final diffuse bind occurs immediately before this
 // call; hooking Armada's original DOT3 draw therefore cannot see FO meshes.
 constexpr std::uintptr_t kFleetOpsDot3DrawRva = 0x001e67c8;
+// Fleet Operations' native per-light DOT3 helper submits here after updating
+// c6 and the light-colour texture factor.  A bump-off-only hook can retain its
+// indexed MeshVB submission while selecting equivalent fixed flat-normal
+// tangent-space lighting.
+constexpr std::uintptr_t kFleetOpsDot3LightDrawRva = 0x001e62ec;
 // Armada2.map section offsets 0x23d4ea/0x23d5aa plus the PE .text RVA.
 constexpr std::uintptr_t kStandardMeshPreDrawRva = 0x0023e4ea;
 constexpr std::uintptr_t kStandardMeshPostDrawRva = 0x0023e5aa;
@@ -170,9 +220,18 @@ constexpr DWORD kSpecularOverlayTextureFactor = 0xff404040u;
 constexpr std::size_t kCurrentDeviceIndexOffset = 0xc0;
 constexpr std::size_t kDeviceWrapperTableOffset = 0xcc;
 constexpr std::size_t kStormDeviceOffset = 0x90;
+constexpr std::size_t kStormCurrentMaterialOffset = 0x44;
+// ST3D_TextureMaterial's virtual alpha updater publishes the material alpha,
+// including the current object's cloak/construction multiplier, here before
+// MeshVB selection. Native CPU workspace vertices consume it directly; the
+// fast non-bump vertex shader must receive the same value in c0.w.
+constexpr std::size_t kStormMaterialAlphaOffset = 0x48;
 constexpr std::uint32_t kMaximumStormDeviceCount = 2;
 constexpr std::size_t kRequiredD3D8VtableEntries = 93;
 constexpr std::size_t kSetTextureVtableIndex = 61;
+constexpr std::size_t kCreateVertexShaderVtableIndex = 73;
+constexpr std::size_t kSetVertexShaderVtableIndex = 74;
+constexpr std::size_t kDeleteVertexShaderVtableIndex = 76;
 constexpr std::size_t kSetPixelShaderVtableIndex = 88;
 constexpr std::size_t kDeletePixelShaderVtableIndex = 90;
 constexpr std::size_t kStorm3DEngineOffset = 0x44;
@@ -240,6 +299,34 @@ bool g_dxvk_backend_active = false;
 bool g_dxvk_backend_ini_claimed = false;
 bool g_dxvk_backend_payload_detected = false;
 bool g_mapped_texture_cloak_diagnostics_enabled = false;
+bool g_renderer_route_diagnostics_enabled = false;
+unsigned long g_fast_alpha_meshvb_mode = 1;
+bool g_neutral_bump_when_cloaked = true;
+thread_local unsigned g_fast_unmapped_draw_depth = 0;
+volatile LONG g_logged_cloak_flat_normal = 0;
+std::uint32_t g_route_sample_frames = 0;
+std::uint64_t g_route_standard_boundaries = 0;
+std::uint64_t g_route_nonvb_passes = 0;
+std::uint64_t g_route_nonvb_submissions = 0;
+std::uint64_t g_route_nonvb_triangles = 0;
+std::uint64_t g_route_workspace_draws = 0;
+std::uint64_t g_route_workspace_triangles = 0;
+std::uint64_t g_route_armada_dot3_draws = 0;
+std::uint64_t g_route_armada_dot3_triangles = 0;
+std::uint64_t g_route_fleetops_dot3_draws = 0;
+std::uint64_t g_route_fleetops_dot3_triangles = 0;
+std::uint64_t g_route_selector_no_mesh_vb = 0;
+std::uint64_t g_route_selector_eligibility_reject = 0;
+std::uint64_t g_route_selector_polygon_sort_reject = 0;
+std::uint64_t g_route_selector_external_reject = 0;
+std::uint64_t g_route_selector_fast = 0;
+std::uint64_t g_route_selector_alpha_fast = 0;
+std::uint64_t g_route_selector_alpha_opaque_fast = 0;
+std::uint64_t g_route_selector_alpha_additive_fast = 0;
+std::uint64_t g_route_selector_alpha_aggressive_fast = 0;
+volatile LONG g_logged_fast_nonbump_alpha_meshvb = 0;
+volatile LONG g_logged_fast_nonbump_additive_meshvb = 0;
+volatile LONG g_logged_fast_nonbump_aggressive_meshvb = 0;
 // Derived emissive composites are D3DPOOL_MANAGED, so every cached surface can
 // occupy both process RAM and VRAM. Keep common live states hot without
 // retaining every subsystem-mask/motion combination ever observed.
@@ -250,12 +337,23 @@ constexpr std::size_t kEmissiveCompositeCacheBudgetBytes =
 constexpr std::array<std::uint8_t, 10> kExpectedCompileDot3Mesh{
     0x55, 0x8b, 0xec, 0x6a, 0xff,
     0x68, 0xcb, 0xba, 0x6a, 0x00};
+constexpr std::array<std::uint8_t, 8> kExpectedMeshRenderSelector{
+    0x8b, 0x8e, 0x28, 0x01, 0x00, 0x00, 0x85, 0xc9};
+constexpr std::array<std::uint8_t, 9>
+    kExpectedTextureMaterialSetRenderStateZSort{
+        0xa1, 0x08, 0xd5, 0x7a, 0x00, 0x56, 0x57, 0x8b, 0xf9};
+constexpr std::array<std::uint8_t, 6> kExpectedEnsureDot3Shader{
+    0x55, 0x8b, 0xec, 0x83, 0xec, 0x08};
+constexpr std::array<std::uint8_t, 7> kExpectedDirectD3d9Dot3Create{
+    0x55, 0x8b, 0xec, 0x53, 0x8b, 0x5d, 0x08};
 constexpr std::array<std::uint8_t, 6> kExpectedGetShaderHandle{
     0x55, 0x8b, 0xec, 0x8b, 0x45, 0x08};
 constexpr std::array<std::uint8_t, 13> kExpectedAlphaTransition{
     0x8b, 0x40, 0x0c,
     0xf7, 0x80, 0x2c, 0x01, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00};
 constexpr std::array<std::uint8_t, 6> kExpectedFleetOpsDot3Draw{
+    0xff, 0x90, 0x1c, 0x01, 0x00, 0x00};
+constexpr std::array<std::uint8_t, 6> kExpectedFleetOpsDot3LightDraw{
     0xff, 0x90, 0x1c, 0x01, 0x00, 0x00};
 constexpr std::array<std::uint8_t, 8> kExpectedStandardMeshPreDraw{
     0x8b, 0x16, 0x8b, 0x0d, 0x08, 0xd5, 0x7a, 0x00};
@@ -295,7 +393,13 @@ volatile LONG g_logged_device_destroy_release = 0;
 volatile LONG g_logged_device_cleanup_method_unavailable = 0;
 volatile LONG g_logged_native_dot3_preserved = 0;
 volatile LONG g_pixel_shader_rejected = 0;
+volatile LONG g_system_dot3_compat_attempted = 0;
+volatile LONG g_direct_d3d9_adapter_logged = 0;
+volatile LONG g_direct_d3d9_dot3_compat_logged = 0;
+volatile LONG g_direct_d3d9_dot3_native_logged = 0;
 a2fo::InlineHook g_compile_hook{};
+a2fo::InlineHook g_ensure_dot3_shader_hook{};
+a2fo::InlineHook g_direct_d3d9_dot3_create_hook{};
 a2fo::InlineHook g_alpha_hook{};
 a2fo::InlineHook g_standard_pre_hook{};
 a2fo::InlineHook g_standard_post_hook{};
@@ -307,23 +411,41 @@ a2fo::InlineHook g_frame_bloom_hook{};
 a2fo::InlineHook g_device_reset_hook{};
 a2fo::InlineHook g_device_destroy_hook{};
 a2fo::InlineHook g_dot3_draw_hook{};
+a2fo::InlineHook g_fleetops_dot3_light_draw_hook{};
 a2fo::InlineHook g_fleetops_dot3_draw_hook{};
 bool g_hooks_ready = false;
+bool g_system_dot3_compat_armed = false;
+bool g_system_dot3_compat_applied = false;
+bool g_direct_d3d9_dot3_compat_armed = false;
+a2fo::amd_dot3::Policy g_system_dot3_compat_policy =
+    a2fo::amd_dot3::Policy::automatic;
 void* g_compile_original = nullptr;
+void* g_ensure_dot3_shader_original = nullptr;
+void* g_direct_d3d9_dot3_create_original = nullptr;
 void* g_get_shader_handle_original = nullptr;
 IDirect3DDevice8* g_device = nullptr;
 DWORD g_pixel_shader = 0;
 DWORD g_specular_pixel_shader = 0;
+DWORD g_fast_nonbump_vertex_shader = 0;
 float g_emissive_bump_multiplier = 1.0f;
 float g_bump_light_bias = 0.2f;
 float g_emissive_diffuse_restore = 0.0f;
 ID3DXBuffer* g_compiled_pixel_shader = nullptr;
 ID3DXBuffer* g_compiled_specular_pixel_shader = nullptr;
+ID3DXBuffer* g_compiled_fast_nonbump_vertex_shader = nullptr;
 AssembleShaderFromFile g_assemble_shader = nullptr;
 CreateTextureFromFileEx g_create_texture_from_file = nullptr;
 std::string g_pixel_shader_path;
 std::string g_specular_pixel_shader_path;
+std::string g_fast_nonbump_vertex_shader_path;
 std::string g_root_directory;
+volatile LONG g_fast_nonbump_enabled = 0;
+volatile LONG g_fast_nonbump_shader_rejected = 0;
+volatile LONG g_logged_fast_nonbump_compile_failure = 0;
+volatile LONG g_logged_fast_nonbump_create_failure = 0;
+volatile LONG g_logged_fast_nonbump_draw = 0;
+volatile LONG g_logged_fast_nonbump_dynamic_alpha = 0;
+volatile LONG g_logged_fast_nonbump_final_alpha_state = 0;
 
 struct SparseEmissivePixel {
     std::uint32_t index = 0;
@@ -439,6 +561,13 @@ volatile LONG g_logged_logo_decal_policy_render = 0;
 IDirect3DTexture8* g_black_emissive_texture = nullptr;
 std::unordered_map<IDirect3DBaseTexture8*, std::string>
     g_diffuse_texture_keys;
+// Ownership-aware diffuse variants are selected by optional modules immediately
+// before a craft is drawn.  Keep the suffixes here as renderer policy so the
+// mapped-lighting lookup can fall back from e.g. ship_b -> ship without
+// guessing from arbitrary underscores in ordinary texture names.
+std::unordered_set<std::string> g_faction_texture_suffixes{"_b"};
+volatile LONG g_logged_faction_emissive_fallback = 0;
+volatile LONG g_logged_faction_specular_fallback = 0;
 thread_local std::array<void*, kCraftRenderStackCapacity>
     g_craft_render_stack{};
 thread_local std::size_t g_craft_render_depth = 0;
@@ -500,6 +629,41 @@ thread_local std::array<StandardTextureStageState,
     g_dot3_state_stack{};
 thread_local std::size_t g_dot3_state_depth = 0;
 thread_local std::size_t g_dot3_state_overflow = 0;
+
+struct FastNonBumpDrawState {
+    IDirect3DDevice8* device = nullptr;
+    DWORD vertex_shader = 0;
+    DWORD colour_operation = D3DTOP_DISABLE;
+    DWORD colour_argument1 = D3DTA_TEXTURE;
+    DWORD colour_argument2 = D3DTA_CURRENT;
+    bool active = false;
+};
+
+thread_local std::array<FastNonBumpDrawState,
+                        kStandardStateStackCapacity>
+    g_fast_nonbump_state_stack{};
+thread_local std::size_t g_fast_nonbump_state_depth = 0;
+thread_local std::size_t g_fast_nonbump_state_overflow = 0;
+
+struct FastNonBumpFinalAlphaState {
+    IDirect3DDevice8* device = nullptr;
+    void* device_wrapper = nullptr;
+    std::array<float, 4> vertex_constant_zero{};
+    bool vertex_constant_zero_modified = false;
+    bool active = false;
+};
+
+thread_local std::array<FastNonBumpFinalAlphaState,
+                        kStandardStateStackCapacity>
+    g_fast_nonbump_final_alpha_state_stack{};
+thread_local std::size_t g_fast_nonbump_final_alpha_state_depth = 0;
+thread_local std::size_t g_fast_nonbump_final_alpha_state_overflow = 0;
+thread_local void* g_fast_nonbump_alpha_material = nullptr;
+extern "C" bool prepare_cloak_composite(void* material) noexcept;
+extern "C" bool a2fo_nebula_general_mesh_enabled() noexcept;
+extern "C" void release_transparent_mesh_indices(IDirect3DDevice8*) noexcept;
+extern "C" void clear_cloak_composite_selection() noexcept;
+extern "C" void release_cloak_composite_shaders(IDirect3DDevice8* device) noexcept;
 thread_local bool g_emissive_mask_draw_active = false;
 volatile LONG g_logged_emissive_mask_draw = 0;
 volatile LONG g_logged_emissive_bloom_composite = 0;
@@ -510,6 +674,7 @@ volatile LONG g_logged_workspace_context_fallback = 0;
 
 void release_bloom_resources() noexcept;
 bool ensure_specular_pixel_shader(IDirect3DDevice8* device) noexcept;
+bool ensure_fast_nonbump_vertex_shader(IDirect3DDevice8* device) noexcept;
 
 std::string renderer_ini_path() {
     if (g_root_directory.empty()) return "A2FORenderer.ini";
@@ -603,6 +768,33 @@ bool load_mapped_texture_cloak_diagnostics_policy() noexcept {
         "Diagnostics", "MappedTextureCloak", 0, ini.c_str()) != 0;
 }
 
+bool load_renderer_route_diagnostics_policy() noexcept {
+    const std::string ini = renderer_ini_path();
+    return GetPrivateProfileIntA(
+        "Diagnostics", "RendererRouteCounts", 0, ini.c_str()) != 0;
+}
+
+unsigned long load_fast_alpha_meshvb_policy() noexcept {
+    const std::string ini = renderer_ini_path();
+    const int requested = GetPrivateProfileIntA(
+        "Compatibility", "FastAlphaMeshVB", 1, ini.c_str());
+    if (requested <= 0) return 0;
+    if (requested >= 2) return 2;
+    return 1;
+}
+
+bool load_neutral_bump_cloak_policy() noexcept {
+    const std::string ini = renderer_ini_path();
+    return GetPrivateProfileIntA(
+        "Compatibility", "NeutralBumpWhenCloaked", 1, ini.c_str()) != 0;
+}
+
+a2fo::amd_dot3::Policy load_system_dot3_compat_policy() noexcept {
+    const std::string ini = renderer_ini_path();
+    return a2fo::amd_dot3::policy_from_ini(GetPrivateProfileIntA(
+        "Compatibility", "AmdNativeDot3Fix", 1, ini.c_str()));
+}
+
 void log_line(const char* message) noexcept {
     if (g_log && message) {
         g_log(std::string("[") + kModuleName + "] " + message);
@@ -618,6 +810,69 @@ void log_hresult(const char* operation, HRESULT result) noexcept {
     log_line(message);
 }
 
+void sample_renderer_routes() noexcept {
+    if (!g_renderer_route_diagnostics_enabled) return;
+    constexpr std::uint32_t kSampleFrames = 60;
+    if (++g_route_sample_frames < kSampleFrames) return;
+
+    char message[768]{};
+    std::snprintf(
+        message, sizeof(message),
+        "Renderer routes over %lu frames: standard MeshVB=%llu; legacy "
+        "non-VB passes=%llu submissions=%llu triangles=%llu; classic "
+        "workspace draws=%llu triangles=%llu; Armada DOT3=%llu "
+        "triangles=%llu; Fleet Ops DOT3=%llu triangles=%llu; selector "
+        "fallbacks no-MeshVB=%llu eligibility=%llu polygon-sort=%llu "
+        "external=%llu fast=%llu alpha-fast=%llu "
+        "(opaque=%llu additive=%llu aggressive=%llu)",
+        static_cast<unsigned long>(g_route_sample_frames),
+        static_cast<unsigned long long>(g_route_standard_boundaries),
+        static_cast<unsigned long long>(g_route_nonvb_passes),
+        static_cast<unsigned long long>(g_route_nonvb_submissions),
+        static_cast<unsigned long long>(g_route_nonvb_triangles),
+        static_cast<unsigned long long>(g_route_workspace_draws),
+        static_cast<unsigned long long>(g_route_workspace_triangles),
+        static_cast<unsigned long long>(g_route_armada_dot3_draws),
+        static_cast<unsigned long long>(g_route_armada_dot3_triangles),
+        static_cast<unsigned long long>(g_route_fleetops_dot3_draws),
+        static_cast<unsigned long long>(g_route_fleetops_dot3_triangles),
+        static_cast<unsigned long long>(g_route_selector_no_mesh_vb),
+        static_cast<unsigned long long>(g_route_selector_eligibility_reject),
+        static_cast<unsigned long long>(
+            g_route_selector_polygon_sort_reject),
+        static_cast<unsigned long long>(g_route_selector_external_reject),
+        static_cast<unsigned long long>(g_route_selector_fast),
+        static_cast<unsigned long long>(g_route_selector_alpha_fast),
+        static_cast<unsigned long long>(
+            g_route_selector_alpha_opaque_fast),
+        static_cast<unsigned long long>(
+            g_route_selector_alpha_additive_fast),
+        static_cast<unsigned long long>(
+            g_route_selector_alpha_aggressive_fast));
+    log_line(message);
+
+    g_route_sample_frames = 0;
+    g_route_standard_boundaries = 0;
+    g_route_nonvb_passes = 0;
+    g_route_nonvb_submissions = 0;
+    g_route_nonvb_triangles = 0;
+    g_route_workspace_draws = 0;
+    g_route_workspace_triangles = 0;
+    g_route_armada_dot3_draws = 0;
+    g_route_armada_dot3_triangles = 0;
+    g_route_fleetops_dot3_draws = 0;
+    g_route_fleetops_dot3_triangles = 0;
+    g_route_selector_no_mesh_vb = 0;
+    g_route_selector_eligibility_reject = 0;
+    g_route_selector_polygon_sort_reject = 0;
+    g_route_selector_external_reject = 0;
+    g_route_selector_fast = 0;
+    g_route_selector_alpha_fast = 0;
+    g_route_selector_alpha_opaque_fast = 0;
+    g_route_selector_alpha_additive_fast = 0;
+    g_route_selector_alpha_aggressive_fast = 0;
+}
+
 bool readable_range(const void* address, std::size_t size) noexcept {
     if (!address || size == 0) return false;
     const auto start = reinterpret_cast<std::uintptr_t>(address);
@@ -630,6 +885,39 @@ bool readable_range(const void* address, std::size_t size) noexcept {
                          sizeof(info)) != sizeof(info) ||
             info.State != MEM_COMMIT || (info.Protect & PAGE_GUARD) != 0 ||
             (info.Protect & PAGE_NOACCESS) != 0) {
+            return false;
+        }
+        const auto region_start =
+            reinterpret_cast<std::uintptr_t>(info.BaseAddress);
+        if (info.RegionSize > static_cast<std::uintptr_t>(-1) - region_start) {
+            return false;
+        }
+        const std::uintptr_t region_end = region_start + info.RegionSize;
+        if (current < region_start || region_end <= current) return false;
+        current = std::min(region_end, requested_end);
+    }
+    return true;
+}
+
+bool writable_range(void* address, std::size_t size) noexcept {
+    if (!address || size == 0) return false;
+    const auto start = reinterpret_cast<std::uintptr_t>(address);
+    if (size > static_cast<std::uintptr_t>(-1) - start) return false;
+    const std::uintptr_t requested_end = start + size;
+    std::uintptr_t current = start;
+    while (current < requested_end) {
+        MEMORY_BASIC_INFORMATION info{};
+        if (VirtualQuery(reinterpret_cast<void*>(current), &info,
+                         sizeof(info)) != sizeof(info) ||
+            info.State != MEM_COMMIT || (info.Protect & PAGE_GUARD) != 0 ||
+            (info.Protect & PAGE_NOACCESS) != 0) {
+            return false;
+        }
+        const DWORD protection = info.Protect & 0xffu;
+        if (protection != PAGE_READWRITE &&
+            protection != PAGE_WRITECOPY &&
+            protection != PAGE_EXECUTE_READWRITE &&
+            protection != PAGE_EXECUTE_WRITECOPY) {
             return false;
         }
         const auto region_start =
@@ -676,6 +964,13 @@ bool device_method_is_callable(IDirect3DDevice8* device,
     void* method = read_at<void*>(
         vtable, method_index * sizeof(void*), nullptr);
     return executable_address(method);
+}
+
+void* interface_method(void* object, std::size_t method_index) noexcept {
+    void* vtable = read_at<void*>(object, 0, nullptr);
+    void* method = read_at<void*>(
+        vtable, method_index * sizeof(void*), nullptr);
+    return executable_address(method) ? method : nullptr;
 }
 
 template <typename T>
@@ -1292,6 +1587,29 @@ std::string current_texture_key(
     return key;
 }
 
+std::string faction_base_texture_key(
+    const std::string& live_key) noexcept {
+    if (live_key.empty() || g_faction_texture_suffixes.empty()) return {};
+    try {
+        std::size_t best_length = 0;
+        for (const std::string& suffix : g_faction_texture_suffixes) {
+            if (suffix.empty() || suffix.size() >= live_key.size() ||
+                suffix.size() <= best_length) {
+                continue;
+            }
+            const std::size_t offset = live_key.size() - suffix.size();
+            if (live_key.compare(offset, suffix.size(), suffix) == 0) {
+                best_length = suffix.size();
+            }
+        }
+        return best_length == 0
+            ? std::string{}
+            : live_key.substr(0, live_key.size() - best_length);
+    } catch (...) {
+        return {};
+    }
+}
+
 std::uint32_t current_craft_cloak_state(void* craft) noexcept {
     void* controller = read_at<void*>(
         craft, kGameObjectCloakControllerOffset, nullptr);
@@ -1299,6 +1617,23 @@ std::uint32_t current_craft_cloak_state(void* craft) noexcept {
         ? read_at<std::uint32_t>(
               controller, kCloakControllerStateOffset, 0)
         : 0;
+}
+
+bool fast_nonbump_requested_for_draw() noexcept {
+    // Promoted, genuinely unmapped meshes always need geometric lighting,
+    // independently of the global bump option and their owner's cloak state.
+    if (g_fast_unmapped_draw_depth != 0) return true;
+    const bool global_flat_normal = InterlockedCompareExchange(
+        &g_fast_nonbump_enabled, 0, 0) != 0;
+    if (global_flat_normal) return true;
+    if (!g_neutral_bump_when_cloaked || !g_dxvk_backend_active ||
+        g_craft_render_overflow != 0 ||
+        InterlockedCompareExchange(&g_runtime_enabled, 0, 0) == 0) {
+        return false;
+    }
+    void* craft = current_render_craft();
+    return craft && a2fo::renderer_flat_normal_for_draw(
+        false, g_neutral_bump_when_cloaked, current_craft_cloak_state(craft));
 }
 
 bool claim_mapped_texture_cloak_diagnostic(std::uint32_t bit) noexcept {
@@ -1432,6 +1767,29 @@ EmissiveMaterialPolicy* select_current_emissive_material(
                 return material.get();
             }
         }
+
+        // A2FOTextureVariants changes the live diffuse pointer/name per craft,
+        // while mapped-lighting policy is normally registered from the base
+        // CraftClass SOD.  If an exact faction-specific policy was not
+        // registered, deliberately fall back through only a known race suffix.
+        const std::string base_key = faction_base_texture_key(diffuse_key);
+        if (!base_key.empty()) {
+            for (auto& material : policy.materials) {
+                if (!material || material->diffuse_key != base_key) continue;
+                if (InterlockedCompareExchange(
+                        &g_logged_faction_emissive_fallback, 1, 0) == 0) {
+                    char message[384]{};
+                    std::snprintf(
+                        message, sizeof(message),
+                        "Faction emissive fallback matched live diffuse '%s' "
+                        "to base material '%s' on texture stage %lu",
+                        diffuse_key.c_str(), base_key.c_str(),
+                        static_cast<unsigned long>(stage));
+                    log_line(message);
+                }
+                return material.get();
+            }
+        }
     }
     if (!identified_live_texture && InterlockedCompareExchange(
                    &g_logged_diffuse_lookup_failure, 1, 0) == 0) {
@@ -1493,6 +1851,25 @@ SpecularMaterialPolicy* select_current_specular_material(
                         "Indexed specular material matched live diffuse '%s' "
                         "on texture stage %lu",
                         diffuse_key.c_str(),
+                        static_cast<unsigned long>(stage));
+                    log_line(message);
+                }
+                return material.get();
+            }
+        }
+
+        const std::string base_key = faction_base_texture_key(diffuse_key);
+        if (!base_key.empty()) {
+            for (auto& material : found->second->materials) {
+                if (!material || material->diffuse_key != base_key) continue;
+                if (InterlockedCompareExchange(
+                        &g_logged_faction_specular_fallback, 1, 0) == 0) {
+                    char message[384]{};
+                    std::snprintf(
+                        message, sizeof(message),
+                        "Faction specular fallback matched live diffuse '%s' "
+                        "to base material '%s' on texture stage %lu",
+                        diffuse_key.c_str(), base_key.c_str(),
                         static_cast<unsigned long>(stage));
                     log_line(message);
                 }
@@ -1724,6 +2101,13 @@ bool preflight_signatures() noexcept {
     if (!signature_matches(g_armada, kCompileDot3MeshRva,
                            kExpectedCompileDot3Mesh.data(),
                            kExpectedCompileDot3Mesh.size()) ||
+        !signature_matches(g_armada, kMeshRenderSelectorRva,
+                           kExpectedMeshRenderSelector.data(),
+                           kExpectedMeshRenderSelector.size()) ||
+        !signature_matches(
+            g_armada, kTextureMaterialSetRenderStateZSortRva,
+            kExpectedTextureMaterialSetRenderStateZSort.data(),
+            kExpectedTextureMaterialSetRenderStateZSort.size()) ||
         (kUseFleetOpsShaderHandleRoute &&
          !signature_matches(g_armada, kGetShaderHandleRva,
                             kExpectedGetShaderHandle.data(),
@@ -1760,6 +2144,10 @@ bool preflight_signatures() noexcept {
         !signature_matches(g_fleet_ops, kAlphaTransitionRva,
                            kExpectedAlphaTransition.data(),
                            kExpectedAlphaTransition.size()) ||
+        (g_dxvk_backend_active &&
+         !signature_matches(g_fleet_ops, kFleetOpsDot3LightDrawRva,
+                            kExpectedFleetOpsDot3LightDraw.data(),
+                            kExpectedFleetOpsDot3LightDraw.size())) ||
         (g_dxvk_backend_active &&
          !signature_matches(g_fleet_ops, kFleetOpsDot3DrawRva,
                             kExpectedFleetOpsDot3Draw.data(),
@@ -1879,6 +2267,67 @@ bool compile_specular_pixel_shader() noexcept {
     return true;
 }
 
+bool fast_nonbump_vertex_shader_asset_available() noexcept {
+    if (g_fast_nonbump_vertex_shader_path.empty()) {
+        g_fast_nonbump_vertex_shader_path = renderer_data_path(
+            "Shaders\\dx8\\vertex\\vs_flat_lighting.nvv");
+    }
+    const DWORD attributes = GetFileAttributesA(
+        g_fast_nonbump_vertex_shader_path.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES ||
+        (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+        if (InterlockedCompareExchange(
+                &g_logged_fast_nonbump_compile_failure, 1, 0) == 0) {
+            log_line("Fast non-bump vertex shader is missing from Data\\Shaders");
+        }
+        return false;
+    }
+    return true;
+}
+
+bool compile_fast_nonbump_vertex_shader() noexcept {
+    if (g_compiled_fast_nonbump_vertex_shader) return true;
+    // D3DX81ab is deliberately loaded at the first native DOT3 compilation,
+    // outside the Windows loader lock. The controller selects this policy
+    // earlier during deferred module startup, so only the asset itself can be
+    // preflighted there; assembly remains at the first safe draw-time use.
+    if (!fast_nonbump_vertex_shader_asset_available() ||
+        !g_assemble_shader) {
+        return false;
+    }
+
+    ID3DXBuffer* compiled = nullptr;
+    ID3DXBuffer* errors = nullptr;
+    const HRESULT result = g_assemble_shader(
+        g_fast_nonbump_vertex_shader_path.c_str(), 0, nullptr,
+        &compiled, &errors);
+    if (FAILED(result) || !compiled || !compiled->GetBufferPointer()) {
+        if (InterlockedCompareExchange(
+                &g_logged_fast_nonbump_compile_failure, 1, 0) == 0) {
+            log_hresult("Assemble fast non-bump DX8 vertex shader", result);
+            if (errors && errors->GetBufferPointer()) {
+                char message[384]{};
+                const char* error_text = static_cast<const char*>(
+                    errors->GetBufferPointer());
+                const int text_size = static_cast<int>(
+                    errors->GetBufferSize() < 320
+                        ? errors->GetBufferSize() : 320);
+                std::snprintf(message, sizeof(message),
+                              "Fast non-bump shader assembler: %.*s",
+                              text_size, error_text);
+                log_line(message);
+            }
+        }
+        if (compiled) compiled->Release();
+        if (errors) errors->Release();
+        return false;
+    }
+    if (errors) errors->Release();
+    g_compiled_fast_nonbump_vertex_shader = compiled;
+    log_line("Fast non-bump DX8 vertex shader assembled");
+    return true;
+}
+
 IDirect3DDevice8* resolve_live_device(void* renderer) noexcept {
     if (!renderer) return nullptr;
 
@@ -1917,6 +2366,497 @@ IDirect3DDevice8* resolve_live_device(void* renderer) noexcept {
         ? device : nullptr;
 }
 
+void* active_storm_device_wrapper(
+    IDirect3DDevice8* expected_device) noexcept {
+    if (!expected_device || !g_armada) return nullptr;
+    void* renderer = read_at<void*>(
+        at(g_armada, kGraphicsEnginePointerRva), 0, nullptr);
+    const std::uint32_t device_index = read_at<std::uint32_t>(
+        renderer, kCurrentDeviceIndexOffset, kMaximumStormDeviceCount);
+    if (device_index >= kMaximumStormDeviceCount) return nullptr;
+
+    void* wrapper = read_at<void*>(
+        renderer,
+        kDeviceWrapperTableOffset + device_index * sizeof(void*), nullptr);
+    if (!wrapper || read_at<IDirect3DDevice8*>(
+            wrapper, kStormDeviceOffset, nullptr) != expected_device) {
+        return nullptr;
+    }
+    return wrapper;
+}
+
+bool active_storm_material_alpha(
+    IDirect3DDevice8* expected_device, float* alpha) noexcept {
+    if (!alpha) return false;
+    void* wrapper = active_storm_device_wrapper(expected_device);
+    if (!wrapper || !readable_range(
+            static_cast<const std::uint8_t*>(wrapper) +
+                kStormMaterialAlphaOffset,
+            sizeof(float))) {
+        return false;
+    }
+
+    const float published_alpha = read_at<float>(
+        wrapper, kStormMaterialAlphaOffset, 1.0f);
+    if (!std::isfinite(published_alpha)) return false;
+    *alpha = std::max(0.0f, std::min(1.0f, published_alpha));
+    return true;
+}
+
+bool active_adapter_vendor(std::uint32_t* vendor_id) noexcept {
+    if (!vendor_id) return false;
+    *vendor_id = 0;
+
+    void* renderer = read_at<void*>(
+        at(g_armada, kGraphicsEnginePointerRva), 0, nullptr);
+    IDirect3DDevice8* device = resolve_live_device(renderer);
+    if (!device) {
+        log_line("AMD native DOT3 compatibility could not resolve the active "
+                 "DX8 device");
+        return false;
+    }
+
+    D3DDEVICE_CREATION_PARAMETERS creation{};
+    HRESULT result = device->GetCreationParameters(&creation);
+    if (FAILED(result)) {
+        log_hresult("Get DX8 creation parameters for AMD DOT3 compatibility",
+                    result);
+        return false;
+    }
+
+    IDirect3D8* direct3d = nullptr;
+    result = device->GetDirect3D(&direct3d);
+    if (FAILED(result) || !direct3d) {
+        log_hresult("Get Direct3D8 interface for AMD DOT3 compatibility",
+                    result);
+        return false;
+    }
+
+    D3DADAPTER_IDENTIFIER8 identifier{};
+    result = direct3d->GetAdapterIdentifier(
+        creation.AdapterOrdinal, 0, &identifier);
+    direct3d->Release();
+    if (FAILED(result)) {
+        log_hresult("Identify DX8 adapter for AMD DOT3 compatibility", result);
+        return false;
+    }
+
+    *vendor_id = identifier.VendorId;
+    char message[256]{};
+    std::snprintf(message, sizeof(message),
+                  "Active DX8 adapter for native DOT3: %.120s "
+                  "(vendor=0x%04lx, device=0x%04lx)",
+                  identifier.Description,
+                  static_cast<unsigned long>(identifier.VendorId),
+                  static_cast<unsigned long>(identifier.DeviceId));
+    log_line(message);
+    return true;
+}
+
+struct DirectD3d9CreationParameters {
+    UINT adapter_ordinal;
+    DWORD device_type;
+    HWND focus_window;
+    DWORD behavior_flags;
+};
+
+struct DirectD3d9AdapterIdentifier {
+    char driver[512];
+    char description[512];
+    char device_name[32];
+    LARGE_INTEGER driver_version;
+    DWORD vendor_id;
+    DWORD device_id;
+    DWORD subsystem_id;
+    DWORD revision;
+    GUID device_identifier;
+    DWORD whql_level;
+};
+
+static_assert(offsetof(DirectD3d9AdapterIdentifier, vendor_id) == 1064);
+
+bool active_direct_d3d9_adapter_vendor(
+    void* device, std::uint32_t* vendor_id) noexcept {
+    if (!device || !vendor_id) return false;
+    *vendor_id = 0;
+
+    using GetCreationParameters = HRESULT (WINAPI*)(
+        void*, DirectD3d9CreationParameters*);
+    using GetDirect3D = HRESULT (WINAPI*)(void*, void**);
+    using GetAdapterIdentifier = HRESULT (WINAPI*)(
+        void*, UINT, DWORD, DirectD3d9AdapterIdentifier*);
+    using ReleaseInterface = ULONG (WINAPI*)(void*);
+
+    GetCreationParameters get_creation =
+        function_from_address<GetCreationParameters>(
+            interface_method(device, 9));
+    GetDirect3D get_direct3d = function_from_address<GetDirect3D>(
+        interface_method(device, 6));
+    if (!get_creation || !get_direct3d) {
+        log_line("AMD direct-D3D9 DOT3 compatibility could not inspect the "
+                 "live device");
+        return false;
+    }
+
+    DirectD3d9CreationParameters creation{};
+    HRESULT result = get_creation(device, &creation);
+    if (FAILED(result)) {
+        log_hresult("Get D3D9 creation parameters for AMD DOT3 compatibility",
+                    result);
+        return false;
+    }
+
+    void* direct3d = nullptr;
+    result = get_direct3d(device, &direct3d);
+    if (FAILED(result) || !direct3d) {
+        log_hresult("Get Direct3D9 interface for AMD DOT3 compatibility",
+                    result);
+        return false;
+    }
+
+    GetAdapterIdentifier get_identifier =
+        function_from_address<GetAdapterIdentifier>(
+            interface_method(direct3d, 5));
+    ReleaseInterface release = function_from_address<ReleaseInterface>(
+        interface_method(direct3d, 2));
+    if (!get_identifier || !release) {
+        if (release) release(direct3d);
+        log_line("AMD direct-D3D9 DOT3 compatibility found an invalid "
+                 "Direct3D9 interface");
+        return false;
+    }
+
+    DirectD3d9AdapterIdentifier identifier{};
+    result = get_identifier(
+        direct3d, creation.adapter_ordinal, 0, &identifier);
+    release(direct3d);
+    if (FAILED(result)) {
+        log_hresult("Identify D3D9 adapter for AMD DOT3 compatibility",
+                    result);
+        return false;
+    }
+
+    *vendor_id = identifier.vendor_id;
+    if (InterlockedCompareExchange(
+            &g_direct_d3d9_adapter_logged, 1, 0) == 0) {
+        char message[256]{};
+        std::snprintf(message, sizeof(message),
+                      "Active direct-D3D9 adapter for native DOT3: %.120s "
+                      "(vendor=0x%04lx, device=0x%04lx)",
+                      identifier.description,
+                      static_cast<unsigned long>(identifier.vendor_id),
+                      static_cast<unsigned long>(identifier.device_id));
+        log_line(message);
+    }
+    return true;
+}
+
+bool assemble_direct_d3d9_dot3_shader(
+    ID3DXBuffer** compiled_shader) noexcept {
+    if (!compiled_shader) return false;
+    *compiled_shader = nullptr;
+    const std::string path = renderer_data_path(
+        a2fo::amd_dot3::kDirectD3d9RemappedShaderPath);
+    const DWORD attributes = GetFileAttributesA(path.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES ||
+        (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+        log_line("AMD direct-D3D9 DOT3 shader is missing from "
+                 "Data\\Shaders\\dot3_amd9.nvv; native shader retained");
+        return false;
+    }
+
+    HMODULE d3dx9 = GetModuleHandleA("d3dx9_43.dll");
+    AssembleShaderFromFile9 assemble =
+        imported_function<AssembleShaderFromFile9>(
+            d3dx9, "D3DXAssembleShaderFromFileA");
+    if (!assemble) {
+        log_line("D3DX9 shader assembler is unavailable; direct-D3D9 DOT3 "
+                 "shader retained");
+        return false;
+    }
+
+    ID3DXBuffer* errors = nullptr;
+    const HRESULT result = assemble(
+        path.c_str(), nullptr, nullptr, 0, compiled_shader, &errors);
+    if (FAILED(result) || !*compiled_shader ||
+        !(*compiled_shader)->GetBufferPointer()) {
+        log_hresult("Assemble AMD direct-D3D9 DOT3 shader", result);
+        if (errors && errors->GetBufferPointer()) {
+            char message[384]{};
+            const char* error_text = static_cast<const char*>(
+                errors->GetBufferPointer());
+            const int text_size = static_cast<int>(
+                errors->GetBufferSize() < 320
+                    ? errors->GetBufferSize() : 320);
+            std::snprintf(message, sizeof(message),
+                          "AMD direct-D3D9 shader assembler: %.*s",
+                          text_size, error_text);
+            log_line(message);
+        }
+        if (*compiled_shader) {
+            (*compiled_shader)->Release();
+            *compiled_shader = nullptr;
+        }
+        if (errors) errors->Release();
+        return false;
+    }
+    if (errors) errors->Release();
+    return true;
+}
+
+void release_direct_d3d9_object(void* object) noexcept {
+    if (!object) return;
+    using ReleaseInterface = ULONG (WINAPI*)(void*);
+    ReleaseInterface release = function_from_address<ReleaseInterface>(
+        interface_method(object, 2));
+    if (release) release(object);
+}
+
+HRESULT WINAPI create_direct_d3d9_dot3_shader_hook(
+    void* device, const DWORD* declaration, const DWORD* function,
+    DWORD* handle, DWORD usage) noexcept {
+    CreateDirectD3d9Dot3Shader original =
+        function_from_address<CreateDirectD3d9Dot3Shader>(
+            g_direct_d3d9_dot3_create_original);
+    auto retain_native = [&]() noexcept -> HRESULT {
+        return original
+            ? original(device, declaration, function, handle, usage)
+            : E_FAIL;
+    };
+
+    if (!g_direct_d3d9_dot3_compat_armed || !device) {
+        return retain_native();
+    }
+
+    std::uint32_t vendor_id = 0;
+    const bool vendor_known = active_direct_d3d9_adapter_vendor(
+        device, &vendor_id);
+    if (!a2fo::amd_dot3::should_apply(
+            g_system_dot3_compat_policy, vendor_known, vendor_id)) {
+        if (InterlockedCompareExchange(
+                &g_direct_d3d9_dot3_native_logged, 1, 0) == 0) {
+            log_line(vendor_known
+                ? "Non-AMD direct-D3D9 adapter detected; native DOT3 "
+                  "declaration retained"
+                : "Direct-D3D9 adapter detection was inconclusive; native "
+                  "DOT3 declaration retained (set AmdNativeDot3Fix=2 to "
+                  "force the candidate)");
+        }
+        return retain_native();
+    }
+
+    ID3DXBuffer* compiled = nullptr;
+    if (!assemble_direct_d3d9_dot3_shader(&compiled)) {
+        return retain_native();
+    }
+
+    using CreateVertexDeclaration = HRESULT (WINAPI*)(
+        void*, const a2fo::amd_dot3::VertexElement9*, void**);
+    using CreateVertexShader = HRESULT (WINAPI*)(
+        void*, const DWORD*, void**);
+    CreateVertexDeclaration create_declaration =
+        function_from_address<CreateVertexDeclaration>(
+            interface_method(device, 86));
+    CreateVertexShader create_shader =
+        function_from_address<CreateVertexShader>(
+            interface_method(device, 91));
+    void** shader_slot = reinterpret_cast<void**>(
+        at(g_fleet_ops, kDirectD3d9VertexShaderRva));
+    void** declaration_slot = reinterpret_cast<void**>(
+        at(g_fleet_ops, kDirectD3d9VertexDeclarationRva));
+    if (!create_declaration || !create_shader ||
+        !writable_range(shader_slot, sizeof(*shader_slot)) ||
+        !writable_range(declaration_slot, sizeof(*declaration_slot))) {
+        compiled->Release();
+        log_line("AMD direct-D3D9 DOT3 creation interface is unavailable; "
+                 "native shader retained");
+        return retain_native();
+    }
+
+    void* candidate_declaration = nullptr;
+    HRESULT result = create_declaration(
+        device,
+        a2fo::amd_dot3::kDirectD3d9RemappedDeclaration.data(),
+        &candidate_declaration);
+    if (FAILED(result) || !candidate_declaration) {
+        compiled->Release();
+        log_hresult("Create AMD direct-D3D9 DOT3 declaration", result);
+        return retain_native();
+    }
+
+    void* candidate_shader = nullptr;
+    result = create_shader(
+        device, static_cast<const DWORD*>(compiled->GetBufferPointer()),
+        &candidate_shader);
+    compiled->Release();
+    if (FAILED(result) || !candidate_shader) {
+        release_direct_d3d9_object(candidate_declaration);
+        log_hresult("Create AMD direct-D3D9 DOT3 vertex shader", result);
+        return retain_native();
+    }
+
+    std::memcpy(declaration_slot, &candidate_declaration,
+                sizeof(candidate_declaration));
+    std::memcpy(shader_slot, &candidate_shader, sizeof(candidate_shader));
+    if (InterlockedCompareExchange(
+            &g_direct_d3d9_dot3_compat_logged, 1, 0) == 0) {
+        log_line("AMD direct-D3D9 DOT3 compatibility active: tangent inputs "
+                 "remapped to TEXCOORD semantics; draw sequence retained");
+    }
+    return result;
+}
+
+bool validate_system_dot3_shader_asset() noexcept {
+    const std::string path = renderer_data_path("Shaders\\dot3_amd.nvv");
+    const DWORD attributes = GetFileAttributesA(path.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES ||
+        (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+        log_line("AMD native DOT3 shader is missing from "
+                 "Data\\Shaders\\dot3_amd.nvv; native shader retained");
+        return false;
+    }
+
+    HMODULE d3dx8 = GetModuleHandleA("D3DX81ab.dll");
+    AssembleShaderFromFile assemble =
+        imported_function<AssembleShaderFromFile>(
+            d3dx8, "D3DXAssembleShaderFromFileA");
+    if (!assemble) {
+        log_line("D3DX8 shader assembler is unavailable; AMD native DOT3 "
+                 "shader retained");
+        return false;
+    }
+
+    ID3DXBuffer* compiled = nullptr;
+    ID3DXBuffer* errors = nullptr;
+    const HRESULT result = assemble(
+        path.c_str(), 0, nullptr, &compiled, &errors);
+    if (FAILED(result) || !compiled || !compiled->GetBufferPointer()) {
+        log_hresult("Assemble AMD native DOT3 compatibility shader", result);
+        if (errors && errors->GetBufferPointer()) {
+            char message[384]{};
+            const char* error_text = static_cast<const char*>(
+                errors->GetBufferPointer());
+            const int text_size = static_cast<int>(
+                errors->GetBufferSize() < 320
+                    ? errors->GetBufferSize() : 320);
+            std::snprintf(message, sizeof(message),
+                          "AMD DOT3 shader assembler: %.*s",
+                          text_size, error_text);
+            log_line(message);
+        }
+        if (compiled) compiled->Release();
+        if (errors) errors->Release();
+        return false;
+    }
+    compiled->Release();
+    if (errors) errors->Release();
+    return true;
+}
+
+bool apply_system_dot3_compatibility() noexcept {
+    if (!g_system_dot3_compat_armed ||
+        InterlockedCompareExchange(
+            &g_system_dot3_compat_attempted, 1, 0) != 0) {
+        return g_system_dot3_compat_applied;
+    }
+
+    const DWORD shader_handle = read_at<DWORD>(
+        at(g_armada, kDot3ShaderHandleRva), 0, 0);
+    if (shader_handle != a2fo::amd_dot3::kUncreatedShaderHandle) {
+        log_line("AMD native DOT3 compatibility reached the renderer after "
+                 "the shared shader was created; native shader retained");
+        return false;
+    }
+
+    std::uint32_t vendor_id = 0;
+    const bool vendor_known = active_adapter_vendor(&vendor_id);
+    if (!a2fo::amd_dot3::should_apply(
+            g_system_dot3_compat_policy, vendor_known, vendor_id)) {
+        log_line(vendor_known
+            ? "Non-AMD system adapter detected; native DOT3 shader retained"
+            : "AMD adapter detection was inconclusive; native DOT3 shader "
+              "retained (set AmdNativeDot3Fix=2 to force the candidate)");
+        return false;
+    }
+
+    if (!validate_system_dot3_shader_asset()) return false;
+
+    void* declaration = at(g_armada, kDot3DeclarationRva);
+    void* shader_path = at(g_armada, kDot3ShaderPathRva);
+    const auto* stock_declaration =
+        reinterpret_cast<const std::uint8_t*>(
+            a2fo::amd_dot3::kStockDeclaration.data());
+    const auto* remapped_declaration =
+        reinterpret_cast<const std::uint8_t*>(
+            a2fo::amd_dot3::kRemappedDeclaration.data());
+    const auto* stock_path = reinterpret_cast<const std::uint8_t*>(
+        a2fo::amd_dot3::kStockShaderPath);
+    const auto* remapped_path = reinterpret_cast<const std::uint8_t*>(
+        a2fo::amd_dot3::kRemappedShaderPath);
+    constexpr std::size_t declaration_size =
+        sizeof(a2fo::amd_dot3::kStockDeclaration);
+    constexpr std::size_t path_size =
+        sizeof(a2fo::amd_dot3::kStockShaderPath);
+
+    if (!signature_matches(g_armada, kDot3DeclarationRva,
+                           stock_declaration, declaration_size) ||
+        !signature_matches(g_armada, kDot3ShaderPathRva,
+                           stock_path, path_size)) {
+        log_line("AMD native DOT3 declaration/source signature differs; "
+                 "native shader retained");
+        return false;
+    }
+
+    if (!a2fo::patch_bytes(
+            declaration, remapped_declaration,
+            stock_declaration, declaration_size)) {
+        log_line("AMD native DOT3 declaration remap could not be installed; "
+                 "native shader retained");
+        return false;
+    }
+    if (!a2fo::patch_bytes(
+            shader_path, remapped_path, stock_path, path_size)) {
+        const bool rolled_back = a2fo::patch_bytes(
+            declaration, stock_declaration,
+            remapped_declaration, declaration_size);
+        log_line(rolled_back
+            ? "AMD native DOT3 shader-path remap failed; declaration was "
+              "rolled back"
+            : "AMD native DOT3 shader-path remap failed and declaration "
+              "rollback also failed");
+        return false;
+    }
+
+    g_system_dot3_compat_applied = true;
+    log_line("AMD native DOT3 compatibility active: tangent inputs remapped "
+             "to TEXCOORD semantics; Fleet Operations draw sequence retained");
+    return true;
+}
+
+void restore_system_dot3_compatibility() noexcept {
+    if (!g_system_dot3_compat_applied) return;
+    const auto* stock_declaration =
+        reinterpret_cast<const std::uint8_t*>(
+            a2fo::amd_dot3::kStockDeclaration.data());
+    const auto* remapped_declaration =
+        reinterpret_cast<const std::uint8_t*>(
+            a2fo::amd_dot3::kRemappedDeclaration.data());
+    const auto* stock_path = reinterpret_cast<const std::uint8_t*>(
+        a2fo::amd_dot3::kStockShaderPath);
+    const auto* remapped_path = reinterpret_cast<const std::uint8_t*>(
+        a2fo::amd_dot3::kRemappedShaderPath);
+    const bool path_restored = a2fo::patch_bytes(
+        at(g_armada, kDot3ShaderPathRva), stock_path,
+        remapped_path, sizeof(a2fo::amd_dot3::kStockShaderPath));
+    const bool declaration_restored = a2fo::patch_bytes(
+        at(g_armada, kDot3DeclarationRva), stock_declaration,
+        remapped_declaration,
+        sizeof(a2fo::amd_dot3::kStockDeclaration));
+    if (path_restored && declaration_restored) {
+        g_system_dot3_compat_applied = false;
+    }
+}
+
 void release_damage_decal_textures() noexcept {
     for (auto& entry : g_damage_decal_textures) {
         if (entry.second) entry.second->Release();
@@ -1925,6 +2865,7 @@ void release_damage_decal_textures() noexcept {
 }
 
 void invalidate_device_resources(IDirect3DDevice8* device) noexcept {
+    release_cloak_composite_shaders(device);
     release_bloom_resources();
     if (device) {
         // No extension texture or shader may remain bound while its backing
@@ -1933,6 +2874,8 @@ void invalidate_device_resources(IDirect3DDevice8* device) noexcept {
             device, kSetPixelShaderVtableIndex);
         const bool can_set_texture = device_method_is_callable(
             device, kSetTextureVtableIndex);
+        const bool can_delete_vertex_shader = device_method_is_callable(
+            device, kDeleteVertexShaderVtableIndex);
         const bool can_delete_pixel_shader = device_method_is_callable(
             device, kDeletePixelShaderVtableIndex);
         if (can_set_pixel_shader) device->SetPixelShader(0);
@@ -1948,20 +2891,28 @@ void invalidate_device_resources(IDirect3DDevice8* device) noexcept {
             if (g_specular_pixel_shader != 0) {
                 device->DeletePixelShader(g_specular_pixel_shader);
             }
-        } else if ((g_pixel_shader != 0 || g_specular_pixel_shader != 0) &&
-                   InterlockedCompareExchange(
-                       &g_logged_device_cleanup_method_unavailable,
-                       1, 0) == 0) {
-            log_line(
-                "DX8 device cleanup skipped an unavailable pixel-shader "
-                "deletion route");
+        }
+        if (can_delete_vertex_shader &&
+            g_fast_nonbump_vertex_shader != 0) {
+            device->DeleteVertexShader(g_fast_nonbump_vertex_shader);
+        }
+        const bool pixel_cleanup_missing = !can_delete_pixel_shader &&
+            (g_pixel_shader != 0 || g_specular_pixel_shader != 0);
+        const bool vertex_cleanup_missing = !can_delete_vertex_shader &&
+            g_fast_nonbump_vertex_shader != 0;
+        if ((pixel_cleanup_missing || vertex_cleanup_missing) &&
+            InterlockedCompareExchange(
+                &g_logged_device_cleanup_method_unavailable, 1, 0) == 0) {
+            log_line("DX8 device cleanup skipped an unavailable shader deletion route");
         }
     }
     g_pixel_shader = 0;
     g_specular_pixel_shader = 0;
+    g_fast_nonbump_vertex_shader = 0;
     g_specular_shader_selected = false;
     InterlockedExchange(&g_pixel_shader_rejected, 0);
     InterlockedExchange(&g_specular_shader_rejected, 0);
+    InterlockedExchange(&g_fast_nonbump_shader_rejected, 0);
     release_all_emissive_gpu_caches();
     release_all_specular_gpu_caches();
     release_damage_decal_textures();
@@ -2003,11 +2954,23 @@ void standard_emissive_pre_draw() noexcept {
         g_standard_state_stack[g_standard_state_depth++];
     state = StandardTextureStageState{};
     if (InterlockedCompareExchange(&g_runtime_enabled, 0, 0) == 0) return;
-    if (!current_render_craft()) {
+    if (!a2fo::renderer_extension_draw_required(
+            false, a2fo::renderer_emissive_maps_enabled(), false)) {
+        return;
+    }
+    void* craft = current_render_craft();
+    if (!craft) {
         if (InterlockedCompareExchange(
                 &g_logged_fixed_function_without_context, 1, 0) == 0) {
             log_line("Fixed-function draw had no enclosing Craft render context");
         }
+        return;
+    }
+    void* object_class = read_at<void*>(
+        craft, kCraftClassOffset, nullptr);
+    const auto emissive_policy = g_emissive_policies.find(object_class);
+    if (emissive_policy == g_emissive_policies.end() ||
+        !emissive_policy->second) {
         return;
     }
 
@@ -3536,6 +4499,210 @@ void standard_emissive_post_draw() noexcept {
     state = StandardTextureStageState{};
 }
 
+void fast_nonbump_light_pre_draw(IDirect3DDevice8* device) noexcept {
+    if (g_fast_nonbump_state_depth >=
+        g_fast_nonbump_state_stack.size()) {
+        ++g_fast_nonbump_state_overflow;
+        return;
+    }
+    FastNonBumpDrawState& state =
+        g_fast_nonbump_state_stack[g_fast_nonbump_state_depth++];
+    state = FastNonBumpDrawState{};
+    if (!fast_nonbump_requested_for_draw() || !device ||
+        !ensure_fast_nonbump_vertex_shader(device)) {
+        return;
+    }
+
+    state.device = device;
+    if (FAILED(device->GetVertexShader(&state.vertex_shader)) ||
+        FAILED(device->GetTextureStageState(
+            0, D3DTSS_COLOROP, &state.colour_operation)) ||
+        FAILED(device->GetTextureStageState(
+            0, D3DTSS_COLORARG1, &state.colour_argument1)) ||
+        FAILED(device->GetTextureStageState(
+            0, D3DTSS_COLORARG2, &state.colour_argument2))) {
+        state = FastNonBumpDrawState{};
+        return;
+    }
+
+    const HRESULT shader_result = device->SetVertexShader(
+        g_fast_nonbump_vertex_shader);
+    const HRESULT operation_result = device->SetTextureStageState(
+        0, D3DTSS_COLOROP, static_cast<DWORD>(D3DTOP_SELECTARG1));
+    const HRESULT argument_result = device->SetTextureStageState(
+        0, D3DTSS_COLORARG1, static_cast<DWORD>(D3DTA_DIFFUSE));
+    if (FAILED(shader_result) || FAILED(operation_result) ||
+        FAILED(argument_result)) {
+        device->SetVertexShader(state.vertex_shader);
+        device->SetTextureStageState(
+            0, D3DTSS_COLOROP, state.colour_operation);
+        device->SetTextureStageState(
+            0, D3DTSS_COLORARG1, state.colour_argument1);
+        device->SetTextureStageState(
+            0, D3DTSS_COLORARG2, state.colour_argument2);
+        state = FastNonBumpDrawState{};
+        InterlockedExchange(&g_fast_nonbump_shader_rejected, 1);
+        return;
+    }
+
+    state.active = true;
+    if (InterlockedCompareExchange(&g_fast_nonbump_enabled, 0, 0) == 0 &&
+        InterlockedCompareExchange(&g_logged_cloak_flat_normal, 1, 0) == 0) {
+        log_line("Scoped flat-normal lighting active; shared bump textures and global bump settings are unchanged");
+    }
+    if (InterlockedCompareExchange(
+            &g_logged_fast_nonbump_draw, 1, 0) == 0) {
+        char message[224]{};
+        std::snprintf(
+            message, sizeof(message),
+            "Fast non-bump vertex-lighting draw replaced native stage-0 operation %lu (arguments %lu/%lu)",
+            static_cast<unsigned long>(state.colour_operation),
+            static_cast<unsigned long>(state.colour_argument1),
+            static_cast<unsigned long>(state.colour_argument2));
+        log_line(message);
+    }
+}
+
+void fast_nonbump_light_post_draw() noexcept {
+    if (g_fast_nonbump_state_overflow != 0) {
+        --g_fast_nonbump_state_overflow;
+        return;
+    }
+    if (g_fast_nonbump_state_depth == 0) return;
+    FastNonBumpDrawState& state =
+        g_fast_nonbump_state_stack[--g_fast_nonbump_state_depth];
+    if (state.active && state.device) {
+        state.device->SetVertexShader(state.vertex_shader);
+        state.device->SetTextureStageState(
+            0, D3DTSS_COLOROP, state.colour_operation);
+        state.device->SetTextureStageState(
+            0, D3DTSS_COLORARG1, state.colour_argument1);
+        state.device->SetTextureStageState(
+            0, D3DTSS_COLORARG2, state.colour_argument2);
+    }
+    state = FastNonBumpDrawState{};
+}
+
+void fast_nonbump_final_alpha_pre_draw(
+    IDirect3DDevice8* device) noexcept {
+    if (g_fast_nonbump_final_alpha_state_depth >=
+        g_fast_nonbump_final_alpha_state_stack.size()) {
+        ++g_fast_nonbump_final_alpha_state_overflow;
+        return;
+    }
+    FastNonBumpFinalAlphaState& state =
+        g_fast_nonbump_final_alpha_state_stack[
+            g_fast_nonbump_final_alpha_state_depth++];
+    state = FastNonBumpFinalAlphaState{};
+
+    void* material = g_fast_nonbump_alpha_material;
+    if (!material || !device || !a2fo_nebula_general_mesh_enabled() ||
+        InterlockedCompareExchange(
+            &g_fast_nonbump_shader_rejected, 0, 0) != 0) {
+        return;
+    }
+
+    void* device_wrapper = active_storm_device_wrapper(device);
+    if (!device_wrapper || !writable_range(
+            static_cast<std::uint8_t*>(device_wrapper) +
+                kStormCurrentMaterialOffset,
+            sizeof(void*))) {
+        return;
+    }
+
+    // Fleet Operations begins its DOT3 MeshVB renderer by forcing opaque
+    // ONE/ZERO blending after ST3D_Mesh made the polygon-sort decision. Force
+    // Storm3D's native z-sort material state again at the final material draw,
+    // after all per-light accumulation passes and that opaque reset.
+    void* previous_material = read_at<void*>(
+        device_wrapper, kStormCurrentMaterialOffset, nullptr);
+    void* no_material = nullptr;
+    std::memcpy(static_cast<std::uint8_t*>(device_wrapper) +
+                    kStormCurrentMaterialOffset,
+                &no_material, sizeof(no_material));
+    a2fo_nebula_call_thiscall_0(
+        at(g_armada, kTextureMaterialSetRenderStateZSortRva), material);
+    if (read_at<void*>(
+            device_wrapper, kStormCurrentMaterialOffset, nullptr) !=
+        material) {
+        std::memcpy(static_cast<std::uint8_t*>(device_wrapper) +
+                        kStormCurrentMaterialOffset,
+                    &previous_material, sizeof(previous_material));
+        return;
+    }
+
+    state.device = device;
+    state.device_wrapper = device_wrapper;
+    state.active = true;
+
+    float material_alpha = 1.0f;
+    if (active_storm_material_alpha(device, &material_alpha) &&
+        material_alpha < 0.99999f &&
+        SUCCEEDED(device->GetVertexShaderConstant(
+            0, state.vertex_constant_zero.data(), 1))) {
+        std::array<float, 4> alpha_constant =
+            state.vertex_constant_zero;
+        alpha_constant[3] = material_alpha;
+        if (std::fabs(
+                state.vertex_constant_zero[3] - material_alpha) >
+                0.00001f &&
+            SUCCEEDED(device->SetVertexShaderConstant(
+                0, alpha_constant.data(), 1))) {
+            state.vertex_constant_zero_modified = true;
+        }
+        if (InterlockedCompareExchange(
+                &g_logged_fast_nonbump_dynamic_alpha, 1, 0) == 0) {
+            char message[192]{};
+            std::snprintf(
+                message, sizeof(message),
+                "Final fast non-bump material draw received Storm3D dynamic alpha %.3f",
+                static_cast<double>(material_alpha));
+            log_line(message);
+        }
+    }
+
+    if (InterlockedCompareExchange(
+            &g_logged_fast_nonbump_final_alpha_state, 1, 0) == 0) {
+        log_line("Reapplied Storm3D alpha blend state after Fleet Ops' opaque MeshVB reset");
+    }
+}
+
+void fast_nonbump_final_alpha_post_draw() noexcept {
+    if (g_fast_nonbump_final_alpha_state_overflow != 0) {
+        --g_fast_nonbump_final_alpha_state_overflow;
+        g_fast_nonbump_alpha_material = nullptr;
+        return;
+    }
+    if (g_fast_nonbump_final_alpha_state_depth == 0) {
+        g_fast_nonbump_alpha_material = nullptr;
+        return;
+    }
+    FastNonBumpFinalAlphaState& state =
+        g_fast_nonbump_final_alpha_state_stack[
+            --g_fast_nonbump_final_alpha_state_depth];
+    if (state.active && state.device) {
+        if (state.vertex_constant_zero_modified) {
+            state.device->SetVertexShaderConstant(
+                0, state.vertex_constant_zero.data(), 1);
+        }
+        if (state.device_wrapper && writable_range(
+                static_cast<std::uint8_t*>(state.device_wrapper) +
+                    kStormCurrentMaterialOffset,
+                sizeof(void*))) {
+            // Raw Fleet Ops state changes are not reflected in Storm3D's
+            // material equality cache. Invalidate it so the next object,
+            // including another instance using the same material pointer,
+            // republishes its ordinary or z-sort state.
+            void* no_material = nullptr;
+            std::memcpy(static_cast<std::uint8_t*>(state.device_wrapper) +
+                            kStormCurrentMaterialOffset,
+                        &no_material, sizeof(no_material));
+        }
+    }
+    state = FastNonBumpFinalAlphaState{};
+    g_fast_nonbump_alpha_material = nullptr;
+}
+
 void dot3_emissive_pre_draw(IDirect3DDevice8* device, UINT vertex_count,
                             UINT primitive_count) noexcept {
     if (g_dot3_state_depth >= g_dot3_state_stack.size()) {
@@ -3547,6 +4714,11 @@ void dot3_emissive_pre_draw(IDirect3DDevice8* device, UINT vertex_count,
     state = StandardTextureStageState{};
     if (InterlockedCompareExchange(&g_runtime_enabled, 0, 0) == 0 ||
         !device) {
+        return;
+    }
+    if (!a2fo::renderer_extension_draw_required(
+            true, a2fo::renderer_emissive_maps_enabled(),
+            a2fo::renderer_specular_maps_enabled())) {
         return;
     }
     if (!current_render_craft()) {
@@ -3817,6 +4989,46 @@ bool ensure_specular_pixel_shader(IDirect3DDevice8* device) noexcept {
     return true;
 }
 
+bool ensure_fast_nonbump_vertex_shader(
+    IDirect3DDevice8* device) noexcept {
+    if (!device || InterlockedCompareExchange(
+            &g_fast_nonbump_shader_rejected, 0, 0) != 0) {
+        return false;
+    }
+    if (!device_method_is_callable(
+            device, kCreateVertexShaderVtableIndex) ||
+        !device_method_is_callable(
+            device, kSetVertexShaderVtableIndex)) {
+        InterlockedExchange(&g_fast_nonbump_shader_rejected, 1);
+        return false;
+    }
+    if (!compile_fast_nonbump_vertex_shader()) {
+        InterlockedExchange(&g_fast_nonbump_shader_rejected, 1);
+        return false;
+    }
+    if (g_device != device) adopt_live_device(device);
+    if (g_fast_nonbump_vertex_shader != 0) return true;
+
+    DWORD shader = 0;
+    const HRESULT result = device->CreateVertexShader(
+        reinterpret_cast<const DWORD*>(
+            a2fo::amd_dot3::kStockDeclaration.data()),
+        static_cast<const DWORD*>(
+            g_compiled_fast_nonbump_vertex_shader->GetBufferPointer()),
+        &shader, 0);
+    if (FAILED(result) || shader == 0) {
+        if (InterlockedCompareExchange(
+                &g_logged_fast_nonbump_create_failure, 1, 0) == 0) {
+            log_hresult("Create fast non-bump DX8 vertex shader", result);
+        }
+        InterlockedExchange(&g_fast_nonbump_shader_rejected, 1);
+        return false;
+    }
+    g_fast_nonbump_vertex_shader = shader;
+    log_line("Fast non-bump DX8 vertex shader created");
+    return true;
+}
+
 std::uintptr_t set_pixel_shader_impl(
     void* self, std::uintptr_t shader_id) noexcept {
     g_specular_shader_selected = false;
@@ -3939,9 +5151,14 @@ void disable_pixel_shader_impl() noexcept {
 }
 
 void* __cdecl compile_dot3_mesh_hook(const void* mesh) noexcept {
+    if (g_system_dot3_compat_armed) {
+        apply_system_dot3_compatibility();
+    }
+
     // This is the first safe point after process attach. Activate here so no
     // file/D3DX work occurs under the Windows loader lock, while Fleet Ops'
-    // stock DOT3 vertex shader remains untouched.
+    // stock DOT3 creation remains ordered after the optional system-backend
+    // declaration/source preflight.
     const LONG state = InterlockedCompareExchange(&g_activation_state, 1, 0);
     if (state == 0) {
         bool activated = false;
@@ -3978,8 +5195,102 @@ void* __cdecl compile_dot3_mesh_hook(const void* mesh) noexcept {
     return original ? original(mesh) : nullptr;
 }
 
+void __cdecl ensure_dot3_shader_hook() noexcept {
+    if (g_system_dot3_compat_armed) {
+        apply_system_dot3_compatibility();
+    }
+    EnsureDot3Shader original =
+        function_from_address<EnsureDot3Shader>(
+            g_ensure_dot3_shader_original);
+    if (original) original();
+}
+
+bool install_direct_d3d9_dot3_compat_hook() noexcept {
+    if (!signature_matches(g_fleet_ops, kDirectD3d9Dot3CreateRva,
+                           kExpectedDirectD3d9Dot3Create.data(),
+                           kExpectedDirectD3d9Dot3Create.size())) {
+        log_line("AMD direct-D3D9 DOT3 creation signature differs; native "
+                 "shader retained");
+        return false;
+    }
+
+    const bool installed = a2fo::install_inline_hook(
+        at(g_fleet_ops, kDirectD3d9Dot3CreateRva),
+        function_address(&create_direct_d3d9_dot3_shader_hook),
+        kExpectedDirectD3d9Dot3Create.size(),
+        kExpectedDirectD3d9Dot3Create.data(),
+        g_direct_d3d9_dot3_create_hook);
+    if (installed) {
+        g_direct_d3d9_dot3_create_original =
+            g_direct_d3d9_dot3_create_hook.gateway;
+        g_direct_d3d9_dot3_compat_armed = true;
+        log_line("AMD direct-D3D9 DOT3 compatibility armed at the checked "
+                 "declaration/shader creation callback; draw hooks remain "
+                 "disabled");
+    } else {
+        g_direct_d3d9_dot3_compat_armed = false;
+        log_line("AMD direct-D3D9 DOT3 compatibility hook could not be "
+                 "installed; native shader retained");
+    }
+    return installed;
+}
+
+bool install_system_dot3_compat_hooks() noexcept {
+    if (!signature_matches(g_armada, kCompileDot3MeshRva,
+                           kExpectedCompileDot3Mesh.data(),
+                           kExpectedCompileDot3Mesh.size()) ||
+        !signature_matches(g_armada, kEnsureDot3ShaderRva,
+                           kExpectedEnsureDot3Shader.data(),
+                           kExpectedEnsureDot3Shader.size())) {
+        log_line("AMD native DOT3 lazy-creation signature differs; system "
+                 "renderer remains fully native");
+        return false;
+    }
+
+    bool installed = a2fo::install_inline_hook(
+        at(g_armada, kCompileDot3MeshRva),
+        function_address(&compile_dot3_mesh_hook),
+        kExpectedCompileDot3Mesh.size(), kExpectedCompileDot3Mesh.data(),
+        g_compile_hook);
+    if (installed) g_compile_original = g_compile_hook.gateway;
+
+    installed = installed && a2fo::install_inline_hook(
+        at(g_armada, kEnsureDot3ShaderRva),
+        function_address(&ensure_dot3_shader_hook),
+        kExpectedEnsureDot3Shader.size(),
+        kExpectedEnsureDot3Shader.data(), g_ensure_dot3_shader_hook);
+    if (installed) {
+        g_ensure_dot3_shader_original = g_ensure_dot3_shader_hook.gateway;
+        g_system_dot3_compat_armed = true;
+        log_line("AMD native DOT3 compatibility armed at both checked shader "
+                 "creation routes; draw hooks remain disabled");
+    } else {
+        g_system_dot3_compat_armed = false;
+        log_line("AMD native DOT3 compatibility hook installation was "
+                 "incomplete; installed entry remains pass-through");
+    }
+    return installed;
+}
+
 bool install_hooks_early() noexcept {
     if (!preflight_signatures()) return false;
+
+    g_a2fo_nebula_mesh_selector_fast =
+        at(g_armada, kMeshRenderSelectorFastRva);
+    g_a2fo_nebula_mesh_selector_legacy =
+        at(g_armada, kMeshRenderSelectorLegacyRva);
+    if (!a2fo::patch_jump(
+            at(g_armada, kMeshRenderSelectorRva),
+            function_address(&a2fo_nebula_mesh_selector_hook),
+            kExpectedMeshRenderSelector.data(),
+            kExpectedMeshRenderSelector.size())) {
+        log_line("Mesh-render selector compatibility signature differs; "
+                 "native rendering retained");
+        return false;
+    }
+    log_line(g_renderer_route_diagnostics_enabled
+        ? "Mesh-render selector compatibility and fallback diagnostics armed"
+        : "Mesh-render selector compatibility armed");
 
     // These replacements are installed under process attach but remain pure
     // pass-throughs. The compile hook performs all file/D3DX work later at the
@@ -4010,6 +5321,19 @@ bool install_hooks_early() noexcept {
     if (installed) g_a2fo_nebula_alpha_gateway = g_alpha_hook.gateway;
 
     if (g_dxvk_backend_active) {
+        installed = installed && a2fo::install_inline_hook(
+            at(g_fleet_ops, kFleetOpsDot3LightDrawRva),
+            function_address(&a2fo_nebula_fleetops_dot3_light_draw_hook),
+            kExpectedFleetOpsDot3LightDraw.size(),
+            kExpectedFleetOpsDot3LightDraw.data(),
+            g_fleetops_dot3_light_draw_hook);
+        if (installed) {
+            g_a2fo_nebula_fleetops_dot3_light_draw_return =
+                at(g_fleet_ops,
+                   kFleetOpsDot3LightDrawRva +
+                       kExpectedFleetOpsDot3LightDraw.size());
+        }
+
         installed = installed && a2fo::install_inline_hook(
             at(g_fleet_ops, kFleetOpsDot3DrawRva),
             function_address(&a2fo_nebula_fleetops_dot3_draw_hook),
@@ -4078,10 +5402,11 @@ bool install_hooks_early() noexcept {
     // DOT3 materials need a native fixed-function emissive fallback on DXVK.
     // Do not interpose either DOT3 draw on the system backend: Windows'
     // dxwrapper/D3D8 chain has been observed to retain driver-private draw
-    // state across this boundary and crash in its native callback even when
-    // the extension makes no texture changes. Native Fleet Ops bumps remain
-    // fully enabled; only extension emissive/specular work on bumped materials
-    // is unavailable on that backend.
+    // state across this boundary, and the native DOT3 result is already
+    // vendor-sensitive there. Keep the compatibility candidate entirely at
+    // shader creation. Native Fleet Ops bumps remain fully enabled; only
+    // extension emissive/specular work on bumped materials is unavailable on
+    // that backend.
     if (g_dxvk_backend_active) {
         installed = installed && a2fo::install_inline_hook(
             at(g_armada, kDot3DrawRva),
@@ -4158,6 +5483,9 @@ extern "C" void __cdecl a2fo_nebula_disable_pixel_shader() {
 }
 
 extern "C" void __cdecl a2fo_nebula_standard_pre() {
+    if (g_renderer_route_diagnostics_enabled) {
+        ++g_route_standard_boundaries;
+    }
     if (InterlockedCompareExchange(
             &g_logged_standard_hook_reached, 1, 0) == 0) {
         log_line("Standard MeshVB draw boundary reached");
@@ -4174,6 +5502,9 @@ extern "C" void __cdecl a2fo_nebula_standard_post(void* mesh_stream) {
 
 extern "C" void __cdecl a2fo_nebula_nonvb_pre(
     UINT pass_index, UINT pass_count) {
+    if (g_renderer_route_diagnostics_enabled) {
+        ++g_route_nonvb_passes;
+    }
     if (InterlockedCompareExchange(
             &g_logged_nonvb_hook_reached, 1, 0) == 0) {
         log_line("Legacy non-VB direct-submit draw boundary reached");
@@ -4182,6 +5513,10 @@ extern "C" void __cdecl a2fo_nebula_nonvb_pre(
 }
 
 extern "C" void __cdecl a2fo_nebula_nonvb_post(void* workspace) {
+    if (g_renderer_route_diagnostics_enabled) {
+        ++g_route_nonvb_submissions;
+        g_route_nonvb_triangles += read_at<UINT>(workspace, 0x9c, 0);
+    }
     if (g_native_framebuffer_bloom_enabled) {
         nonvb_emissive_mask_draw(workspace);
     }
@@ -4190,6 +5525,10 @@ extern "C" void __cdecl a2fo_nebula_nonvb_post(void* workspace) {
 extern "C" void __cdecl a2fo_nebula_workspace_dx8_draw(
     IDirect3DDevice8* device, void* workspace, UINT vertex_count,
     UINT start_index, UINT primitive_count) {
+    if (g_renderer_route_diagnostics_enabled) {
+        ++g_route_workspace_draws;
+        g_route_workspace_triangles += primitive_count;
+    }
     standard_emissive_pre_draw();
     if (g_native_framebuffer_bloom_enabled) {
         workspace_dx8_emissive_mask_draw(
@@ -4203,6 +5542,7 @@ extern "C" void __cdecl a2fo_nebula_workspace_dx8_post() {
 
 extern "C" void __cdecl a2fo_nebula_frame_begin(
     IDirect3DDevice8* device) {
+    sample_renderer_routes();
     if (!g_native_framebuffer_bloom_enabled || !device) return;
     // EndScene normally consumes and resets the mask. BeginScene is the
     // authoritative safety boundary: discard any stale logical contents before
@@ -4239,6 +5579,10 @@ extern "C" void __cdecl a2fo_nebula_before_device_destroy(void* wrapper) {
 extern "C" void __cdecl a2fo_nebula_dot3_draw(
     IDirect3DDevice8* device, const void* mesh_stream,
     UINT primitive_count) {
+    if (g_renderer_route_diagnostics_enabled) {
+        ++g_route_armada_dot3_draws;
+        g_route_armada_dot3_triangles += primitive_count;
+    }
     if (InterlockedCompareExchange(
             &g_logged_dot3_hook_reached, 1, 0) == 0) {
         log_line("DOT3 indexed draw boundary reached");
@@ -4254,8 +5598,21 @@ extern "C" void __cdecl a2fo_nebula_dot3_post() {
     dot3_emissive_post_draw();
 }
 
+extern "C" void __cdecl a2fo_nebula_fast_nonbump_light_draw(
+    IDirect3DDevice8* device) {
+    fast_nonbump_light_pre_draw(device);
+}
+
+extern "C" void __cdecl a2fo_nebula_fast_nonbump_light_post() {
+    fast_nonbump_light_post_draw();
+}
+
 extern "C" void __cdecl a2fo_nebula_fleetops_dot3_draw(
     IDirect3DDevice8* device, UINT vertex_count, UINT primitive_count) {
+    if (g_renderer_route_diagnostics_enabled) {
+        ++g_route_fleetops_dot3_draws;
+        g_route_fleetops_dot3_triangles += primitive_count;
+    }
     if (InterlockedCompareExchange(
             &g_logged_fleetops_dot3_hook_reached, 1, 0) == 0) {
         log_line("Fleet Ops DOT3 indexed draw boundary reached");
@@ -4265,13 +5622,130 @@ extern "C" void __cdecl a2fo_nebula_fleetops_dot3_draw(
         dot3_emissive_mask_draw_counts(
             device, vertex_count, primitive_count);
     }
+    fast_nonbump_final_alpha_pre_draw(device);
 }
 
 extern "C" void __cdecl a2fo_nebula_fleetops_dot3_post() {
+    fast_nonbump_final_alpha_post_draw();
     dot3_emissive_post_draw();
 }
 
+extern "C" int __cdecl a2fo_nebula_try_fast_nonbump_alpha_meshvb(
+    void* material, void* device_wrapper) {
+    const bool fast_enabled = a2fo_nebula_general_mesh_enabled();
+    const bool renderer_active = InterlockedCompareExchange(
+        &g_runtime_enabled, 0, 0) != 0;
+    const bool shader_rejected = InterlockedCompareExchange(
+        &g_fast_nonbump_shader_rejected, 0, 0) != 0;
+    constexpr std::size_t kDestinationBlendOffset = 0x20;
+    const DWORD destination_blend = read_at<DWORD>(
+        material, kDestinationBlendOffset, 0);
+    if (!a2fo::renderer_fast_nonbump_alpha_meshvb_allowed(
+            fast_enabled, renderer_active, shader_rejected, false,
+            destination_blend, (g_fast_alpha_meshvb_mode ? 2ul : 0ul)) ||
+        !readable_range(material, kDestinationBlendOffset + sizeof(DWORD)) ||
+        !writable_range(
+            static_cast<std::uint8_t*>(device_wrapper) +
+                kStormCurrentMaterialOffset,
+            sizeof(void*))) {
+        return 0;
+    }
+
+    void* current_material = read_at<void*>(
+        device_wrapper, kStormCurrentMaterialOffset, nullptr);
+    if (current_material != material) return 0;
+
+    // Admission must not outrun shader readiness. In particular, a cloak-only
+    // request can be the first flat-normal draw while global bumps stay on.
+    // Missing assets or an unsupported device retain the native sorted path.
+    IDirect3DDevice8* device = read_at<IDirect3DDevice8*>(
+        device_wrapper, kStormDeviceOffset, nullptr);
+    if (!device || active_storm_device_wrapper(device) != device_wrapper ||
+        !ensure_fast_nonbump_vertex_shader(device)) {
+        return 0;
+    }
+
+    // SetRenderState already published this material before noticing that the
+    // active global alpha pass requested polygon sorting. Clear only that
+    // equality cache so SetRenderState_ZSort applies the same transition state
+    // immediately; the native function republishes `material` before return.
+    void* no_material = nullptr;
+    std::memcpy(static_cast<std::uint8_t*>(device_wrapper) +
+                    kStormCurrentMaterialOffset,
+                &no_material, sizeof(no_material));
+    a2fo_nebula_call_thiscall_0(
+        at(g_armada, kTextureMaterialSetRenderStateZSortRva), material);
+    if (read_at<void*>(
+            device_wrapper, kStormCurrentMaterialOffset, nullptr) !=
+        material) {
+        std::memcpy(static_cast<std::uint8_t*>(device_wrapper) +
+                        kStormCurrentMaterialOffset,
+                    &current_material, sizeof(current_material));
+        return 0;
+    }
+
+    if (!prepare_cloak_composite(material)) return 0;
+    g_fast_nonbump_alpha_material = material;
+
+    constexpr DWORD kOpaqueDestinationBlend = D3DBLEND_ZERO;
+    constexpr DWORD kAdditiveDestinationBlend = D3DBLEND_ONE;
+    if (destination_blend == kOpaqueDestinationBlend) {
+        if (g_renderer_route_diagnostics_enabled) {
+            ++g_route_selector_alpha_opaque_fast;
+        }
+        if (InterlockedCompareExchange(
+                &g_logged_fast_nonbump_alpha_meshvb, 1, 0) == 0) {
+            log_line("Fast non-bump MeshVB retained for native-opaque alpha transition material");
+        }
+    } else if (destination_blend == kAdditiveDestinationBlend) {
+        if (g_renderer_route_diagnostics_enabled) {
+            ++g_route_selector_alpha_additive_fast;
+        }
+        if (InterlockedCompareExchange(
+                &g_logged_fast_nonbump_additive_meshvb, 1, 0) == 0) {
+            log_line("Fast non-bump MeshVB retained for order-independent additive material");
+        }
+    } else {
+        if (g_renderer_route_diagnostics_enabled) {
+            ++g_route_selector_alpha_aggressive_fast;
+        }
+        if (InterlockedCompareExchange(
+                &g_logged_fast_nonbump_aggressive_meshvb, 1, 0) == 0) {
+            char message[192]{};
+            std::snprintf(
+                message, sizeof(message),
+                "Aggressive fast non-bump MeshVB retained for transparent material (destination blend %lu)",
+                static_cast<unsigned long>(destination_blend));
+            log_line(message);
+        }
+    }
+    return 1;
+}
+
+extern "C" void __cdecl a2fo_nebula_mesh_selector_reason(UINT reason) {
+    if (reason != 5) {
+        g_fast_nonbump_alpha_material = nullptr;
+        clear_cloak_composite_selection();
+    }
+    if (!g_renderer_route_diagnostics_enabled) return;
+    switch (reason) {
+        case 0: ++g_route_selector_no_mesh_vb; break;
+        case 1: ++g_route_selector_eligibility_reject; break;
+        case 2: ++g_route_selector_polygon_sort_reject; break;
+        case 3: ++g_route_selector_external_reject; break;
+        case 4: ++g_route_selector_fast; break;
+        case 5: ++g_route_selector_alpha_fast; break;
+        default: break;
+    }
+}
+
 namespace a2fo {
+
+#include "renderer_unmapped_meshvb.inl"
+#include "renderer_phong_meshvb.inl"
+#include "renderer_cloak_composite.inl"
+#include "renderer_general_meshvb.inl"
+#include "renderer_transparent_indices.inl"
 
 bool install_nebula_renderer_early(HMODULE armada, HMODULE fleet_ops,
                                    const std::string& root_directory,
@@ -4280,6 +5754,28 @@ bool install_nebula_renderer_early(HMODULE armada, HMODULE fleet_ops,
     g_fleet_ops = fleet_ops;
     g_root_directory = root_directory;
     g_log = log;
+    InterlockedExchange(&g_logged_cloak_flat_normal, 0);
+    InterlockedExchange(&g_fast_nonbump_enabled, 0);
+    InterlockedExchange(&g_fast_nonbump_shader_rejected, 0);
+    InterlockedExchange(&g_logged_fast_nonbump_compile_failure, 0);
+    InterlockedExchange(&g_logged_fast_nonbump_create_failure, 0);
+    InterlockedExchange(&g_logged_fast_nonbump_draw, 0);
+    InterlockedExchange(&g_logged_fast_nonbump_dynamic_alpha, 0);
+    InterlockedExchange(&g_logged_fast_nonbump_final_alpha_state, 0);
+    InterlockedExchange(&g_logged_fast_nonbump_alpha_meshvb, 0);
+    InterlockedExchange(&g_logged_fast_nonbump_additive_meshvb, 0);
+    InterlockedExchange(&g_logged_fast_nonbump_aggressive_meshvb, 0);
+    g_fast_nonbump_alpha_material = nullptr;
+    g_fast_nonbump_final_alpha_state_depth = 0;
+    g_fast_nonbump_final_alpha_state_overflow = 0;
+    g_system_dot3_compat_policy = load_system_dot3_compat_policy();
+    g_system_dot3_compat_armed = false;
+    g_system_dot3_compat_applied = false;
+    g_direct_d3d9_dot3_compat_armed = false;
+    InterlockedExchange(&g_system_dot3_compat_attempted, 0);
+    InterlockedExchange(&g_direct_d3d9_adapter_logged, 0);
+    InterlockedExchange(&g_direct_d3d9_dot3_compat_logged, 0);
+    InterlockedExchange(&g_direct_d3d9_dot3_native_logged, 0);
     g_dxvk_backend_active = load_dxvk_backend_policy();
     if (g_dxvk_backend_payload_detected) {
         log_line(g_dxvk_backend_ini_claimed
@@ -4292,32 +5788,83 @@ bool install_nebula_renderer_early(HMODULE armada, HMODULE fleet_ops,
     }
     if (!g_dxvk_backend_active) {
         // Native Windows reaches the vendor D3D9 driver through
-        // dxwrapper/d3d8to9. An AMD failure captured at Fleet Ops'
-        // unintercepted DOT3 DrawIndexedPrimitive showed that merely retaining
-        // and inspecting the shared DX8 device from adjacent material hooks
-        // can destabilize this chain. Keep the system backend completely
-        // native: no compile, material, workspace, reset, or device-lifetime
-        // hook is installed, and the controller can use status() to avoid SOD
-        // texture mutations as well.
+        // dxwrapper/d3d8to9. Keep every A2FO material, draw, reset, and
+        // device-lifetime hook disabled on this backend. The optional AMD
+        // compatibility path owns only lazy shader creation: two Armada D3D8
+        // entries for the external d3d8to9 route, or Fleet Operations' single
+        // declaration/shader callback for /d3d9. It identifies the live
+        // adapter and substitutes an exact matched pair before the shared
+        // shader is created. No render-state or draw interception is involved.
         g_native_framebuffer_bloom_enabled = false;
         g_hooks_ready = false;
         InterlockedExchange(&g_runtime_enabled, 0);
         InterlockedExchange(&g_activation_state, -1);
-        log_line("System renderer safety isolation active; A2FO DX8 "
-                 "mapped-material hooks are not installed and Fleet "
-                 "Operations retains its complete native render path");
+        if (g_system_dot3_compat_policy ==
+                a2fo::amd_dot3::Policy::disabled) {
+            log_line("AMD native DOT3 compatibility is disabled by "
+                     "AmdNativeDot3Fix=0");
+        } else if (validate_armada_module(g_armada) &&
+                   validate_module(g_fleet_ops, kFleetOpsTimestamp,
+                                   kFleetOpsImageSize,
+                                   "FleetOpsHook.dll")) {
+            if (command_line_requests_dx9()) {
+                install_direct_d3d9_dot3_compat_hook();
+            } else {
+                install_system_dot3_compat_hooks();
+            }
+        }
+        log_line("System renderer safety isolation active; A2FO mapped-"
+                 "material draw/state hooks are not installed");
         return true;
+    }
+    g_fast_alpha_meshvb_mode = load_fast_alpha_meshvb_policy();
+    install_unmapped_meshvb_policy();
+    g_neutral_bump_when_cloaked = load_neutral_bump_cloak_policy();
+    log_line(g_neutral_bump_when_cloaked
+        ? "Per-craft neutral bump lighting enabled during cloak and decloak"
+        : "Per-craft neutral bump lighting disabled");
+    if (g_fast_alpha_meshvb_mode == 0) {
+        log_line("Fast alpha MeshVB policy disabled; native polygon sorting retained");
+    } else if (g_fast_alpha_meshvb_mode == 1) {
+        log_line("Fast alpha MeshVB safe policy enabled for opaque transitions and additive materials");
+    } else {
+        log_line("Fast alpha MeshVB aggressive policy enabled for all transparent materials");
     }
     g_native_framebuffer_bloom_enabled =
         load_native_framebuffer_bloom_policy();
     g_mapped_texture_cloak_diagnostics_enabled =
         load_mapped_texture_cloak_diagnostics_policy();
+    g_renderer_route_diagnostics_enabled =
+        load_renderer_route_diagnostics_policy();
+    g_route_sample_frames = 0;
+    g_route_standard_boundaries = 0;
+    g_route_nonvb_passes = 0;
+    g_route_nonvb_submissions = 0;
+    g_route_nonvb_triangles = 0;
+    g_route_workspace_draws = 0;
+    g_route_workspace_triangles = 0;
+    g_route_armada_dot3_draws = 0;
+    g_route_armada_dot3_triangles = 0;
+    g_route_fleetops_dot3_draws = 0;
+    g_route_fleetops_dot3_triangles = 0;
+    g_route_selector_no_mesh_vb = 0;
+    g_route_selector_eligibility_reject = 0;
+    g_route_selector_polygon_sort_reject = 0;
+    g_route_selector_external_reject = 0;
+    g_route_selector_fast = 0;
+    g_route_selector_alpha_fast = 0;
+    g_route_selector_alpha_opaque_fast = 0;
+    g_route_selector_alpha_additive_fast = 0;
+    g_route_selector_alpha_aggressive_fast = 0;
     InterlockedExchange(&g_mapped_texture_cloak_diagnostic_mask, 0);
     if (g_native_framebuffer_bloom_enabled) {
         log_line("Native selective emissive framebuffer bloom enabled for DXVK");
     }
     if (g_mapped_texture_cloak_diagnostics_enabled) {
         log_line("Mapped-texture cloak diagnostics enabled");
+    }
+    if (g_renderer_route_diagnostics_enabled) {
+        log_line("Renderer-route counters enabled");
     }
     if (!validate_armada_module(g_armada) ||
         !validate_module(g_fleet_ops, kFleetOpsTimestamp, kFleetOpsImageSize,
@@ -4332,7 +5879,13 @@ bool install_nebula_renderer_early(HMODULE armada, HMODULE fleet_ops,
 }
 
 void shutdown_nebula_renderer() noexcept {
+    InterlockedExchange(&g_fast_nonbump_enabled, 0);
+    g_faction_texture_suffixes.clear();
+    g_faction_texture_suffixes.insert("_b");
+    InterlockedExchange(&g_logged_faction_emissive_fallback, 0);
+    InterlockedExchange(&g_logged_faction_specular_fallback, 0);
     InterlockedExchange(&g_runtime_enabled, 0);
+    restore_system_dot3_compatibility();
     release_com_owner(
         g_device, [](IDirect3DDevice8* previous) noexcept {
             invalidate_device_resources(previous);
@@ -4370,6 +5923,42 @@ bool set_nebula_emissive_diffuse_restore(float amount) noexcept {
     }
     g_emissive_diffuse_restore = amount;
     return true;
+}
+
+bool set_nebula_fast_nonbump_enabled(bool enabled) noexcept {
+    if (enabled && (!g_dxvk_backend_active || !g_hooks_ready)) {
+        return false;
+    }
+    if (enabled && !fast_nonbump_vertex_shader_asset_available()) {
+        log_line("Fast non-bump vertex-lighting policy rejected because its shader asset did not pass preflight");
+        return false;
+    }
+    InterlockedExchange(&g_fast_nonbump_enabled, enabled ? 1 : 0);
+    log_line(enabled
+        ? "Fast non-bump vertex-lighting policy enabled"
+        : "Fast non-bump vertex-lighting policy disabled");
+    return true;
+}
+
+bool register_nebula_faction_texture_suffix(const char* suffix) noexcept {
+    if (!suffix) return false;
+    try {
+        std::string normalized;
+        for (const char* cursor = suffix; *cursor; ++cursor) {
+            const unsigned char value =
+                static_cast<unsigned char>(*cursor);
+            if (normalized.size() >= 32 ||
+                (!std::isalnum(value) && *cursor != '_' && *cursor != '-')) {
+                return false;
+            }
+            normalized.push_back(static_cast<char>(std::tolower(value)));
+        }
+        if (normalized.empty()) return false;
+        g_faction_texture_suffixes.insert(std::move(normalized));
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
 bool register_nebula_emissive_class(
@@ -4644,6 +6233,16 @@ int __cdecl A2FO_NebulaSetBumpLightBias(float bias) {
 extern "C" __declspec(dllexport)
 int __cdecl A2FO_NebulaSetEmissiveDiffuseRestore(float amount) {
     return a2fo::set_nebula_emissive_diffuse_restore(amount) ? 1 : 0;
+}
+
+extern "C" __declspec(dllexport)
+int __cdecl A2FO_NebulaSetFastNonBumpEnabled(int enabled) {
+    return a2fo::set_nebula_fast_nonbump_enabled(enabled != 0) ? 1 : 0;
+}
+
+extern "C" __declspec(dllexport)
+int __cdecl A2FO_NebulaRegisterFactionTextureSuffix(const char* suffix) {
+    return a2fo::register_nebula_faction_texture_suffix(suffix) ? 1 : 0;
 }
 
 extern "C" __declspec(dllexport)

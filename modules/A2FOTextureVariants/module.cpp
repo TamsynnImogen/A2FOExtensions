@@ -70,7 +70,8 @@ using a2fo::texture_variants::SubsystemCondition;
 using a2fo::texture_variants::texture_asset_path;
 
 constexpr char kModuleName[] = "A2FOTextureVariants";
-constexpr char kFactionSuffixCommand[] = "factionTextureSuffix";
+constexpr const char* kFactionSuffixCommand =
+    a2fo::faction_suffix::kCommand;
 constexpr char kFactionNameCommand[] = "name";
 constexpr char kRepairParticleName[] = "xspark";
 constexpr char kCraftIdentityModuleName[] = "A2FOCraftIdentity.dll";

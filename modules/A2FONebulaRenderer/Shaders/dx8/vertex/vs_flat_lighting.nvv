@@ -1,0 +1,27 @@
+; A2FOExtensions fast non-bump vertex-lighting shader.
+;
+; Reuses Armada's native DOT3 MeshVB declaration:
+; v0=position, v1=normal, v2=UV, v3/v4/v5=tangent basis
+; c0=1, c1=0.5, c2-c5=clip matrix, c6=light direction
+;
+; Fleet Operations normally transforms and normalizes c6 in tangent space,
+; then samples a normal map with D3DTOP_DOTPRODUCT3.  When native bumps are
+; disabled, a flat normal is +Z in that same tangent space.  This shader emits
+; the normalized tangent-space light's Z component directly.  The draw hook
+; selects oD0 at texture stage 0, so no bump texture is sampled.
+vs.1.1
+
+m4x4 oPos,v0,c2
+mov oT0.xy,v2.xy
+
+dp3 r0.x,v3,c6
+dp3 r0.y,v4,c6
+dp3 r0.z,v5,c6
+dp3 r0.w,r0,r0
+rsq r0.w,r0.w
+mul r0.xyz,r0,r0.w
+sub r1,c0,c0
+max r0.z,r0.z,r1.z
+min r0.z,r0.z,c0.z
+mov oD0.rgb,r0.z
+mov oD0.a,c0.w

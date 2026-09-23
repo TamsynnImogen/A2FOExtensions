@@ -632,6 +632,30 @@ using DelphiRegister2Function =
 using DelphiRegister2Stack2Function =
     void (__attribute__((regparm(2), stdcall)) *)(
         void*, void*, std::uintptr_t, void*);
+using FeaturePackLogicalQueueHasRoomFunction =
+    bool (__cdecl*)(void* producer);
+using FeaturePackQueueExtendedBuildFunction =
+    bool (__cdecl*)(void* producer, void* target_class);
+using FeaturePackCanQueueExtendedBuildFunction =
+    bool (__cdecl*)(void* producer, void* target_class);
+FeaturePackLogicalQueueHasRoomFunction
+    g_feature_pack_logical_queue_has_room = nullptr;
+FeaturePackQueueExtendedBuildFunction
+    g_feature_pack_queue_extended_build = nullptr;
+FeaturePackCanQueueExtendedBuildFunction
+    g_feature_pack_can_queue_extended_build = nullptr;
+bool g_logged_extended_queue_admission = false;
+bool g_logged_extended_queue_pop_preserved = false;
+bool g_logged_extended_queue_palette = false;
+bool g_logged_extended_queue_count_spoof = false;
+bool g_logged_extended_queue_direct_press = false;
+bool g_logged_extended_queue_full_press_seen = false;
+bool g_logged_extended_queue_press_mode_invalid = false;
+bool g_logged_extended_queue_press_not_build = false;
+bool g_logged_extended_queue_press_no_room = false;
+bool g_logged_extended_queue_press_enqueue_rejected = false;
+bool g_logged_extended_queue_tail_mask = false;
+void* g_last_single_popup_selection = nullptr;
 
 template <typename T = void>
 T* at(HMODULE module, std::uintptr_t rva) {
@@ -678,6 +702,150 @@ void resolve_nebula_craft_render_observers() noexcept {
     } else {
         g_nebula_begin_craft_render = nullptr;
         g_nebula_end_craft_render = nullptr;
+    }
+}
+
+std::uint8_t* bytes(void* value) noexcept;
+bool readable_range(const void* pointer, std::size_t size) noexcept;
+bool writable_range(void* pointer, std::size_t size) noexcept;
+
+void resolve_feature_pack_extended_queue() noexcept {
+    // Prefer the read-only FeaturePack admission export when the linker has
+    // published it.  The bridge itself intentionally remains the original V1
+    // ABI so HybridBuild cannot be rejected merely because queue polish was
+    // updated independently.
+    HMODULE feature_pack = GetModuleHandleA("A2FOFeaturePack.dll");
+    FARPROC exported = feature_pack
+        ? GetProcAddress(feature_pack, "A2FO_ProducerLogicalQueueHasRoom")
+        : nullptr;
+    FARPROC queue_export = feature_pack
+        ? GetProcAddress(feature_pack, "A2FO_ProducerQueueExtendedBuild")
+        : nullptr;
+    FARPROC target_export = feature_pack
+        ? GetProcAddress(feature_pack,
+                         "A2FO_ProducerCanQueueExtendedBuild")
+        : nullptr;
+    static_assert(sizeof(exported) ==
+                      sizeof(g_feature_pack_logical_queue_has_room),
+                  "unexpected FeaturePack function-pointer size");
+    static_assert(sizeof(queue_export) ==
+                      sizeof(g_feature_pack_queue_extended_build),
+                  "unexpected FeaturePack queue function-pointer size");
+    static_assert(sizeof(target_export) ==
+                      sizeof(g_feature_pack_can_queue_extended_build),
+                  "unexpected FeaturePack target-admission pointer size");
+    std::memcpy(&g_feature_pack_logical_queue_has_room, &exported,
+                sizeof(g_feature_pack_logical_queue_has_room));
+    std::memcpy(&g_feature_pack_queue_extended_build, &queue_export,
+                sizeof(g_feature_pack_queue_extended_build));
+    std::memcpy(&g_feature_pack_can_queue_extended_build, &target_export,
+                sizeof(g_feature_pack_can_queue_extended_build));
+    if (g_feature_pack_logical_queue_has_room &&
+        g_feature_pack_queue_extended_build &&
+        g_feature_pack_can_queue_extended_build) {
+        log_message("FeaturePack extended-queue admission linked to "
+                    "Producer gates, direct overflow routing, and "
+                    "target-specific tail-slot masking");
+    } else if (g_feature_pack_logical_queue_has_room) {
+        log_message("FeaturePack logical queue gate linked; direct overflow "
+                    "button routing unavailable");
+    } else {
+        // The native gate runs before FeaturePack's synchronized queue hook.
+        // When the PE export is unavailable, fail open only at the physical
+        // ten-job boundary and preserve the FIFO. FeaturePack remains the
+        // authoritative final admission check (10 slots x 10 units), so a
+        // logically-full order is simply rejected later without losing a
+        // native queue item.
+        log_message("FeaturePack queue-capacity export unavailable; "
+                    "native-full orders handed to FeaturePack final "
+                    "admission");
+    }
+}
+
+bool feature_pack_extended_queue_has_room(void* producer) noexcept {
+    if (!producer) return false;
+    if (g_feature_pack_logical_queue_has_room) {
+        return g_feature_pack_logical_queue_has_room(producer);
+    }
+    if (!readable_range(bytes(producer) + kQueueCountOffset,
+                        sizeof(std::uint32_t))) {
+        return false;
+    }
+    const std::uint32_t count =
+        *reinterpret_cast<const std::uint32_t*>(
+            bytes(producer) + kQueueCountOffset);
+    return count >= kNativeQueueCapacity;
+}
+
+
+bool feature_pack_can_queue_extended_build(
+    void* producer, void* target_class) noexcept {
+    if (!producer || !target_class) return false;
+    if (g_feature_pack_can_queue_extended_build) {
+        return g_feature_pack_can_queue_extended_build(
+            producer, target_class);
+    }
+    // Older FeaturePack builds expose only the producer-wide capacity hint.
+    // Preserve their behavior rather than disabling valid build choices.
+    return feature_pack_extended_queue_has_room(producer);
+}
+
+void apply_extended_queue_tail_mask(void* producer) noexcept {
+    if (!producer || !g_fleet_ops ||
+        !g_feature_pack_can_queue_extended_build ||
+        !readable_range(bytes(producer) + kQueueCountOffset,
+                        sizeof(std::uint32_t)) ||
+        *reinterpret_cast<const std::uint32_t*>(
+            bytes(producer) + kQueueCountOffset) < kNativeQueueCapacity) {
+        return;
+    }
+
+    void** popup_buttons = at<void*>(
+        g_fleet_ops, kFoPopupButtonPointerArrayRva);
+    if (!readable_range(
+            popup_buttons, kFoPopupButtonCount * sizeof(void*))) {
+        return;
+    }
+
+    bool masked_any = false;
+    for (std::size_t index = 0; index < kFoPopupButtonCount; ++index) {
+        void* button = popup_buttons[index];
+        if (!button || !readable_range(
+                bytes(button) + kControlButtonModeInfoOffset,
+                sizeof(void*)) || !writable_range(
+                bytes(button) + kControlButtonStateOffset,
+                sizeof(std::uint32_t))) {
+            continue;
+        }
+        void* mode_info = *reinterpret_cast<void**>(
+            bytes(button) + kControlButtonModeInfoOffset);
+        if (!mode_info || !readable_range(
+                bytes(mode_info) + kModeInfoTypeOffset,
+                sizeof(std::uint32_t)) || !readable_range(
+                bytes(mode_info) + kModeInfoTargetClassOffset,
+                sizeof(void*))) {
+            continue;
+        }
+        const std::uint32_t type =
+            *reinterpret_cast<const std::uint32_t*>(
+                bytes(mode_info) + kModeInfoTypeOffset);
+        void* target_class = *reinterpret_cast<void**>(
+            bytes(mode_info) + kModeInfoTargetClassOffset);
+        if (type != 1u || !target_class) continue;
+
+        if (!feature_pack_can_queue_extended_build(
+                producer, target_class)) {
+            *reinterpret_cast<std::uint32_t*>(
+                bytes(button) + kControlButtonStateOffset) = 0u;
+            masked_any = true;
+        }
+    }
+
+    if (masked_any && !g_logged_extended_queue_tail_mask) {
+        g_logged_extended_queue_tail_mask = true;
+        log_message("Extended queue full-slot palette mask active: only "
+                    "the class already occupying slot ten remains "
+                    "available until that slot reaches x10");
     }
 }
 
@@ -2454,6 +2622,24 @@ std::uintptr_t __attribute__((fastcall)) producer_is_busy_hook(
         return_address == at(
             g_armada, kConstructionRigGetActionBusyReturnRva) &&
         hybrid_construction_interface(producer);
+    const bool extended_build_order = build_order_query &&
+        feature_pack_extended_queue_has_room(producer);
+    if (extended_build_order) {
+        if (!g_logged_extended_queue_admission) {
+            g_logged_extended_queue_admission = true;
+            log_message("FeaturePack logical queue bypassed the native "
+                        "ten-job Producer busy gate");
+        }
+        return 0;
+    }
+    if (menu_query && feature_pack_extended_queue_has_room(producer)) {
+        if (!g_logged_extended_queue_palette) {
+            g_logged_extended_queue_palette = true;
+            log_message("FeaturePack extended queue kept the Build palette "
+                        "enabled beyond ten native jobs");
+        }
+        return 0;
+    }
     if ((menu_query || build_order_query || construct_action_query) &&
         hybrid_station_has_queue_capacity(producer)) {
         if (menu_query && !g_logged_shared_queue_ui) {
@@ -2485,9 +2671,18 @@ void __attribute__((fastcall)) fo_producer_pop_checked_hook(
              g_armada, kBuildCommandCleanupPopReturnRva) ||
          return_address == at(
              g_armada, kBuildCommandReplacePopReturnRva));
+    const bool hybrid_queue_room =
+        hybrid_station_has_queue_capacity(producer);
+    const bool extended_queue_room = command_replacement_pop &&
+        feature_pack_extended_queue_has_room(producer);
     if (command_replacement_pop &&
-        hybrid_station_has_queue_capacity(producer)) {
-        if (!g_logged_preserved_command_queue) {
+        (hybrid_queue_room || extended_queue_room)) {
+        if (extended_queue_room && !g_logged_extended_queue_pop_preserved) {
+            g_logged_extended_queue_pop_preserved = true;
+            log_message("FeaturePack logical queue preserved the native FIFO "
+                        "while routing overflow to the sidecar");
+        }
+        if (hybrid_queue_room && !g_logged_preserved_command_queue) {
             g_logged_preserved_command_queue = true;
             log_message("Hybrid ResearchStation preserved existing FIFO "
                         "items while admitting another build command");
@@ -2809,6 +3004,7 @@ std::uintptr_t __attribute__((fastcall)) popup_update_buttons_hook(
             bytes(popup) + kPopupCurrentMenuOffset);
     }
     void* refit_selection = single_refit_source(craft_array);
+    g_last_single_popup_selection = refit_selection;
     if (refit_selection != g_last_single_refit_source) {
         g_last_single_refit_source = nullptr;
     }
@@ -2960,10 +3156,50 @@ std::uintptr_t __attribute__((fastcall)) popup_update_buttons_hook(
     // refresh; limiting it to prepare_hybrid_station_menu allowed the gateway
     // to disable every choice again as soon as the first job became active.
     void* previous_queue_station = g_queue_enabled_button_station;
+    void* extended_queue_station = nullptr;
+    if (refit_selection && menu == kBuildMenu &&
+        readable_range(bytes(refit_selection) + kQueueCountOffset,
+                       sizeof(std::uint32_t)) &&
+        *reinterpret_cast<const std::uint32_t*>(
+            bytes(refit_selection) + kQueueCountOffset) >=
+            kNativeQueueCapacity &&
+        feature_pack_extended_queue_has_room(refit_selection)) {
+        extended_queue_station = refit_selection;
+    }
     if (hybrid_station && (menu == kBuildMenu || menu == kResearchMenu ||
                            menu == kEvolveMenu)) {
         g_queue_enabled_button_station = hybrid_station;
+    } else if (extended_queue_station) {
+        g_queue_enabled_button_station = extended_queue_station;
     }
+    // Fleet Ops has at least one direct queue-count check in its Build-palette
+    // refresh path in addition to Producer::IsBusy.  Present only that UI
+    // refresh with a 9/10 native count so all of the normal technology,
+    // resource and class checks still run, but the hard ten-job UI gate does
+    // not disable the physical build controls.  The real FIFO and count are
+    // restored before the popup hook returns, so simulation/production never
+    // observes more or fewer native jobs than actually exist.
+    std::uint32_t* extended_queue_count_slot = nullptr;
+    std::uint32_t saved_extended_queue_count = 0;
+    if (extended_queue_station && writable_range(
+            bytes(extended_queue_station) + kQueueCountOffset,
+            sizeof(std::uint32_t))) {
+        extended_queue_count_slot = reinterpret_cast<std::uint32_t*>(
+            bytes(extended_queue_station) + kQueueCountOffset);
+        saved_extended_queue_count = *extended_queue_count_slot;
+        if (saved_extended_queue_count >= kNativeQueueCapacity) {
+            *extended_queue_count_slot = kNativeQueueCapacity - 1;
+            if (!g_logged_extended_queue_count_spoof) {
+                g_logged_extended_queue_count_spoof = true;
+                log_message(
+                    "Extended queue temporarily presented the Build palette "
+                    "with native queue count 9/10");
+            }
+        } else {
+            extended_queue_count_slot = nullptr;
+        }
+    }
+
     const std::uint32_t previous_refit_layout_menu =
         g_refit_pre_layout_menu;
     g_refit_pre_layout_menu = menu == kRootMenu
@@ -2977,6 +3213,9 @@ std::uintptr_t __attribute__((fastcall)) popup_update_buttons_hook(
             g_popup_update_buttons_hook.gateway, popup,
             reinterpret_cast<std::uintptr_t>(craft_array), argument2,
             argument3);
+    }
+    if (extended_queue_count_slot) {
+        *extended_queue_count_slot = saved_extended_queue_count;
     }
     g_refit_pre_layout_menu = previous_refit_layout_menu;
     if (menu == kRootMenu) {
@@ -2994,6 +3233,13 @@ std::uintptr_t __attribute__((fastcall)) popup_update_buttons_hook(
     if (have_gateway_menu) {
         gateway_menu = *reinterpret_cast<const std::uint32_t*>(
             bytes(popup) + kPopupCurrentMenuOffset);
+    }
+    if (extended_queue_station && have_gateway_menu &&
+        gateway_menu == kBuildMenu) {
+        // Fleet Ops has finished its normal technology/resource refresh.
+        // Only remove choices that cannot fit the logical tail; never re-enable
+        // a button Fleet Ops disabled for some other reason.
+        apply_extended_queue_tail_mask(extended_queue_station);
     }
 
     if (g_retain_research_menu_refreshes != 0) {
@@ -3164,6 +3410,79 @@ void* pressed_mode_info(void* button) noexcept {
     }
     return *reinterpret_cast<void**>(
         bytes(button) + kControlButtonModeInfoOffset);
+}
+
+bool route_full_native_queue_button_to_feature_pack(
+    void* button) noexcept {
+    void* producer = g_last_single_popup_selection;
+    if (!button || !producer || !g_feature_pack_queue_extended_build ||
+        !readable_range(bytes(producer) + kQueueCountOffset,
+                        sizeof(std::uint32_t)) ||
+        *reinterpret_cast<const std::uint32_t*>(
+            bytes(producer) + kQueueCountOffset) < kNativeQueueCapacity) {
+        return false;
+    }
+    if (!g_logged_extended_queue_full_press_seen) {
+        g_logged_extended_queue_full_press_seen = true;
+        log_message(
+            "Full native queue button press reached HybridBuild overflow "
+            "router");
+    }
+
+    void* mode_info = pressed_mode_info(button);
+    if (!mode_info || !readable_range(
+            bytes(mode_info) + kModeInfoTypeOffset,
+            sizeof(std::uint32_t)) ||
+        !readable_range(bytes(mode_info) + kModeInfoTargetClassOffset,
+                        sizeof(void*))) {
+        if (!g_logged_extended_queue_press_mode_invalid) {
+            g_logged_extended_queue_press_mode_invalid = true;
+            log_message(
+                "Full native queue button press had no readable build "
+                "ModeInfo");
+        }
+        return false;
+    }
+    const std::uint32_t type =
+        *reinterpret_cast<const std::uint32_t*>(
+            bytes(mode_info) + kModeInfoTypeOffset);
+    void* target_class = *reinterpret_cast<void**>(
+        bytes(mode_info) + kModeInfoTargetClassOffset);
+    if (type != 1u || !target_class) {
+        if (!g_logged_extended_queue_press_not_build) {
+            g_logged_extended_queue_press_not_build = true;
+            log_message(
+                "Full native queue button press was not a type-1 build "
+                "target");
+        }
+        return false;
+    }
+
+    // constructItem choices must still enter native world-placement mode.
+    if (producer == g_last_single_hybrid_selection &&
+        target_has_explicit_method(
+            producer, target_class, ProductionMethod::construct)) {
+        return false;
+    }
+    // FeaturePack owns final admission here because it can see the modifier
+    // keys. A Ctrl click means fill-to-10 and Ctrl+Alt means xINF; applying
+    // the ordinary target-admission predicate first would incorrectly turn
+    // those into (or reject them as) single overflow orders.
+    if (!g_feature_pack_queue_extended_build(producer, target_class)) {
+        if (!g_logged_extended_queue_press_enqueue_rejected) {
+            g_logged_extended_queue_press_enqueue_rejected = true;
+            log_message(
+                "FeaturePack rejected direct overflow build-button order "
+                "after modifier-aware admission");
+        }
+        return false;
+    }
+    if (!g_logged_extended_queue_direct_press) {
+        g_logged_extended_queue_direct_press = true;
+        log_message("Build button at native 10/10 routed directly to "
+                    "FeaturePack's synchronized extended queue");
+    }
+    return true;
 }
 
 void* refit_halt_source(void* button) noexcept {
@@ -3514,6 +3833,12 @@ void __attribute__((fastcall)) object_control_button_press_hook(
         }
         return;
     }
+    if (outermost && route_full_native_queue_button_to_feature_pack(button)) {
+        --g_control_button_press_depth;
+        restore_research_palette_after_button_press();
+        g_post_press_research_menu_station = nullptr;
+        return;
+    }
     select_hybrid_build_palette(button);
     HybridConstructionPlacementPress placement(button);
     // Fleet Ops ObjectControlButton bypasses PopupPalette and emits its
@@ -3546,6 +3871,12 @@ void __attribute__((fastcall)) control_button_press_hook(
             restore_research_palette_after_button_press();
             g_post_press_research_menu_station = nullptr;
         }
+        return;
+    }
+    if (outermost && route_full_native_queue_button_to_feature_pack(button)) {
+        --g_control_button_press_depth;
+        restore_research_palette_after_button_press();
+        g_post_press_research_menu_station = nullptr;
         return;
     }
     select_hybrid_build_palette(button);
@@ -4492,6 +4823,7 @@ bool initialize_hybrid_production_registry(const A2FO_ModuleApi* api,
     g_fleet_ops = fleet_ops;
     resolve_shield_craft_observer();
     resolve_nebula_craft_render_observers();
+    resolve_feature_pack_extended_queue();
     // Queued ghosts are presentation-only. Validate their native renderer
     // independently so a preview incompatibility can never disable the
     // hybridbuild classlabel or its production menus.

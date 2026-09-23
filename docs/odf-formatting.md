@@ -18,8 +18,9 @@ The formatter:
 - preserves the relative order of repeated assignments with the same
   case-insensitive key, retaining last-value-wins behaviour;
 - preserves values, inline syntax, disabled assignments, and existing comments;
-- preserves UTF-8 or Windows-1252 encoding, an existing UTF-8 BOM, CRLF/LF line
-  endings, and the presence or absence of the final newline;
+- preserves UTF-8 or Windows-1252 encoding, an existing UTF-8 BOM, and the
+  presence or absence of the final newline, while normalising output to CRLF
+  line endings for legacy Armada and Fleet Operations parser compatibility;
 - writes changed files atomically;
 - rejects assignment-like syntax it cannot recognize;
 - compares per-key semantic signatures before accepting a result;

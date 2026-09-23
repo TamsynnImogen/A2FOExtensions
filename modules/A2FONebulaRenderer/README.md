@@ -16,23 +16,32 @@ Copy both release outputs into the game's `Data` directory:
 
 ```text
 modules/A2FONebulaRenderer.dll
-Shaders/dx8/
-└── pixel/
-    ├── ps.nvv
-    └── ps_specular.nvv
+Shaders/
+├── dot3_amd.nvv
+├── dot3_amd9.nvv
+└── dx8/
+    └── pixel/
+        ├── ps.nvv
+        └── ps_specular.nvv
 licenses/armada-nebula-patch.txt
 ```
 
-Fleet Operations' native `Shaders/dot3_directional.nvv` and native multipass
-DOT3 renderer remain active and are never replaced. The packaged `ps.nvv` and
-`ps_specular.nvv` files are retained as forward-development assets, but are not
-selected by the bump-safe runtime. Bumped emissive materials use a scoped
-fixed-function stage at the final draw. Bumped specular maps use a separate,
-quarter-strength additive replay immediately afterward, isolated from Fleet
-Operations' earlier normal-map light draws.
-Removing `A2FONebulaRenderer.dll` before launch disables the feature; the core's
-early hook sites remain native pass-throughs and the shader files may remain in
-place harmlessly.
+Fleet Operations' native multipass DOT3 renderer remains active. On an AMD
+adapter using System Direct3D 9, the core may substitute a matched declaration
+and shader before the shared shader is created. The normal D3D8-to-D3D9 route
+uses `dot3_amd.nvv`; Fleet Operations' separate `/d3d9` route uses
+`dot3_amd9.nvv`. Both keep the stock lighting math while exposing UV/tangent
+fields through neutral D3D9 texture-coordinate semantics. The packaged
+`ps.nvv` and `ps_specular.nvv` files are retained as forward-development
+assets, but are not selected by the bump-safe runtime. Bumped emissive
+materials use a scoped fixed-function stage at the final draw.
+Bumped specular maps use a separate, quarter-strength additive
+replay immediately afterward, isolated from Fleet Operations' earlier normal-
+map light draws.
+Removing `A2FONebulaRenderer.dll` before launch disables mapped emissive and
+specular rendering; its DXVK hook sites remain native pass-throughs. The
+system-backend AMD DOT3 candidates are core compatibility options and are
+instead controlled by `AmdNativeDot3Fix` below.
 
 Do not install armadaNebulaPatch's `Win2kDisableTaskSwitch.dll`, `shader+.dll`,
 MinHook, hook-tools DLL, runtime DLLs, or `dll/after.list` alongside this port.
@@ -52,8 +61,9 @@ The runtime:
 
 - validates the exact supported Armada/Fleet Ops PE identities and every
   renderer signature before enabling;
-- leaves Fleet Operations' stock DOT3 vertex-shader path and shader source
-  untouched;
+- leaves Fleet Operations' stock DOT3 vertex-shader path and source untouched
+  except for the exact AMD/system-D3D9 compatibility substitution described
+  below;
 - leaves Fleet Operations' DOT3 `GetShaderHandle` function-pointer slot
   untouched, avoiding redundant shader state calls between its native handle
   lookup and `SetVertexShader` on Windows dxwrapper/d3d8to9 systems;
@@ -84,10 +94,112 @@ The runtime:
 - disables the pixel shader at Fleet Operations' fixed-pipeline transition,
   then resumes the displaced code and all remaining alpha draws.
 
-These renderer and SOD-mutation paths are enabled only when the managed DXVK
-payload is the active `Data\\d3d9.dll`. On the Windows system renderer the
-module remains loaded for configuration/reporting, but class registration is a
-no-op and Fleet Operations owns the complete native DX8/DOT3 path.
+These mapped-material renderer and SOD-mutation paths are enabled only when the
+managed DXVK payload is the active `Data\\d3d9.dll`. On the Windows system
+renderer the module remains loaded for configuration/reporting, class
+registration is a no-op, and Fleet Operations owns the complete native draw
+sequence. The AMD compatibility path changes only the shared shader's input
+declaration/source pair before creation; it installs no draw or render-state
+hooks.
+
+## AMD native DOT3 compatibility
+
+Roots' normal route translates Armada's D3D8 vertex declaration to D3D9, while
+its `/d3d9` route constructs a D3D9 declaration directly. In both cases Fleet
+Operations' stock DOT3 stream labels normal, UV, and tangent data with the
+special-purpose `BLENDWEIGHT`, `BLENDINDICES`, `NORMAL`, `PSIZE`, and `COLOR`
+semantics. Some AMD system-D3D9 paths render that legacy combination
+incorrectly.
+
+The compatibility candidate preserves the stream byte layout, stride, shader
+math, textures, render states, and all Fleet Operations draws. It moves those
+five fields to `v7` through `v11`, which translate to `TEXCOORD0` through
+`TEXCOORD4`. Before applying, the core verifies the supported executable and
+FleetOpsHook identities, the route-specific creation callback, the stock
+declaration/source signature, the replacement asset, and the active adapter
+PCI vendor. The replacement is assembled with the D3DX8 or D3DX9 assembler
+already used by the selected route. Any failed check retains the stock shader.
+
+`Data\\A2FORenderer.ini` controls the candidate:
+
+```ini
+[Compatibility]
+; 0 = disabled, 1 = automatic on AMD system D3D9, 2 = force for A/B testing
+AmdNativeDot3Fix=1
+; Preserve fast DOT3 geometry with a self-contained flat-normal shader when native bumps are off
+NeutralBumpWhenDisabled=1
+; Suppress bump shading only for the craft currently cloaking/cloaked/decloaking
+NeutralBumpWhenCloaked=1
+; 0 = native sorter, 1 = opaque fades/additive, 2 = all transparency (test)
+FastAlphaMeshVB=1
+```
+
+The setting is read at process startup and requires a restart. The AMD fix is
+ignored when the managed DXVK payload is active; both System D3D9 launch routes
+are covered. Logs identify the selected adapter and whether the remap was
+applied or safely skipped.
+
+`NeutralBumpWhenDisabled` activates only while the saved Fleet Operations
+`Settings.xml` contains `disable_bump=True` and the core renderer is available.
+It preflights `vs_flat_lighting.nvv`, then keeps Storm3D's DOT3 eligibility
+enabled at runtime without changing material texture assignments. On DXVK,
+the core selects that shader only around Fleet Operations' native per-light
+indexed draw. It transforms and normalizes the light through the MeshVB's
+tangent basis, then selects its Z component as the result of a fixed flat
+normal. Stage 0 changes from `D3DTOP_DOTPRODUCT3` to that diffuse result, so the
+bump texture is not sampled and `all_bump.dds` is not required. Because Fleet
+Operations' graphics-options object is not created when deferred modules
+initialize, a checked two-byte patch bypasses only the matching bump-disabled rejection in
+`ST3D_Dot3_MeshVB::CanRender`; its GPU-capability test remains intact. The
+persisted native option is not changed. Set the compatibility value to `0` to
+restore the native non-VB bump-off path. A restart is required.
+
+Fleet Operations normally moves materials to its CPU per-triangle sorter during
+cloak, decloak, construction, and other alpha passes. `FastAlphaMeshVB=0`
+retains that behavior. Mode `1` (default) keeps native-opaque whole-model fades
+and order-independent additive materials on their existing MeshVB after
+applying Storm3D's own z-sort blend state immediately. Mode `2` also admits
+ordinary transparent blend modes for maximum performance. It preserves their
+authored blend state but draws the existing index order rather than Fleet Ops'
+per-frame triangle order, so intersecting transparent surfaces may display
+differently. Immediately before the final material draw, redirected draws
+reapply Storm3D's z-sort blend state after Fleet Operations' internal opaque
+reset and supply the live material/object alpha in vertex constant `c0.w`.
+This supplies the alpha missing from static MeshVB vertex colours. The setting
+is restart-applied and affects the active DXVK flat-normal route, whether
+requested globally or for an individual cloaked craft. Final-draw alpha alone
+does not establish correct composition of every earlier multipass lighting
+draw; cloak transparency and overlapping surfaces still need in-game checks.
+
+### Per-unit bump suppression while cloaked
+
+`[Compatibility] NeutralBumpWhenCloaked=1` (default) selects the existing
+flat-normal vertex-lighting shader for the craft being drawn when its cloak
+controller is cloaking, fully cloaked, or decloaking. Once the controller
+returns to visible, that unit automatically resumes its authored bump shading
+unless the player's global bump-off option is still active. Merely carrying
+a cloak weapon does not disable bump shading.
+
+This is draw-scoped: it does not detach bump textures, change shared SOD mesh
+flags, modify the saved global bump option, or affect another visible instance
+using the same model. Existing per-light state restoration restores the native
+shader and texture combiner after each redirected draw. Flat-normal lighting
+still responds to the native directional-light calculation; it is not unlit
+white/constant shading.
+
+The scope is the managed DXVK DX8 path with a valid existing MeshVB. The
+ordinary `FastAlphaMeshVB` admission policy still applies; missing vertex
+buffers, rejected material modes, and missing/unsupported flat-normal shaders
+retain the native path. The shader is prepared before sorted geometry can be
+redirected. This option does not force missing bump maps or tangent buffers
+into existence and does not make cached triangle order exact. Set
+`FastAlphaMeshVB=0` to retain the native sorter if fast-alpha visuals are not
+acceptable, or `NeutralBumpWhenCloaked=0` to disable this per-unit feature.
+Both options are read at startup and require a restart.
+
+The first successful cloak-only flat-normal draw is logged separately from
+global bump-off draws. Check cloak-in, steady cloak, cloak-out, and a visible
+ship sharing the same SOD when validating this option.
 
 That final gateway is an intentional safety change from upstream. The original
 patch returned from the renderer in the middle of the function, which fixed
@@ -137,10 +249,10 @@ A material without a bump map keeps its ordinary renderer.
 
 The DOT3 emissive/specular draw interception is enabled only with the managed
 DXVK backend. On the System Direct3D 9 / WineD3D backend, Fleet Operations'
-native bump draw is left completely unintercepted because Windows dxwrapper
-and some vendor drivers crash when that boundary is wrapped. Native bump maps
-remain available there; extension emissive/specular overlays on bumped
-materials require DXVK.
+native bump draw is left completely unintercepted because the old Windows
+dxwrapper path retains driver-private state across that boundary and produces
+vendor-sensitive results. Native bump maps remain available there; extension
+emissive/specular overlays on bumped materials require DXVK.
 
 `A2FO_EMISSIVE_BUMP_MULTIPLIER` is retained for the redesigned bumped-material
 extension pass. It is temporarily inactive while bumped emissives use the
@@ -153,6 +265,29 @@ brightness of bumped hulls. Its accepted range remains `0.0` through `1.0`.
 
 `A2FO_EMISSIVE_DIFFUSE_RESTORE` is likewise retained but temporarily inactive
 for bumped materials. It defaults to `0.0` and accepts `0.0` through `2.0`.
+
+Faction diffuse variants from `A2FOTextureVariants` use the same Race ODF
+`factionTextureSuffix` values. The mapped-lighting controller also treats stock
+Borg `_b` as a known suffix even when `borg.odf` does not declare one. The
+official naming rule is **map role first, faction suffix last**. If a material
+`fbattle` is rendered as `fbattle_b`, the renderer looks for
+`fbattle_emissive_warp_b` and `fbattle_specular_b`, then falls back to the base
+`fbattle_emissive_warp` / `fbattle_specular` maps when a faction-specific map
+is absent. Names such as `fbattle_b_emissive_warp` are not the faction-map
+convention. Explicit ODF emissive declarations remain authoritative and are
+reused for faction diffuse aliases. Late-loaded ownership ODF classes whose SOD
+already stores a suffixed diffuse such as `fbattle_b` are canonicalized back to
+`fbattle` for auxiliary-map discovery, so they resolve
+`fbattle_emissive_warp_b` / `fbattle_specular_b` rather than attempting the old
+`fbattle_b_emissive_warp` / `fbattle_b_specular` ordering.
+
+This final-suffix convention is also the intended naming for future
+ownership-scoped bump/normal variants: `fbattle_bump_b`, `fbattle_bump_k`, etc.
+Bump maps are currently class material state rather than ownership-scoped
+state, however, so a base bump remains active when only the diffuse switches
+faction. Selecting faction-specific bump/normal maps safely requires a
+draw-scoped texture-slot-1 override rather than mutating the shared CraftClass
+mesh.
 
 Only materials for which the derived file exists are changed. A bump texture
 already stored in the SOD wins over the global convention. A derived bump map
@@ -182,6 +317,12 @@ and fixed/workspace versus DOT3 route once for each visible, cloaking, fully
 cloaked, and decloaking state reached by a mapped-lighting craft. Leave it at
 `0` or remove it during normal play; no per-draw state inspection occurs when
 the option is disabled.
+
+`[Diagnostics] RendererRouteCounts=1` logs 60-frame draw-route totals and the
+first failed guard in Armada's MeshVB selector: no MeshVB object, eligibility,
+polygon sorting, external renderer, ordinary fast selection, or the scoped
+alpha MeshVB selection, split into opaque, additive, and aggressive transparent
+counts. It requires a restart and should be removed after diagnosis.
 
 ## Subsystem emissive maps
 
@@ -416,3 +557,66 @@ The complete address and ownership record is in
 [`../../docs/addresses.md`](../../docs/addresses.md). The upstream licence is
 vendored at
 [`../../third_party/armada-nebula-patch/LICENSE.txt`](../../third_party/armada-nebula-patch/LICENSE.txt).
+
+## Automatic fast rendering for models without bump maps
+
+```ini
+[Compatibility]
+FastUnmappedMeshVB=1
+```
+
+This restart-applied option defaults to `1` on the managed DXVK/DX8 renderer.
+Unlike `NeutralBumpWhenDisabled`, it does not require the saved global bump
+option to be off. Unlike `NeutralBumpWhenCloaked`, it also covers visible craft.
+
+A checked hook on the non-DOT3 creation branch at Armada RVA `0x00231d7e`
+lets compatible, textured Lambert meshes without a bump map obtain native
+DOT3 MeshVB geometry. The native factory creates vertex/index buffers,
+UV-seam duplicates and tangent data; the engine retains buffer ownership and
+rebuild/destruction responsibilities. Existing native DOT3/standard meshes,
+constant-lit effects, Phong materials, malformed geometry and layouts outside
+the 16-bit index budget are not forcibly converted. Admission is scoped to
+craft rendering; other scene objects retain native selection.
+
+Promoted meshes select the existing geometric flat-normal lighting shader
+for every admitted draw, whether visible or cloaked. Fleet Operations still
+accesses texture slot 1 before drawing, so a call-local texture array supplies
+a valid borrowed diffuse texture in that unused slot. The flat-normal shader
+does not sample it as a normal map. No SOD texture assignment, mesh flag,
+texture flag, or global bump-map setting is changed. Models with authored bump
+maps retain their existing rendering policy. If a bump texture is attached
+later to a promoted mesh, it falls back rather than flattening the new map.
+
+Device capability, shader readiness, external-renderer and alpha-material
+checks remain. `FastAlphaMeshVB` still determines which sorted materials may
+use existing MeshVB index order; this option does not solve exact transparent
+triangle ordering or the native multipass cloak-composition limitation.
+This is a fast-path preference, not an unconditional force-everything patch.
+Lighting uses the existing DOT3 directional-light path, not a guarantee of
+pixel-identical ambient/affector lighting compared with CPU Lambert rendering.
+
+Startup logs report whether automatic creation was enabled or safely skipped.
+The first few successful preparations log `Prepared native MeshVB buffers for
+a model without a bump map`. First visible/cloaked submissions separately log
+`Unmapped craft MeshVB draw active while visible` and `Unmapped craft MeshVB
+draw active while cloaked or transitioning`. Existing renderer-route counters
+should then show Fleet Ops DOT3 submissions for admitted meshes instead of
+only `no-MeshVB` fallbacks. Counters describe the whole scene, not ship counts.
+
+Set `FastUnmappedMeshVB=0` and restart to restore native buffer creation.
+Runtime validation is still required: compare the same non-bump Warbirds at
+the same camera angle, visible and cloaked, then check decloaking, overlapping
+ships, lighting, map-editor rendering, and device reset/map reload. The source
+change alone is not evidence of a measured FPS improvement.
+
+### Late-loaded ODF variant classes
+
+`A2FOODFVariants` may load a suffixed CraftClass (for example `fbattle_b`)
+only when ownership changes. Some Fleet Operations class paths do not expose
+usable cached SOD/material state until a craft instance has actually been
+constructed. The ODF variant module therefore requests a SOD/ART-only refresh
+after constructing the replacement craft and retries once on its first
+simulation tick. A null-ParameterDB refresh logs whether SOD materials were
+available, making late-load timing failures visible. The final-suffix ownership
+convention remains `fbattle_emissive_warp_b` / `fbattle_specular_b`, with
+base-map fallback.

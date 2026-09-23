@@ -53,6 +53,12 @@ struct ArcConfig {
     float cone_angle_degrees = 360.0f;
 };
 
+// CannonImp's automatic-target mode must reach Simulate before its candidate
+// loop can apply CanFireAt. Its earlier Weapon::Trigger receives only the
+// craft's primary target, so rejecting there would prevent the loop entirely.
+bool defer_arc_to_candidate_selection(
+    bool cannon_imp, bool use_primary_target) noexcept;
+
 // Wraps an angle into -180..+180. Used for yaw and yaw differences.
 float normalize_degrees(float value) noexcept;
 

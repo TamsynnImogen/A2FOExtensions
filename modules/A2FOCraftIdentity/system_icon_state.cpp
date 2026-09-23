@@ -1,6 +1,7 @@
 #include "system_icon_state.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 
 namespace a2fo::craft_identity {
@@ -69,6 +70,49 @@ std::array<float, 3> tint_system_icon_colour(
         std::clamp(configured_colour[1] * scale, 0.0f, 1.0f),
         std::clamp(configured_colour[2] * scale, 0.0f, 1.0f),
     }};
+}
+
+bool is_passive_weapon_classlabel(std::string_view classlabel) noexcept {
+    while (!classlabel.empty() && std::isspace(
+               static_cast<unsigned char>(classlabel.front()))) {
+        classlabel.remove_prefix(1);
+    }
+    while (!classlabel.empty() && std::isspace(
+               static_cast<unsigned char>(classlabel.back()))) {
+        classlabel.remove_suffix(1);
+    }
+    constexpr std::string_view expected = "utilityweapon";
+    if (classlabel.size() != expected.size()) return false;
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        if (std::tolower(static_cast<unsigned char>(classlabel[index])) !=
+            expected[index]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+WeaponIconPresentation weapon_icon_presentation(
+    WeaponIconKind kind, WeaponTechnologyState technology,
+    bool hide_when_unavailable) noexcept {
+    if (kind == WeaponIconKind::passive) {
+        return WeaponIconPresentation::passive_neutral;
+    }
+    if (technology == WeaponTechnologyState::unavailable) {
+        return hide_when_unavailable
+            ? WeaponIconPresentation::hidden
+            : WeaponIconPresentation::disabled;
+    }
+    return WeaponIconPresentation::live_status;
+}
+
+WeaponIconColourSource weapon_icon_colour_source(
+    bool weapon_colour_found, bool system_colour_found) noexcept {
+    if (weapon_colour_found) return WeaponIconColourSource::weapon;
+    if (system_colour_found) {
+        return WeaponIconColourSource::system_fallback;
+    }
+    return WeaponIconColourSource::native;
 }
 
 }  // namespace a2fo::craft_identity

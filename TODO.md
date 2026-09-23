@@ -1,7 +1,45 @@
 # TODO
 
-- Re-enable the shell display monitor only after its fullscreen handling can be
-  proven not to alter legacy menu and modal-dialog layouts.
+## Weapon Muzzle Flares
+
+[PLANNED]
+
+* [ ] Add muzzle flare support for pulse and torpedo weapons.
+
+## Map Editor: Advanced Object Details
+
+[PLANNED]
+
+* [ ] Add an editable captain name in the object details panel's Advanced
+  section.
+* [ ] Add an editable ship registry in the same Advanced section.
+* [ ] Add editable health values for each directional shield in the same
+  Advanced section. The panel currently exposes current shield health and
+  maximum shield values for overall shields, but no directional shield health
+  controls.
+
+## Game Monitor Selection
+
+[IMPLEMENTED, REQUIRES MANUAL VALIDATION]
+
+* [x] Enumerate currently attached desktop monitors and identify the primary
+  display, friendly monitor name, current resolution, and stable Win32 device
+  name.
+* [x] Add a restart-applied **Game Monitor** selector to Graphics Options.
+* [x] Resolve the saved stable device name after Fleet Operations' initial
+  display-mode transition, with primary-monitor fallback when the selected
+  display is disconnected.
+* [x] Track the stable top-level game window across switch, menu, and gameplay
+  display transitions and apply position-only placement whenever a settled
+  transition leaves it off the selected monitor; never change its size, style,
+  resolution, activation, or z-order.
+* [x] Keep conservative initial stabilization but reduce later transition
+  correction latency after the window first reaches the selected monitor.
+* [x] Remove the invalid early implementation that wrote a monitor ordinal into
+  `FoSettings+0x30` (the saved display width), and repair its impossible
+  positive ordinal to automatic width/height on the next settings load.
+* [ ] Validate one- and two-monitor startup on Windows and Wine in both
+  fullscreen and windowed modes, including disconnecting the selected monitor.
 
 ## Photon and Quantum Torpedo Stores
 
@@ -872,7 +910,35 @@ safety constraint.
 
 ### Squadron System
 
-[IDEA, VIABLE, LARGE GAMEPLAY SYSTEM]
+[IMPLEMENTATION STARTED — POLICY FOUNDATION TESTED; NATIVE GAMEPLAY PENDING]
+
+The current [feasibility and design](docs/squadrons-design.md) records the
+2026-09-20 request: buildable squadrons, an upper-corner member-count badge,
+**one logical selection slot** for the surviving group, independent native
+movement/targeting, casualty-driven count loss, and **automatic replenishment
+during a yard repair cycle**. This supersedes the earlier manual-Reinforce
+and multi-selection-only presentation proposals below. The first
+[implementation increment](modules/A2FOSquadrons/README.md) supplies tested C++
+configuration and state logic. No gameplay DLL is built or deployed yet.
+
+Completed engineering foundation (2026-09-20):
+
+* [x] Parse and validate effective squadron ODF member/count fields, strict
+  numeric row order, member-class resolution, nesting rejection and limits.
+* [x] Implement atomic full-complement membership, deterministic IDs and
+  slot-preserving casualties, representative death and capture detachment.
+* [x] Implement logical selection planning and deterministic member expansion
+  with explicit physical-capacity rejection and no partial command list.
+* [x] Implement accepted-repair replacement reservations, exact-type completion,
+  cancellation, last-member retirement and validated structured snapshots.
+* [x] Add host regression scenarios and a 32-bit Windows test build. These
+  tests do not establish native UI, production, repair, save or multiplayer support.
+
+Design reference: **Warhammer 40,000: Dawn of War**. The user's preferred
+authoring is a dedicated squadron configuration ODF listing member ship ODFs
+and quantities. Build lists and other supported public references point to
+that configuration; the individual ship definitions keep their own normal
+combat/presentation behaviour and can also be used independently.
 
 Add Dawn of War-style squadrons: one logical selectable and commandable unit
 made from several real native Craft objects. Every member must retain its own
@@ -891,23 +957,33 @@ Provisional authoring shape, to be finalized only after the construction and
 save/load prototypes prove the required identities:
 
 ```ini
+// Proposed squadron config; not an implemented native classlabel.
+classLabel = "squadron"
 squadMember0 = "fed_squad_member"
-squadMember1 = "fed_squad_member"
-squadMember2 = "fed_squad_member"
+squadMemberCount0 = 3
 
 squadReinforceAtYard = 1
 ```
 
+The yard refers to this configuration, e.g. `buildItem0 = "fed_squadron"`.
+Additional `squadMemberX` / `squadMemberCountX` pairs allow a fixed mixed
+composition, with the badge maximum derived from the sum of quantities.
+
 The buildable squad definition should own the aggregate button, tooltip,
 build time, and initial cost policy. The member ODFs remain authoritative for
-their individual combat and presentation behaviour. The first supported
-version should use a fixed homogeneous composition even if the indexed format
-is kept capable of later mixed squads.
+their individual combat and presentation behaviour. Start the engineering
+prototype with three identical ships, then validate a fixed mixed composition
+and replacement of the correct missing ship type before claiming the
+configuration model complete.
 
 Core prototype:
 
 * [ ] Add a dedicated optional `A2FOSquadrons.dll` module and define strict
   bounds for members per squad and live squads per team.
+* [ ] Add an extension-owned squadron-config descriptor and a checked native
+  queue adapter. Build lists reference the descriptor, which must not spawn
+  as an additional/invisible Craft. Validate member/count pairs, class types,
+  limits and recursion; preserve ordinary independent use of member ODFs.
 * [ ] Prototype one fixed three-member squad built from an ordinary Shipyard
   item, with all three outputs created as normal mission-published Craft.
 * [ ] Before admitting the build job, atomically validate the aggregate
@@ -921,6 +997,8 @@ Core prototype:
 * [ ] Selecting any live member should select the whole surviving squad once,
   while Shift-selection, box selection, deselection, control-group binding,
   camera focus, and selection limits retain understandable native behaviour.
+  Display one logical slot per squad even in mixed selections; validate the
+  expanded native command payload limits without silently dropping members.
 * [ ] Route movement, attack, guard, repair, halt, stance, autonomy, special-
   weapon, and formation orders through the synchronized native group command
   paths after selection expansion. Do not mirror unsynchronized UI state into
@@ -943,8 +1021,10 @@ Yard-only reinforcement:
 * [ ] Require all surviving members to reach the same yard or a bounded yard
   staging area before reinforcement becomes available; prevent one distant
   member from granting reinforcement to the rest of the squad.
-* [ ] Expose a manual Reinforce action first. Automatic reinforcement may be
-  considered later, but must never spend resources unexpectedly by default.
+* [ ] Replenish missing members automatically during an accepted yard repair
+  cycle, without a separate manual Reinforce action. Accept healthy but
+  depleted squads for repair too. Decide moddable replacement cost/time
+  defaults before coding; check berth/launch scheduling for deadlocks.
 * [ ] Admit each missing configured slot as a real synchronized yard job, with
   per-member cost, build time, cap, cancellation/refund, queue-wireframe, and
   launch handling. Reinforce one member at a time rather than creating a whole
@@ -964,9 +1044,12 @@ Persistence, presentation, and validation:
 * [ ] Reconstruct membership, configured composition, stable slots, missing
   members, leader choice, active orders, and queued reinforcement after
   save/load without changing the native stream layout unsafely.
-* [ ] Use native multi-selection presentation for the first playable version.
-  Later add a dedicated squad panel showing each member and its individual
-  health only after core selection and combat behaviour is stable.
+* [ ] Present one squad image/selection slot from the first user-visible
+  prototype, with an upper-right live/configured member counter (`3/3`,
+  `2/3`, etc.) and an authored-complement badge on the build image. Keep
+  placement configurable and independent of the source image. Native
+  multi-selection may support engineering tests but does not satisfy this UI.
+  A later expanded panel may show individual member health.
 * [ ] Make the Collapsible Fleet Sidebar squad-aware as an optional integration:
   one logical squad may be summarized as one fleet entry component while the
   native control group still contains the real member handles.
@@ -1588,3 +1671,21 @@ premature-destruction result
 visual state
 cleansing conditions
 ```
+## Immediate follow-up: object editor, muzzle flashes, and cloaking (2026-09-12)
+
+Investigation and entry points:
+[Object editor, muzzle flashes, and cloak rendering](docs/2026-09-12-editor-muzzle-cloak-investigation.md).
+These items are researched requirements, not implemented features.
+
+- [ ] Extend the existing native map-editor object-properties dialog with
+  Captain and Registry overrides and Current / Maximum values for Forward,
+  Aft, Port, and Starboard shields, using its existing manual editing workflow.
+- [ ] Add per-object identity/shield overrides and map/game persistence;
+  coordinate with existing Craft save/load hook owners. Directional shields
+  currently reconstruct facing values from the native aggregate on post-load.
+- [ ] Add configurable pulse/torpedo muzzle effects at actual projectile
+  launches, sharing the ammunition launch boundaries and animated hardpoints.
+- [ ] Investigate cloak rendering using the existing FastAlphaMeshVB route and
+  diagnostics. Cover bump-on and fully cloaked materials, real material alpha,
+  lighting, depth state, and transparent ordering; avoid blanket branch/flag
+  forcing. Existing acceleration is scoped to the DXVK bump-disabled path.

@@ -1,12 +1,13 @@
 /*
  * File: core/renderer_options.cpp
  * Module: A2FOHookExtensions (main-hook)
- * Purpose: Restart-applied renderer selection on the Fleet Ops Graphics form.
+ * Purpose: Restart-applied renderer and monitor selection on Graphics Options.
  */
 
 #include "renderer_options.hpp"
 
 #include "build_identity.hpp"
+#include "game_monitor.hpp"
 #include "hook.hpp"
 
 #include <windows.h>
@@ -79,6 +80,8 @@ constexpr int kNativeBumpHeight = 17;
 constexpr int kEffectsTop = 468;
 constexpr int kEffectWidth = 142;
 constexpr int kEffectGap = 8;
+constexpr UINT_PTR kMonitorSelectionTimerId = 0xa2f04d4fu;
+constexpr UINT kMonitorSelectionTimerIntervalMs = 100u;
 
 const std::uint8_t kExpectedFormShow[] = {
     0x55, 0x8b, 0xec, 0xb9, 0x09, 0x00, 0x00, 0x00};
@@ -144,6 +147,11 @@ void* g_renderer_label = nullptr;
 void* g_renderer_combo_control = nullptr;
 HWND g_renderer_combo_window = nullptr;
 void* g_renderer_control_form = nullptr;
+void* g_monitor_label = nullptr;
+void* g_monitor_combo_control = nullptr;
+HWND g_monitor_combo_window = nullptr;
+void* g_monitor_control_form = nullptr;
+std::vector<GameMonitorDescriptor> g_game_monitors;
 void* g_emissive_checkbox = nullptr;
 void* g_specular_checkbox = nullptr;
 void* g_effect_checkbox_form = nullptr;
@@ -154,6 +162,9 @@ volatile LONG g_emissive_maps_enabled = -1;
 volatile LONG g_specular_maps_enabled = -1;
 volatile LONG g_syncing_effect_checkboxes = 0;
 volatile LONG g_syncing_renderer_combo = 0;
+volatile LONG g_syncing_monitor_combo = 0;
+int g_observed_monitor_selection = -1;
+bool g_monitor_selection_timer_active = false;
 
 extern "C" void* a2fo_call_delphi_one_register(
     void* function, void* eax_argument);
@@ -578,6 +589,41 @@ void select_renderer(RendererBackend backend) {
         backend_text(backend));
 }
 
+void save_game_monitor_selection(int selected);
+
+void observe_game_monitor_selection(const char* source) {
+    if (InterlockedCompareExchange(&g_syncing_monitor_combo, 0, 0) != 0 ||
+        !g_monitor_combo_window || !IsWindow(g_monitor_combo_window)) {
+        return;
+    }
+    const LRESULT selected =
+        SendMessageA(g_monitor_combo_window, CB_GETCURSEL, 0, 0);
+    if (selected < 0 ||
+        static_cast<std::size_t>(selected) >= g_game_monitors.size() ||
+        selected == g_observed_monitor_selection) {
+        return;
+    }
+    g_observed_monitor_selection = static_cast<int>(selected);
+    log(std::string("Renderer options: Game Monitor selection detected by ") +
+        source + " (selected=" + std::to_string(selected) + ")");
+    save_game_monitor_selection(static_cast<int>(selected));
+}
+
+void ensure_game_monitor_selection_timer() {
+    if (g_monitor_selection_timer_active || !g_form_window ||
+        !IsWindow(g_form_window)) {
+        return;
+    }
+    if (SetTimer(g_form_window, kMonitorSelectionTimerId,
+                 kMonitorSelectionTimerIntervalMs, nullptr) == 0) {
+        log("Renderer options: Game Monitor selection timer could not be "
+            "started");
+        return;
+    }
+    g_monitor_selection_timer_active = true;
+    log("Renderer options: Game Monitor selection timer enabled");
+}
+
 LRESULT CALLBACK graphics_form_window_proc(HWND window, UINT message,
                                            WPARAM wparam, LPARAM lparam) {
     const bool renderer_selection_notification =
@@ -585,6 +631,11 @@ LRESULT CALLBACK graphics_form_window_proc(HWND window, UINT message,
         reinterpret_cast<HWND>(lparam) == g_renderer_combo_window &&
         HIWORD(wparam) == CBN_SELCHANGE &&
         InterlockedCompareExchange(&g_syncing_renderer_combo, 0, 0) == 0;
+    const bool monitor_selection_notification =
+        message == WM_COMMAND &&
+        reinterpret_cast<HWND>(lparam) == g_monitor_combo_window &&
+        HIWORD(wparam) == CBN_SELCHANGE &&
+        InterlockedCompareExchange(&g_syncing_monitor_combo, 0, 0) == 0;
     const RendererBackend requested_before = renderer_selection_notification
         ? requested_backend() : RendererBackend::system;
     WNDPROC original = g_original_form_proc;
@@ -611,6 +662,29 @@ LRESULT CALLBACK graphics_form_window_proc(HWND window, UINT message,
             }
         }
     }
+    if (monitor_selection_notification && g_monitor_combo_window &&
+        IsWindow(g_monitor_combo_window)) {
+        const LRESULT selected =
+            SendMessageA(g_monitor_combo_window, CB_GETCURSEL, 0, 0);
+        if (selected >= 0 &&
+            static_cast<std::size_t>(selected) < g_game_monitors.size()) {
+            std::string configured_device;
+            const bool configured = read_configured_game_monitor(
+                g_data_root, configured_device);
+            if (!configured ||
+                _stricmp(configured_device.c_str(),
+                         g_game_monitors[selected].device_name.c_str()) != 0) {
+                g_observed_monitor_selection = static_cast<int>(selected);
+                log("Renderer options: native Windows Game Monitor combo "
+                    "notification handled as OnChange fallback");
+                save_game_monitor_selection(static_cast<int>(selected));
+            }
+        }
+    }
+    if (message == WM_TIMER &&
+        wparam == kMonitorSelectionTimerId) {
+        observe_game_monitor_selection("UI timer fallback");
+    }
     if (message == WM_NCDESTROY && window == g_form_window) {
         // Fleet Operations retains the TGraphicOptionsForm component while
         // destroying and recreating only its HWND between visits. Its owned
@@ -619,8 +693,12 @@ LRESULT CALLBACK graphics_form_window_proc(HWND window, UINT message,
         // FormShow reacquires their handles instead of inserting duplicates.
         log("Renderer options: Graphics Options window destroyed; retained "
             "form-owned VCL controls for handle recreation");
+        KillTimer(window, kMonitorSelectionTimerId);
+        g_monitor_selection_timer_active = false;
+        g_observed_monitor_selection = -1;
         g_form_window = nullptr;
         g_renderer_combo_window = nullptr;
+        g_monitor_combo_window = nullptr;
         g_original_form_proc = nullptr;
     }
     return result;
@@ -791,8 +869,8 @@ bool ensure_graphics_form_subclass(HWND form_window) {
     return true;
 }
 
-void add_combo_item(const char* text) {
-    void* items = field<void*>(g_renderer_combo_control, kComboItemsOffset);
+void add_combo_item(void* combo_control, const char* text) {
+    void* items = field<void*>(combo_control, kComboItemsOffset);
     if (!items || !readable_range(items, sizeof(void*))) return;
     char* delphi_text = nullptr;
     a2fo_call_delphi_two_registers(
@@ -802,9 +880,9 @@ void add_combo_item(const char* text) {
     a2fo_call_delphi_one_register(at(kLongStringClearRva), &delphi_text);
 }
 
-bool install_renderer_combo_change_handler() {
-    if (!g_renderer_combo_control ||
-        !readable_range(g_renderer_combo_control,
+bool install_combo_change_handler(void* combo_control) {
+    if (!combo_control ||
+        !readable_range(combo_control,
                         kComboOnChangeDataOffset + sizeof(void*))) {
         return false;
     }
@@ -814,12 +892,12 @@ bool install_renderer_combo_change_handler() {
     // through TCustomCombo.Select instead of relying on a raw parent
     // WM_COMMAND notification that TJvHTComboBox consumes internally.
     *reinterpret_cast<void**>(
-        static_cast<std::uint8_t*>(g_renderer_combo_control) +
+        static_cast<std::uint8_t*>(combo_control) +
         kComboOnChangeCodeOffset) =
         reinterpret_cast<void*>(&a2fo_renderer_combo_change_bridge);
     *reinterpret_cast<void**>(
-        static_cast<std::uint8_t*>(g_renderer_combo_control) +
-        kComboOnChangeDataOffset) = g_renderer_combo_control;
+        static_cast<std::uint8_t*>(combo_control) +
+        kComboOnChangeDataOffset) = combo_control;
     return true;
 }
 
@@ -853,6 +931,187 @@ void* create_vcl_control(void* form, void* exemplar,
     return control;
 }
 
+int native_display_selection(void* native_combo) {
+    if (!native_combo) return 0;
+    const HWND window = reinterpret_cast<HWND>(
+        a2fo_call_delphi_one_register(
+            at(kWinControlGetHandleRva), native_combo));
+    if (!window || !IsWindow(window)) return 0;
+    const LRESULT selected = SendMessageA(window, CB_GETCURSEL, 0, 0);
+    return selected >= 0 && selected <= 31
+        ? static_cast<int>(selected) : 0;
+}
+
+void refresh_game_monitor_combo(void* native_combo) {
+    if (!g_monitor_combo_control || !g_monitor_combo_window ||
+        !IsWindow(g_monitor_combo_window)) {
+        return;
+    }
+
+    InterlockedIncrement(&g_syncing_monitor_combo);
+    SendMessageA(g_monitor_combo_window, CB_RESETCONTENT, 0, 0);
+    g_game_monitors = enumerate_game_monitors();
+    for (const GameMonitorDescriptor& monitor : g_game_monitors) {
+        const std::string label = game_monitor_label(monitor);
+        add_combo_item(g_monitor_combo_control, label.c_str());
+    }
+
+    if (g_game_monitors.empty()) {
+        add_combo_item(g_monitor_combo_control,
+                       "No connected monitors detected");
+        a2fo_call_delphi_two_registers(
+            at(kCustomComboSetItemIndexRva), g_monitor_combo_control,
+            nullptr);
+        SendMessageA(g_monitor_combo_window, CB_SETCURSEL, 0, 0);
+        g_observed_monitor_selection = -1;
+        log("Renderer options: no connected game monitors were detected");
+        InterlockedDecrement(&g_syncing_monitor_combo);
+        return;
+    }
+
+    std::string configured_device;
+    const GameMonitorResolution resolution =
+        resolve_configured_game_monitor(
+            g_data_root, g_game_monitors,
+            native_display_selection(native_combo), &configured_device);
+    const int selected = resolution.monitor_index >= 0
+        ? resolution.monitor_index : 0;
+    a2fo_call_delphi_two_registers(
+        at(kCustomComboSetItemIndexRva), g_monitor_combo_control,
+        reinterpret_cast<void*>(static_cast<std::uintptr_t>(selected)));
+    SendMessageA(g_monitor_combo_window, CB_SETCURSEL, selected, 0);
+    g_observed_monitor_selection = selected;
+    InterlockedDecrement(&g_syncing_monitor_combo);
+
+    log("Renderer options: detected " +
+        std::to_string(g_game_monitors.size()) +
+        " connected game monitor(s)");
+    if (resolution.configured &&
+        !resolution.configured_device_present) {
+        log("Renderer options: saved game monitor " + configured_device +
+            " is disconnected; primary monitor selected as fallback");
+    }
+}
+
+void save_game_monitor_selection(int selected) {
+    if (selected < 0 ||
+        static_cast<std::size_t>(selected) >= g_game_monitors.size()) {
+        return;
+    }
+    g_observed_monitor_selection = selected;
+    const GameMonitorDescriptor& monitor = g_game_monitors[selected];
+    if (!write_configured_game_monitor(g_data_root, monitor.device_name)) {
+        refresh_game_monitor_combo(nullptr);
+        set_restart_text("Could not save the game monitor setting.");
+        log("Renderer options: A2FORenderer.ini game monitor could not be "
+            "written");
+        return;
+    }
+    set_restart_text(
+        "Game monitor saved. Fully exit and relaunch Fleet Operations to apply it.");
+    log("Renderer options: requested game monitor " +
+        game_monitor_label(monitor) + " [" + monitor.device_name + "]");
+}
+
+void ensure_game_monitor_controls(void* form, void* native_combo,
+                                  void* native_label) {
+    if (!form || !native_combo || !native_label) return;
+    const bool reusable =
+        g_monitor_control_form == form &&
+        is_owned_control_for_form(g_monitor_label, native_label, form) &&
+        is_owned_control_for_form(
+            g_monitor_combo_control, native_combo, form);
+    if (reusable) {
+        g_monitor_combo_window = reinterpret_cast<HWND>(
+            a2fo_call_delphi_one_register(
+                at(kWinControlGetHandleRva), g_monitor_combo_control));
+    }
+    if (reusable && g_monitor_combo_window &&
+        IsWindow(g_monitor_combo_window)) {
+        install_combo_change_handler(g_monitor_combo_control);
+        refresh_game_monitor_combo(native_combo);
+        set_control_visible(g_monitor_label, true);
+        set_control_visible(g_monitor_combo_control, true);
+        a2fo_call_delphi_one_register(
+            at(kControlBringToFrontRva), g_monitor_label);
+        a2fo_call_delphi_one_register(
+            at(kControlBringToFrontRva), g_monitor_combo_control);
+        log("Renderer options: reused and refreshed Game Monitor selector");
+        return;
+    }
+
+    g_monitor_label = create_vcl_control(
+        form, native_label, kCustomLabelCreateRva);
+    g_monitor_combo_control = create_vcl_control(
+        form, native_combo, kJvCustomHTComboBoxCreateRva);
+    if (!g_monitor_label || !g_monitor_combo_control) {
+        g_monitor_label = nullptr;
+        g_monitor_combo_control = nullptr;
+        log("Renderer options: Game Monitor controls could not be created");
+        return;
+    }
+    g_monitor_control_form = form;
+
+    set_control_text(g_monitor_label, "Game Monitor");
+    a2fo_call_delphi_two_registers(
+        at(kCustomLabelSetTransparentRva), g_monitor_label,
+        reinterpret_cast<void*>(1));
+    if (!set_initial_control_bounds(g_monitor_label, 288, 282, 176, 18) ||
+        !set_initial_control_bounds(
+            g_monitor_combo_control, 480, 278, 408, 30)) {
+        log("Renderer options: Game Monitor control bounds were unreadable");
+        return;
+    }
+    a2fo_call_delphi_two_registers(
+        at(kCustomComboBoxSetStyleRva), g_monitor_combo_control,
+        reinterpret_cast<void*>(2));
+    a2fo_call_delphi_two_registers(
+        at(kControlSetParentRva), g_monitor_label, form);
+    a2fo_call_delphi_two_registers(
+        at(kControlSetParentRva), g_monitor_combo_control, form);
+
+    void* native_combo_font = field<void*>(native_combo, kControlFontOffset);
+    if (native_combo_font &&
+        readable_range(native_combo_font, sizeof(void*))) {
+        a2fo_call_delphi_two_registers(
+            at(kControlSetParentFontRva), g_monitor_combo_control, nullptr);
+        a2fo_call_delphi_two_registers(
+            at(kControlSetFontRva), g_monitor_combo_control,
+            native_combo_font);
+        void* monitor_font = field<void*>(
+            g_monitor_combo_control, kControlFontOffset);
+        if (monitor_font && readable_range(monitor_font, sizeof(void*))) {
+            a2fo_call_delphi_two_registers(
+                at(kFontSetColorRva), monitor_font,
+                reinterpret_cast<void*>(
+                    static_cast<std::uintptr_t>(0xff000008u)));
+        }
+    }
+
+    g_monitor_combo_window = reinterpret_cast<HWND>(
+        a2fo_call_delphi_one_register(
+            at(kWinControlGetHandleRva), g_monitor_combo_control));
+    if (!g_monitor_combo_window || !IsWindow(g_monitor_combo_window)) {
+        log("Renderer options: Game Monitor combo has no window handle");
+        return;
+    }
+    refresh_game_monitor_combo(native_combo);
+    if (!install_combo_change_handler(g_monitor_combo_control)) {
+        log("Renderer options: Game Monitor change handler was not installed");
+    }
+    set_control_visible(g_monitor_label, true);
+    set_control_visible(g_monitor_combo_control, true);
+    a2fo_call_delphi_one_register(
+        at(kControlBringToFrontRva), g_monitor_label);
+    a2fo_call_delphi_one_register(
+        at(kControlBringToFrontRva), g_monitor_combo_control);
+    a2fo_call_delphi_one_register(
+        at(kControlRepaintRva), g_monitor_label);
+    a2fo_call_delphi_one_register(
+        at(kControlRepaintRva), g_monitor_combo_control);
+    log("Renderer options: Game Monitor selector added");
+}
+
 void ensure_renderer_controls(void* form) {
     if (!form) return;
     HWND form_window = *reinterpret_cast<HWND*>(
@@ -863,6 +1122,7 @@ void ensure_renderer_controls(void* form) {
 
     void* native_combo = field<void*>(form, kPrimaryDeviceComboOffset);
     void* native_label = field<void*>(form, kFirstNativeLabelOffset);
+    ensure_game_monitor_controls(form, native_combo, native_label);
     const bool reusable_controls =
         g_renderer_control_form == form &&
         is_owned_control_for_form(g_renderer_label, native_label, form) &&
@@ -876,7 +1136,7 @@ void ensure_renderer_controls(void* form) {
     }
     if (form_window == g_form_window && reusable_controls &&
         g_renderer_combo_window && IsWindow(g_renderer_combo_window)) {
-        install_renderer_combo_change_handler();
+        install_combo_change_handler(g_renderer_combo_control);
         const RendererBackend requested = requested_backend();
         set_combo_index(requested == RendererBackend::dxvk ? 1 : 0);
         set_control_visible(g_renderer_label, true);
@@ -884,6 +1144,11 @@ void ensure_renderer_controls(void* form) {
         set_control_visible(g_restart_label, true);
         a2fo_call_delphi_one_register(
             at(kControlBringToFrontRva), g_renderer_combo_control);
+        // Reassert the saved monitor after every other dynamically cloned VCL
+        // combo has finished constructing. This old Jv control can otherwise
+        // reset the earlier monitor combo to item zero during FormShow.
+        refresh_game_monitor_combo(native_combo);
+        ensure_game_monitor_selection_timer();
         log("Renderer options: reused Fleet Ops Graphics Options selector "
             "after handle recreation");
         return;
@@ -919,7 +1184,7 @@ void ensure_renderer_controls(void* form) {
     if (!set_initial_control_bounds(g_renderer_label, 288, 246, 176, 18) ||
         !set_initial_control_bounds(g_renderer_combo_control,
                                     480, 242, 408, 30) ||
-        !set_initial_control_bounds(g_restart_label, 480, 282, 520, 18)) {
+        !set_initial_control_bounds(g_restart_label, 480, 318, 520, 18)) {
         log("Renderer options: VCL control bounds were unreadable");
         return;
     }
@@ -985,11 +1250,13 @@ void ensure_renderer_controls(void* form) {
     }
     log("Renderer options: Fleet Ops renderer combo window created");
 
-    add_combo_item("System Direct3D 9 (Windows / WineD3D)");
-    add_combo_item("DXVK (Vulkan)");
+    add_combo_item(
+        g_renderer_combo_control,
+        "System Direct3D 9 (Windows / WineD3D)");
+    add_combo_item(g_renderer_combo_control, "DXVK (Vulkan)");
     const RendererBackend requested = requested_backend();
     set_combo_index(requested == RendererBackend::dxvk ? 1 : 0);
-    if (!install_renderer_combo_change_handler()) {
+    if (!install_combo_change_handler(g_renderer_combo_control)) {
         log("Renderer options: renderer combo change handler was not installed");
         return;
     }
@@ -1031,6 +1298,11 @@ void ensure_renderer_controls(void* form) {
         }
     }
 
+    // Renderer-control construction can reset the separately cloned monitor
+    // combo. Restore the saved device before arming the polling fallback so an
+    // internal reset is never mistaken for a user selecting Display 1.
+    refresh_game_monitor_combo(native_combo);
+    ensure_game_monitor_selection_timer();
     log("Renderer options: VCL selector added to Fleet Ops Graphics Options");
 }
 
@@ -1073,24 +1345,39 @@ extern "C" void a2fo_jvg_checkbox_set_checked_hook_cpp(
 
 extern "C" void a2fo_renderer_combo_change_hook_cpp(
     void* method_instance, void* sender) {
-    if (method_instance != g_renderer_combo_control ||
-        sender != g_renderer_combo_control ||
-        InterlockedCompareExchange(&g_syncing_renderer_combo, 0, 0) != 0 ||
-        !g_renderer_combo_window || !IsWindow(g_renderer_combo_window)) {
+    const bool renderer_change =
+        method_instance == g_renderer_combo_control &&
+        sender == g_renderer_combo_control &&
+        InterlockedCompareExchange(&g_syncing_renderer_combo, 0, 0) == 0 &&
+        g_renderer_combo_window && IsWindow(g_renderer_combo_window);
+    const bool monitor_change =
+        method_instance == g_monitor_combo_control &&
+        sender == g_monitor_combo_control &&
+        InterlockedCompareExchange(&g_syncing_monitor_combo, 0, 0) == 0 &&
+        g_monitor_combo_window && IsWindow(g_monitor_combo_window);
+    if (!renderer_change && !monitor_change) {
         return;
     }
     try {
-        const LRESULT selected =
-            SendMessageA(g_renderer_combo_window, CB_GETCURSEL, 0, 0);
-        log("Renderer options: renderer combo change event (selected=" +
-            std::to_string(selected) + ")");
-        if (selected == 0 || selected == 1) {
-            select_renderer(selected == 1 ? RendererBackend::dxvk
-                                          : RendererBackend::system);
+        if (renderer_change) {
+            const LRESULT selected =
+                SendMessageA(g_renderer_combo_window, CB_GETCURSEL, 0, 0);
+            log("Renderer options: renderer combo change event (selected=" +
+                std::to_string(selected) + ")");
+            if (selected == 0 || selected == 1) {
+                select_renderer(selected == 1 ? RendererBackend::dxvk
+                                              : RendererBackend::system);
+            }
+        } else {
+            const LRESULT selected =
+                SendMessageA(g_monitor_combo_window, CB_GETCURSEL, 0, 0);
+            log("Renderer options: Game Monitor combo change event "
+                "(selected=" + std::to_string(selected) + ")");
+            g_observed_monitor_selection = static_cast<int>(selected);
+            save_game_monitor_selection(static_cast<int>(selected));
         }
     } catch (...) {
-        log("Renderer options: renderer combo change was ignored after an "
-            "exception");
+        log("Renderer options: combo change was ignored after an exception");
     }
 }
 
@@ -1175,7 +1462,8 @@ bool install_renderer_options(HMODULE fleet_ops, const std::string& data_root,
             "installed");
         return false;
     }
-    log("Renderer options: restart-applied selector enabled");
+    log("Renderer options: restart-applied renderer and Game Monitor "
+        "selectors enabled");
     const RendererBackend requested = requested_backend();
     const RendererBackend applied = applied_backend();
     log(std::string("Renderer options: requested backend ") +

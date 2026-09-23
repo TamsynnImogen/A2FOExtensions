@@ -18,4 +18,9 @@ bool initialize_queue_enhancements(const A2FO_ModuleApi* api,
                                    HMODULE armada,
                                    HMODULE fleet_ops) noexcept;
 
+// Read-only admission hint for HybridBuild's native Producer::IsBusy gate.
+// The real target-specific admission still happens in FeaturePack when the
+// synchronized build command reaches the queue receiver.
+bool producer_logical_queue_has_room(void* producer) noexcept;
+
 }  // namespace a2fo

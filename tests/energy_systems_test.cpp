@@ -5,8 +5,14 @@
 
 using a2fo::energy_systems::RechargeMode;
 using a2fo::energy_systems::StorePolicy;
+using a2fo::energy_systems::Stores;
 
 int main() {
+    const Stores full_stores{80.0f, 16.0f, 6.0f};
+    assert(full_stores.photon == 80.0f);
+    assert(full_stores.quantum == 16.0f);
+    assert(full_stores.shuttle_craft == 6.0f);
+
     StorePolicy automatic{10.0f, 2.0f, RechargeMode::automatic};
     assert(std::fabs(a2fo::energy_systems::recharge(
                          4.0f, automatic, 1.5f, false) - 7.0f) < 0.001f);

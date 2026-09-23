@@ -50,6 +50,7 @@ namespace {
     constexpr std::uintptr_t kMissionFilenameTableRva = 0x003a8afc;
     constexpr std::size_t kCampaignCount = 4;
     constexpr std::size_t kMissionsPerCampaign = 10;
+    constexpr std::size_t kMissionTableSize = kCampaignCount * kMissionsPerCampaign;
     constexpr int kMaximumConfiguredCampaign = 127;
     constexpr int kMaximumConfiguredMission = 511;
     constexpr std::size_t kMaximumMissionName = 260;
@@ -87,6 +88,9 @@ namespace {
                     HBRUSH g_background_brush = nullptr;
                     HBRUSH g_field_brush = nullptr;
                     std::vector<std::string> g_roots;
+                    std::array<char, kMaximumMissionName> g_launch_filename_storage{};
+                    const char* g_original_launch_filename = nullptr;
+                    std::size_t g_launch_filename_row = kMissionTableSize;
 
                     template <typename T = void>
                     T* at(HMODULE module, std::uintptr_t rva) noexcept {
@@ -691,10 +695,23 @@ namespace {
                                                                             return {};
                                                                             }
 
-                                                                            std::vector<CampaignEntry> campaigns;
+                                                                        std::vector<CampaignEntry> campaigns;
                                                                         const std::set<int> configured_campaigns =
                                                                         configured_campaign_indices(metadata);
-                                                                        const int highest_campaign = configured_campaigns.empty()
+                                                                        bool ini_catalog_mode = lower(metadata_value(
+                                                                            metadata, "selector", "catalogmode")) == "ini";
+                                                                        if (ini_catalog_mode && configured_campaigns.empty()) {
+                                                                            log_line(
+                                                                                "catalogMode=ini had no configured campaigns; using the native catalog");
+                                                                            ini_catalog_mode = false;
+                                                                        } else if (ini_catalog_mode) {
+                                                                            log_line(
+                                                                                "Using the authoritative mission_selector.ini catalog");
+                                                                        }
+                                                                        const int highest_campaign =
+                                                                        ini_catalog_mode
+                                                                        ? *configured_campaigns.rbegin()
+                                                                        : configured_campaigns.empty()
                                                                         ? static_cast<int>(kCampaignCount) - 1
                                                                         : std::max(
                                                                             static_cast<int>(kCampaignCount) - 1,
@@ -745,7 +762,7 @@ namespace {
 
                                                                         std::set<int> mission_indices =
                                                                         configured_mission_indices(metadata, campaign_index);
-                                                                        if (native_campaign) {
+                                                                        if (native_campaign && !ini_catalog_mode) {
                                                                             for (int mission_index = 0;
                                                                                  mission_index < static_cast<int>(kMissionsPerCampaign);
                                                                             ++mission_index) {
@@ -810,7 +827,8 @@ namespace {
                                                                                                                        filename);
                                                                             campaign.missions.push_back(std::move(mission));
                                                                         }
-                                                                        if (native_campaign || configured_campaigns.count(campaign_index) != 0 ||
+                                                                        if ((!ini_catalog_mode && native_campaign) ||
+                                                                            configured_campaigns.count(campaign_index) != 0 ||
                                                                             !campaign.missions.empty()) {
                                                                             campaigns.push_back(std::move(campaign));
                                                                             }
@@ -842,7 +860,9 @@ namespace {
                                                                 HWND back = nullptr;
                                                                 int campaign = 0;
                                                                 int mission_position = 0;
-                                                                int native_preview_handle = 0;
+int native_preview_handle = 0;
+std::array<std::unique_ptr<Gdiplus::Image>, 4> button_images;
+HWND hovered_button = nullptr;
                                                                 std::unique_ptr<Gdiplus::Image> background;
                                                                 std::string background_source_path;
                                                                 std::unique_ptr<Gdiplus::Image> thumbnail;
@@ -1086,7 +1106,12 @@ namespace {
                                                                     const int margin = 18;
                                                                     const int gap = 12;
                                                                     const int header_height = 54;
-                                                                    const int button_height = 30;
+const int button_height = context.button_images[0]
+    ? std::clamp(static_cast<int>(context.button_images[0]->GetHeight()), 16, 64)
+    : 30;
+const int button_width = context.button_images[0]
+    ? std::clamp(static_cast<int>(context.button_images[0]->GetWidth()), 80, 320)
+    : 150;
                                                                     const int footer_y = height - margin - button_height;
                                                                     const int content_top = margin + header_height;
                                                                     const int content_height = footer_y - gap - content_top;
@@ -1107,32 +1132,13 @@ namespace {
                                                                                content_height - preview_height - gap, TRUE);
                                                                     MoveWindow(context.overview, margin, margin,
                                                                                width - margin * 2, header_height - 8, TRUE);
-                                                                    MoveWindow(context.start, width - margin - 116, footer_y,
-                                                                               116, button_height, TRUE);
-                                                                    MoveWindow(context.back, width - margin - 116 - gap - 104,
-                                                                               footer_y, 104, button_height, TRUE);
+MoveWindow(context.start, width - margin - button_width, footer_y,
+button_width, button_height, TRUE);
+MoveWindow(context.back, width - margin - button_width * 2 - gap,
+footer_y, button_width, button_height, TRUE);
                                                                 }
 
-                                                                void draw_button(const DRAWITEMSTRUCT* item) noexcept {
-                                                                    if (!item) return;
-                                                                    const bool disabled = (item->itemState & ODS_DISABLED) != 0;
-                                                                    const bool pressed = (item->itemState & ODS_SELECTED) != 0;
-                                                                    const COLORREF fill = disabled ? RGB(30, 32, 36)
-                                                                    : pressed ? RGB(34, 92, 126) : RGB(22, 62, 86);
-                                                                    HBRUSH brush = CreateSolidBrush(fill);
-                                                                    FillRect(item->hDC, &item->rcItem, brush);
-                                                                    DeleteObject(brush);
-                                                                    FrameRect(item->hDC, &item->rcItem,
-                                                                              reinterpret_cast<HBRUSH>(GetStockObject(GRAY_BRUSH)));
-                                                                    char text[96]{};
-                                                                    GetWindowTextA(item->hwndItem, text, sizeof(text));
-                                                                    SetBkMode(item->hDC, TRANSPARENT);
-                                                                    SetTextColor(item->hDC, disabled ? RGB(115, 115, 115) : RGB(240, 245, 250));
-                                                                    SelectObject(item->hDC, g_regular_font);
-                                                                    RECT rectangle = item->rcItem;
-                                                                    DrawTextA(item->hDC, text, -1, &rectangle,
-                                                                              DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                                                                }
+#include "standard_buttons.inl"
 
                                                                 void draw_campaign_overview(
                                                                     SelectorContext& context,
@@ -1240,6 +1246,49 @@ namespace {
 
                                                                         using SetupMissionFunction = bool (__cdecl*)(HWND, int*);
 
+                                                                        void restore_launch_filename_override() noexcept {
+                                                                            if (g_launch_filename_row >= kMissionTableSize) return;
+                                                                            auto** filenames = at<const char*>(
+                                                                                g_armada, kMissionFilenameTableRva);
+                                                                            if (readable_range(
+                                                                                    filenames,
+                                                                                    sizeof(const char*) * kMissionTableSize) &&
+                                                                                filenames[g_launch_filename_row] ==
+                                                                                    g_launch_filename_storage.data()) {
+                                                                                filenames[g_launch_filename_row] =
+                                                                                    g_original_launch_filename;
+                                                                            }
+                                                                            g_original_launch_filename = nullptr;
+                                                                            g_launch_filename_row = kMissionTableSize;
+                                                                            g_launch_filename_storage.fill('\0');
+                                                                        }
+
+                                                                        bool retain_launch_filename_override(
+                                                                            const std::string& filename,
+                                                                            std::size_t launch_row) noexcept {
+                                                                            restore_launch_filename_override();
+                                                                            if (filename.empty() ||
+                                                                                filename.size() >= g_launch_filename_storage.size() ||
+                                                                                launch_row >= kMissionTableSize) {
+                                                                                return false;
+                                                                            }
+                                                                            auto** filenames = at<const char*>(
+                                                                                g_armada, kMissionFilenameTableRva);
+                                                                            if (!readable_range(
+                                                                                    filenames,
+                                                                                    sizeof(const char*) * kMissionTableSize)) {
+                                                                                return false;
+                                                                            }
+                                                                            std::copy(filename.begin(), filename.end(),
+                                                                                      g_launch_filename_storage.begin());
+                                                                            g_launch_filename_storage[filename.size()] = '\0';
+                                                                            g_original_launch_filename = filenames[launch_row];
+                                                                            g_launch_filename_row = launch_row;
+                                                                            filenames[launch_row] =
+                                                                                g_launch_filename_storage.data();
+                                                                            return true;
+                                                                        }
+
                                                                         void start_selected_mission(SelectorContext& context) {
                                                                             const CampaignEntry* campaign = selected_campaign(context);
                                                                             const MissionEntry* mission = selected_mission(context);
@@ -1279,25 +1328,38 @@ namespace {
                                                                                         static_cast<std::size_t>(mission->launch_campaign) *
                                                                                         kMissionsPerCampaign +
                                                                                         static_cast<std::size_t>(mission->launch_mission);
-                                                                                        const char* original_filename = filenames[launch_row];
                                                                                         *campaign_index = mission->launch_campaign;
                                                                                         *mission_index = static_cast<std::int8_t>(mission->launch_mission);
-                                                                                        if (mission->replace_launch_filename) {
-                                                                                            filenames[launch_row] = mission->filename.c_str();
+                                                                                        restore_launch_filename_override();
+                                                                                        if (mission->replace_launch_filename &&
+                                                                                            !retain_launch_filename_override(
+                                                                                                mission->filename, launch_row)) {
+                                                                                            MessageBoxA(
+                                                                                                context.dialog,
+                                                                                                "The configured mission filename could not be retained for launch.",
+                                                                                                "Mission Selector",
+                                                                                                MB_OK | MB_ICONERROR);
+                                                                                            return;
                                                                                         }
+                                                                                        log_line(
+                                                                                            "Launching " + mission->filename +
+                                                                                            " through native campaign " +
+                                                                                            std::to_string(mission->launch_campaign) +
+                                                                                            ", mission " +
+                                                                                            std::to_string(mission->launch_mission));
                                                                                         const auto setup = reinterpret_cast<SetupMissionFunction>(
                                                                                             at(g_armada, kSetupMissionRva));
                                                                                         InterlockedExchange(&g_accept_selected_mission, 1);
                                                                                         const bool launched = setup && setup(
                                                                                             context.dialog, &context.native_preview_handle);
                                                                                         InterlockedExchange(&g_accept_selected_mission, 0);
-                                                                                        if (mission->replace_launch_filename) {
-                                                                                            filenames[launch_row] = original_filename;
-                                                                                        }
-                                                                                        if (!launched && IsWindow(context.dialog)) {
-                                                                                            MessageBoxA(context.dialog,
-                                                                                                        "Armada rejected the selected native mission row.",
-                                                                                                        "Mission Selector", MB_OK | MB_ICONERROR);
+                                                                                        if (!launched) {
+                                                                                            restore_launch_filename_override();
+                                                                                            if (IsWindow(context.dialog)) {
+                                                                                                MessageBoxA(context.dialog,
+                                                                                                            "Armada rejected the selected native mission row.",
+                                                                                                            "Mission Selector", MB_OK | MB_ICONERROR);
+                                                                                            }
                                                                                         }
                                                                         }
 
@@ -1409,7 +1471,12 @@ namespace {
                                                                                      }
                                                                                      set_control_font(context->overview, g_heading_font);
                                                                                      SendMessageA(context->campaign_list, LB_SETITEMHEIGHT, 0, 30);
-                                                                                     SendMessageA(context->mission_list, LB_SETITEMHEIGHT, 0, 28);
+SendMessageA(context->mission_list, LB_SETITEMHEIGHT, 0, 28);
+load_standard_buttons(*context);
+for (HWND button : {context->start, context->back}) {
+    SetWindowSubclass(button, &standard_button_subclass, 1,
+                      reinterpret_cast<DWORD_PTR>(context));
+}
                                                                                      layout_controls(*context);
                                                                                      populate_campaigns(*context);
                                                                                      SetFocus(context->campaign_list);
@@ -1480,7 +1547,7 @@ namespace {
                                                                                     if (item->CtlID == kOverviewId) {
                                                                                         draw_campaign_overview(*context, item);
                                                                                     } else if (item->CtlID == kStartId || item->CtlID == kBackId) {
-                                                                                        draw_button(item);
+draw_button(*context, item);
                                                                                     } else if (item->CtlID == kCampaignListId ||
                                                                                         item->CtlID == kMissionListId) {
                                                                                         draw_list_item(*context, item);
@@ -1659,6 +1726,7 @@ extern "C" __declspec(dllexport)
 void A2FO_CALL A2FO_ModuleShutdown() {
     // Hooks are process-lifetime. Core shutdown occurs after the shell has
     // stopped dispatching menu callbacks, so drawing resources can be freed.
+    restore_launch_filename_override();
     if (g_gdiplus_token) {
         Gdiplus::GdiplusShutdown(g_gdiplus_token);
         g_gdiplus_token = 0;

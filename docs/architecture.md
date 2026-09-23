@@ -44,7 +44,11 @@ The built-in native modules separate optional policy:
   Operations' native craft-name index, plus selected-object panel identity,
   ammunition, directional-shield graphics, the ranked-craft XP bar, and
   native hover regions for selected shield and XP status bars, with optional
-  per-state colours for the five native subsystem icons/value text, the native
+  per-state colours for the five native subsystem icons/value text, Fleet
+  Operations' `weaponXiconpos` icons through weapon slot 128 (the native 32
+  controls plus 96 layout-safe sidecars, including fixed-colour passive
+  `UtilityWeapon` and native `buttonHideUnavailable` hidden-versus-disabled
+  presentation, with an independent state palette and fixed passive colour), the native
   mouse-over hull/shield/crew icon-values, and the selected crew icon/value,
   plus an independent fixed colour for the native officer icon/value;
 - `A2FOEditMenu.dll`: recursive `buildItemX` editor-menu navigation using the
@@ -86,10 +90,25 @@ The built-in native modules separate optional policy:
   while loose per-diffuse specular maps use the spare shader texture stage;
   the core owns its checked early pass-through hooks, shader resource cache,
   and Fleet Operations alpha-transition gateway because the shared DOT3 shader
-  predates deferred module loading. DOT3 materials preserve their native bump
-  sampler and use an exact single-draw stage-2 emissive fallback when a wrapper
-  rejects the optional pixel shader. Classic SODs use scoped MeshVB and checked
-  GPU/CPU workspace fixed-function combiner sites. Loose
+  predates deferred module loading. On AMD with System Direct3D 9, isolated
+  compatibility paths cover both the normal D3D8-to-D3D9 route and Fleet
+  Operations' separate `/d3d9` route. Each remaps only its stock DOT3 input
+  declaration/source pair from legacy special-purpose semantics to neutral
+  texture-coordinate semantics before creation; stream layout, lighting math,
+  and the native draw sequence are unchanged. When the persisted native bump
+  option is off, the optional neutral-bump compatibility policy keeps DOT3
+  runtime eligibility and, on DXVK, replaces the native per-light normal-map
+  combiner with the equivalent fixed flat-normal tangent-space shader. The
+  shader asset is preflighted before eligibility changes, while D3DX assembly
+  remains deferred to the first safe DOT3 boundary outside loader lock. It
+  retains original material texture assignments and does not depend on a
+  shared flat texture. This
+  avoids Fleet Operations' CPU/non-VB fallback without restoring visible bump
+  relief. DOT3 materials otherwise
+  preserve their native bump sampler
+  and use an exact single-draw stage-2 emissive fallback when a wrapper rejects
+  the optional pixel shader. Classic SODs use scoped MeshVB and checked GPU/CPU
+  workspace fixed-function combiner sites. Loose
   emissive maps retain their authored RGB and sharp self-lit centres, while all
   mesh paths bind the matching composite directly during their native material
   draw. Mostly-black sources use an exact sparse CPU representation; generated
@@ -109,6 +128,10 @@ The built-in native modules separate optional policy:
   cycles for `PointDefenseLaser` and `OrdnanceDefenseWeapon`, plus accurate
   pre-fire enforcement of ordinary `shotDelay` for PointDefenseLaser while
   preserving the native target/interception paths and reload modifiers;
+- `A2FOODFVariants.dll`: ownership-change ODF replacement using the same
+  `factionTextureSuffix` policy as TextureVariants, with a native `_b` Borg
+  default, canonical base-ODF tracking, base fallback, and the core-owned Race
+  and Craft event dispatchers rather than independent hooks;
 - `A2FOTextureVariants.dll`: render-time faction texture suffix selection and
   case-insensitive Race-name SOD node visibility using each craft's live owner,
   plus DDS-aware native Borg alternate preflight. Shared class geometry is
@@ -118,8 +141,9 @@ The built-in native modules separate optional policy:
   `Textures\RGB`, `Textures\Index8`, and `Textures\Compressed` assets across
   Data, parent mods, and the active mod through Armada's TGA FileExists/OpenRead
   boundary. Its flattened true-colour route expands indexed, grayscale,
-  16-bit, and RLE TGA variants before loading, with null-source guards for
-  failed minimap textures.
+  16-bit, and RLE TGA variants before loading. It also synthesizes an inherited
+  manual mip from the effective winning base when a parent chain is too small
+  for a child replacement, with null-source guards for failed minimap textures.
 - `A2FOSwarmSystem.dll`: sparse numbered ambient-traffic definitions on any
   rendered host ODF, implemented as shared-model `ST3D_Instance` visuals with
   host-local randomized movement, launch/interaction hardpoint visits, dwell
@@ -143,6 +167,13 @@ and `a2freight.odf` defaults, Armada 1 `Addon` ODF precedence, the
 starbase officer-quarter system, and the signature-checked legacy nebula
 sprite-node guard. Its activation marker and required policy therefore enable
 it only when `STA1 Classic` or one of its children is selected.
+
+`A1Fallbacks.dll` is a separate optional presentation module. It owns the
+checked native wireframe-set resolver and preserves every native layered or
+single-sprite result. An entirely missing set resolves to the target class's
+`b_<basename>` interface sprite, then to the current owner's
+`<faction>_icon`. Keeping this outside `A1Compat` lets non-A1 mods opt into the
+same missing-asset behavior without enabling A1 gameplay policy.
 
 FeaturePack also owns the Fleet Operations BuildYard configuration parser's
 single `RequiredTechnology` project-ID call. It captures
