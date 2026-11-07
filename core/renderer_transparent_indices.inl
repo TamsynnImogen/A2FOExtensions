@@ -69,6 +69,7 @@ extern "C" void release_transparent_mesh_indices(IDirect3DDevice8* device) noexc
 
 extern "C" void __cdecl a2fo_nebula_transparent_indices_pre(
     IDirect3DDevice8* device, const void* group, UINT primitive_count) noexcept {
+    set_ingame_shadow_group(group,primitive_count);
     if (!device || !g_cloak_composite.active ||
         !cloak_composite_selected(device) || g_transparent_index_draw.active ||
         primitive_count < 2) return;
@@ -168,5 +169,6 @@ extern "C" void __cdecl a2fo_nebula_transparent_indices_pre(
 }
 
 extern "C" void __cdecl a2fo_nebula_transparent_indices_post() noexcept {
+    set_ingame_shadow_group(nullptr,0);
     restore_transparent_mesh_indices();
 }

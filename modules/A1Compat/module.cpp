@@ -5,7 +5,19 @@
  */
 
 #include "../../sdk/include/a2fo_module_api.h"
+#include "../../sdk/include/a2fo_module_provider.hpp"
 #include "a1_bzn_policy.hpp"
+#include "../../rust/stage8_a1_ffi.h"
+#include "../../rust/stage8_a1_lifecycle_ffi.h"
+#include "../../rust/stage8_a1_shutdown_ffi.h"
+#include "../../rust/stage8_a1_relationships_ffi.h"
+#include "../../rust/stage8_a1_maps_runtime_ffi.h"
+#include "../../rust/stage8_a1_physics_ffi.h"
+#include "../../rust/stage8_a1_officer_ffi.h"
+#include "../../rust/stage9_a1_config_ffi.h"
+#include "../../rust/stage9_a1_mission_scan_ffi.h"
+#include "../../rust/stage9_a1_reporting_ffi.h"
+#include <exception>
 #include "a1_ui_policy.hpp"
 #include "race_menu_policy.hpp"
 #include "team_color_policy.hpp"
@@ -23,6 +35,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -94,6 +107,34 @@ void __cdecl a2fo_a1_run_to_the_death_check(
     void* game_type, const void* return_address);
 }
 
+#include "../../rust/stage9_a1_assets_ffi.h"
+#include "../../rust/stage9_a1_class_defaults_ffi.h"
+#include "../../rust/stage9_a1_physics_defaults_ffi.h"
+#include "../../rust/stage9_a1_geometry_ffi.h"
+#include "../../rust/stage9_a1_layout_ffi.h"
+#include "../../rust/stage9_a1_gui_config_ffi.h"
+#include "../../rust/stage9_a1_numeric_ffi.h"
+#include "../../rust/stage9_a1_speed_ffi.h"
+#include "../../rust/stage9_a1_quarters_ffi.h"
+#include "../../rust/stage9_a1_officer_policy_ffi.h"
+#include "../../rust/stage9_a1_bzn_runtime_ffi.h"
+#include "../../rust/stage9_a1_sod_ffi.h"
+#include "../../rust/stage9_a1_race_ffi.h"
+#include "../../rust/stage9_a1_ui_numeric_ffi.h"
+#include "../../rust/stage9_a1_officer_workflow_ffi.h"
+#include "../../rust/stage9_a1_fofs_ffi.h"
+#include "../../rust/stage9_a1_race_workflow_ffi.h"
+#include "../../rust/stage9_a1_crew_ffi.h"
+#include "../../rust/stage9_a1_officer_ui_ffi.h"
+#include "../../rust/stage9_a1_display_text_ffi.h"
+#include "../../rust/stage9_a1_display_numeric_ffi.h"
+#include "../../rust/stage9_a1_node_policy_ffi.h"
+#include "../../rust/stage9_a1_gui_scale_ffi.h"
+#include "../../rust/stage9_a1_aip_name_ffi.h"
+#include "../../rust/stage9_a1_native_ui_ffi.h"
+#include "../../rust/stage9_a1_resource_limits_ffi.h"
+#include "../../rust/stage9_a1_state_policy_ffi.h"
+#include "../../rust/stage9_a1_render_policy_ffi.h"
 namespace {
 
 constexpr const char* kModuleName = "A1Compat";
@@ -237,6 +278,13 @@ constexpr std::size_t kNodeParentOffset = 0x18;
 constexpr std::size_t kNodeFirstChildOffset = 0x1c;
 constexpr std::size_t kNodeNextSiblingOffset = 0x20;
 constexpr std::size_t kNodeFlagsOffset = 0xbc;
+// Calculated local AABB used by the Storm3D mesh/MRM render culler.  These
+// offsets are already documented and used elsewhere in A2FOExtensions.
+constexpr std::size_t kMeshBoundsMinimumOffset = 0xe4;
+constexpr std::size_t kMeshBoundsMaximumOffset = 0xf0;
+constexpr std::int32_t kMeshNodeType = 1;
+constexpr std::int32_t kMrmNodeType = 9;
+constexpr float kLegacyA1BoundsInflation = 4.0f;
 constexpr std::size_t kSpriteNodeDataOffset = 0xc0;
 constexpr std::int32_t kSpriteNodeType = 3;
 constexpr std::uint32_t kNodeHiddenFlag = 0x00000001;
@@ -1286,6 +1334,8 @@ volatile LONG g_legacy_construction_bar_target_reported = 0;
 volatile LONG g_legacy_construction_rig_progress_diagnostic_reported = 0;
 volatile LONG g_legacy_ship_display_alias_report_count = 0;
 volatile LONG g_missing_craft_race_count = 0;
+volatile LONG g_legacy_sod_lod0_suppression_count = 0;
+volatile LONG g_legacy_sod_bounds_repair_count = 0;
 volatile LONG g_officer_quarter_prepare_count = 0;
 volatile LONG g_officer_upgrade_completion_count = 0;
 volatile LONG g_officer_upgrade_rejection_count = 0;
@@ -1519,6 +1569,7 @@ using FileInFixedCharsFn = bool (__cdecl*)(
 using FileReaderLoadFn = bool (__cdecl*)(void* file_reader);
 using AiMissionLoadFn = FileReaderLoadFn;
 using MapDetailsFactoryLoadFn = void* (__cdecl*)(const char* filename);
+using SolMapDetailsLoadFn = void* (__cdecl*)(const char* filename, int selected_map);
 using TeamColorInitFn = void (__cdecl*)();
 using ControlButtonStateModeInfoFn =
     std::uintptr_t (__attribute__((regparm(3))) *)(
@@ -1531,6 +1582,11 @@ bool read_parameter_classlabel(
 bool read_parameter_race(
     void* parameter_db, std::array<char, 64>* output) noexcept;
 bool contains_ci_substring(const char* source, const char* token) noexcept;
+std::int32_t a1_policy_compare(const std::uint8_t*,const std::uint8_t*,void*) noexcept;
+std::int32_t a1_policy_ncompare(const std::uint8_t*,const std::uint8_t*,std::size_t,void*) noexcept;
+std::size_t a1_policy_length(const std::uint8_t*,void*) noexcept;
+const std::uint8_t* a1_policy_scan260(const std::uint8_t*,void*) noexcept;
+std::uint8_t a1_policy_lower(std::uint8_t,void*) noexcept;
 void* read_pointer_at(const void* object, std::size_t offset) noexcept;
 bool is_valid_parameter_db(void* parameter_db) noexcept;
 std::string join_path(const char* root, const char* name);
@@ -1795,87 +1851,109 @@ bool restore_a1_instant_action_relationships(
     }
 
     try {
-        // This is the native A2 SetupGame relationship rule at Armada RVA
-        // 0x00085323: inactive sides receive distinct sentinel team IDs,
-        // active sides use GameSetup::GetTeam, side zero remains neutral,
-        // equal teams are allied, and all other teams are enemies.
-        std::array<std::int32_t, 9> alliance_team{};
-        std::array<bool, 9> active_side{};
-        for (std::size_t side = 0; side < alliance_team.size(); ++side) {
-            alliance_team[side] = static_cast<std::int32_t>(side + 9);
-        }
-
-        std::ostringstream slots;
-        bool first_slot = true;
-        std::size_t active_count = 0;
-        for (std::size_t slot = 0; slot < 8; ++slot) {
-            const bool active =
-                (a2fo_a1_call_thiscall_1(
-                    is_active, game_setup, slot) & 0xffu) != 0;
-            if (!active) continue;
-            const auto side = static_cast<std::int32_t>(
-                a2fo_a1_call_thiscall_1(
-                    get_side, game_setup, slot));
-            const auto team = static_cast<std::int32_t>(
-                a2fo_a1_call_thiscall_1(
-                    get_alliance_team, game_setup, slot));
-            if (side < 1 || side >=
-                    static_cast<std::int32_t>(alliance_team.size())) {
-                continue;
-            }
-            alliance_team[static_cast<std::size_t>(side)] = team;
-            active_side[static_cast<std::size_t>(side)] = true;
-            ++active_count;
-            if (!first_slot) slots << ',';
-            first_slot = false;
-            slots << slot << "=(side " << side << ",team " << team << ')';
-        }
-        if (active_count == 0) {
-            log_line("A1 Instant Action relationship restore found no "
-                     "active setup slots");
-            return false;
-        }
-
-        std::array<void*, 9> sides{};
-        for (std::size_t side = 0; side < sides.size(); ++side) {
-            sides[side] = side_lookup(static_cast<std::int32_t>(side));
-        }
-
-        std::ostringstream changed_pairs;
-        bool first_pair = true;
-        for (std::size_t side = 0; side < sides.size(); ++side) {
-            if (!sides[side]) continue;
-            for (std::size_t other = 0; other < sides.size(); ++other) {
-                const std::int32_t relationship = side == 0 || other == 0
-                    ? 1
-                    : (alliance_team[side] == alliance_team[other] ? 2 : 0);
-                std::int32_t previous = -1;
-                const auto* relation =
-                    static_cast<const std::uint8_t*>(sides[side]) +
-                    0x170 + other * sizeof(std::int32_t);
-                if (readable_range(relation, sizeof(previous))) {
-                    std::memcpy(&previous, relation, sizeof(previous));
+        struct Context {
+            void* game_setup{};
+            void* is_active{};
+            void* get_side{};
+            void* get_alliance_team{};
+            void* set_relationship{};
+            SideLookupFn side_lookup{};
+            std::array<void*, 9> sides{};
+            std::optional<std::ostringstream> slots;
+            std::optional<std::ostringstream> changed_pairs;
+            std::exception_ptr error{};
+        } context{};
+        context.game_setup = game_setup;
+        context.is_active = is_active;
+        context.get_side = get_side;
+        context.get_alliance_team = get_alliance_team;
+        context.set_relationship = set_relationship;
+        context.side_lookup = side_lookup;
+        const auto operation = [](void* opaque, std::uint32_t id,
+                std::uint64_t a, std::uint64_t b, std::uint64_t c,
+                std::uint64_t d, std::uint64_t e) noexcept -> std::uint64_t {
+            auto& state = *static_cast<Context*>(opaque);
+            try {
+                switch (id) {
+                case 15:
+                    state.slots.emplace();
+                    return 1;
+                case 0:
+                    return (a2fo_a1_call_thiscall_1(
+                        state.is_active, state.game_setup,
+                        static_cast<std::uintptr_t>(a)) & 0xffu) != 0;
+                case 1:
+                    return static_cast<std::uint32_t>(
+                        a2fo_a1_call_thiscall_1(
+                            state.get_side, state.game_setup,
+                            static_cast<std::uintptr_t>(a)));
+                case 2:
+                    return static_cast<std::uint32_t>(
+                        a2fo_a1_call_thiscall_1(
+                            state.get_alliance_team, state.game_setup,
+                            static_cast<std::uintptr_t>(a)));
+                case 3:
+                    if (d > 1) *state.slots << ',';
+                    *state.slots << a << "=(side "
+                                 << static_cast<std::int32_t>(b)
+                                 << ",team " << static_cast<std::int32_t>(c)
+                                 << ')';
+                    return 1;
+                case 4:
+                    log_line("A1 Instant Action relationship restore found no "
+                             "active setup slots");
+                    return 1;
+                case 5:
+                    state.sides[static_cast<std::size_t>(a)] =
+                        state.side_lookup(static_cast<std::int32_t>(a));
+                    return state.sides[static_cast<std::size_t>(a)] != nullptr;
+                case 14:
+                    state.changed_pairs.emplace();
+                    return 1;
+                case 6: {
+                    std::int32_t previous = -1;
+                    const auto* relation = static_cast<const std::uint8_t*>(
+                        state.sides[static_cast<std::size_t>(a)]) +
+                        0x170 + static_cast<std::size_t>(b) * sizeof(previous);
+                    if (readable_range(relation, sizeof(previous))) {
+                        std::memcpy(&previous, relation, sizeof(previous));
+                    }
+                    a2fo_a1_call_thiscall_2(
+                        state.set_relationship,
+                        state.sides[static_cast<std::size_t>(a)],
+                        static_cast<std::uintptr_t>(b),
+                        static_cast<std::uintptr_t>(c));
+                    return static_cast<std::uint32_t>(previous);
                 }
-                a2fo_a1_call_thiscall_2(
-                    set_relationship, sides[side], other,
-                    static_cast<std::uintptr_t>(relationship));
-                if (side < other && active_side[side] && active_side[other]) {
-                    if (!first_pair) changed_pairs << ',';
-                    first_pair = false;
-                    changed_pairs << side << '-' << other << ':'
-                                  << previous << "->" << relationship;
+                case 7:
+                    if (e > 1) *state.changed_pairs << ',';
+                    *state.changed_pairs << a << '-' << b << ':'
+                        << static_cast<std::int32_t>(c) << "->" << d;
+                    return 1;
+                case 8:
+                    InterlockedExchange(&g_a1_relationship_restore_count, 1);
+                    return 1;
+                case 9: {
+                    std::ostringstream message;
+                    message << "A1 Instant Action relationships restored from setup: "
+                            << "slots=" << (a == 0 ? "<none>" : state.slots->str())
+                            << "; activePairs="
+                            << (b == 0 ? "<none>" : state.changed_pairs->str());
+                    log_line(message.str().c_str());
+                    return 1;
                 }
+                default:
+                    return 0;
+                }
+            } catch (...) {
+                state.error = std::current_exception();
+                return UINT64_MAX;
             }
-        }
-
-        InterlockedExchange(&g_a1_relationship_restore_count, 1);
-        std::ostringstream message;
-        message << "A1 Instant Action relationships restored from setup: "
-                << "slots=" << (first_slot ? "<none>" : slots.str())
-                << "; activePairs="
-                << (first_pair ? "<none>" : changed_pairs.str());
-        log_line(message.str().c_str());
-        return true;
+        };
+        const bool restored =
+            a2fo_rs_stage8_a1_relationship_restore(&context, operation) != 0;
+        if (context.error) std::rethrow_exception(context.error);
+        return restored;
     } catch (...) {
         log_line("A1 Instant Action relationship restore failed safely");
         return false;
@@ -1883,25 +1961,50 @@ bool restore_a1_instant_action_relationships(
 }
 
 void restore_a1_relationships_before_elimination() noexcept {
-    if (!g_armada ||
-        InterlockedCompareExchange(
-            &g_a1_selected_map_active, 0, 0) == 0) {
-        return;
-    }
-
-    auto** transport_slot = at<void*>(g_armada, kTransportCurrentRva);
-    if (!readable_range(transport_slot, sizeof(*transport_slot)) ||
-        !*transport_slot) {
-        return;
-    }
-    void* get_game_setup = at(g_armada, kTransportGetGameSetupRva);
-    if (!is_executable_pointer(get_game_setup)) return;
-
-    void* game_setup = reinterpret_cast<void*>(
-        a2fo_a1_call_thiscall_0(get_game_setup, *transport_slot));
-    if (game_setup) {
-        restore_a1_instant_action_relationships(game_setup);
-    }
+    struct Context {
+        void** transport_slot{};
+        void* get_game_setup{};
+        std::exception_ptr error{};
+    } context{};
+    const auto operation = [](void* opaque, std::uint32_t id,
+            std::uint64_t, std::uint64_t, std::uint64_t,
+            std::uint64_t, std::uint64_t) noexcept -> std::uint64_t {
+        auto& state = *static_cast<Context*>(opaque);
+        try {
+            switch (id) {
+            case 10:
+                return g_armada && InterlockedCompareExchange(
+                    &g_a1_selected_map_active, 0, 0) != 0;
+            case 11:
+                state.transport_slot = at<void*>(
+                    g_armada, kTransportCurrentRva);
+                return readable_range(
+                    state.transport_slot, sizeof(*state.transport_slot)) &&
+                    *state.transport_slot != nullptr;
+            case 12:
+                state.get_game_setup = at(
+                    g_armada, kTransportGetGameSetupRva);
+                return is_executable_pointer(state.get_game_setup);
+            case 13: {
+                void* game_setup = reinterpret_cast<void*>(
+                    a2fo_a1_call_thiscall_0(
+                        state.get_game_setup, *state.transport_slot));
+                if (game_setup) {
+                    restore_a1_instant_action_relationships(game_setup);
+                }
+                return 1;
+            }
+            default:
+                return 0;
+            }
+        } catch (...) {
+            state.error = std::current_exception();
+            return UINT64_MAX;
+        }
+    };
+    a2fo_rs_stage8_a1_relationships_before_elimination(
+        &context, operation);
+    if (context.error) std::rethrow_exception(context.error);
 }
 
 void run_to_the_death_check(
@@ -1934,62 +2037,75 @@ bool read_a1_bzn_header_file(const std::string& path,
 bool find_a1_bzn_header(const char* filename,
                         a1compat::A1BznHeader& header,
                         std::string* source_path = nullptr) noexcept {
-    if (!filename || !*filename) {
-        return false;
-    }
+    if (!filename || !*filename) return false;
     try {
-        std::string supplied(filename);
-        if (supplied.size() > 1024) return false;
-        for (char& character : supplied) {
-            if (character == '/') character = '\\';
-        }
-
-        const auto try_path = [&](const std::string& path) noexcept {
-            if (path.empty()) return false;
-            a1compat::A1BznHeader parsed;
-            if (!read_a1_bzn_header_file(path, parsed)) return false;
-            header = parsed;
-            if (source_path) *source_path = path;
-            return true;
-        };
-
-        // GameSetup may supply an already-qualified virtual or physical path.
-        // Trying it as-is also avoids prepending an extension root to a drive
-        // path such as Z:\\...\\bzn\\2blue.bzn under Wine.
-        if (try_path(supplied)) return true;
-
-        if (!g_api || !g_api->extension_root_count ||
-            !g_api->extension_root) {
-            return false;
-        }
-
-        std::string relative = supplied;
-        while (relative.size() >= 2 && relative[0] == '.' &&
-               relative[1] == '\\') {
-            relative.erase(0, 2);
-        }
-        const std::size_t separator = relative.find_last_of("\\/");
-        const std::string basename = separator == std::string::npos
-            ? relative : relative.substr(separator + 1);
-
-        const std::uint32_t root_count = g_api->extension_root_count();
-        if (root_count == 0 || root_count > 4096) return false;
-        for (std::uint32_t position = root_count; position != 0; --position) {
-            const char* root = g_api->extension_root(position - 1);
-            if (!root || !*root) continue;
-            const std::array<std::string, 3> candidates{{
-                join_path(root, relative.c_str()),
-                join_path(root,
-                          (std::string("bzn\\") + basename).c_str()),
-                join_path(root, basename.c_str())}};
-            for (const std::string& path : candidates) {
-                if (try_path(path)) return true;
+        struct Context {
+            std::string supplied;
+            std::optional<std::string> relative;
+            std::optional<std::string> basename;
+            std::optional<std::array<std::string, 3>> candidates;
+            a1compat::A1BznHeader& header;
+            std::string* source_path;
+            std::exception_ptr error{};
+        } context{std::string(filename), {}, {}, {}, header, source_path};
+        const auto operation = [](void* opaque, std::uint32_t id,
+                std::uint64_t a, std::uint64_t) noexcept -> std::uint64_t {
+            auto& state = *static_cast<Context*>(opaque);
+            const auto try_path = [&](const std::string& path) noexcept {
+                if (path.empty()) return false;
+                a1compat::A1BznHeader parsed;
+                if (!read_a1_bzn_header_file(path, parsed)) return false;
+                state.header = parsed;
+                if (state.source_path) *state.source_path = path;
+                return true;
+            };
+            try {
+                switch (id) {
+                case 0: return state.supplied.size();
+                case 1: return static_cast<unsigned char>(state.supplied[a]);
+                case 2: state.supplied[a] = '\\'; return 1;
+                case 3: return try_path(state.supplied);
+                case 4: return g_api && g_api->extension_root_count &&
+                    g_api->extension_root;
+                case 5: state.relative.emplace(state.supplied); return 1;
+                case 6: return state.relative->size() >= 2 &&
+                    (*state.relative)[0] == '.' && (*state.relative)[1] == '\\';
+                case 7: state.relative->erase(0, 2); return 1;
+                case 8: {
+                    const std::size_t separator =
+                        state.relative->find_last_of("\\/");
+                    state.basename.emplace(separator == std::string::npos
+                        ? *state.relative : state.relative->substr(separator + 1));
+                    return 1;
+                }
+                case 9: return g_api->extension_root_count();
+                case 10: {
+                    const char* root = g_api->extension_root(
+                        static_cast<std::uint32_t>(a));
+                    if (!root || !*root) return 0;
+                    state.candidates.emplace(std::array<std::string, 3>{{
+                        join_path(root, state.relative->c_str()),
+                        join_path(root,
+                            (std::string("bzn\\") + *state.basename).c_str()),
+                        join_path(root, state.basename->c_str())}});
+                    return 1;
+                }
+                case 11: return try_path((*state.candidates)[a]);
+                case 12: state.candidates.reset(); return 1;
+                default: return 0;
+                }
+            } catch (...) {
+                state.error = std::current_exception();
+                return UINT64_MAX;
             }
-        }
+        };
+        const bool found = a2fo_rs_stage8_a1_find_bzn(
+            &context, operation) != 0;
+        if (context.error) std::rethrow_exception(context.error);
+        return found;
     } catch (...) {
         return false;
     }
-    return false;
 }
 
 bool read_a1_companion_mdf(
@@ -1997,39 +2113,65 @@ bool read_a1_companion_mdf(
     std::string* source_path = nullptr) noexcept {
     if (bzn_path.empty()) return false;
     try {
-        std::string path = bzn_path;
-        const std::size_t separator = path.find_last_of("\\/");
-        const std::size_t extension = path.find_last_of('.');
-        if (extension == std::string::npos ||
-            (separator != std::string::npos && extension < separator)) {
-            path += ".mdf";
-        } else {
-            path.replace(extension, std::string::npos, ".mdf");
-        }
-
-        HANDLE file = CreateFileA(
-            path.c_str(), GENERIC_READ,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (file == INVALID_HANDLE_VALUE) return false;
-
-        LARGE_INTEGER file_size{};
-        const bool valid_size = GetFileSizeEx(file, &file_size) &&
-            file_size.QuadPart > 0 &&
-            file_size.QuadPart <=
-                static_cast<LONGLONG>(kMaximumA1MdfFileSize);
-        std::array<char, kMaximumA1MdfFileSize> bytes{};
-        DWORD read = 0;
-        const bool succeeded = valid_size && ReadFile(
-            file, bytes.data(), static_cast<DWORD>(file_size.QuadPart),
-            &read, nullptr);
-        CloseHandle(file);
-        if (!succeeded || read != static_cast<DWORD>(file_size.QuadPart) ||
-            !a1compat::parse_a1_mdf(bytes.data(), read, &mdf)) {
-            return false;
-        }
-        if (source_path) *source_path = path;
-        return true;
+        struct Context {
+            const std::string& bzn_path;
+            a1compat::A1MdfData& mdf;
+            std::string* source_path;
+            std::string path;
+            std::size_t extension{};
+            std::exception_ptr error{};
+        } context{bzn_path, mdf, source_path, {}, 0, {}};
+        const auto operation = [](void* opaque, std::uint32_t id,
+                std::uint64_t a, std::uint64_t) noexcept -> std::uint64_t {
+            auto& state = *static_cast<Context*>(opaque);
+            try {
+                switch (id) {
+                case 0: return !state.bzn_path.empty();
+                case 1: state.path = state.bzn_path; return 1;
+                case 2: return state.path.find_last_of("\\/");
+                case 3: state.extension = state.path.find_last_of('.');
+                    return state.extension;
+                case 4:
+                    if (a != 0) state.path += ".mdf";
+                    else state.path.replace(
+                        state.extension, std::string::npos, ".mdf");
+                    return 1;
+                case 5: {
+                    HANDLE file = CreateFileA(
+                        state.path.c_str(), GENERIC_READ,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+                    if (file == INVALID_HANDLE_VALUE) return 0;
+                    LARGE_INTEGER file_size{};
+                    const bool valid_size = GetFileSizeEx(file, &file_size) &&
+                        file_size.QuadPart > 0 &&
+                        file_size.QuadPart <=
+                            static_cast<LONGLONG>(kMaximumA1MdfFileSize);
+                    std::array<char, kMaximumA1MdfFileSize> bytes{};
+                    DWORD read = 0;
+                    const bool succeeded = valid_size && ReadFile(
+                        file, bytes.data(),
+                        static_cast<DWORD>(file_size.QuadPart), &read, nullptr);
+                    CloseHandle(file);
+                    return succeeded &&
+                        read == static_cast<DWORD>(file_size.QuadPart) &&
+                        a1compat::parse_a1_mdf(
+                            bytes.data(), read, &state.mdf);
+                }
+                case 6:
+                    if (state.source_path) *state.source_path = state.path;
+                    return 1;
+                default: return 0;
+                }
+            } catch (...) {
+                state.error = std::current_exception();
+                return UINT64_MAX;
+            }
+        };
+        const bool found = a2fo_rs_stage8_a1_read_mdf(
+            &context, operation) != 0;
+        if (context.error) std::rethrow_exception(context.error);
+        return found;
     } catch (...) {
         return false;
     }
@@ -2038,86 +2180,113 @@ bool read_a1_companion_mdf(
 bool apply_a1_mdf_start_locations(
     void* details, const a1compat::A1BznHeader& header,
     const a1compat::A1MdfData& mdf) noexcept {
-    if (!g_armada || !details || !header.has_map_bounds ||
-        !writable_range(details, kMapDetailsRequiredSize)) {
-        return false;
-    }
-
-    const auto* slot_count_address =
-        at<const std::int32_t>(g_armada, kGameSetupSlotCountRva);
-    if (!readable_range(slot_count_address, sizeof(*slot_count_address))) {
-        return false;
-    }
-    const std::int32_t slot_count = *slot_count_address;
-    if (slot_count < 1 || slot_count > 32 ||
-        mdf.start_location_count >
-            static_cast<std::size_t>(slot_count - 1)) {
-        return false;
-    }
-
-    void* start_location_array = read_pointer_at(
-        details, kMapDetailsStartLocationArrayOffset);
-    if (!start_location_array || !readable_range(
-            start_location_array,
-            static_cast<std::size_t>(slot_count) * sizeof(void*))) {
-        return false;
-    }
-
-    auto** assign_slot = at<void*>(g_armada, kNativeStringAssignIatRva);
-    if (!readable_range(assign_slot, sizeof(*assign_slot)) ||
-        !is_executable_pointer(*assign_slot)) {
-        return false;
-    }
-    void* type_empty = at(g_armada, kStartLocationTypeEmptyRva);
-    void* type_player = at(g_armada, kStartLocationTypePlayerRva);
-    if (!readable_range(type_empty, 0x10) ||
-        !readable_range(type_player, 0x10)) {
-        return false;
-    }
-
-    // Validate every native record before making any changes.
-    for (std::int32_t index = 1; index < slot_count; ++index) {
-        void* location = read_pointer_at(
-            start_location_array,
-            static_cast<std::size_t>(index) * sizeof(void*));
-        if (!location || !writable_range(
-                location, kStartLocationDetailsSize)) {
-            return false;
+    struct Context {
+        void* details;
+        const a1compat::A1BznHeader& header;
+        const a1compat::A1MdfData& mdf;
+        std::int32_t slot_count{};
+        void* start_location_array{};
+        void** assign_slot{};
+        void* type_empty{};
+        void* type_player{};
+        void* location{};
+        std::exception_ptr error{};
+    } context{details, header, mdf};
+    const auto operation = [](void* opaque, std::uint32_t id,
+            std::uint64_t a, std::uint64_t b) noexcept -> std::uint64_t {
+        auto& state = *static_cast<Context*>(opaque);
+        try {
+            switch (id) {
+            case 0:
+                return g_armada && state.details &&
+                    state.header.has_map_bounds &&
+                    writable_range(state.details, kMapDetailsRequiredSize);
+            case 1: {
+                const auto* slot_count_address =
+                    at<const std::int32_t>(g_armada, kGameSetupSlotCountRva);
+                if (!readable_range(
+                        slot_count_address, sizeof(*slot_count_address))) {
+                    return 0;
+                }
+                state.slot_count = *slot_count_address;
+                if (state.slot_count < 1 || state.slot_count > 32 ||
+                    state.mdf.start_location_count >
+                        static_cast<std::size_t>(state.slot_count - 1)) {
+                    return 0;
+                }
+                return static_cast<std::uint32_t>(state.slot_count);
+            }
+            case 2:
+                state.start_location_array = read_pointer_at(
+                    state.details, kMapDetailsStartLocationArrayOffset);
+                return state.start_location_array && readable_range(
+                    state.start_location_array,
+                    static_cast<std::size_t>(state.slot_count) * sizeof(void*));
+            case 3:
+                state.assign_slot = at<void*>(
+                    g_armada, kNativeStringAssignIatRva);
+                return readable_range(
+                    state.assign_slot, sizeof(*state.assign_slot)) &&
+                    is_executable_pointer(*state.assign_slot);
+            case 4:
+                state.type_empty = at(g_armada, kStartLocationTypeEmptyRva);
+                state.type_player = at(g_armada, kStartLocationTypePlayerRva);
+                return readable_range(state.type_empty, 0x10) &&
+                    readable_range(state.type_player, 0x10);
+            case 5: {
+                void* location = read_pointer_at(
+                    state.start_location_array,
+                    static_cast<std::size_t>(a) * sizeof(void*));
+                return location && writable_range(
+                    location, kStartLocationDetailsSize);
+            }
+            case 10:
+                state.location = read_pointer_at(
+                    state.start_location_array,
+                    static_cast<std::size_t>(a) * sizeof(void*));
+                return 1;
+            case 9: return state.mdf.start_location_count;
+            case 6:
+                a2fo_a1_call_thiscall_1(
+                    *state.assign_slot,
+                    static_cast<std::uint8_t*>(state.location) +
+                        kStartLocationTypeOffset,
+                    reinterpret_cast<std::uintptr_t>(
+                        b != 0 ? state.type_player : state.type_empty));
+                return 1;
+            case 7: {
+                float position[3]{};
+                if (!a1compat::a1_mdf_world_position(
+                        state.header, state.mdf.start_locations[a - 1],
+                        position)) {
+                    return 0;
+                }
+                std::memcpy(
+                    static_cast<std::uint8_t*>(state.location) +
+                        kStartLocationPositionOffset,
+                    position, sizeof(position));
+                return 1;
+            }
+            case 8: {
+                const std::int32_t native_count =
+                    static_cast<std::int32_t>(state.mdf.start_location_count);
+                std::memcpy(
+                    static_cast<std::uint8_t*>(state.details) +
+                        kMapDetailsStartLocationCountOffset,
+                    &native_count, sizeof(native_count));
+                return 1;
+            }
+            default: return 0;
+            }
+        } catch (...) {
+            state.error = std::current_exception();
+            return UINT64_MAX;
         }
-    }
-
-    for (std::int32_t index = 1; index < slot_count; ++index) {
-        void* location = read_pointer_at(
-            start_location_array,
-            static_cast<std::size_t>(index) * sizeof(void*));
-        const bool active = static_cast<std::size_t>(index) <=
-            mdf.start_location_count;
-        a2fo_a1_call_thiscall_1(
-            *assign_slot,
-            static_cast<std::uint8_t*>(location) +
-                kStartLocationTypeOffset,
-            reinterpret_cast<std::uintptr_t>(
-                active ? type_player : type_empty));
-        if (!active) continue;
-
-        float position[3]{};
-        if (!a1compat::a1_mdf_world_position(
-                header, mdf.start_locations[index - 1], position)) {
-            return false;
-        }
-        std::memcpy(
-            static_cast<std::uint8_t*>(location) +
-                kStartLocationPositionOffset,
-            position, sizeof(position));
-    }
-
-    const std::int32_t native_count =
-        static_cast<std::int32_t>(mdf.start_location_count);
-    std::memcpy(
-        static_cast<std::uint8_t*>(details) +
-            kMapDetailsStartLocationCountOffset,
-        &native_count, sizeof(native_count));
-    return true;
+    };
+    const bool applied = a2fo_rs_stage8_a1_apply_mdf(
+        &context, operation) != 0;
+    if (context.error) std::rethrow_exception(context.error);
+    return applied;
 }
 
 bool regular_file_exists(const std::string& path) noexcept {
@@ -2129,35 +2298,36 @@ bool regular_file_exists(const std::string& path) noexcept {
 
 bool build_legacy_aip_name(const char* requested_name,
                            std::string& legacy_name) {
-    legacy_name.clear();
-    if (!requested_name || !*requested_name) return false;
-
-    std::string normalized(requested_name);
-    if (normalized.size() > 192) return false;
-    for (char& character : normalized) {
-        const unsigned char value = static_cast<unsigned char>(character);
-        if (!std::isalnum(value) && character != '_' && character != '-') {
-            return false;
-        }
-        character = static_cast<char>(std::tolower(value));
-    }
-
-    std::size_t stem_end = normalized.size();
-    while (stem_end != 0 && std::isdigit(
-            static_cast<unsigned char>(normalized[stem_end - 1]))) {
-        --stem_end;
-    }
-    constexpr std::size_t suffix_size =
-        sizeof(kInstantActionBuildListSuffix) - 1;
-    if (stem_end <= suffix_size ||
-        normalized.compare(stem_end - suffix_size, suffix_size,
-                           kInstantActionBuildListSuffix) != 0) {
-        return false;
-    }
-
-    legacy_name.assign(normalized, 0, stem_end - suffix_size);
-    legacy_name += kLegacyBuildListSuffix;
-    return true;
+    struct Context {
+        const char* requested;
+        std::string& legacy;
+        std::optional<std::string> normalized;
+        std::exception_ptr error;
+    } context{requested_name,legacy_name,std::nullopt,nullptr};
+    const auto step=+[](void* opaque,std::uint32_t op,std::size_t index,
+                        std::size_t value) noexcept -> std::size_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {
+            switch(op) {
+            case 0:c.legacy.clear();return 0;
+            case 1:return c.requested!=nullptr;
+            case 2:return *c.requested!='\0';
+            case 3:c.normalized.emplace(c.requested);return c.normalized->size();
+            case 4:return static_cast<unsigned char>((*c.normalized)[index]);
+            case 5:return std::isalnum(static_cast<unsigned char>(value))!=0;
+            case 6:(*c.normalized)[index]=static_cast<char>(std::tolower(static_cast<unsigned char>(value)));return 0;
+            case 7:return std::isdigit(static_cast<unsigned char>((*c.normalized)[index]))!=0;
+            case 8:return c.normalized->compare(index,value,kInstantActionBuildListSuffix)==0;
+            case 9:c.legacy.assign(*c.normalized,0,index);return 0;
+            case 10:c.legacy+=kLegacyBuildListSuffix;return 0;
+            default:return SIZE_MAX;
+            }
+        } catch(...) {c.error=std::current_exception();return SIZE_MAX;}
+    };
+    const bool result=a2fo_rs_stage9_a1_aip_name(&context,
+        sizeof(kInstantActionBuildListSuffix)-1,step)!=0;
+    if(context.error)std::rethrow_exception(context.error);
+    return result;
 }
 
 bool aip_file_exists_in_root(const char* root,
@@ -2171,42 +2341,45 @@ bool aip_file_exists_in_root(const char* root,
 bool mod_chain_prefers_legacy_aip(
     const std::string& requested_name,
     const std::string& legacy_name) noexcept {
-    if (!g_api || !g_api->extension_root_count ||
-        !g_api->extension_root) {
-        return false;
-    }
-
-    try {
-        const std::uint32_t root_count = g_api->extension_root_count();
-        if (root_count == 0 || root_count > 4096) return false;
-
-        std::uint32_t a1_root = root_count;
-        for (std::uint32_t index = 0; index < root_count; ++index) {
-            const char* root = g_api->extension_root(index);
-            if (regular_file_exists(join_path(root, kA1CompatIniFileName))) {
-                a1_root = index;
-                break;
+    struct Context {
+        const std::string& requested;
+        const std::string& legacy;
+        const char* root{};
+        std::exception_ptr error{};
+    } context{requested_name, legacy_name};
+    const auto operation = [](void* opaque, std::uint32_t id,
+            std::uint64_t a, std::uint64_t) noexcept -> std::uint64_t {
+        auto& state = *static_cast<Context*>(opaque);
+        try {
+            switch (id) {
+            case 0: return g_api && g_api->extension_root_count &&
+                g_api->extension_root;
+            case 1: return g_api->extension_root_count();
+            case 2: {
+                const char* root = g_api->extension_root(
+                    static_cast<std::uint32_t>(a));
+                return regular_file_exists(
+                    join_path(root, kA1CompatIniFileName));
             }
-        }
-        if (a1_root == root_count) return false;
-
-        // Resolve the highest A1-layer file explicitly, rather than allowing
-        // Data or an A2 compatibility parent to select a same-named FO plan.
-        for (std::uint32_t position = root_count;
-             position > a1_root; --position) {
-            const char* root = g_api->extension_root(position - 1);
-            const bool requested_exists =
-                aip_file_exists_in_root(root, requested_name);
-            const bool legacy_exists =
-                aip_file_exists_in_root(root, legacy_name);
-            if (requested_exists || legacy_exists) {
-                return legacy_exists && !requested_exists;
+            case 3:
+                state.root = g_api->extension_root(
+                    static_cast<std::uint32_t>(a));
+                return 1;
+            case 4: return aip_file_exists_in_root(
+                state.root, state.requested);
+            case 5: return aip_file_exists_in_root(
+                state.root, state.legacy);
+            default: return 0;
             }
+        } catch (...) {
+            state.error = std::current_exception();
+            return UINT64_MAX;
         }
-    } catch (...) {
-        return false;
-    }
-    return false;
+    };
+    const bool prefers = a2fo_rs_stage8_a1_prefers_legacy_aip(
+        &context, operation) != 0;
+    if (context.error) std::rethrow_exception(context.error);
+    return prefers;
 }
 
 void* resolve_aip_lookup(void* manager,
@@ -2215,36 +2388,68 @@ void* resolve_aip_lookup(void* manager,
     if (!gateway || !manager || !requested_name || !*requested_name) {
         return nullptr;
     }
-
     try {
-        std::string legacy_name;
-        const std::string requested(requested_name);
-        if (build_legacy_aip_name(requested_name, legacy_name) &&
-            mod_chain_prefers_legacy_aip(requested, legacy_name)) {
-            void* legacy_aip = reinterpret_cast<void*>(
-                a2fo_a1_call_thiscall_1(
-                    gateway, manager,
-                    reinterpret_cast<std::uintptr_t>(legacy_name.c_str())));
-            const LONG count = InterlockedIncrement(
-                &g_legacy_aip_name_fallback_count);
-            if (count <= 32) {
-                char message[512]{};
-                std::snprintf(
-                    message, sizeof(message),
-                    "Armada 1 AIP name fallback #%ld: '%s' -> '%s' "
-                    "(loaded=%s)",
-                    static_cast<long>(count), requested_name,
-                    legacy_name.c_str(), legacy_aip ? "yes" : "no");
-                log_line(message);
-            } else if (count == 33) {
-                log_line("Further Armada 1 AIP name fallbacks suppressed");
+        struct Context {
+            void* manager;
+            void* gateway;
+            const char* requested_name;
+            std::string legacy_name;
+            std::string requested;
+            void* legacy_aip{};
+            std::exception_ptr error{};
+        } context{manager, gateway, requested_name, {},
+                  std::string(requested_name)};
+        const auto operation = [](void* opaque, std::uint32_t id,
+                std::uint64_t a, std::uint64_t) noexcept -> std::uint64_t {
+            auto& state = *static_cast<Context*>(opaque);
+            try {
+                switch (id) {
+                case 0: return build_legacy_aip_name(
+                    state.requested_name, state.legacy_name);
+                case 1: return mod_chain_prefers_legacy_aip(
+                    state.requested, state.legacy_name);
+                case 2:
+                    state.legacy_aip = reinterpret_cast<void*>(
+                        a2fo_a1_call_thiscall_1(
+                            state.gateway, state.manager,
+                            reinterpret_cast<std::uintptr_t>(
+                                state.legacy_name.c_str())));
+                    return reinterpret_cast<std::uintptr_t>(state.legacy_aip);
+                case 3: return static_cast<std::uint32_t>(InterlockedIncrement(
+                    &g_legacy_aip_name_fallback_count));
+                case 4: {
+                    char message[512]{};
+                    std::snprintf(
+                        message, sizeof(message),
+                        "Armada 1 AIP name fallback #%ld: '%s' -> '%s' "
+                        "(loaded=%s)",
+                        static_cast<long>(static_cast<std::int32_t>(
+                            static_cast<std::uint32_t>(a))),
+                        state.requested_name,
+                        state.legacy_name.c_str(),
+                        state.legacy_aip ? "yes" : "no");
+                    log_line(message);
+                    return 1;
+                }
+                case 5:
+                    log_line("Further Armada 1 AIP name fallbacks suppressed");
+                    return 1;
+                default: return 0;
+                }
+            } catch (...) {
+                state.error = std::current_exception();
+                return UINT64_MAX;
             }
-            if (legacy_aip) return legacy_aip;
+        };
+        const std::uint64_t legacy = a2fo_rs_stage8_a1_resolve_aip(
+            &context, operation);
+        if (context.error) std::rethrow_exception(context.error);
+        if (legacy != 0) {
+            return reinterpret_cast<void*>(static_cast<std::uintptr_t>(legacy));
         }
     } catch (...) {
         // A compatibility lookup must never prevent the native name lookup.
     }
-
     return reinterpret_cast<void*>(a2fo_a1_call_thiscall_1(
         gateway, manager,
         reinterpret_cast<std::uintptr_t>(requested_name)));
@@ -2254,8 +2459,10 @@ void report_missing_aip_technology_unit(
     const char* aip_name, const char* unit_name) noexcept {
     const LONG count = InterlockedIncrement(
         &g_missing_aip_technology_unit_count);
-    if (count > 64) {
-        if (count == 65) {
+    const std::uint8_t admission = a2fo_rs_stage9_a1_reporting_admit(
+        count, 64, 1);
+    if (admission != 1) {
+        if (admission == 2) {
             log_line("Further unresolved A1/A2 AIP unit reports suppressed");
         }
         return;
@@ -2313,15 +2520,11 @@ bool apply_a1_world_bounds(
             header, target_minimum, target_size)) {
         return false;
     }
-    float computed_maximum[3]{};
-    for (std::size_t axis = 0; axis < 3; ++axis) {
-        computed_maximum[axis] = target_minimum[axis] + target_size[axis];
-    }
-    std::memcpy(minimum, target_minimum, sizeof(target_minimum));
-    std::memcpy(maximum, computed_maximum, sizeof(computed_maximum));
+    a2fo_rs_stage9_a1_publish_bounds(target_minimum,target_size,minimum,maximum);
 
     const LONG count = InterlockedIncrement(&g_a1_bzn_world_bounds_count);
-    if (count <= 8) {
+    const auto report=a2fo_rs_stage9_a1_bounds_report(count);
+    if (report == 1) {
         char message[640]{};
         std::snprintf(
             message, sizeof(message),
@@ -2338,7 +2541,7 @@ bool apply_a1_world_bounds(
             target_minimum[0], target_minimum[1], target_minimum[2],
             target_size[0], target_size[1], target_size[2]);
         log_line(message);
-    } else if (count == 9) {
+    } else if (report == 2) {
         log_line("Further Armada 1 BZN live-bound reports suppressed");
     }
     return true;
@@ -2384,18 +2587,10 @@ bool write_int32_at(void* object, std::size_t offset,
 }
 
 bool is_neutral_race_odf(const char* value) noexcept {
-    if (!value || !*value) return false;
-    const char* basename = value;
-    for (const char* cursor = value; *cursor != '\0'; ++cursor) {
-        if (*cursor == '\\' || *cursor == '/') basename = cursor + 1;
-    }
-    const std::size_t length = std::strlen(basename);
-    if (length == std::strlen(kNeutralRaceOdfName) &&
-        _stricmp(basename, kNeutralRaceOdfName) == 0) {
-        return true;
-    }
-    return length == std::strlen("norace") &&
-        _stricmp(basename, "norace") == 0;
+    return a2fo_rs_stage8_a1_neutral_odf(
+        reinterpret_cast<const std::uint8_t*>(value),
+        reinterpret_cast<const std::uint8_t*>(kNeutralRaceOdfName),
+        &a1_policy_compare,nullptr)!=0;
 }
 
 std::uintptr_t native_race_entry_lookup(
@@ -2411,6 +2606,8 @@ std::uintptr_t native_race_entry_lookup(
 std::uintptr_t resolve_race_count(
     void* parameter_db, const char* key, std::int32_t* output,
     std::int32_t default_value) noexcept {
+    static_assert(kMaximumLegacyRaceRecords == 4096,
+                  "A1 staged race count policy requires the native record cap");
     const std::uintptr_t found = a2fo_a1_call_thiscall_3(
         at(g_armada, kParameterDbGetIntRva), parameter_db,
         reinterpret_cast<std::uintptr_t>(key),
@@ -2423,48 +2620,49 @@ std::uintptr_t resolve_race_count(
     }
 
     const std::int32_t declared_count = *output;
-    if (declared_count <= 0 ||
-        declared_count >= kMaximumLegacyRaceRecords - 1) {
-        return found;
-    }
-
     char field_name[32]{};
     char value[160]{};
-    for (std::int32_t index = 0; index < declared_count; ++index) {
-        std::snprintf(field_name, sizeof(field_name), "race%ld",
-                      static_cast<long>(index));
-        value[0] = '\0';
-        native_race_entry_lookup(
-            parameter_db, field_name, value, sizeof(value), "");
-        value[sizeof(value) - 1] = '\0';
-        if (is_neutral_race_odf(value)) return found;
-    }
-
-    // Do not overwrite a dormant declaration immediately beyond the stated
-    // count. The supported A1 registry has no race10; this check keeps the
-    // missing-only rule conservative for other parent/child combinations.
-    std::snprintf(field_name, sizeof(field_name), "race%ld",
-                  static_cast<long>(declared_count));
-    value[0] = '\0';
-    const std::uintptr_t next_found = native_race_entry_lookup(
-        parameter_db, field_name, value, sizeof(value), "");
-    value[sizeof(value) - 1] = '\0';
-    if ((next_found & 0xffu) != 0 && value[0] != '\0' &&
-        !is_neutral_race_odf(value)) {
+    struct ScanContext {
+        void* db;
+        char* field_name;
+        char* value;
+    } scan{parameter_db, field_name, value};
+    const auto probe = +[](void* opaque, std::uint32_t operation,
+                           std::uint32_t index,
+                           A2foA1RaceNext* next) noexcept -> std::uint8_t {
+        auto& c = *static_cast<ScanContext*>(opaque);
+        if (operation == 2) return is_neutral_race_odf(c.value);
+        std::snprintf(c.field_name, 32, "race%ld", static_cast<long>(index));
+        c.value[0] = '\0';
+        const std::uintptr_t row_found = native_race_entry_lookup(
+            c.db, c.field_name, c.value, 160, "");
+        c.value[159] = '\0';
+        if (operation == 0) return is_neutral_race_odf(c.value);
+        next->found = (row_found & 0xffu) != 0;
+        next->nonempty = c.value[0] != '\0';
+        return 0;
+    };
+    A2foA1RaceCountPlan plan{};
+    a2fo_rs_stage9_a1_race_count_plan(
+        declared_count, &scan, probe, &plan);
+    if (plan.occupied) {
         log_line("A2 Classic neutral Race registry default skipped: next "
                  "undeclared race entry is already occupied");
         return found;
     }
+    if (!plan.append) return found;
 
     *output = declared_count + 1;
-    if (!is_neutral_race_odf(value)) {
+    if (a2fo_rs_stage9_a1_race_synthesize(&scan, probe)) {
         InterlockedExchange(
             &g_synthetic_neutral_race_index, declared_count);
     }
 
     const LONG incident = InterlockedIncrement(
         &g_neutral_race_registry_default_count);
-    if (incident <= 16) {
+    const std::uint8_t report_case =
+        a2fo_rs_stage9_a1_race_log_case(incident);
+    if (report_case == 1) {
         char message[256]{};
         std::snprintf(
             message, sizeof(message),
@@ -2474,7 +2672,7 @@ std::uintptr_t resolve_race_count(
             static_cast<long>(declared_count), kNeutralRaceOdfName,
             static_cast<long>(declared_count));
         log_line(message);
-    } else if (incident == 17) {
+    } else if (report_case == 2) {
         log_line("Further A2 Classic neutral Race registry defaults "
                  "suppressed");
     }
@@ -2488,18 +2686,22 @@ std::uintptr_t resolve_race_entry(
         parameter_db, key, output, output_size, default_value);
     const LONG synthetic_index = InterlockedCompareExchange(
         &g_synthetic_neutral_race_index, -1, -1);
-    if (synthetic_index < 0 || !key || !output) return found;
-
     char expected_key[32]{};
-    std::snprintf(expected_key, sizeof(expected_key), "race%ld",
-                  static_cast<long>(synthetic_index));
-    if (_stricmp(key, expected_key) != 0 ||
-        (found & 0xffu) != 0) {
-        return found;
-    }
-
+    struct EntryContext {
+        const char* key;
+        LONG synthetic_index;
+        char* expected_key;
+    } entry{key, synthetic_index, expected_key};
+    const auto compare = +[](void* opaque) noexcept -> std::uint8_t {
+        auto& c = *static_cast<EntryContext*>(opaque);
+        std::snprintf(c.expected_key, 32, "race%ld",
+                      static_cast<long>(c.synthetic_index));
+        return _stricmp(c.key, c.expected_key) == 0;
+    };
     const std::size_t required = sizeof(kNeutralRaceOdfName);
-    if (output_size < required || !writable_range(output, required)) {
+    if (!a2fo_rs_stage9_a1_race_entry_admit(
+            synthetic_index, key, output, found, output_size, required,
+            &entry, compare) || !writable_range(output, required)) {
         return found;
     }
     std::memcpy(output, kNeutralRaceOdfName, required);
@@ -2511,20 +2713,35 @@ bool race_event_field(const A2FO_OdfFieldView* fields,
                       std::string* value = nullptr) {
     if (!fields || !name) return false;
     const std::size_t name_size = std::strlen(name);
-    for (std::uint32_t index = 0; index < count; ++index) {
-        const A2FO_OdfFieldView& field = fields[index];
-        if (!field.name.data || field.name.size != name_size ||
-            _strnicmp(field.name.data, name, name_size) != 0 ||
-            (!field.value.data && field.value.size != 0)) {
-            continue;
+    struct FieldContext {
+        const A2FO_OdfFieldView* fields;
+        const char* name;
+        std::size_t size;
+        std::string* value;
+        std::exception_ptr error;
+    } context{fields, name, name_size, value, {}};
+    const auto visit = +[](void* opaque, std::uint32_t index)
+        noexcept -> std::uint8_t {
+        auto& c = *static_cast<FieldContext*>(opaque);
+        try {
+            const A2FO_OdfFieldView& field = c.fields[index];
+            if (!field.name.data || field.name.size != c.size ||
+                _strnicmp(field.name.data, c.name, c.size) != 0 ||
+                (!field.value.data && field.value.size != 0)) return 0;
+            if (c.value) {
+                c.value->assign(field.value.data ? field.value.data : "",
+                                field.value.size);
+            }
+            return 1;
+        } catch (...) {
+            c.error = std::current_exception();
+            return 2;
         }
-        if (value) {
-            value->assign(field.value.data ? field.value.data : "",
-                          field.value.size);
-        }
-        return true;
-    }
-    return false;
+    };
+    const std::uint8_t result = a2fo_rs_stage9_a1_race_field(
+        count, &context, visit);
+    if (context.error) std::rethrow_exception(context.error);
+    return result == 1;
 }
 
 bool parse_nonnegative_int32(
@@ -2533,12 +2750,11 @@ bool parse_nonnegative_int32(
     errno = 0;
     char* end = nullptr;
     const long long parsed = std::strtoll(text.c_str(), &end, 10);
-    while (end && (*end == ' ' || *end == '\t' ||
-                   *end == '\r' || *end == '\n')) {
-        ++end;
-    }
-    if (!end || end == text.c_str() || *end != '\0' || errno == ERANGE ||
-        parsed < 0 || parsed > std::numeric_limits<std::int32_t>::max()) {
+    const std::size_t consumed = end ?
+        static_cast<std::size_t>(end - text.c_str()) : SIZE_MAX;
+    if (!a2fo_rs_stage9_a1_race_nonnegative(
+            reinterpret_cast<const std::uint8_t*>(text.c_str()),
+            text.size() + 1, consumed, parsed, errno == ERANGE)) {
         return false;
     }
     value = static_cast<std::int32_t>(parsed);
@@ -2563,29 +2779,43 @@ bool apply_legacy_native_starting_resources(
     const std::array<std::size_t, 3> native_indices{{
         kNativeCrewResourceIndex, kNativeDilithiumResourceIndex,
         kNativeMetalResourceIndex}};
-    bool applied = true;
-    for (std::size_t command_index = 0;
-         command_index < native_indices.size(); ++command_index) {
-        const std::int32_t normal = race_starting_resource_value(
-            event, kNormalStartingResourceCommands[command_index],
-            g_legacy_starting_resource_defaults.normal[command_index]);
-        const std::int32_t lots = race_starting_resource_value(
-            event, kLotsStartingResourceCommands[command_index],
-            g_legacy_starting_resource_defaults.lots[command_index]);
-        const std::size_t native_index = native_indices[command_index];
-        applied = write_int32_at(
-            event->race,
-            kRaceStartingResourcesOffset +
-                native_index * sizeof(std::int32_t),
-            normal) && applied;
-        applied = write_int32_at(
-            event->race,
-            kRaceStartingResourcesOffset +
-                (kNativeStartingResourceCount + native_index) *
-                    sizeof(std::int32_t),
-            lots) && applied;
-    }
-    return applied;
+    static_assert(kNormalStartingResourceCommands.size() >= 3 &&
+                  kLotsStartingResourceCommands.size() >= 3,
+                  "A1 native resource columns require three commands");
+    struct ResourceContext {
+        const A2FO_RaceLoadedEvent* event;
+        const std::array<std::size_t, 3>& indices;
+    } context{event, native_indices};
+    const auto resource = +[](void* opaque, std::uint32_t operation,
+                              std::uint32_t command, std::int32_t* value)
+        noexcept -> std::uint8_t {
+        auto& c = *static_cast<ResourceContext*>(opaque);
+        try {
+            switch (operation) {
+                case 0:
+                    *value = race_starting_resource_value(
+                        c.event, kNormalStartingResourceCommands[command],
+                        g_legacy_starting_resource_defaults.normal[command]);
+                    return 1;
+                case 1:
+                    *value = race_starting_resource_value(
+                        c.event, kLotsStartingResourceCommands[command],
+                        g_legacy_starting_resource_defaults.lots[command]);
+                    return 1;
+                case 2:
+                    return write_int32_at(
+                        c.event->race, kRaceStartingResourcesOffset +
+                        c.indices[command] * sizeof(std::int32_t), *value);
+                case 3:
+                    return write_int32_at(
+                        c.event->race, kRaceStartingResourcesOffset +
+                        (kNativeStartingResourceCount + c.indices[command]) *
+                            sizeof(std::int32_t), *value);
+                default: return 0;
+            }
+        } catch (...) { std::terminate(); }
+    };
+    return a2fo_rs_stage9_a1_race_resources(&context, resource) != 0;
 }
 
 bool write_race_display_key(void* race,
@@ -2648,76 +2878,45 @@ void A2FO_CALL legacy_race_loaded_handler(
     }
 
     try {
-        const std::int32_t declared_race_count = read_int32_at(
-            g_armada, kRaceNumberOfRacesRva, 0);
-        if (declared_race_count <= 0 ||
-            declared_race_count > kMaximumLegacyRaceRecords) {
-            log_line("Legacy race-menu fallback ignored an invalid "
-                     "numberOfRaces value");
-            return;
-        }
-
-        const std::int32_t race_identifier = read_int32_at(
-            event->race, kRaceIdentifierOffset, -1);
-        if (race_identifier < 0 ||
-            race_identifier >= declared_race_count) {
-            // Race objects outside Race::InitAll's active races.odf sequence
-            // are not declarations and must not influence the IA dropdown.
-            return;
-        }
-        // Modules are initialized before Armada parses the effective
-        // RTS_CFG.h. A raw A1 file does not define the A2 MAX_* commands, so
-        // that later parse resets these globals to zero after our startup
-        // validation/write. The first real Race-loaded event is the earliest
-        // stable post-configuration boundary shared by shell and gameplay.
-        if (InterlockedCompareExchange(
-                &g_legacy_resource_maximum_post_config_pending, 0, 1) == 1) {
-            if (apply_legacy_native_resource_limits()) {
-                log_line("A1 legacy resource maxima reaffirmed after "
-                         "RTS configuration");
-            } else {
-                log_line("A1 legacy resource-maximum post-configuration "
-                         "bridge failed");
-                InterlockedExchange(
-                    &g_legacy_resource_maximum_post_config_pending, 1);
-            }
-        }
-        const LONG synthetic_neutral_index = InterlockedCompareExchange(
-            &g_synthetic_neutral_race_index, -1, -1);
-        if (race_identifier != synthetic_neutral_index &&
-            !apply_legacy_native_starting_resources(event)) {
-            log_line("A1 Race starting-resource defaults could not update "
-                     "the native Race matrix");
-        }
-        if (!g_legacy_race_records.empty() && race_identifier == 0) {
-            reset_legacy_race_menu_state();
-        }
-        if (static_cast<std::size_t>(race_identifier) !=
-            g_legacy_race_records.size()) {
-            log_line("Legacy race-menu fallback ignored a non-sequential "
-                     "Race-loaded event");
-            return;
-        }
-        if (g_legacy_race_records.empty()) {
-            g_legacy_race_records.reserve(
-                static_cast<std::size_t>(declared_race_count));
-        }
-
-        LegacyRaceRuntimeRecord record;
-        record.race = event->race;
-        record.input.has_instant_action_slot = race_event_field(
-            event->odf_fields, event->odf_field_count,
-            "instantActionSlot");
-        record.input.instant_action_slot = read_int32_at(
-            event->race, kRaceInstantActionSlotOffset, -1);
-        record.input.has_interface_configuration = race_event_field(
-            event->odf_fields, event->odf_field_count,
-            "interfaceConfiguration");
-        record.input.has_display_key = race_event_field(
-            event->odf_fields, event->odf_field_count, "displayKey");
-        record.input.has_display_name = race_event_field(
-            event->odf_fields, event->odf_field_count, "displayName",
-            &record.input.display_name);
+        static_assert(kMaximumLegacyRaceRecords==4096);
+        struct Context {const A2FO_RaceLoadedEvent* event;std::int32_t declared=0,race=0;std::exception_ptr error;} context{event,0,0,{}};
+        const auto step=+[](void* opaque,std::uint32_t operation) noexcept ->std::uint64_t {
+            auto& c=*static_cast<Context*>(opaque);
+            try{switch(operation){
+            case 0:c.declared=read_int32_at(g_armada,kRaceNumberOfRacesRva,0);return static_cast<std::uint32_t>(c.declared);
+            case 1:log_line("Legacy race-menu fallback ignored an invalid numberOfRaces value");return 0;
+            case 2:c.race=read_int32_at(c.event->race,kRaceIdentifierOffset,-1);return static_cast<std::uint32_t>(c.race);
+            case 3:return InterlockedCompareExchange(&g_legacy_resource_maximum_post_config_pending,0,1)==1;
+            case 4:return apply_legacy_native_resource_limits();
+            case 5:log_line("A1 legacy resource maxima reaffirmed after RTS configuration");return 0;
+            case 6:log_line("A1 legacy resource-maximum post-configuration bridge failed");return 0;
+            case 7:InterlockedExchange(&g_legacy_resource_maximum_post_config_pending,1);return 0;
+            case 8:return static_cast<std::uint32_t>(InterlockedCompareExchange(&g_synthetic_neutral_race_index,-1,-1));
+            case 9:return apply_legacy_native_starting_resources(c.event);
+            case 10:log_line("A1 Race starting-resource defaults could not update the native Race matrix");return 0;
+            case 11:return g_legacy_race_records.empty();
+            case 12:reset_legacy_race_menu_state();return 0;
+            case 13:return g_legacy_race_records.size();
+            case 14:log_line("Legacy race-menu fallback ignored a non-sequential Race-loaded event");return 0;
+            case 15:g_legacy_race_records.reserve(static_cast<std::size_t>(c.declared));return 0;
+            case 16:{
+                const auto race_identifier=c.race;const auto declared_race_count=c.declared;
+                    LegacyRaceRuntimeRecord record;
+                    struct RecordContext {const A2FO_RaceLoadedEvent* event;LegacyRaceRuntimeRecord* record;std::exception_ptr error;} rc{c.event,&record,{}};
+                    const auto field=+[](void* opaque,std::uint32_t operation) noexcept ->std::uint64_t {
+                        auto& c=*static_cast<RecordContext*>(opaque);auto& record=*c.record;const auto* event=c.event;
+                        try{switch(operation){
+                        case 0:record.race=event->race;return 0;
+                        case 1:record.input.has_instant_action_slot=race_event_field(event->odf_fields,event->odf_field_count,"instantActionSlot");return 0;
+                        case 2:record.input.instant_action_slot=read_int32_at(event->race,kRaceInstantActionSlotOffset,-1);return 0;
+                        case 3:record.input.has_interface_configuration=race_event_field(event->odf_fields,event->odf_field_count,"interfaceConfiguration");return 0;
+                        case 4:record.input.has_display_key=race_event_field(event->odf_fields,event->odf_field_count,"displayKey");return 0;
+                        case 5:record.input.has_display_name=race_event_field(event->odf_fields,event->odf_field_count,"displayName",&record.input.display_name);return 0;
+                        default:return 0;}}
+                        catch(...){c.error=std::current_exception();return UINT64_MAX;}
+                    };
+                    a2fo_rs_stage9_a1_race_record(&rc,field);
+                    if(rc.error)std::rethrow_exception(rc.error);
         g_legacy_race_records.push_back(std::move(record));
 
         std::vector<a1compat::LegacyRaceMenuInput> inputs;
@@ -2729,8 +2928,14 @@ void A2FO_CALL legacy_race_loaded_handler(
         const a1compat::LegacyRaceMenuPlan plan =
             a1compat::build_legacy_race_menu_plan(
                 inputs, static_cast<std::size_t>(declared_race_count));
-        if (plan.fallback_active) {
-            if (!g_legacy_race_fallback_logged) {
+                    struct PresentationContext {const a1compat::LegacyRaceMenuPlan* plan;std::int32_t race_identifier,declared_race_count;std::exception_ptr error;} pc{&plan,race_identifier,declared_race_count,{}};
+                    const auto present=+[](void* opaque,std::uint32_t operation) noexcept ->std::uint64_t {
+                        auto& c=*static_cast<PresentationContext*>(opaque);const auto& plan=*c.plan;
+                        const auto race_identifier=c.race_identifier;const auto declared_race_count=c.declared_race_count;
+                        try{switch(operation){
+                        case 0:return plan.fallback_active;
+                        case 1:return g_legacy_race_fallback_logged;
+                        case 2:{
                 char message[256]{};
                 std::snprintf(
                     message, sizeof(message),
@@ -2739,12 +2944,11 @@ void A2FO_CALL legacy_race_loaded_handler(
                     static_cast<unsigned long>(race_identifier));
                 log_line(message);
                 g_legacy_race_fallback_logged = true;
-            }
-            apply_legacy_race_menu_plan(plan);
-        }
 
-        if (g_legacy_race_records.size() ==
-            static_cast<std::size_t>(declared_race_count)) {
+                        return 0;}
+                        case 3:apply_legacy_race_menu_plan(plan);return 0;
+                        case 4:return g_legacy_race_records.size()==static_cast<std::size_t>(declared_race_count);
+                        case 5:{
             char message[256]{};
             if (plan.fallback_active) {
                 std::snprintf(
@@ -2761,58 +2965,88 @@ void A2FO_CALL legacy_race_loaded_handler(
                     static_cast<long>(declared_race_count));
             }
             log_line(message);
-        }
+
+                        return 0;}
+                        default:return 0;}}
+                        catch(...){c.error=std::current_exception();return UINT64_MAX;}
+                    };
+                    a2fo_rs_stage9_a1_race_present(&pc,present);
+                    if(pc.error)std::rethrow_exception(pc.error);
+
+                return 0;}
+            default:return 0;}}
+            catch(...){c.error=std::current_exception();return UINT64_MAX;}
+        };
+        a2fo_rs_stage9_a1_race_loaded(&context,step);
+        if(context.error)std::rethrow_exception(context.error);
     } catch (...) {
-        log_line("Legacy race-menu fallback skipped after an unexpected "
-                 "C++ exception");
+        log_line("Legacy race-menu fallback skipped after an unexpected C++ exception");
     }
 }
 
 bool is_officer_upgrade_class(void* object_class) noexcept {
-    if (!object_class || !g_armada || !is_plausible_object_class(object_class)) {
-        return false;
-    }
-    const bool by_vtable =
-        *reinterpret_cast<void**>(object_class) ==
-        at(g_armada, kOfficerUpgradeClassVtableRva);
-    if (by_vtable) return true;
-
-    std::array<char, 64> class_label{};
-    if (!read_parameter_classlabel(object_class, &class_label)) return false;
-    return _stricmp(class_label.data(), "upgrade") == 0;
+    struct Context {void* object=nullptr;std::array<char,64> label{};std::exception_ptr error{};} context{};
+    context.object=object_class;
+    auto step=[](void* opaque,std::uint32_t op,std::size_t)->std::uint64_t{
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return c.object!=nullptr;
+        case 1:return g_armada!=nullptr;
+        case 2:return is_plausible_object_class(c.object);
+        case 3:return *reinterpret_cast<void**>(c.object)==at(g_armada,kOfficerUpgradeClassVtableRva);
+        case 4:return read_parameter_classlabel(c.object,&c.label);
+        case 5:return _stricmp(c.label.data(),"upgrade")==0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const bool result=a2fo_rs_stage8_a1_officer(0,&context,step)!=0;
+    if(context.error)std::rethrow_exception(context.error);
+    return result;
 }
 
 bool is_starbase_label(const char* label) noexcept {
-    if (!label || !*label) return false;
-    return _stricmp(label, "constructionrig") == 0 ||
-        _stricmp(label, "starbase") == 0 ||
-        _stricmp(label, "construction") == 0;
+    struct Context {const char* label=nullptr;std::exception_ptr error{};} context{};
+    context.label=label;
+    auto step=[](void* opaque,std::uint32_t op,std::size_t)->std::uint64_t{
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return c.label!=nullptr;
+        case 1:return *c.label!='\0';
+        case 2:return _stricmp(c.label,"constructionrig")==0;
+        case 3:return _stricmp(c.label,"starbase")==0;
+        case 4:return _stricmp(c.label,"construction")==0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const bool result=a2fo_rs_stage8_a1_officer(1,&context,step)!=0;
+    if(context.error)std::rethrow_exception(context.error);
+    return result;
 }
 
 bool producer_class_has_officer_upgrade_build_item(void* object_class) noexcept {
-    if (!is_plausible_object_class(object_class)) return false;
-    void** items = reinterpret_cast<void**>(read_pointer_at(
-        object_class, kProducerClassBuildItemsOffset));
-    if (!items || !readable_range(
-            items, kProducerClassBuildItemCapacity * sizeof(void*))) {
-        return false;
-    }
-    for (std::size_t slot = 0; slot < kProducerClassBuildItemCapacity; ++slot) {
-        void* target_class = nullptr;
-        std::memcpy(&target_class, items + slot, sizeof(target_class));
-        if (target_class && is_plausible_object_class(target_class) &&
-            is_officer_upgrade_class(target_class)) {
-            return true;
-        }
-    }
-    return false;
+    struct Context {void* object=nullptr;void** items=nullptr;void* target=nullptr;std::exception_ptr error{};} context{};
+    context.object=object_class;
+    auto step=[](void* opaque,std::uint32_t op,std::size_t index)->std::uint64_t{
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return is_plausible_object_class(c.object);
+        case 1:c.items=reinterpret_cast<void**>(read_pointer_at(c.object,kProducerClassBuildItemsOffset));return c.items!=nullptr;
+        case 2:return readable_range(c.items,kProducerClassBuildItemCapacity*sizeof(void*));
+        case 3:return kProducerClassBuildItemCapacity;
+        case 4:c.target=nullptr;std::memcpy(&c.target,c.items+index,sizeof(c.target));return 0;
+        case 5:return c.target!=nullptr;
+        case 6:return is_plausible_object_class(c.target);
+        case 7:return is_officer_upgrade_class(c.target);
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const bool result=a2fo_rs_stage8_a1_officer(2,&context,step)!=0;
+    if(context.error)std::rethrow_exception(context.error);
+    return result;
 }
 
 bool infer_starbase_race_from_object_name(
     const char* odf_name, std::array<char, 64>* race) noexcept {
-    if (!odf_name || !race) return false;
-    race->fill('\0');
-
     const std::pair<const char*, const char*> known_races[] = {
         {"fbase", "federation"}, {"fbasehq", "federation"}, {"fconst", "federation"},
         {"fedoff", "federation"},
@@ -2823,58 +3057,81 @@ bool infer_starbase_race_from_object_name(
         {"rbase", "romulan"},   {"rconst", "romulan"},
         {"romoff", "romulan"},
     };
-    for (const auto& known : known_races) {
-        if (contains_ci_substring(odf_name, known.first)) {
-            std::snprintf(race->data(), race->size(), "%s", known.second);
-            return true;
-        }
-    }
-
-    if (contains_ci_substring(odf_name, "zclon") ||
-        contains_ci_substring(odf_name, "dominion")) {
-        std::snprintf(race->data(), race->size(), "dominion");
-        return true;
-    }
-    return false;
+    static_assert(std::size(known_races)==13);
+    struct Context {const char* name=nullptr;std::array<char,64>* race=nullptr;
+        const std::pair<const char*,const char*>* known=nullptr;std::exception_ptr error{};} context{};
+    context.name=odf_name;context.race=race;context.known=known_races;
+    auto step=[](void* opaque,std::uint32_t op,std::size_t index)->std::uint64_t{
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return c.name!=nullptr;
+        case 1:return c.race!=nullptr;
+        case 2:c.race->fill('\0');return 0;
+        case 3:return contains_ci_substring(c.name,c.known[index].first);
+        case 4:std::snprintf(c.race->data(),c.race->size(),"%s",c.known[index].second);return 0;
+        case 5:return contains_ci_substring(c.name,"zclon");
+        case 6:return contains_ci_substring(c.name,"dominion");
+        case 7:std::snprintf(c.race->data(),c.race->size(),"dominion");return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const bool result=a2fo_rs_stage8_a1_officer(3,&context,step)!=0;
+    if(context.error)std::rethrow_exception(context.error);
+    return result;
 }
 
 bool officer_upgrade_matches_race(
     const std::array<char, 64>& race, void* target_class) noexcept {
-    if (!g_officer_state_lock_ready || race[0] == '\0' ||
-        !is_officer_upgrade_class(target_class)) {
-        return false;
-    }
-    OfficerStateLockGuard lock;
-    const auto found = g_officer_upgrade_races.find(target_class);
-    return found != g_officer_upgrade_races.end() &&
-        found->second[0] != '\0' &&
-        _stricmp(race.data(), found->second.data()) == 0;
+    struct Context {const std::array<char,64>* race=nullptr;void* target=nullptr;
+        std::optional<OfficerStateLockGuard> lock{};
+        decltype(g_officer_upgrade_races)::iterator found{};std::exception_ptr error{};} context{};
+    context.race=&race;context.target=target_class;
+    auto step=[](void* opaque,std::uint32_t op,std::size_t)->std::uint64_t{
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return g_officer_state_lock_ready;
+        case 1:return (*c.race)[0]!='\0';
+        case 2:return is_officer_upgrade_class(c.target);
+        case 3:c.lock.emplace();c.found=g_officer_upgrade_races.find(c.target);return 0;
+        case 4:return c.found!=g_officer_upgrade_races.end();
+        case 5:return c.found->second[0]!='\0';
+        case 6:return _stricmp(c.race->data(),c.found->second.data())==0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const bool result=a2fo_rs_stage8_a1_officer(4,&context,step)!=0;
+    if(context.error)std::rethrow_exception(context.error);
+    return result;
 }
 
 bool officer_upgrade_matches_registered_starbase(
     void* producer_class, void* target_class) noexcept {
-    if (!g_officer_state_lock_ready || !producer_class || !target_class) {
-        return false;
-    }
-    OfficerStateLockGuard lock;
-    const auto policy = g_starbase_class_policies.find(producer_class);
-    const auto target = g_officer_upgrade_races.find(target_class);
-    if (target == g_officer_upgrade_races.end()) {
-        return false;
-    }
-    if (!is_officer_upgrade_class(target_class) &&
-        (target->second[0] == '\0')) {
-        return false;
-    }
-    if (policy == g_starbase_class_policies.end() ||
-        policy->second.race[0] == '\0') {
-        return false;
-    }
-    return
-        target != g_officer_upgrade_races.end() &&
-        policy->second.race[0] != '\0' && target->second[0] != '\0' &&
-        _stricmp(
-            policy->second.race.data(), target->second.data()) == 0;
+    struct Context {void* producer=nullptr;void* target_class=nullptr;
+        std::optional<OfficerStateLockGuard> lock{};
+        decltype(g_starbase_class_policies)::iterator policy{};
+        decltype(g_officer_upgrade_races)::iterator target{};std::exception_ptr error{};} context{};
+    context.producer=producer_class;context.target_class=target_class;
+    auto step=[](void* opaque,std::uint32_t op,std::size_t)->std::uint64_t{
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return g_officer_state_lock_ready;
+        case 1:return c.producer!=nullptr;
+        case 2:return c.target_class!=nullptr;
+        case 3:c.lock.emplace();c.policy=g_starbase_class_policies.find(c.producer);
+            c.target=g_officer_upgrade_races.find(c.target_class);return 0;
+        case 4:return c.target!=g_officer_upgrade_races.end();
+        case 5:return is_officer_upgrade_class(c.target_class);
+        case 6:return c.target->second[0]=='\0';
+        case 7:return c.policy!=g_starbase_class_policies.end();
+        case 8:return c.policy->second.race[0]!='\0';
+        case 9:return c.target->second[0]!='\0';
+        case 10:return _stricmp(c.policy->second.race.data(),c.target->second.data())==0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const bool result=a2fo_rs_stage8_a1_officer(5,&context,step)!=0;
+    if(context.error)std::rethrow_exception(context.error);
+    return result;
 }
 
 bool starbase_policy(void* starbase, StarbaseClassPolicy* output,
@@ -2902,13 +3159,7 @@ void adjust_team_maximum_officers(void* team, std::int32_t delta) noexcept {
     if (!team || delta == 0) return;
     const std::int32_t current = read_int32_at(
         team, kTeamMaximumOfficersOffset, 0);
-    const std::int64_t adjusted =
-        static_cast<std::int64_t>(current) + delta;
-    const std::int32_t clamped = static_cast<std::int32_t>(
-        adjusted < 0 ? 0 :
-        adjusted > std::numeric_limits<std::int32_t>::max()
-            ? std::numeric_limits<std::int32_t>::max()
-            : adjusted);
+    const std::int32_t clamped=a2fo_rs_stage9_a1_officer_adjust(current,delta);
     write_int32_at(team, kTeamMaximumOfficersOffset, clamped);
 }
 
@@ -2926,49 +3177,12 @@ std::uintptr_t read_uintptr_at(
     return value;
 }
 
-void copy_printable_string(
-    const char* source, char* output, std::size_t output_size) noexcept {
-    if (!output || output_size == 0) return;
-    output[0] = '\0';
-    if (!source) return;
-
-    std::size_t length = 0;
-    while (length + 1 < output_size && readable_range(source + length, 1)) {
-        const char value = source[length];
-        if (value == '\0') break;
-        const unsigned char byte = static_cast<unsigned char>(value);
-        output[length++] = (byte >= 0x20 && byte < 0x7f) ? value : '?';
-    }
-    output[length] = '\0';
+std::uint8_t a1_policy_readable(const std::uint8_t* pointer,std::size_t size,void*) noexcept{return readable_range(pointer,size);}
+void copy_printable_string(const char* source,char* output,std::size_t output_size) noexcept {
+    a2fo_rs_stage8_a1_printable(reinterpret_cast<const std::uint8_t*>(source),reinterpret_cast<std::uint8_t*>(output),output_size,&a1_policy_readable,nullptr);
 }
-
-void normalize_race_name(
-    const char* source, std::array<char, 64>* output) noexcept {
-    if (!output) return;
-    output->fill('\0');
-    if (!source) return;
-
-    while (*source == ' ' || *source == '\t' ||
-           *source == '\r' || *source == '\n') {
-        ++source;
-    }
-    std::size_t length = 0;
-    while (source[length] != '\0' &&
-           length + 1 < output->size()) {
-        ++length;
-    }
-    while (length != 0 &&
-           (source[length - 1] == ' ' || source[length - 1] == '\t' ||
-            source[length - 1] == '\r' || source[length - 1] == '\n')) {
-        --length;
-    }
-    for (std::size_t index = 0; index < length; ++index) {
-        char value = source[index];
-        if (value >= 'A' && value <= 'Z') {
-            value = static_cast<char>(value - 'A' + 'a');
-        }
-        (*output)[index] = value;
-    }
+void normalize_race_name(const char* source,std::array<char,64>* output) noexcept {
+    a2fo_rs_stage8_a1_race(reinterpret_cast<const std::uint8_t*>(source),output?reinterpret_cast<std::uint8_t*>(output->data()):nullptr,64);
 }
 
 bool read_parameter_race(
@@ -3023,89 +3237,35 @@ bool read_parameter_int(
     return true;
 }
 
-void normalize_command_token(
-    const char* source, char* output, std::size_t output_size) noexcept {
-    if (!output || output_size == 0) return;
-    output[0] = '\0';
-    if (!source) return;
-
-    while (*source != '\0' &&
-           std::isspace(static_cast<unsigned char>(*source))) {
-        ++source;
-    }
-
-    const char* end = source;
-    while (*end != '\0') ++end;
-    while (end > source &&
-           std::isspace(static_cast<unsigned char>(*(end - 1)))) {
-        --end;
-    }
-
-    if ((end - source) >= 2 && ((source[0] == '"' && end[-1] == '"') ||
-                                (source[0] == '\'' && end[-1] == '\''))) {
-        ++source;
-        --end;
-        while (source < end &&
-               std::isspace(static_cast<unsigned char>(*source))) {
-            ++source;
-        }
-        while (end > source &&
-               std::isspace(static_cast<unsigned char>(*(end - 1)))) {
-            --end;
-        }
-    }
-
-    std::size_t length = 0;
-    while (source < end && length + 1 < output_size) {
-        char value = *source++;
-        if (value >= 'A' && value <= 'Z') {
-            value = static_cast<char>(value - 'A' + 'a');
-        }
-        output[length++] = value;
-    }
-    output[length] = '\0';
+std::uint8_t a1_policy_space(std::uint8_t ch,void*) noexcept{return std::isspace(ch)!=0;}
+std::uint8_t a1_policy_lower(std::uint8_t ch,void*) noexcept{return static_cast<std::uint8_t>(std::tolower(ch));}
+std::int32_t a1_policy_compare(const std::uint8_t* lhs,const std::uint8_t* rhs,void*) noexcept {
+    return _stricmp(reinterpret_cast<const char*>(lhs),reinterpret_cast<const char*>(rhs));
 }
-
-bool parse_bool_config_value(std::string_view value, bool& out_value) noexcept {
+std::int32_t a1_policy_ncompare(const std::uint8_t* lhs,const std::uint8_t* rhs,std::size_t count,void*) noexcept {
+    return _strnicmp(reinterpret_cast<const char*>(lhs),reinterpret_cast<const char*>(rhs),count);
+}
+std::size_t a1_policy_length(const std::uint8_t* value,void*) noexcept {
+    return std::strlen(reinterpret_cast<const char*>(value));
+}
+const std::uint8_t* a1_policy_scan260(const std::uint8_t* value,void*) noexcept {
+    return static_cast<const std::uint8_t*>(std::memchr(value,'\0',260));
+}
+void normalize_command_token(const char* source,char* output,std::size_t output_size) noexcept {
+    a2fo_rs_stage8_a1_token(reinterpret_cast<const std::uint8_t*>(source),reinterpret_cast<std::uint8_t*>(output),output_size,&a1_policy_space,nullptr);
+}
+bool parse_bool_config_value(std::string_view value,bool& out_value) noexcept {
     std::string normalized(value);
-    while (!normalized.empty() &&
-           std::isspace(static_cast<unsigned char>(normalized.front()))) {
-        normalized.erase(normalized.begin());
-    }
-    while (!normalized.empty() &&
-           std::isspace(static_cast<unsigned char>(normalized.back()))) {
-        normalized.pop_back();
-    }
-    if (normalized.empty()) return false;
-    for (char& ch : normalized) {
-        ch = static_cast<char>(std::tolower(
-            static_cast<unsigned char>(ch)));
-    }
-    if (normalized == "1" || normalized == "true" ||
-        normalized == "yes" || normalized == "on" ||
-        normalized == "enabled") {
-        out_value = true;
-        return true;
-    }
-    if (normalized == "0" || normalized == "false" ||
-        normalized == "no" || normalized == "off" ||
-        normalized == "disabled") {
-        out_value = false;
-        return true;
-    }
-    return false;
+    const auto result=a2fo_rs_stage8_a1_bool(reinterpret_cast<std::uint8_t*>(normalized.data()),normalized.size(),&a1_policy_space,&a1_policy_lower,nullptr);
+    if(!result)return false;
+    out_value=result==2;
+    return true;
 }
 
 bool command_info_path_is_scout(const char* odf_name) noexcept {
-    if (!odf_name) return false;
-    const char* end = static_cast<const char*>(
-        std::memchr(odf_name, '\0', 260));
-    if (!end) return false;
-    const char* basename = odf_name;
-    for (const char* cursor = odf_name; cursor != end; ++cursor) {
-        if (*cursor == '\\' || *cursor == '/') basename = cursor + 1;
-    }
-    return _stricmp(basename, "scout.odf") == 0;
+    return a2fo_rs_stage8_a1_scout_path(
+        reinterpret_cast<const std::uint8_t*>(odf_name),
+        &a1_policy_scan260,&a1_policy_compare,nullptr)!=0;
 }
 
 void* __attribute__((fastcall)) command_info_build_class_hook(
@@ -3136,7 +3296,7 @@ void* __attribute__((fastcall)) command_info_build_class_hook(
     const auto command_name_to_id = reinterpret_cast<CommandNameToId>(
         at(g_armada, kCommandNameToIdRva));
     const std::int32_t scout_command_id = command_name_to_id("SCOUT");
-    if (scout_command_id < 0 || scout_command_id >= 57) return built;
+    if (!a2fo_rs_stage9_a1_native_ui_scout_id(scout_command_id)) return built;
 
     const auto write_text = [&](std::size_t offset, std::size_t capacity,
                                 const char* value) {
@@ -3209,6 +3369,187 @@ bool install_legacy_explore_command_bridge(
         kExpectedCommandInfoBuildClass, &g_command_info_build_class_hook);
 }
 
+
+void copy_node_name(void* node, char* output, std::size_t output_size) noexcept;
+std::int32_t node_type(void* node) noexcept;
+
+bool ascii_equals_ignore_case(const char* value, const char* expected) noexcept {
+    return a2fo_rs_stage8_a1_ascii_equal(
+        reinterpret_cast<const std::uint8_t*>(value),
+        reinterpret_cast<const std::uint8_t*>(expected),
+        &a1_policy_lower,nullptr)!=0;
+}
+
+struct A1NodeSearchContext {const char* requested;char name[96]{};};
+std::uintptr_t a1_node_search_step(void* opaque,std::uint32_t operation,std::uintptr_t address) noexcept {
+    auto& c=*static_cast<A1NodeSearchContext*>(opaque);
+    void* node=reinterpret_cast<void*>(address);
+    if(operation==0)return reinterpret_cast<std::uintptr_t>(read_pointer_at(node,kNodeFirstChildOffset));
+    if(operation==2)return reinterpret_cast<std::uintptr_t>(read_pointer_at(node,kNodeNextSiblingOffset));
+    std::memset(c.name,0,sizeof(c.name));
+    copy_node_name(node,c.name,sizeof(c.name));
+    return ascii_equals_ignore_case(c.name,c.requested);
+}
+
+void* find_direct_child_named(void* parent,const char* requested) noexcept {
+    if(!parent||!requested)return nullptr;
+    A1NodeSearchContext context{requested,{}};
+    return reinterpret_cast<void*>(a2fo_rs_stage9_a1_node_find_direct_child(
+        &context,reinterpret_cast<std::uintptr_t>(parent),reinterpret_cast<std::uintptr_t>(requested),a1_node_search_step));
+}
+
+void* find_node_named_bounded(void* node,const char* requested,std::size_t depth,std::size_t* remaining) noexcept {
+    if(!node||!requested||!remaining||*remaining==0||depth>32)return nullptr;
+    A1NodeSearchContext context{requested,{}};
+    return reinterpret_cast<void*>(a2fo_rs_stage9_a1_node_find_named_bounded(
+        &context,reinterpret_cast<std::uintptr_t>(node),reinterpret_cast<std::uintptr_t>(requested),depth,remaining,a1_node_search_step));
+}
+
+bool set_node_hidden_flag(void* node, bool hidden) noexcept {
+    if (!node) return false;
+    auto* address = reinterpret_cast<std::uint32_t*>(
+        static_cast<std::uint8_t*>(node) + kNodeFlagsOffset);
+    if (!readable_range(address, sizeof(*address)) ||
+        !writable_range(address, sizeof(*address))) {
+        return false;
+    }
+
+    std::uint32_t flags = 0;
+    std::memcpy(&flags, address, sizeof(flags));
+    const std::uint32_t updated=a2fo_rs_stage9_a1_node_hidden_flags(flags,hidden,kNodeHiddenFlag);
+    if (updated == flags) return true;
+    std::memcpy(address, &updated, sizeof(updated));
+    return true;
+}
+
+// Armada 1's Storm3D 1.80 exporters commonly emit Geometry/lod0/lod1/lod2.
+// The previous experiment hid lod0, but runtime logs proved the policy fired
+// without changing the visual bug.  The next conservative experiment targets
+// the renderer's calculated per-mesh AABB instead: FO appears to reject parts
+// of some legacy meshes once their projected bounds become small at distance.
+//
+// Mesh/MRM nodes expose calculated local minimum/maximum vectors at +0xe4 and
+// +0xf0.  Inflate those bounds around their existing centre for classic A1
+// three-LOD models only.  Geometry, transforms, materials, collision, physics,
+// and authored A2/FO models are untouched.  This is intentionally a diagnostic
+// compatibility policy: if it fixes Sovereign/Akira/starbase distance breakup,
+// we know the remaining work belongs in the legacy mesh-culling translation.
+struct LegacyMeshBoundsRepair {
+    std::size_t visited = 0;
+    std::size_t mesh_nodes = 0;
+    std::size_t changed = 0;
+    std::size_t invalid = 0;
+};
+
+bool inflate_legacy_mesh_bounds(void* node, LegacyMeshBoundsRepair* state) noexcept {
+    if (!node || !state || state->visited >= 8192) return false;
+    static_assert(kMeshNodeType==1 && kMrmNodeType==9 && kLegacyA1BoundsInflation==4.0f);
+    struct Context {std::uint32_t lo[3]{},hi[3]{};} context;
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t address,std::size_t arg) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);void* n=reinterpret_cast<void*>(address);
+        switch(op){
+        case 0:return static_cast<std::uint32_t>(node_type(n));
+        case 1:{auto* minimum=static_cast<std::uint8_t*>(n)+kMeshBoundsMinimumOffset;
+            auto* maximum=static_cast<std::uint8_t*>(n)+kMeshBoundsMaximumOffset;
+            if (!readable_range(minimum,12)||!readable_range(maximum,12)||
+                !writable_range(minimum,12)||!writable_range(maximum,12))return 0;
+            std::memcpy(c.lo,minimum,12);std::memcpy(c.hi,maximum,12);return 1;}
+        case 2:return c.lo[arg];case 3:return c.hi[arg];
+        case 4:{const auto* words=reinterpret_cast<const std::uint32_t*>(arg);
+            std::memcpy(static_cast<std::uint8_t*>(n)+kMeshBoundsMinimumOffset,words,12);
+            std::memcpy(static_cast<std::uint8_t*>(n)+kMeshBoundsMaximumOffset,words+3,12);return 0;}
+        case 5:return reinterpret_cast<std::uintptr_t>(read_pointer_at(n,kNodeFirstChildOffset));
+        case 6:return reinterpret_cast<std::uintptr_t>(read_pointer_at(n,kNodeNextSiblingOffset));
+        default:return 0;}
+    };
+    A2foA1SodStats stats{state->visited,state->mesh_nodes,state->changed,state->invalid};
+    const bool result=a2fo_rs_stage9_a1_sod_walk(reinterpret_cast<std::uintptr_t>(node),&context,step,&stats)!=0;
+    state->visited=stats.visited;state->mesh_nodes=stats.mesh_nodes;state->changed=stats.changed;state->invalid=stats.invalid;
+    return result;
+}
+
+void apply_legacy_sod_mesh_bounds_policy(
+    void* object_class, const char* odf_name) noexcept {
+    if (!object_class) return;
+
+    void* geometry_database = read_pointer_at(
+        object_class, kGameObjectClassGeometryDatabaseOffset);
+    void* hierarchy_root = read_pointer_at(
+        geometry_database, kGeometryDatabaseHierarchyRootOffset);
+    if (!hierarchy_root) return;
+
+    std::size_t remaining = 4096;
+    void* geometry = find_node_named_bounded(
+        hierarchy_root, "geometry", 0, &remaining);
+    if (!geometry) return;
+
+    void* lod0 = find_direct_child_named(geometry, "lod0");
+    void* lod1 = find_direct_child_named(geometry, "lod1");
+    void* lod2 = find_direct_child_named(geometry, "lod2");
+    if (!lod0 || !lod1 || !lod2) return;
+
+    // Undo the previous diagnostic suppression so this test changes exactly
+    // one variable: mesh bounds rather than LOD visibility.
+    set_node_hidden_flag(lod0, false);
+    set_node_hidden_flag(lod1, false);
+    set_node_hidden_flag(lod2, false);
+
+    LegacyMeshBoundsRepair state{};
+    inflate_legacy_mesh_bounds(lod0, &state);
+    inflate_legacy_mesh_bounds(lod1, &state);
+    inflate_legacy_mesh_bounds(lod2, &state);
+    if (state.mesh_nodes == 0) return;
+
+    const LONG incident = InterlockedIncrement(&g_legacy_sod_bounds_repair_count);
+    if (a2fo_rs_stage9_a1_reporting_admit(incident, 64, 1) == 1) {
+        char message[448]{};
+        std::snprintf(
+            message, sizeof(message),
+            "A1 legacy SOD bounds policy #%ld: odf='%s', "
+            "lod0/lod1/lod2 mesh bounds inflated %.1fx "
+            "(meshNodes=%zu changed=%zu invalid=%zu)",
+            static_cast<long>(incident),
+            odf_name && *odf_name ? odf_name : "<unavailable>",
+            static_cast<double>(kLegacyA1BoundsInflation),
+            state.mesh_nodes, state.changed, state.invalid);
+        log_line(message);
+    } else if (a2fo_rs_stage9_a1_reporting_admit(incident, 64, 1) == 2) {
+        log_line("Further A1 legacy SOD bounds reports suppressed");
+    }
+}
+
+struct A1MissingProbeContext {
+    const A2FO_GameObjectClassLoadedEvent* event;
+    const A2foA1ClassCapability* capabilities;
+    std::string applied;
+    std::exception_ptr error;
+};
+
+std::uint8_t a1_missing_step(void* opaque, std::uint32_t operation,
+                             std::uint32_t index) noexcept {
+    auto& context = *static_cast<A1MissingProbeContext*>(opaque);
+    try {
+        if (operation == 0) {
+            return race_event_field(context.event->odf_fields,
+                                    context.event->odf_field_count,
+                                    context.capabilities[index].command) ? 1 : 0;
+        }
+        if (!context.applied.empty()) context.applied += ",";
+        context.applied += context.capabilities[index].command;
+        return 1;
+    } catch (...) {
+        context.error = std::current_exception();
+        return 2;
+    }
+}
+
+std::uint8_t a1_numbered_family_probe(void* opaque,
+                                      std::uint32_t index) noexcept {
+    const char* odf_name = static_cast<const char*>(opaque);
+    return matches_numbered_odf_family(
+        odf_name, index == 0 ? "mdmoon" : "mmooninf") ? 1 : 0;
+}
+
 void A2FO_CALL legacy_menu_capability_class_loaded_handler(
     const A2FO_GameObjectClassLoadedEvent* event, void*) {
     if (!event || !event->object_class) return;
@@ -3220,6 +3561,8 @@ void A2FO_CALL legacy_menu_capability_class_loaded_handler(
         std::memcpy(odf_name, event->source_odf.data, copied);
         odf_name[copied] = '\0';
     }
+
+    apply_legacy_sod_mesh_bounds_policy(event->object_class, odf_name);
 
     std::string scout_text;
     bool legacy_scout = false;
@@ -3240,28 +3583,25 @@ void A2FO_CALL legacy_menu_capability_class_loaded_handler(
         race_event_field(event->odf_fields, event->odf_field_count,
                          "classLabel", &class_label_text) &&
         is_starbase_label(class_label_text.c_str());
-    const bool legacy_moon =
-        matches_numbered_odf_family(odf_name, "mdmoon") ||
-        matches_numbered_odf_family(odf_name, "mmooninf");
-    if (!legacy_scout && !legacy_station && !legacy_moon) return;
+    const bool legacy_moon = a2fo_rs_stage9_a1_class_family(
+        odf_name, &a1_numbered_family_probe) != 0;
+    const std::uint32_t groups = a2fo_rs_stage9_a1_class_groups(
+        legacy_scout, legacy_station, legacy_moon);
+    if (groups == 0) return;
 
-    struct MissingMenuCapability {
-        const char* command;
-        std::uint32_t bit;
-    };
-    constexpr std::array<MissingMenuCapability, 4> scout_capabilities{{
+    constexpr std::array<A2foA1ClassCapability, 4> scout_capabilities{{
         {"combat", kCombatMenuCapability},
         {"alert", kAlertMenuCapability},
         {"can_sandd", kSearchAndDestroyMenuCapability},
         {"can_explore", kExploreMenuCapability},
     }};
-    constexpr std::array<MissingMenuCapability, 4> station_capabilities{{
+    constexpr std::array<A2foA1ClassCapability, 4> station_capabilities{{
         {"transporter", kTransporterMenuCapability},
         {"facility", kFacilityMenuCapability},
         {"has_crew", kHasCrewMenuCapability},
         {"has_hitpoints", kHasHitpointsMenuCapability},
     }};
-    constexpr std::array<MissingMenuCapability, 2> moon_capabilities{{
+    constexpr std::array<A2foA1ClassCapability, 2> moon_capabilities{{
         {"spatial_object", kSpatialObjectMenuCapability},
         {"has_resource", kHasResourceMenuCapability},
     }};
@@ -3279,27 +3619,22 @@ void A2FO_CALL legacy_menu_capability_class_loaded_handler(
     const auto apply_missing = [&](const auto& capabilities,
                                    volatile LONG* counter,
                                    const char* description) {
-        std::uint32_t missing_mask = 0;
-        std::string applied;
-        for (const auto& capability : capabilities) {
-            // Any explicit/inherited declaration, including zero, is
-            // authoritative. Only a genuinely absent command receives A2's
-            // base-class value.
-            if (race_event_field(event->odf_fields, event->odf_field_count,
-                                 capability.command)) {
-                continue;
-            }
-            missing_mask |= capability.bit;
-            if (!applied.empty()) applied += ",";
-            applied += capability.command;
-        }
-        if (missing_mask == 0) return;
+        A1MissingProbeContext context{event, capabilities.data(), {}, {}};
+        A2foA1ClassMissing missing{};
+        a2fo_rs_stage9_a1_missing(
+            capabilities.data(),
+            static_cast<std::uint32_t>(capabilities.size()),
+            &context, &a1_missing_step, &missing);
+        if (context.error) std::rethrow_exception(context.error);
+        if (missing.failed || missing.mask == 0) return;
 
         const LONG previous = InterlockedOr(
-            menu_capabilities, static_cast<LONG>(missing_mask));
-        const LONG updated = previous | static_cast<LONG>(missing_mask);
+            menu_capabilities, static_cast<LONG>(missing.mask));
+        const LONG updated = previous | static_cast<LONG>(missing.mask);
         const LONG incident = InterlockedIncrement(counter);
-        if (incident <= 32) {
+        const std::uint8_t report = a2fo_rs_stage9_a1_report(
+            static_cast<std::int32_t>(incident), 32);
+        if (report == 1) {
             char message[512]{};
             std::snprintf(
                 message, sizeof(message),
@@ -3308,9 +3643,9 @@ void A2FO_CALL legacy_menu_capability_class_loaded_handler(
                 description, static_cast<long>(incident),
                 odf_name[0] ? odf_name : "<unavailable>",
                 event->object_class, static_cast<unsigned long>(previous),
-                static_cast<unsigned long>(updated), applied.c_str());
+                static_cast<unsigned long>(updated), context.applied.c_str());
             log_line(message);
-        } else if (incident == 33) {
+        } else if (report == 2) {
             char message[160]{};
             std::snprintf(
                 message, sizeof(message),
@@ -3319,12 +3654,12 @@ void A2FO_CALL legacy_menu_capability_class_loaded_handler(
         }
     };
 
-    if (legacy_scout) {
+    if ((groups & 1u) != 0) {
         apply_missing(scout_capabilities,
                       &g_legacy_scout_menu_capability_count,
                       "scout menu");
     }
-    if (legacy_station) {
+    if ((groups & 2u) != 0) {
         apply_missing(station_capabilities,
                       &g_legacy_station_menu_capability_count,
                       "station command");
@@ -3338,7 +3673,7 @@ void A2FO_CALL legacy_menu_capability_class_loaded_handler(
             register_completed_starbase_class_policy(event, odf_name);
         }
     }
-    if (legacy_moon) {
+    if ((groups & 4u) != 0) {
         apply_missing(moon_capabilities,
                       &g_legacy_moon_menu_capability_count,
                       "moon target");
@@ -3372,81 +3707,124 @@ bool detect_incompatible_legacy_cursor_table(
     }
     try {
         const std::uint32_t count = g_api->extension_root_count();
-        if (count == 0 || count > 4096) return false;
-
-        // Roots are ordered from lowest to highest precedence. Retain the
-        // last cursor.spr found so this examines the table the game will
-        // actually include from sprites.spr.
-        for (std::uint32_t index = 0; index < count; ++index) {
-            const char* root = g_api->extension_root(index);
-            if (!root || !*root) continue;
-            const std::array<std::string, 2> candidates{{
-                join_path(root, "Sprites\\cursor.spr"),
-                join_path(root, "sprites\\cursor.spr")}};
-            for (const std::string& candidate : candidates) {
-                if (regular_file_exists(candidate)) {
-                    source_path = candidate;
-                    break;
+        struct RootFrame {
+            const std::array<std::string, 2> candidates;
+            explicit RootFrame(const char* root)
+                : candidates{{join_path(root, "Sprites\\cursor.spr"),
+                              join_path(root, "sprites\\cursor.spr")}} {}
+        };
+        struct RootContext {
+            std::string& selected;
+            std::optional<RootFrame> frame;
+            std::exception_ptr error;
+        } roots{source_path, {}, {}};
+        const auto root_step = +[](void* opaque, std::uint32_t operation,
+                                   std::uint32_t index, std::uint32_t candidate,
+                                   A2foA1AssetView*) noexcept -> std::uint8_t {
+            auto& c = *static_cast<RootContext*>(opaque);
+            try {
+                switch (operation) {
+                    case 0: {
+                        const char* root = g_api->extension_root(index);
+                        if (!root || !*root) return 0;
+                        c.frame.emplace(root);
+                        return 1;
+                    }
+                    case 1: {
+                        const std::string& path = c.frame->candidates[candidate];
+                        if (!regular_file_exists(path)) return 0;
+                        c.selected = path;
+                        return 1;
+                    }
+                    case 2: c.frame.reset(); return 0;
+                    default: return 0;
                 }
+            } catch (...) {
+                c.frame.reset();
+                c.error = std::current_exception();
+                return 2;
             }
-        }
+        };
+        a2fo_rs_stage9_a1_cursor_roots(count, &roots, root_step);
+        if (roots.error) std::rethrow_exception(roots.error);
         if (source_path.empty()) return false;
 
         const std::string contents = read_small_text_file(source_path);
         if (contents.empty()) return false;
-        bool standard_cursor_found = false;
-        bool standard_cursor_invalid = false;
-        bool select_cursor_found = false;
-        bool select_cursor_invalid = false;
         std::istringstream lines(contents);
-        std::string line;
-        while (std::getline(lines, line)) {
-            const std::size_t first = line.find_first_not_of(" \t\r\n");
-            if (first == std::string::npos || line[first] == '#') continue;
-
-            std::istringstream fields(line.substr(first));
+        struct LineFrame {
+            std::istringstream fields;
             std::string name;
             std::string texture;
-            std::int32_t u = 0;
-            std::int32_t v = 0;
-            std::int32_t width = 0;
-            std::int32_t height = 0;
-            if (!(fields >> name >> texture >> u >> v >> width >> height)) {
-                continue;
+            std::int32_t u = 0, v = 0, width = 0, height = 0;
+            std::optional<std::string> normalized;
+            LineFrame(const std::string& line, std::size_t first)
+                : fields(line.substr(first)) {}
+        };
+        struct LineContext {
+            std::istringstream& lines;
+            std::string line;
+            std::optional<LineFrame> frame;
+            std::exception_ptr error;
+        } rows{lines, {}, {}, {}};
+        const auto line_step = +[](void* opaque, std::uint32_t operation,
+                                   std::uint32_t, std::uint32_t argument,
+                                   A2foA1AssetView* output) noexcept -> std::uint8_t {
+            auto& c = *static_cast<LineContext*>(opaque);
+            try {
+                switch (operation) {
+                    case 0:
+                        if (!std::getline(c.lines, c.line)) return 0;
+                        output->bytes = reinterpret_cast<const std::uint8_t*>(c.line.data());
+                        output->size = c.line.size();
+                        return 1;
+                    case 1: {
+                        c.frame.emplace(c.line, argument);
+                        auto& f = *c.frame;
+                        if (!(f.fields >> f.name >> f.texture >> f.u >> f.v >>
+                              f.width >> f.height))
+                            return 0;
+                        std::transform(f.name.begin(), f.name.end(), f.name.begin(),
+                            [](unsigned char value) {
+                                return static_cast<char>(std::tolower(value));
+                            });
+                        output->bytes = reinterpret_cast<const std::uint8_t*>(f.name.data());
+                        output->size = f.name.size();
+                        return 1;
+                    }
+                    case 2:
+                        c.frame->normalized.emplace(c.line);
+                        std::transform(c.frame->normalized->begin(),
+                                       c.frame->normalized->end(),
+                                       c.frame->normalized->begin(),
+                            [](unsigned char value) {
+                                return static_cast<char>(std::tolower(value));
+                            });
+                        output->bytes = reinterpret_cast<const std::uint8_t*>(
+                            c.frame->normalized->data());
+                        output->size = c.frame->normalized->size();
+                        output->width = c.frame->width;
+                        output->height = c.frame->height;
+                        return 1;
+                    case 3:
+                        c.frame.reset();
+                        return 0;
+                    default: return 0;
+                }
+            } catch (...) {
+                c.frame.reset();
+                c.error = std::current_exception();
+                return 2;
             }
-            std::transform(
-                name.begin(), name.end(), name.begin(),
-                [](unsigned char value) {
-                    return static_cast<char>(std::tolower(value));
-                });
-            if (name != "standard_cursor" && name != "c_select") {
-                continue;
-            }
-
-            std::string normalized = line;
-            std::transform(
-                normalized.begin(), normalized.end(), normalized.begin(),
-                [](unsigned char value) {
-                    return static_cast<char>(std::tolower(value));
-                });
-            const bool cursor_flag =
-                normalized.find("@cursor") != std::string::npos;
-            const bool invalid =
-                !cursor_flag || width > 40 || height > 40 ||
-                width <= 0 || height <= 0;
-            if (name == "standard_cursor") {
-                standard_cursor_found = true;
-                standard_cursor_invalid = invalid;
-            } else {
-                select_cursor_found = true;
-                select_cursor_invalid = invalid;
-            }
-        }
+        };
+        A2foA1CursorDecision decision{};
+        a2fo_rs_stage9_a1_cursor_lines(&rows, line_step, &decision);
+        if (rows.error) std::rethrow_exception(rows.error);
         if (tactical_override_required) {
             *tactical_override_required =
-                !select_cursor_found || select_cursor_invalid;
+                !decision.select_found || decision.select_invalid;
         }
-        return !standard_cursor_found || standard_cursor_invalid;
+        return !decision.standard_found || decision.standard_invalid;
     } catch (...) {
         source_path.clear();
         if (tactical_override_required) {
@@ -3458,15 +3836,39 @@ bool detect_incompatible_legacy_cursor_table(
 
 std::string find_team_color_odf_in_root(const char* root) {
     if (!root || !*root) return {};
-    for (const char* relative : kTeamColorRelativePaths) {
-        const std::string path = join_path(root, relative);
-        if (path.empty()) continue;
-        const DWORD attributes = GetFileAttributesA(path.c_str());
-        if (attributes != INVALID_FILE_ATTRIBUTES &&
-            (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
-            return path;
+    struct CandidateFrame {
+        const std::string path;
+        CandidateFrame(const char* base, const char* relative)
+            : path(join_path(base, relative)) {}
+    };
+    struct Context {
+        const char* root;
+        std::optional<CandidateFrame> frame;
+        std::exception_ptr error;
+    } context{root, {}, {}};
+    const auto step = +[](void* opaque, std::uint32_t,
+                          std::uint32_t index, std::uint32_t,
+                          A2foA1AssetView*) noexcept -> std::uint8_t {
+        auto& c = *static_cast<Context*>(opaque);
+        try {
+            c.frame.emplace(c.root, kTeamColorRelativePaths[index]);
+            if (c.frame->path.empty()) { c.frame.reset(); return 0; }
+            const DWORD attributes = GetFileAttributesA(c.frame->path.c_str());
+            if (attributes == INVALID_FILE_ATTRIBUTES ||
+                (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+                c.frame.reset();
+                return 0;
+            }
+            return 1;
+        } catch (...) {
+            c.frame.reset();
+            c.error = std::current_exception();
+            return 2;
         }
-    }
+    };
+    a2fo_rs_stage9_a1_team_find(&context, step);
+    if (context.error) std::rethrow_exception(context.error);
+    if (context.frame) return context.frame->path;
     return {};
 }
 
@@ -3479,40 +3881,50 @@ bool load_legacy_team_color_palette() noexcept {
 
     try {
         const std::uint32_t root_count = g_api->extension_root_count();
-        if (root_count == 0 || root_count > 4096) return false;
-        std::uint32_t parsed_files = 0;
-        std::uint32_t indexed_values = 0;
-        std::uint32_t legacy_aliases = 0;
-        for (std::uint32_t index = 0; index < root_count; ++index) {
-            const std::string path = find_team_color_odf_in_root(
-                g_api->extension_root(index));
-            if (path.empty()) continue;
-            const std::string contents = read_small_text_file(path);
-            if (contents.empty()) continue;
-            const a1compat::TeamColorMergeResult merged =
-                a1compat::merge_team_color_odf(
-                    contents, g_legacy_team_color_palette);
-            indexed_values += merged.indexed_values;
-            legacy_aliases += merged.legacy_aliases;
-            ++parsed_files;
-        }
-        g_legacy_team_color_palette_active = legacy_aliases != 0;
+        struct Context { std::exception_ptr error; } context{};
+        const auto step = +[](void* opaque, std::uint32_t operation,
+                              std::uint32_t index, std::uint32_t,
+                              A2foA1AssetView* output) noexcept -> std::uint8_t {
+            auto& c = *static_cast<Context*>(opaque);
+            try {
+                switch (operation) {
+                    case 0: {
+                        const std::string path = find_team_color_odf_in_root(
+                            g_api->extension_root(index));
+                        if (path.empty()) return 0;
+                        const std::string contents = read_small_text_file(path);
+                        if (contents.empty()) return 0;
+                        const a1compat::TeamColorMergeResult merged =
+                            a1compat::merge_team_color_odf(
+                                contents, g_legacy_team_color_palette);
+                        output->indexed = merged.indexed_values;
+                        output->legacy = merged.legacy_aliases;
+                        return 1;
+                    }
+                    case 1: return g_legacy_team_color_palette.present[index];
+                    default: return 0;
+                }
+            } catch (...) {
+                c.error = std::current_exception();
+                return 2;
+            }
+        };
+        A2foA1TeamPlan plan{};
+        a2fo_rs_stage9_a1_team_load(root_count, &context, step, &plan);
+        if (context.error) std::rethrow_exception(context.error);
+        g_legacy_team_color_palette_active = plan.active != 0;
         if (!g_legacy_team_color_palette_active) return false;
 
-        std::uint32_t resolved_colors = 0;
-        for (bool present : g_legacy_team_color_palette.present) {
-            if (present) ++resolved_colors;
-        }
         char message[320]{};
         std::snprintf(
             message, sizeof(message),
             "A1 team-colour palette resolved: %lu/16 player colours from "
             "%lu teamcolor.odf layer(s), %lu indexed values and %lu legacy "
             "aliases",
-            static_cast<unsigned long>(resolved_colors),
-            static_cast<unsigned long>(parsed_files),
-            static_cast<unsigned long>(indexed_values),
-            static_cast<unsigned long>(legacy_aliases));
+            static_cast<unsigned long>(plan.resolved_colors),
+            static_cast<unsigned long>(plan.parsed_files),
+            static_cast<unsigned long>(plan.indexed_values),
+            static_cast<unsigned long>(plan.legacy_aliases));
         log_line(message);
         return true;
     } catch (...) {
@@ -3545,21 +3957,29 @@ bool apply_legacy_team_color_palette() noexcept {
         armada_palette,
         kNativeTeamColorEntryCount * sizeof(*armada_palette));
 
-    std::uint32_t applied = 0;
-    for (std::size_t index = 0;
-         index < a1compat::kPlayerTeamColorCount; ++index) {
-        if (!g_legacy_team_color_palette.present[index]) continue;
-        native_palette[kNativePlayerColorFirstIndex + index] =
+    struct Context {
+        a1compat::TeamColorRgb* native;
+        a1compat::TeamColorRgb* mirror;
+        bool mirror_enabled;
+    } context{native_palette, armada_palette, mirror_armada_palette};
+    const auto step = +[](void* opaque, std::uint32_t,
+                          std::uint32_t index, std::uint32_t,
+                          A2foA1AssetView*) noexcept -> std::uint8_t {
+        auto& c = *static_cast<Context*>(opaque);
+        if (!g_legacy_team_color_palette.present[index]) return 0;
+        c.native[kNativePlayerColorFirstIndex + index] =
             g_legacy_team_color_palette.colors[index];
-        if (mirror_armada_palette) {
-            armada_palette[kNativePlayerColorFirstIndex + index] =
+        if (c.mirror_enabled) {
+            c.mirror[kNativePlayerColorFirstIndex + index] =
                 g_legacy_team_color_palette.colors[index];
         }
-        ++applied;
-    }
+        return 1;
+    };
+    const std::uint32_t applied = a2fo_rs_stage9_a1_team_apply(
+        a1compat::kPlayerTeamColorCount, &context, step);
     const LONG application =
         InterlockedIncrement(&g_legacy_team_color_apply_count);
-    if (application <= 8) {
+    if (a2fo_rs_stage9_a1_team_log_first8(application)) {
         char message[192]{};
         std::snprintf(
             message, sizeof(message),
@@ -3602,66 +4022,21 @@ bool install_legacy_team_color_translation(
 }
 
 std::string strip_c_comments(const std::string& input) {
-    std::string output;
-    output.reserve(input.size());
-    bool line_comment = false;
-    bool block_comment = false;
-    for (std::size_t index = 0; index < input.size(); ++index) {
-        const char current = input[index];
-        const char next = index + 1 < input.size() ? input[index + 1] : '\0';
-        if (line_comment) {
-            if (current == '\n' || current == '\r') {
-                line_comment = false;
-                output.push_back(current);
-            } else {
-                output.push_back(' ');
-            }
-            continue;
-        }
-        if (block_comment) {
-            if (current == '*' && next == '/') {
-                output.append("  ");
-                ++index;
-                block_comment = false;
-            } else {
-                output.push_back(
-                    current == '\n' || current == '\r' ? current : ' ');
-            }
-            continue;
-        }
-        if (current == '/' && next == '/') {
-            output.append("  ");
-            ++index;
-            line_comment = true;
-        } else if (current == '/' && next == '*') {
-            output.append("  ");
-            ++index;
-            block_comment = true;
-        } else {
-            output.push_back(current);
-        }
-    }
+    std::string output;output.reserve(input.size());
+    struct Context {std::string& output;std::exception_ptr error{};}context{output};
+    const auto emit=+[](void* opaque,std::uint8_t ch,std::uint32_t count) noexcept ->std::uint8_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{if(count==2)c.output.append("  ");else c.output.push_back(static_cast<char>(ch));return 1;}
+        catch(...){c.error=std::current_exception();return 0;}
+    };
+    a2fo_rs_stage8_a1_comments(reinterpret_cast<const std::uint8_t*>(input.data()),input.size(),emit,&context);
+    if(context.error)std::rethrow_exception(context.error);
     return output;
 }
-
-bool config_identifier_character(char value) noexcept {
-    return (value >= 'a' && value <= 'z') ||
-        (value >= 'A' && value <= 'Z') ||
-        (value >= '0' && value <= '9') || value == '_';
-}
-
-std::string assignment_identifier(
-    const std::string& statement, std::size_t equals) {
-    std::size_t end = equals;
-    while (end != 0 && !config_identifier_character(statement[end - 1])) {
-        --end;
-    }
-    std::size_t begin = end;
-    while (begin != 0 &&
-           config_identifier_character(statement[begin - 1])) {
-        --begin;
-    }
-    return statement.substr(begin, end - begin);
+std::string assignment_identifier(const std::string& statement,std::size_t equals) {
+    std::size_t begin=0,end=0;
+    a2fo_rs_stage8_a1_assignment(reinterpret_cast<const std::uint8_t*>(statement.data()),equals,&begin,&end);
+    return statement.substr(begin,end-begin);
 }
 
 struct LegacyGameplayConfigAreas {
@@ -3718,40 +4093,48 @@ bool parse_gui_rectangle_assignment(
     if (!key || !*key || !output) return false;
     try {
         const std::string source = strip_c_comments(contents);
-        std::istringstream lines(source);
-        std::string line;
-        bool found = false;
-        while (std::getline(lines, line)) {
-            const std::size_t equals = line.find('=');
-            if (equals == std::string::npos ||
-                assignment_identifier(line, equals) != key) {
-                continue;
-            }
-            const char* cursor = line.c_str() + equals + 1;
-            std::array<std::int32_t, 4> values{};
-            bool valid = true;
-            for (std::size_t index = 0; index < values.size(); ++index) {
-                while (*cursor == ' ' || *cursor == '\t' ||
-                       *cursor == '\r' || *cursor == '\n') {
-                    ++cursor;
-                }
-                errno = 0;
-                char* end = nullptr;
-                const long parsed = std::strtol(cursor, &end, 10);
-                if (end == cursor || errno == ERANGE ||
-                    parsed < std::numeric_limits<std::int32_t>::min() ||
-                    parsed > std::numeric_limits<std::int32_t>::max()) {
-                    valid = false;
-                    break;
-                }
-                values[index] = static_cast<std::int32_t>(parsed);
-                cursor = end;
-            }
-            if (!valid) continue;
-            *output = a1compat::LegacyUiArea{
+        struct Context {
+            std::string line;
+            a1compat::LegacyUiArea* output;
+        } context{{}, output};
+        const auto line = +[](void* opaque, const std::uint8_t* begin,
+                              std::size_t length, const std::uint8_t** bytes,
+                              std::size_t* size) noexcept {
+            auto& state = *static_cast<Context*>(opaque);
+            try {
+                state.line.assign(reinterpret_cast<const char*>(begin),
+                                  length);
+                *bytes = reinterpret_cast<const std::uint8_t*>(
+                    state.line.c_str());
+                *size = state.line.size();
+                return true;
+            } catch (...) { return false; }
+        };
+        const auto integer = +[](void* opaque, std::size_t offset,
+                                 std::size_t* consumed,
+                                 std::int32_t* value) noexcept {
+            auto& state = *static_cast<Context*>(opaque);
+            const char* cursor = state.line.c_str() + offset;
+            errno = 0;
+            char* end = nullptr;
+            const long parsed = std::strtol(cursor, &end, 10);
+            if (end == cursor || errno == ERANGE ||
+                parsed < std::numeric_limits<std::int32_t>::min() ||
+                parsed > std::numeric_limits<std::int32_t>::max()) return false;
+            *consumed = static_cast<std::size_t>(end - cursor);
+            *value = static_cast<std::int32_t>(parsed);
+            return true;
+        };
+        const auto commit = +[](void* opaque,
+                                const std::int32_t* values) noexcept {
+            auto& state = *static_cast<Context*>(opaque);
+            *state.output = a1compat::LegacyUiArea{
                 values[0], values[1], values[2], values[3]};
-            found = true;
-        }
+        };
+        const bool found = a2fo_rs_stage9_a1_config_gui_rect(
+            reinterpret_cast<const std::uint8_t*>(source.data()),
+            source.size(), reinterpret_cast<const std::uint8_t*>(key),
+            std::strlen(key), &context, line, integer, commit);
         return found;
     } catch (...) {
         return false;
@@ -3774,209 +4157,164 @@ bool load_active_legacy_gameplay_config(
         const std::uint32_t root_count = g_api->extension_root_count();
         if (root_count == 0 || root_count > 4096) return false;
 
-        for (std::uint32_t position = root_count; position != 0; --position) {
-            const char* root = g_api->extension_root(position - 1);
-            if (!root || !*root) continue;
-            const std::array<std::string, 3> candidates{{
-                join_path(root, supplied.c_str()),
-                join_path(
-                    root, (std::string("misc\\") + basename).c_str()),
-                join_path(root, basename.c_str())}};
-            for (const std::string& path : candidates) {
-                if (path.empty()) continue;
-                const std::string contents = read_small_text_file(path);
-                if (contents.empty()) continue;
-
-                LegacyGameplayConfigAreas parsed{};
-                const bool complete = parse_gui_rectangle_assignment(
-                        contents, "controlPanelArea",
-                        &parsed.control_panel) &&
-                    parse_gui_rectangle_assignment(
-                        contents, "cinematicPanelArea",
-                        &parsed.cinematic_panel) &&
-                    parse_gui_rectangle_assignment(
-                        contents, "cinematicBackgroundPanelArea",
-                        &parsed.cinematic_background_panel) &&
-                    parse_gui_rectangle_assignment(
-                        contents, "cinematicBackgroundArea",
-                        &parsed.cinematic_background) &&
-                    parse_gui_rectangle_assignment(
-                        contents, "cinematicDisplayArea",
-                        &parsed.cinematic_display);
-                if (!complete) return false;
-                parsed.has_cinematic_buttons =
-                    parse_gui_rectangle_assignment(
-                        contents, "cinematicMenuButtonArea",
-                        &parsed.cinematic_menu_button) &&
-                    parse_gui_rectangle_assignment(
-                        contents, "cinematicCommButtonArea",
-                        &parsed.cinematic_comm_button);
-                parsed.has_single_wireframe =
-                    parse_gui_rectangle_assignment(
-                        contents, "infoSingleWireframeIconArea",
-                        &parsed.single_wireframe);
-                parsed.has_single_race_icon =
-                    parse_gui_rectangle_assignment(
-                        contents, "infoSingleRaceIconArea",
-                        &parsed.single_race_icon) &&
-                    parse_gui_rectangle_assignment(
-                        contents, "infoSingleRaceIconDisplayArea",
-                        &parsed.single_race_icon_display);
-                parsed.has_single_background =
-                    parse_gui_rectangle_assignment(
-                        contents, "infoSingleBackgroundArea",
-                        &parsed.single_background);
-                for (std::size_t index = 0;
-                     parsed.has_single_background &&
-                     index < parsed.single_background_pieces.size();
-                     ++index) {
-                    char key[64]{};
-                    std::snprintf(
-                        key, sizeof(key), "infoSingleBackground_%lu",
-                        static_cast<unsigned long>(index));
-                    if (!parse_gui_rectangle_assignment(
-                            contents, key,
-                            &parsed.single_background_pieces[index])) {
-                        break;
-                    }
-                    ++parsed.single_background_piece_count;
+        struct Context {
+            const std::string& supplied;
+            const std::string& basename;
+            LegacyGameplayConfigAreas* output;
+            std::array<std::string, 3> candidates{};
+            std::uint32_t candidate = 0;
+            std::string contents;
+            LegacyGameplayConfigAreas parsed{};
+            std::exception_ptr error;
+        } context{supplied, basename, output, {}, 0, {}, {}, {}};
+        const auto step = +[](void* opaque, std::uint32_t operation,
+                              std::uint32_t index) noexcept -> std::uint32_t {
+            auto& state = *static_cast<Context*>(opaque);
+            try {
+                if (operation == 0) {
+                    const char* root = g_api->extension_root(index);
+                    if (!root || !*root) return 0;
+                    state.candidates = {{
+                        join_path(root, state.supplied.c_str()),
+                        join_path(root, (std::string("misc\\") +
+                                         state.basename).c_str()),
+                        join_path(root, state.basename.c_str())}};
+                    return 1;
                 }
-                parsed.has_single_name_background =
-                    parse_gui_rectangle_assignment(
-                        contents, "infoSingleNameTextBackgroundArea",
-                        &parsed.single_name_background);
-                parsed.has_single_crew_background =
-                    parse_gui_rectangle_assignment(
-                        contents, "infoSingleCrewTextBackgroundArea",
-                        &parsed.single_crew_background);
-                parsed.has_single_officer_background =
-                    parse_gui_rectangle_assignment(
-                        contents, "infoSingleOfficerTextBackgroundArea",
-                        &parsed.single_officer_background);
-                bool has_class_text = parse_gui_rectangle_assignment(
-                    contents, "infoSingleClassTextInformationArea",
-                    &parsed.single_class_text);
-                if (!has_class_text) {
-                    has_class_text = parse_gui_rectangle_assignment(
-                        contents, "infoSingleClassTextArea",
-                        &parsed.single_class_text);
+                if (operation == 1) {
+                    state.candidate = index;
+                    const std::string& path = state.candidates[index];
+                    if (path.empty()) return 0;
+                    state.contents = read_small_text_file(path);
+                    if (state.contents.empty()) return 0;
+                    state.parsed = {};
+                    return 1;
                 }
-                bool has_name_text = parse_gui_rectangle_assignment(
-                    contents, "infoSingleNameTextInformationArea",
-                    &parsed.single_name_text);
-                if (!has_name_text) {
-                    has_name_text = parse_gui_rectangle_assignment(
-                        contents, "infoSingleNameTextArea",
-                        &parsed.single_name_text);
+                if (operation == 3) {
+                    const auto bit = [index](unsigned position) {
+                        return (index & (1u << position)) != 0;
+                    };
+                    state.parsed.has_cinematic_buttons = bit(0);
+                    state.parsed.has_single_wireframe = bit(1);
+                    state.parsed.has_single_race_icon = bit(2);
+                    state.parsed.has_single_background = bit(3);
+                    state.parsed.has_single_name_background = bit(4);
+                    state.parsed.has_single_crew_background = bit(5);
+                    state.parsed.has_single_officer_background = bit(6);
+                    state.parsed.has_single_identity_layout = bit(7);
+                    state.parsed.has_single_identity_labels = bit(8);
+                    state.parsed.has_single_construction_bar = bit(9);
+                    state.parsed.has_single_energy_bar = bit(10);
+                    state.parsed.has_multi_ship_layout = bit(11);
+                    state.parsed.single_background_piece_count = index >> 16;
+                    state.parsed.source_path =
+                        state.candidates[state.candidate];
+                    *state.output = std::move(state.parsed);
+                    return 1;
                 }
-                const bool has_crew_text = parse_gui_rectangle_assignment(
-                    contents, "infoSingleCrewTextInformationArea",
-                    &parsed.single_crew_text);
-                const bool has_officer_text =
-                    parse_gui_rectangle_assignment(
-                        contents, "infoSingleOfficerTextInformationArea",
-                        &parsed.single_officer_text);
-                parsed.has_single_identity_layout = has_class_text &&
-                    has_name_text && has_crew_text && has_officer_text;
-                parsed.has_single_identity_labels =
-                    parse_gui_rectangle_assignment(
-                        contents, "infoSingleCrewTextLabelArea",
-                        &parsed.single_crew_label) &&
-                    parse_gui_rectangle_assignment(
-                        contents, "infoSingleOfficerTextLabelArea",
-                        &parsed.single_officer_label);
-                parsed.has_single_construction_bar =
-                    parse_gui_rectangle_assignment(
-                        contents, "infoSingleConstructionBarArea",
-                        &parsed.single_construction_bar);
-                parsed.has_single_energy_bar =
-                    parse_gui_rectangle_assignment(
-                        contents, "infoSingleEnergyBarArea",
-                        &parsed.single_energy_bar);
-                parsed.has_multi_ship_layout = true;
-                for (std::size_t index = 0;
-                     index < parsed.multi_ship_tiles.size(); ++index) {
-                    char key[64]{};
-                    std::snprintf(
-                        key, sizeof(key), "infoMultiShipIcon_%lu",
-                        static_cast<unsigned long>(index));
-                    if (!parse_gui_rectangle_assignment(
-                            contents, key,
-                            &parsed.multi_ship_tiles[index])) {
-                        parsed.has_multi_ship_layout = false;
-                        break;
-                    }
+                if (operation != 2) return 0;
+                const std::uint32_t field = index & 0xffu;
+                const std::uint32_t piece = index >> 8;
+                char generated[64]{};
+                const char* key = nullptr;
+                a1compat::LegacyUiArea* area = nullptr;
+                switch (field) {
+                    case 0: key="controlPanelArea"; area=&state.parsed.control_panel; break;
+                    case 1: key="cinematicPanelArea"; area=&state.parsed.cinematic_panel; break;
+                    case 2: key="cinematicBackgroundPanelArea"; area=&state.parsed.cinematic_background_panel; break;
+                    case 3: key="cinematicBackgroundArea"; area=&state.parsed.cinematic_background; break;
+                    case 4: key="cinematicDisplayArea"; area=&state.parsed.cinematic_display; break;
+                    case 5: key="cinematicMenuButtonArea"; area=&state.parsed.cinematic_menu_button; break;
+                    case 6: key="cinematicCommButtonArea"; area=&state.parsed.cinematic_comm_button; break;
+                    case 7: key="infoSingleWireframeIconArea"; area=&state.parsed.single_wireframe; break;
+                    case 8: key="infoSingleRaceIconArea"; area=&state.parsed.single_race_icon; break;
+                    case 9: key="infoSingleRaceIconDisplayArea"; area=&state.parsed.single_race_icon_display; break;
+                    case 10: key="infoSingleBackgroundArea"; area=&state.parsed.single_background; break;
+                    case 11:
+                        std::snprintf(generated,sizeof(generated),"infoSingleBackground_%lu",static_cast<unsigned long>(piece));
+                        key=generated; area=&state.parsed.single_background_pieces[piece]; break;
+                    case 12: key="infoSingleNameTextBackgroundArea"; area=&state.parsed.single_name_background; break;
+                    case 13: key="infoSingleCrewTextBackgroundArea"; area=&state.parsed.single_crew_background; break;
+                    case 14: key="infoSingleOfficerTextBackgroundArea"; area=&state.parsed.single_officer_background; break;
+                    case 15: key="infoSingleClassTextInformationArea"; area=&state.parsed.single_class_text; break;
+                    case 16: key="infoSingleClassTextArea"; area=&state.parsed.single_class_text; break;
+                    case 17: key="infoSingleNameTextInformationArea"; area=&state.parsed.single_name_text; break;
+                    case 18: key="infoSingleNameTextArea"; area=&state.parsed.single_name_text; break;
+                    case 19: key="infoSingleCrewTextInformationArea"; area=&state.parsed.single_crew_text; break;
+                    case 20: key="infoSingleOfficerTextInformationArea"; area=&state.parsed.single_officer_text; break;
+                    case 21: key="infoSingleCrewTextLabelArea"; area=&state.parsed.single_crew_label; break;
+                    case 22: key="infoSingleOfficerTextLabelArea"; area=&state.parsed.single_officer_label; break;
+                    case 23: key="infoSingleConstructionBarArea"; area=&state.parsed.single_construction_bar; break;
+                    case 24: key="infoSingleEnergyBarArea"; area=&state.parsed.single_energy_bar; break;
+                    case 25:
+                        std::snprintf(generated,sizeof(generated),"infoMultiShipIcon_%lu",static_cast<unsigned long>(piece));
+                        key=generated; area=&state.parsed.multi_ship_tiles[piece]; break;
+                    case 26: key="infoMultiShieldBarArea"; area=&state.parsed.multi_shield_bar; break;
+                    case 27: key="infoMultiEnergyBarArea"; area=&state.parsed.multi_energy_bar; break;
+                    case 28: key="infoMultiCrewDotArea"; area=&state.parsed.multi_crew_dot; break;
+                    case 29: key="infoMultiWireframeIconArea"; area=&state.parsed.multi_wireframe; break;
+                    default: return 0;
                 }
-                parsed.has_multi_ship_layout =
-                    parsed.has_multi_ship_layout &&
-                    parse_gui_rectangle_assignment(
-                        contents, "infoMultiShieldBarArea",
-                        &parsed.multi_shield_bar) &&
-                    parse_gui_rectangle_assignment(
-                        contents, "infoMultiEnergyBarArea",
-                        &parsed.multi_energy_bar) &&
-                    parse_gui_rectangle_assignment(
-                        contents, "infoMultiCrewDotArea",
-                        &parsed.multi_crew_dot) &&
-                    parse_gui_rectangle_assignment(
-                        contents, "infoMultiWireframeIconArea",
-                        &parsed.multi_wireframe);
-                parsed.source_path = path;
-                *output = std::move(parsed);
-                return true;
+                return parse_gui_rectangle_assignment(state.contents,key,area) ? 1u : 0u;
+            } catch (...) {
+                state.error = std::current_exception();
+                return UINT32_MAX;
             }
-        }
+        };
+        const bool loaded = a2fo_rs_stage9_a1_config_gameplay(
+            &context, root_count, step);
+        if (context.error) std::rethrow_exception(context.error);
+        return loaded;
     } catch (...) {
         return false;
     }
     return false;
 }
 
+std::int32_t a1_ui_round_bits(std::uint64_t bits) noexcept {
+    double value;std::memcpy(&value,&bits,sizeof(value));
+    return static_cast<std::int32_t>(std::lround(value));
+}
+
 a1compat::LegacyUiArea scale_legacy_gui_area(
     const a1compat::LegacyUiArea& area,
     double scale_x, double scale_y) noexcept {
-    return a1compat::LegacyUiArea{
-        static_cast<std::int32_t>(std::lround(area.x * scale_x)),
-        static_cast<std::int32_t>(std::lround(area.y * scale_y)),
-        static_cast<std::int32_t>(std::lround(area.width * scale_x)),
-        static_cast<std::int32_t>(std::lround(area.height * scale_y))};
+    static_assert(sizeof(area)==16);
+    std::array<std::int32_t,4> output{};
+    a2fo_rs_stage9_a1_ui_scale(&area,
+        reinterpret_cast<const std::uint64_t*>(&scale_x),
+        reinterpret_cast<const std::uint64_t*>(&scale_y),output.data(),a1_ui_round_bits);
+    return {output[0],output[1],output[2],output[3]};
 }
 
+bool a1_config_number(const std::uint8_t* begin, std::size_t,
+                      std::size_t* consumed, double* output) noexcept {
+    errno = 0;
+    char* end = nullptr;
+    const double parsed = std::strtod(
+        reinterpret_cast<const char*>(begin), &end);
+    if (end == reinterpret_cast<const char*>(begin) || errno == ERANGE ||
+        !std::isfinite(parsed)) return false;
+    *consumed = static_cast<std::size_t>(
+        end - reinterpret_cast<const char*>(begin));
+    *output = parsed;
+    return true;
+}
+bool a1_config_round(double parsed, std::int32_t* output) noexcept {
+        if (parsed < 0.0 || parsed > kMaximumStartingResourceAmount)
+            return false;
+        const long long rounded = std::llround(parsed);
+        if (rounded < 0 ||
+            rounded > std::numeric_limits<std::int32_t>::max()) return false;
+        *output = static_cast<std::int32_t>(rounded);
+        return true;
+}
 bool parse_starting_resource_literal(
     const std::string& statement, std::size_t equals,
     std::int32_t& value) noexcept {
-    const char* begin = statement.c_str() + equals + 1;
-    while (*begin == ' ' || *begin == '\t' ||
-           *begin == '\r' || *begin == '\n') {
-        ++begin;
-    }
-    errno = 0;
-    char* end = nullptr;
-    const double parsed = std::strtod(begin, &end);
-    if (end == begin || errno == ERANGE || !std::isfinite(parsed)) {
-        return false;
-    }
-    while (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n') {
-        ++end;
-    }
-    if (*end == 'f' || *end == 'F') {
-        ++end;
-        while (*end == ' ' || *end == '\t' ||
-               *end == '\r' || *end == '\n') {
-            ++end;
-        }
-    }
-    if (*end != '\0' || parsed < 0.0 ||
-        parsed > kMaximumStartingResourceAmount) {
-        return false;
-    }
-    const long long rounded = std::llround(parsed);
-    if (rounded < 0 ||
-        rounded > std::numeric_limits<std::int32_t>::max()) {
-        return false;
-    }
-    value = static_cast<std::int32_t>(rounded);
-    return true;
+    return a2fo_rs_stage9_a1_config_literal(
+        reinterpret_cast<const std::uint8_t*>(statement.c_str()),
+        statement.size(), equals, &value, a1_config_number, a1_config_round);
 }
 
 struct LegacyNativeResourceLimit {
@@ -4028,69 +4366,60 @@ bool apply_legacy_native_resource_limits() {
     std::string effective_path;
     std::string effective_contents;
     const std::uint32_t count = g_api->extension_root_count();
-    if (count > 4096) return false;
-    for (std::uint32_t index = 0; index < count; ++index) {
-        const std::string path = join_path(
-            g_api->extension_root(index), kRtsConfigFileName);
-        if (path.empty()) continue;
-        std::ifstream candidate(path, std::ios::binary);
-        if (!candidate) continue;
-        effective_path = path;
-        effective_contents = read_small_text_file(path);
-    }
+    struct RootContext{std::string& path;std::string& contents;std::exception_ptr error;} roots{effective_path,effective_contents,nullptr};
+    const auto root_step=+[](void* opaque,std::uint32_t index) noexcept -> std::uint8_t {
+        auto& c=*static_cast<RootContext*>(opaque);
+        try {
+            const std::string path=join_path(g_api->extension_root(index),kRtsConfigFileName);
+            if(path.empty())return 1;
+            std::ifstream candidate(path,std::ios::binary);
+            if(!candidate)return 1;
+            c.path=path;
+            c.contents=read_small_text_file(path);
+            return 1;
+        }catch(...){c.error=std::current_exception();return 0;}
+    };
+    const bool scanned=a2fo_rs_stage9_a1_resource_scan_roots(count,&roots,root_step)!=0;
+    if(roots.error)std::rethrow_exception(roots.error);
+    if(!scanned)return false;
     if (effective_path.empty()) return true;
 
-    std::array<std::int32_t, kLegacyNativeResourceLimits.size()> values{};
-    std::array<bool, kLegacyNativeResourceLimits.size()> legacy_found{};
-    std::array<bool, kLegacyNativeResourceLimits.size()> modern_found{};
-    const std::string source = strip_c_comments(effective_contents);
-    std::size_t begin = 0;
-    while (begin < source.size()) {
-        const std::size_t semicolon = source.find(';', begin);
-        const std::size_t end = semicolon == std::string::npos
-            ? source.size() : semicolon;
-        const std::string statement = source.substr(begin, end - begin);
-        const std::size_t equals = statement.find('=');
-        if (equals != std::string::npos) {
-            const std::string identifier =
-                assignment_identifier(statement, equals);
-            for (std::size_t index = 0;
-                 index < kLegacyNativeResourceLimits.size(); ++index) {
-                const auto& limit = kLegacyNativeResourceLimits[index];
-                if (identifier == limit.modern_command) {
-                    modern_found[index] = true;
-                    break;
-                }
-                if (identifier != limit.legacy_command) continue;
-                std::int32_t value = 0;
-                if (parse_starting_resource_literal(
-                        statement, equals, value)) {
-                    values[index] = value;
-                    legacy_found[index] = true;
-                }
-                break;
-            }
-        }
-        if (semicolon == std::string::npos) break;
-        begin = semicolon + 1;
-    }
-
-    std::size_t applied = 0;
-    for (std::size_t index = 0;
-         index < kLegacyNativeResourceLimits.size(); ++index) {
-        if (!legacy_found[index] || modern_found[index]) continue;
-        const auto& limit = kLegacyNativeResourceLimits[index];
-        void* maximum = at(g_armada, limit.maximum_rva);
-        if (!native_resource_limit_layout_matches(limit) ||
-            !writable_range(maximum, sizeof(float))) {
-            log_line("A1 legacy resource-maximum layout validation failed");
-            return false;
-        }
-        const float value = static_cast<float>(values[index]);
-        std::memcpy(maximum, &value, sizeof(value));
-        ++applied;
-    }
-
+    const std::string source=strip_c_comments(effective_contents);
+    struct IdentifierFrame{const std::string identifier;
+        IdentifierFrame(const std::string& statement,std::size_t equals):identifier(assignment_identifier(statement,equals)){} };
+    struct StatementFrame{const std::string statement;std::optional<IdentifierFrame> identifier;
+        StatementFrame(const std::string& source,std::size_t first,std::size_t end):statement(source.substr(first,end-first)){} };
+    struct ParseContext{const std::string& source;std::optional<StatementFrame> frame;std::exception_ptr error;} parse{source,std::nullopt,nullptr};
+    const auto begin=+[](void* opaque,std::size_t first,std::size_t end,const std::uint8_t** data,std::size_t* size) noexcept -> std::uint8_t {
+        auto& c=*static_cast<ParseContext*>(opaque);
+        try{c.frame.emplace(c.source,first,end);*data=reinterpret_cast<const std::uint8_t*>(c.frame->statement.data());*size=c.frame->statement.size();return 1;}
+        catch(...){c.error=std::current_exception();c.frame.reset();return 0;}
+    };
+    const auto identifier=+[](void* opaque,std::size_t equals,const std::uint8_t** data,std::size_t* size) noexcept -> std::uint8_t {
+        auto& c=*static_cast<ParseContext*>(opaque);
+        try{c.frame->identifier.emplace(c.frame->statement,equals);const auto& name=c.frame->identifier->identifier;*data=reinterpret_cast<const std::uint8_t*>(name.data());*size=name.size();return 1;}
+        catch(...){c.error=std::current_exception();return 0;}
+    };
+    const auto literal=+[](void* opaque,std::size_t equals,std::int32_t* value) noexcept -> std::uint8_t {
+        auto& c=*static_cast<ParseContext*>(opaque);
+        try{return parse_starting_resource_literal(c.frame->statement,equals,*value)?2:1;}
+        catch(...){c.error=std::current_exception();return 0;}
+    };
+    const auto end=+[](void* opaque) noexcept -> std::uint8_t {static_cast<ParseContext*>(opaque)->frame.reset();return 1;};
+    A2foA1ResourceLimitPlan plan{};
+    const bool parsed=a2fo_rs_stage9_a1_resource_parse(reinterpret_cast<const std::uint8_t*>(source.data()),source.size(),&parse,begin,identifier,literal,end,&plan)!=0;
+    if(parse.error)std::rethrow_exception(parse.error);
+    if(!parsed)return false;
+    const auto apply=+[](void*,std::uint32_t index,std::int32_t amount) noexcept -> std::uint8_t {
+        const auto& limit=kLegacyNativeResourceLimits[index];
+        void* maximum=at(g_armada,limit.maximum_rva);
+        if(!native_resource_limit_layout_matches(limit)||!writable_range(maximum,sizeof(float))){log_line("A1 legacy resource-maximum layout validation failed");return 0;}
+        const float value=static_cast<float>(amount);
+        std::memcpy(maximum,&value,sizeof(value));return 1;
+    };
+    std::uint32_t applied=0;
+    if(!a2fo_rs_stage9_a1_resource_apply(&plan,nullptr,apply,&applied))return false;
+    const auto& values=plan.values;
     if (applied != 0) {
         char message[384]{};
         std::snprintf(
@@ -4098,11 +4427,11 @@ bool apply_legacy_native_resource_limits() {
             "A1 legacy resource maxima bridged from '%s': "
             "Dilithium=%s%ld, Crew=%s%ld, Officers=%s%ld",
             effective_path.c_str(),
-            legacy_found[0] && !modern_found[0] ? "" : "unchanged/",
+            (plan.apply_mask & (1u << 0)) != 0 ? "" : "unchanged/",
             static_cast<long>(values[0]),
-            legacy_found[1] && !modern_found[1] ? "" : "unchanged/",
+            (plan.apply_mask & (1u << 1)) != 0 ? "" : "unchanged/",
             static_cast<long>(values[1]),
-            legacy_found[2] && !modern_found[2] ? "" : "unchanged/",
+            (plan.apply_mask & (1u << 2)) != 0 ? "" : "unchanged/",
             static_cast<long>(values[2]));
         log_line(message);
     }
@@ -4112,69 +4441,51 @@ bool apply_legacy_native_resource_limits() {
 std::uint32_t apply_starting_resource_config(
     const std::string& contents,
     LegacyStartingResourceDefaults& defaults) {
-    struct GrantCommand {
-        const char* name;
-        std::size_t resource_index;
-    };
-    constexpr std::array<GrantCommand, 5> commands{{
-        {"SHOWMETHEMONEY_CREW", 0},
-        {"SHOWMETHEMONEY_DILITHIUM", 1},
-        {"SHOWMETHEMONEY_METAL", 2},
-        {"SHOWMETHEMONEY_TRITANIUM", 3},
-        {"SHOWMETHEMONEY_SUPPLIES", 4},
-    }};
-
     const std::string source = strip_c_comments(contents);
-    std::uint32_t applied = 0;
-    std::size_t begin = 0;
-    while (begin < source.size()) {
-        const std::size_t semicolon = source.find(';', begin);
-        const std::size_t end = semicolon == std::string::npos
-            ? source.size() : semicolon;
-        const std::string statement = source.substr(begin, end - begin);
-        const std::size_t equals = statement.find('=');
-        if (equals != std::string::npos) {
-            const std::string identifier =
-                assignment_identifier(statement, equals);
-            for (const GrantCommand& command : commands) {
-                if (identifier != command.name) continue;
-                std::int32_t value = 0;
-                if (parse_starting_resource_literal(
-                        statement, equals, value)) {
-                    defaults.normal[command.resource_index] = value;
-                    ++applied;
-                }
-                break;
-            }
-        }
-        if (semicolon == std::string::npos) break;
-        begin = semicolon + 1;
-    }
-    return applied;
+    return a2fo_rs_stage9_a1_config_apply(
+        reinterpret_cast<const std::uint8_t*>(source.data()),
+        source.size(), defaults.normal.data(), a1_config_number,
+        a1_config_round);
 }
 
+struct A1StartingDefaultsContext {
+    LegacyStartingResourceDefaults& defaults;
+    std::exception_ptr error;
+};
+bool a1_starting_defaults_step(void* opaque, std::uint32_t operation,
+                               std::uint32_t index, const std::uint8_t**,
+                               std::size_t* amount) noexcept {
+    auto& context = *static_cast<A1StartingDefaultsContext*>(opaque);
+    try {
+        if (operation == 0) {
+            const std::string path = join_path(
+                g_api->extension_root(index), kRtsConfigFileName);
+            if (path.empty()) return true;
+            const std::string contents = read_small_text_file(path);
+            if (!contents.empty()) {
+                *amount = apply_starting_resource_config(
+                    contents, context.defaults);
+            }
+            return true;
+        }
+        const long long lots = std::llround(
+            static_cast<double>(context.defaults.normal[index]) * 1.5);
+        context.defaults.lots[index] = static_cast<std::int32_t>(lots);
+        return true;
+    } catch (...) {
+        context.error = std::current_exception();
+        return false;
+    }
+}
 LegacyStartingResourceDefaults load_starting_resource_defaults() {
     LegacyStartingResourceDefaults defaults;
-    std::uint32_t configured_fields = 0;
-    if (g_api && g_api->extension_root_count && g_api->extension_root) {
-        const std::uint32_t count = g_api->extension_root_count();
-        if (count <= 4096) {
-            for (std::uint32_t index = 0; index < count; ++index) {
-                const std::string path = join_path(
-                    g_api->extension_root(index), kRtsConfigFileName);
-                if (path.empty()) continue;
-                const std::string contents = read_small_text_file(path);
-                if (contents.empty()) continue;
-                configured_fields +=
-                    apply_starting_resource_config(contents, defaults);
-            }
-        }
-    }
-    for (std::size_t index = 0; index < defaults.normal.size(); ++index) {
-        const long long lots = std::llround(
-            static_cast<double>(defaults.normal[index]) * 1.5);
-        defaults.lots[index] = static_cast<std::int32_t>(lots);
-    }
+    A1StartingDefaultsContext context{defaults, {}};
+    const std::uint32_t count = g_api && g_api->extension_root_count &&
+        g_api->extension_root ? g_api->extension_root_count() : 0;
+    const std::uint32_t configured_fields =
+        a2fo_rs_stage9_a1_config_defaults(
+            &context, count, a1_starting_defaults_step);
+    if (context.error) std::rethrow_exception(context.error);
 
     char message[384]{};
     std::snprintf(
@@ -4220,73 +4531,15 @@ bool register_starting_resource_defaults(
 
 bool parse_a1compat_ini(const std::string& contents,
                         A1CompatSettings& settings) noexcept {
-    bool in_section = false;
-    bool found = false;
-    std::istringstream stream(contents);
-    for (std::string line; std::getline(stream, line);) {
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-        }
-        std::size_t cursor = 0;
-        while (cursor < line.size() &&
-               std::isspace(static_cast<unsigned char>(line[cursor]))) {
-            ++cursor;
-        }
-        line.erase(0, cursor);
-        while (!line.empty() &&
-               std::isspace(static_cast<unsigned char>(line.back()))) {
-            line.pop_back();
-        }
-
-        if (line.empty() || line[0] == ';' || line[0] == '#') continue;
-
-        if (line.size() >= 2 && line.front() == '[' &&
-            line.back() == ']') {
-            std::string section = line.substr(1, line.size() - 2);
-            for (char& ch : section) {
-                ch = static_cast<char>(std::tolower(
-                    static_cast<unsigned char>(ch)));
-            }
-            while (!section.empty() &&
-                   std::isspace(static_cast<unsigned char>(section.back()))) {
-                section.pop_back();
-            }
-            while (!section.empty() &&
-                   std::isspace(static_cast<unsigned char>(section.front()))) {
-                section.erase(0, 1);
-            }
-            in_section = (section == "a1compat");
-            continue;
-        }
-
-        if (!in_section) continue;
-
-        const std::size_t separator = line.find('=');
-        if (separator == std::string::npos) continue;
-        std::string key = line.substr(0, separator);
-        std::string value = line.substr(separator + 1);
-        for (char& ch : key) {
-            ch = static_cast<char>(std::tolower(
-                static_cast<unsigned char>(ch)));
-        }
-        while (!key.empty() &&
-               std::isspace(static_cast<unsigned char>(key.back()))) {
-            key.pop_back();
-        }
-        while (!key.empty() &&
-               std::isspace(static_cast<unsigned char>(key.front()))) {
-            key.erase(0, 1);
-        }
-
-        if (key == kA1CompatSafeModeKey) {
-            bool safe_mode = settings.safe_mode;
-            if (parse_bool_config_value(value, safe_mode)) {
-                settings.safe_mode = safe_mode;
-                found = true;
-            }
-        }
-    }
-    return found;
+    const auto space = +[](std::uint8_t ch) noexcept -> std::uint8_t {
+        return std::isspace(ch) != 0;
+    };
+    const auto lower = +[](std::uint8_t ch) noexcept -> std::uint8_t {
+        return static_cast<std::uint8_t>(std::tolower(ch));
+    };
+    return a2fo_rs_stage9_a1_config_ini(
+        reinterpret_cast<const std::uint8_t*>(contents.data()),
+        contents.size(), &settings.safe_mode, space, lower);
 }
 
 bool read_a1compat_settings(A1CompatSettings& settings) noexcept {
@@ -4295,27 +4548,39 @@ bool read_a1compat_settings(A1CompatSettings& settings) noexcept {
         return false;
     }
     const std::uint32_t count = g_api->extension_root_count();
-    if (count == 0 || count > 4096) return false;
-
-    bool any_parsed = false;
-    for (std::uint32_t index = 0; index < count; ++index) {
-        const auto marker =
-            join_path(g_api->extension_root(index), kA1CompatIniFileName);
-        if (marker.empty()) continue;
-
-        const DWORD attributes = GetFileAttributesA(marker.c_str());
-        if (attributes == INVALID_FILE_ATTRIBUTES ||
-            (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-            continue;
+    struct Context { std::string contents; std::exception_ptr error; } context;
+    const auto step = +[](void* opaque, std::uint32_t operation,
+                          std::uint32_t index, const std::uint8_t** bytes,
+                          std::size_t* length) noexcept {
+        auto& state = *static_cast<Context*>(opaque);
+        if (operation != 2) return false;
+        try {
+            const auto marker = join_path(
+                g_api->extension_root(index), kA1CompatIniFileName);
+            if (marker.empty()) return true;
+            const DWORD attributes = GetFileAttributesA(marker.c_str());
+            if (attributes == INVALID_FILE_ATTRIBUTES ||
+                (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) return true;
+            state.contents = read_small_text_file(marker);
+            *bytes = reinterpret_cast<const std::uint8_t*>(
+                state.contents.data());
+            *length = state.contents.size();
+            return true;
+        } catch (...) {
+            state.error = std::current_exception();
+            return false;
         }
-
-        const std::string contents = read_small_text_file(marker);
-        if (contents.empty()) continue;
-        if (parse_a1compat_ini(contents, settings)) {
-            any_parsed = true;
-        }
-    }
-    return any_parsed;
+    };
+    const auto space = +[](std::uint8_t ch) noexcept -> std::uint8_t {
+        return std::isspace(ch) != 0;
+    };
+    const auto lower = +[](std::uint8_t ch) noexcept -> std::uint8_t {
+        return static_cast<std::uint8_t>(std::tolower(ch));
+    };
+    const bool found = a2fo_rs_stage9_a1_config_ini_roots(
+        &context, count, &settings.safe_mode, step, space, lower);
+    if (context.error) std::rethrow_exception(context.error);
+    return found;
 }
 
 bool read_parameter_classlabel(
@@ -4342,39 +4607,10 @@ bool read_parameter_classlabel(
 
 bool matches_numbered_odf_family(
     const char* odf_name, const char* family) noexcept {
-    if (!odf_name || !*odf_name || !family || !*family) return false;
-
-    const char* basename = odf_name;
-    for (const char* cursor = odf_name; *cursor != '\0'; ++cursor) {
-        if (*cursor == '\\' || *cursor == '/') basename = cursor + 1;
-    }
-
-    char normalized[128]{};
-    std::size_t length = 0;
-    while (basename[length] != '\0' && length + 1 < sizeof(normalized)) {
-        char value = basename[length];
-        if (value >= 'A' && value <= 'Z') {
-            value = static_cast<char>(value - 'A' + 'a');
-        }
-        normalized[length++] = value;
-    }
-    normalized[length] = '\0';
-    if (length > 4 && _stricmp(normalized + length - 4, ".odf") == 0) {
-        length -= 4;
-        normalized[length] = '\0';
-    }
-
-    const std::size_t family_length = std::strlen(family);
-    if (length < family_length ||
-        _strnicmp(normalized, family, family_length) != 0) {
-        return false;
-    }
-    for (std::size_t index = family_length; index < length; ++index) {
-        if (normalized[index] < '0' || normalized[index] > '9') {
-            return false;
-        }
-    }
-    return true;
+    return a2fo_rs_stage8_a1_numbered_family(
+        reinterpret_cast<const std::uint8_t*>(odf_name),
+        reinterpret_cast<const std::uint8_t*>(family),
+        &a1_policy_compare,&a1_policy_ncompare,&a1_policy_length,nullptr)!=0;
 }
 
 const char* legacy_moon_resource_default(
@@ -4397,13 +4633,12 @@ const char* legacy_moon_resource_default(
         getter, project_id);
     copy_printable_string(
         reinterpret_cast<const char*>(result), odf_name, odf_name_size);
-    if (matches_numbered_odf_family(odf_name, "mmooninf")) {
-        return "ResourceMoonInf";
+    switch (a2fo_rs_stage9_a1_resource_family(
+            odf_name, &a1_numbered_family_probe)) {
+        case 2: return "ResourceMoonInf";
+        case 1: return "ResourceMoon";
+        default: return nullptr;
     }
-    if (matches_numbered_odf_family(odf_name, "mdmoon")) {
-        return "ResourceMoon";
-    }
-    return nullptr;
 }
 
 std::uintptr_t resolve_game_object_resource(
@@ -4434,14 +4669,17 @@ std::uintptr_t resolve_game_object_resource(
 
     const LONG incident = InterlockedIncrement(
         &g_legacy_moon_resource_default_count);
-    if (incident <= kMaximumLegacyMoonResourceReports) {
+    const std::uint8_t report = a2fo_rs_stage9_a1_report(
+        static_cast<std::int32_t>(incident),
+        kMaximumLegacyMoonResourceReports);
+    if (report == 1) {
         char message[320]{};
         std::snprintf(
             message, sizeof(message),
             "A2 Classic missing-code default #%ld: odf='%s', resource='%s'",
             static_cast<long>(incident), odf_name, resource);
         log_line(message);
-    } else if (incident == kMaximumLegacyMoonResourceReports + 1) {
+    } else if (report == 2) {
         log_line("Further A2 Classic moon resource defaults suppressed");
     }
     return 1;
@@ -4462,81 +4700,40 @@ std::uintptr_t resolve_physics_speed(
         parameter_db, context, key, output, default_value);
     if (!key) return found;
 
-    const bool combat_lookup = _stricmp(key, "combatSpeed") == 0;
-    const bool impulse_lookup = _stricmp(key, "impulseSpeed") == 0;
-    const bool warp_lookup = _stricmp(key, "warpSpeed") == 0;
-    if (!combat_lookup && !impulse_lookup && !warp_lookup) return found;
-
-    // A declared/inherited combatSpeed identifies an A2/FO physics contract.
-    // Preserve every native value in that case, including an explicit zero.
-    if (!combat_lookup) {
-        float combat_speed = 0.0f;
-        const std::uintptr_t combat_found = get_float(
-            parameter_db, context, "combatSpeed", &combat_speed, 0.0f);
-        if ((combat_found & 0xffu) != 0) return found;
-    } else if ((found & 0xffu) != 0) {
-        return found;
-    }
-
-    float legacy_impulse_speed = 0.0f;
-    float legacy_warp_speed = 0.0f;
-    const std::uintptr_t impulse_found = get_float(
-        parameter_db, context, "impulseSpeed", &legacy_impulse_speed, 0.0f);
-    const std::uintptr_t warp_found = get_float(
-        parameter_db, context, "warpSpeed", &legacy_warp_speed, 0.0f);
-    const bool has_impulse = (impulse_found & 0xffu) != 0 &&
-        std::isfinite(legacy_impulse_speed) && legacy_impulse_speed > 0.0f;
-    const bool has_warp = (warp_found & 0xffu) != 0 &&
-        std::isfinite(legacy_warp_speed) && legacy_warp_speed > 0.0f;
-    if (!writable_range(output, sizeof(*output))) return found;
-
-    float translated_speed = 0.0f;
-    volatile LONG* report_counter = nullptr;
-    const char* report_kind = nullptr;
-    const char* report_source = nullptr;
-    if (combat_lookup) {
-        if (!has_impulse && !has_warp) return found;
-        translated_speed = has_impulse ? legacy_impulse_speed : 0.0f;
-        if (has_warp) {
-            translated_speed = (std::max)(
-                translated_speed, legacy_warp_speed * 0.5f);
-        }
-        report_counter = &g_legacy_physics_combat_speed_default_count;
-        report_kind = "combat-speed default";
-        report_source = "legacy impulse/warp speeds";
-    } else if (impulse_lookup) {
-        if (!has_warp) return found;
-        // A1 warpSpeed is its ordinary aligned/cruise speed. A2 renamed that
-        // tier to impulseSpeed and reserved warpSpeed for strategic warp.
-        translated_speed = legacy_warp_speed;
-        report_counter = &g_legacy_physics_impulse_speed_translation_count;
-        report_kind = "cruise-speed translation";
-        report_source = "legacy warpSpeed";
-    } else {
-        translated_speed = 0.0f;
-        report_counter = &g_legacy_physics_warp_speed_translation_count;
-        report_kind = "warp-speed translation";
-        report_source = "legacy strategic-warp disable";
-    }
-    std::memcpy(output, &translated_speed, sizeof(translated_speed));
-
-    const LONG incident = InterlockedIncrement(report_counter);
-    if (incident <= kMaximumLegacyPhysicsDefaultReports) {
-        char message[288]{};
-        std::snprintf(
-            message, sizeof(message),
-            "A1 physics %s #%ld: %s=%.3f from %s",
-            report_kind, static_cast<long>(incident), key,
-            static_cast<double>(translated_speed), report_source);
-        log_line(message);
-    } else if (incident == kMaximumLegacyPhysicsDefaultReports + 1) {
-        char message[192]{};
-        std::snprintf(
-            message, sizeof(message),
-            "Further A1 physics %s reports suppressed", report_kind);
-        log_line(message);
-    }
-    return 1;
+    struct Context {
+        void* db;std::uintptr_t context;const char* key;float* output;
+        ParameterDbGetFloatFn getter;std::uintptr_t found,impulse_found=0,warp_found=0;
+        float impulse=0.0f,warp=0.0f;std::uint32_t translated=0,kind=0;
+    } c{parameter_db,context,key,output,get_float,found};
+    const auto step=+[](void* opaque,std::uint32_t op,std::size_t argument) noexcept -> std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return c.found;
+        case 1:return c.key!=nullptr;
+        case 2:return _stricmp(c.key,"combatSpeed")==0;
+        case 3:return _stricmp(c.key,"impulseSpeed")==0;
+        case 4:return _stricmp(c.key,"warpSpeed")==0;
+        case 5:{float combat=0.0f;return c.getter(c.db,c.context,"combatSpeed",&combat,0.0f);}
+        case 6:c.impulse_found=c.getter(c.db,c.context,"impulseSpeed",&c.impulse,0.0f);return c.impulse_found;
+        case 7:c.warp_found=c.getter(c.db,c.context,"warpSpeed",&c.warp,0.0f);return c.warp_found;
+        case 8:{std::uint32_t bits;std::memcpy(&bits,&c.impulse,4);return bits;}
+        case 9:{std::uint32_t bits;std::memcpy(&bits,&c.warp,4);return bits;}
+        case 10:return writable_range(c.output,sizeof(*c.output));
+        case 11:c.translated=static_cast<std::uint32_t>(argument);std::memcpy(c.output,&c.translated,4);return 0;
+        case 12:{c.kind=static_cast<std::uint32_t>(argument);
+            volatile LONG* const counters[]={&g_legacy_physics_combat_speed_default_count,
+                &g_legacy_physics_impulse_speed_translation_count,&g_legacy_physics_warp_speed_translation_count};
+            return static_cast<std::uint32_t>(InterlockedIncrement(counters[c.kind]));}
+        case 13:{float translated;std::memcpy(&translated,&c.translated,4);char message[288]{};
+            std::snprintf(message,sizeof(message),"A1 physics %s #%ld: %s=%.3f from %s",
+                a2fo_rs_stage9_a1_speed_kind(c.kind),static_cast<long>(static_cast<std::int32_t>(argument)),
+                c.key,static_cast<double>(translated),a2fo_rs_stage9_a1_speed_source(c.kind));log_line(message);return 0;}
+        case 14:{char message[192]{};std::snprintf(message,sizeof(message),
+            "Further A1 physics %s reports suppressed",a2fo_rs_stage9_a1_speed_kind(c.kind));log_line(message);return 0;}
+        default:return 0;
+        }}catch(...){std::terminate();}
+    };
+    return a2fo_rs_stage9_a1_speed(&c,step);
 }
 
 enum class LegacySmoothProfile {
@@ -4544,38 +4741,6 @@ enum class LegacySmoothProfile {
     construction,
     battle,
 };
-
-struct SmoothFloatDefault {
-    const char* key;
-    float destroyer;
-    float construction;
-    float battle;
-    float destroyer_combat;
-    float battle_combat;
-};
-
-// These are the controller values used by STA2 Classic's Federation-facing
-// sdestphys, sconstphys and sbattphys families. The raw A1 physics file names
-// are shared by races, so the ordinary fallback deliberately follows these
-// A2 Federation movement profiles rather than attempting a per-ship race
-// guess which PhysicsClass cannot make.
-constexpr std::array<SmoothFloatDefault, 15> kLegacySmoothDefaults{{
-    {"forwardAccel", 1.0f, 1.0f, 3.0f, 0.5f, 0.5f},
-    {"backwardAccel", 1.0f, 1.0f, 1.0f, 1.0f, 1.0f},
-    {"turnOmega", 1.0f, 0.8f, 1.0f, 0.1f, 0.1f},
-    {"turnAlpha", 1.0f, 0.8f, 1.0f, 0.5f, 1.0f},
-    {"pitchOmega", 1.0f, 1.0f, 1.0f, 0.1f, 0.1f},
-    {"pitchAlpha", 1.0f, 1.0f, 1.0f, 1.0f, 1.0f},
-    {"rollCoupling", 2.0f, 0.5f, 3.0f, 2.0f, 3.0f},
-    {"turnOmegaFractionAtRest", 0.2f, 0.8f, 0.0f, 0.2f, 0.0f},
-    {"turnAlphaFractionAtRest", 0.2f, 0.8f, 0.0f, 0.2f, 0.0f},
-    {"pitchOmegaFractionAtRest", 0.2f, 0.8f, 0.0f, 0.2f, 0.0f},
-    {"pitchAlphaFractionAtRest", 0.2f, 0.8f, 0.0f, 0.2f, 0.0f},
-    {"pitchDefault", 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-    {"pitchDefaultSpeed", -1.0f, 0.5f, 1.0f, -1.0f, 1.0f},
-    {"turnControlAngle", 20.0f, 5.0f, 30.0f, 20.0f, 30.0f},
-    {"forwardControlDistance", 70.0f, 10.0f, 100.0f, 70.0f, 100.0f},
-}};
 
 bool parameter_odf_name(
     void* parameter_db, char* output, std::size_t output_size) noexcept {
@@ -4598,63 +4763,73 @@ bool parameter_odf_name(
 }
 
 bool legacy_physics_database(void* parameter_db) noexcept {
-    if (!parameter_db || !g_armada) return false;
-    const auto get_float = reinterpret_cast<ParameterDbGetFloatFn>(
-        at(g_armada, kParameterDbGetFloatRva));
-    float value = 0.0f;
-    if ((get_float(
-            parameter_db, 0, "combatSpeed", &value, 0.0f) & 0xffu) != 0) {
-        return false;
-    }
-    const bool has_impulse = (get_float(
-        parameter_db, 0, "impulseSpeed", &value, 0.0f) & 0xffu) != 0;
-    const bool has_warp = (get_float(
-        parameter_db, 0, "warpSpeed", &value, 0.0f) & 0xffu) != 0;
-    return has_impulse || has_warp;
+    struct Context {
+        void* db;
+        ParameterDbGetFloatFn getter = nullptr;
+        float value = 0.0f;
+        std::exception_ptr error;
+    } context{};
+    context.db=parameter_db;
+    auto op=[](void* opaque,std::uint32_t id,std::size_t)->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {
+            switch(id) {
+            case 0:return c.db!=nullptr;
+            case 1:return g_armada!=nullptr;
+            case 2:
+                c.getter=reinterpret_cast<ParameterDbGetFloatFn>(
+                    at(g_armada,kParameterDbGetFloatRva));
+                return (c.getter(c.db,0,"combatSpeed",&c.value,0.0f)&0xffu)!=0;
+            case 3:return (c.getter(c.db,0,"impulseSpeed",&c.value,0.0f)&0xffu)!=0;
+            case 4:return (c.getter(c.db,0,"warpSpeed",&c.value,0.0f)&0xffu)!=0;
+            default:return 0;
+            }
+        }catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const bool result=a2fo_rs_stage8_a1_physics_database(&context,op)!=0;
+    if(context.error)std::rethrow_exception(context.error);
+    return result;
 }
 
 LegacySmoothProfile legacy_smooth_profile(
     void* parameter_db, char* odf_name,
     std::size_t odf_name_size) noexcept {
-    if (odf_name && odf_name_size != 0) {
-        odf_name[0] = '\0';
-        parameter_odf_name(parameter_db, odf_name, odf_name_size);
-    }
-    const char* name = odf_name && odf_name[0] != '\0' ? odf_name : "";
-    const char* basename = name;
-    for (const char* cursor = name; *cursor != '\0'; ++cursor) {
-        if (*cursor == '\\' || *cursor == '/') basename = cursor + 1;
-    }
-    if (_strnicmp(basename, "cnstphys", 8) == 0 ||
-        _strnicmp(basename, "constphys", 9) == 0) {
-        return LegacySmoothProfile::construction;
-    }
-    if (_strnicmp(basename, "battphys", 8) == 0) {
-        return LegacySmoothProfile::battle;
-    }
-    return LegacySmoothProfile::destroyer;
+    struct Context {
+        void* db;
+        char* output;
+        std::size_t size;
+        const char* name = "";
+        std::exception_ptr error;
+    } context{};
+    context.db=parameter_db;
+    context.output=odf_name;
+    context.size=odf_name_size;
+    auto op=[](void* opaque,std::uint32_t id,std::size_t offset)->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {
+            switch(id) {
+            case 0:return c.output!=nullptr&&c.size!=0;
+            case 1:c.output[0]='\0';return 0;
+            case 2:parameter_odf_name(c.db,c.output,c.size);return 0;
+            case 3:c.name=c.output&&c.output[0]!='\0'?c.output:"";
+                return c.name[0]!='\0';
+            case 4:return static_cast<std::uint8_t>(c.name[offset]);
+            case 5:return _strnicmp(c.name+offset,"cnstphys",8)==0;
+            case 6:return _strnicmp(c.name+offset,"constphys",9)==0;
+            case 7:return _strnicmp(c.name+offset,"battphys",8)==0;
+            default:return 0;
+            }
+        }catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto profile=a2fo_rs_stage8_a1_physics_profile(&context,op);
+    if(context.error)std::rethrow_exception(context.error);
+    return static_cast<LegacySmoothProfile>(profile);
 }
 
 const char* smooth_profile_name(LegacySmoothProfile profile) noexcept {
-    switch (profile) {
-        case LegacySmoothProfile::construction: return "construction";
-        case LegacySmoothProfile::battle: return "battle";
-        default: return "federation-destroyer";
-    }
-}
-
-float smooth_default_value(
-    const SmoothFloatDefault& value, LegacySmoothProfile profile,
-    bool combat_controller) noexcept {
-    switch (profile) {
-        case LegacySmoothProfile::construction:
-            return value.construction;
-        case LegacySmoothProfile::battle:
-            return combat_controller ? value.battle_combat : value.battle;
-        default:
-            return combat_controller ?
-                value.destroyer_combat : value.destroyer;
-    }
+    static const char* const names[]={"federation-destroyer","construction","battle"};
+    return names[a2fo_rs_stage8_a1_physics_profile_name(
+        static_cast<std::uint32_t>(profile))];
 }
 
 void translate_smooth_float(
@@ -4668,8 +4843,18 @@ void translate_smooth_float(
     native(primary_db, fallback_db, key, output);
     if (!key || !writable_range(output, sizeof(*output))) return;
 
-    void* legacy_db = legacy_physics_database(primary_db) ? primary_db :
-        (legacy_physics_database(fallback_db) ? fallback_db : nullptr);
+    struct LegacyContext { void* primary; void* fallback; } legacy_context{
+        primary_db, fallback_db};
+    const auto legacy_read = +[](void* opaque, std::uint32_t operation)
+        noexcept -> std::uint8_t {
+        const auto& c = *static_cast<LegacyContext*>(opaque);
+        return legacy_physics_database(
+            operation == 0 ? c.primary : c.fallback);
+    };
+    const std::uint8_t legacy_choice = a2fo_rs_stage9_a1_physics_legacy_db(
+        &legacy_context, legacy_read);
+    void* legacy_db = legacy_choice == 1 ? primary_db :
+        (legacy_choice == 2 ? fallback_db : nullptr);
     if (!legacy_db) return;
 
     // A partial modern override remains authoritative over the compatibility
@@ -4677,32 +4862,60 @@ void translate_smooth_float(
     const auto get_float = reinterpret_cast<ParameterDbGetFloatFn>(
         at(g_armada, kParameterDbGetFloatRva));
     float declared_value = 0.0f;
-    if ((primary_db && (get_float(
-            primary_db, 0, key, &declared_value, 0.0f) & 0xffu) != 0) ||
-        (fallback_db && (get_float(
-            fallback_db, 0, key, &declared_value, 0.0f) & 0xffu) != 0)) {
-        return;
-    }
-
-    const auto definition = std::find_if(
-        kLegacySmoothDefaults.begin(), kLegacySmoothDefaults.end(),
-        [key](const SmoothFloatDefault& candidate) {
-            return _stricmp(candidate.key, key) == 0;
-        });
-    if (definition == kLegacySmoothDefaults.end()) return;
+    struct DeclaredContext {
+        void* primary;
+        void* fallback;
+        const char* key;
+        ParameterDbGetFloatFn getter;
+        float* value;
+    } declared_context{primary_db, fallback_db, key, get_float,
+                       &declared_value};
+    const auto declared_read = +[](void* opaque, std::uint32_t operation)
+        noexcept -> std::uint8_t {
+        const auto& c = *static_cast<DeclaredContext*>(opaque);
+        void* db = operation == 0 ? c.primary : c.fallback;
+        if (!db) return 0;
+        try {
+            return (c.getter(db, 0, c.key, c.value, 0.0f) & 0xffu) != 0;
+        } catch (...) { std::terminate(); }
+    };
+    if (a2fo_rs_stage9_a1_physics_declared(
+            &declared_context, declared_read)) return;
+    struct KeyContext { const char* key; } key_context{key};
+    const auto table_compare = +[](void* opaque, const char* candidate)
+        noexcept -> std::uint8_t {
+        const auto& c = *static_cast<KeyContext*>(opaque);
+        return _stricmp(candidate, c.key) == 0;
+    };
+    const std::int32_t definition = a2fo_rs_stage9_a1_physics_default_key(
+        &key_context, table_compare);
+    if (definition < 0) return;
 
     char odf_name[160]{};
     const LegacySmoothProfile profile = legacy_smooth_profile(
         legacy_db, odf_name, sizeof(odf_name));
-    const bool combat_controller = fallback_db == legacy_db;
-    const float translated = smooth_default_value(
-        *definition, profile, combat_controller);
+    std::uint32_t translated_bits = 0;
+    std::uint8_t combat_value = 0;
+    a2fo_rs_stage9_a1_physics_default_bits(
+        definition, static_cast<std::uint32_t>(profile), legacy_db,
+        fallback_db, &translated_bits, &combat_value);
+    const bool combat_controller = combat_value != 0;
+    float translated = 0.0f;
+    std::memcpy(&translated, &translated_bits, sizeof(translated));
     std::memcpy(output, &translated, sizeof(translated));
 
-    if (_stricmp(key, "forwardAccel") == 0) {
+    const auto forward_compare = +[](void* opaque, const char* candidate)
+        noexcept -> std::uint8_t {
+        const auto& c = *static_cast<KeyContext*>(opaque);
+        return _stricmp(c.key, candidate) == 0;
+    };
+    if (a2fo_rs_stage9_a1_physics_forward_key(
+            key, &key_context, forward_compare)) {
         const LONG incident = InterlockedIncrement(
             &g_legacy_smooth_profile_translation_count);
-        if (incident <= kMaximumLegacyPhysicsDefaultReports) {
+        const std::uint8_t report_case =
+            a2fo_rs_stage9_a1_physics_log_case(incident);
+        if (report_case == 1) {
             char message[320]{};
             std::snprintf(
                 message, sizeof(message),
@@ -4713,7 +4926,7 @@ void translate_smooth_float(
                 smooth_profile_name(profile),
                 combat_controller ? "combat" : "normal");
             log_line(message);
-        } else if (incident == kMaximumLegacyPhysicsDefaultReports + 1) {
+        } else if (report_case == 2) {
             log_line("Further A1 smooth movement profile reports suppressed");
         }
     }
@@ -4728,26 +4941,52 @@ void translate_smooth_integer(
     const auto native = reinterpret_cast<PhysicsIntCascadeFn>(
         at(g_armada, kPhysicsIntCascadeRva));
     native(primary_db, fallback_db, key, output);
-    if (!key || _stricmp(key, "turnControlSquared") != 0 ||
+    struct KeyContext { const char* key; } key_context{key};
+    const auto turn_compare = +[](void* opaque, const char* candidate)
+        noexcept -> std::uint8_t {
+        const auto& c = *static_cast<KeyContext*>(opaque);
+        return _stricmp(c.key, candidate) == 0;
+    };
+    if (!a2fo_rs_stage9_a1_physics_turn_key(
+            key, &key_context, turn_compare) ||
         !writable_range(output, sizeof(*output))) {
         return;
     }
-    void* legacy_db = legacy_physics_database(primary_db) ? primary_db :
-        (legacy_physics_database(fallback_db) ? fallback_db : nullptr);
+    struct LegacyContext { void* primary; void* fallback; } legacy_context{
+        primary_db, fallback_db};
+    const auto legacy_read = +[](void* opaque, std::uint32_t operation)
+        noexcept -> std::uint8_t {
+        const auto& c = *static_cast<LegacyContext*>(opaque);
+        return legacy_physics_database(
+            operation == 0 ? c.primary : c.fallback);
+    };
+    const std::uint8_t legacy_choice = a2fo_rs_stage9_a1_physics_legacy_db(
+        &legacy_context, legacy_read);
+    void* legacy_db = legacy_choice == 1 ? primary_db :
+        (legacy_choice == 2 ? fallback_db : nullptr);
     if (!legacy_db) return;
 
     std::int32_t declared_value = 0;
-    const bool primary_declared = primary_db &&
-        (a2fo_a1_call_thiscall_3(
-            at(g_armada, kParameterDbGetIntRva), primary_db,
-            reinterpret_cast<std::uintptr_t>(key),
-            reinterpret_cast<std::uintptr_t>(&declared_value), 0) & 0xffu) != 0;
-    const bool fallback_declared = fallback_db &&
-        (a2fo_a1_call_thiscall_3(
-            at(g_armada, kParameterDbGetIntRva), fallback_db,
-            reinterpret_cast<std::uintptr_t>(key),
-            reinterpret_cast<std::uintptr_t>(&declared_value), 0) & 0xffu) != 0;
-    if (primary_declared || fallback_declared) return;
+    struct DeclaredContext {
+        void* primary;
+        void* fallback;
+        const char* key;
+        std::int32_t* value;
+    } declared_context{primary_db, fallback_db, key, &declared_value};
+    const auto declared_read = +[](void* opaque, std::uint32_t operation)
+        noexcept -> std::uint8_t {
+        const auto& c = *static_cast<DeclaredContext*>(opaque);
+        void* db = operation == 0 ? c.primary : c.fallback;
+        if (!db) return 0;
+        try {
+            return (a2fo_a1_call_thiscall_3(
+                at(g_armada, kParameterDbGetIntRva), db,
+                reinterpret_cast<std::uintptr_t>(c.key),
+                reinterpret_cast<std::uintptr_t>(c.value), 0) & 0xffu) != 0;
+        } catch (...) { std::terminate(); }
+    };
+    if (a2fo_rs_stage9_a1_physics_declared_both(
+            &declared_context, declared_read)) return;
     const std::int32_t translated = 0;
     std::memcpy(output, &translated, sizeof(translated));
 }
@@ -4759,8 +4998,14 @@ std::uintptr_t resolve_physics_model(
 
     const std::uintptr_t found = native_race_entry_lookup(
         parameter_db, key, output, output_size, default_value);
-    if ((found & 0xffu) != 0 || !key ||
-        _stricmp(key, "physics") != 0) {
+    struct KeyContext { const char* key; } key_context{key};
+    const auto model_compare = +[](void* opaque, const char* candidate)
+        noexcept -> std::uint8_t {
+        const auto& c = *static_cast<KeyContext*>(opaque);
+        return _stricmp(c.key, candidate) == 0;
+    };
+    if (!a2fo_rs_stage9_a1_physics_model_admit(
+            found, key, &key_context, model_compare)) {
         return found;
     }
 
@@ -4769,8 +5014,8 @@ std::uintptr_t resolve_physics_model(
         at(g_armada, kParameterDbGetIntRva), parameter_db,
         reinterpret_cast<std::uintptr_t>("borgPhysics"),
         reinterpret_cast<std::uintptr_t>(&borg_physics), 0);
-    const char* model =
-        (borg_found & 0xffu) != 0 && borg_physics != 0 ? "borg" : "smooth";
+    const char* model = a2fo_rs_stage9_a1_physics_model_name(
+        borg_found, borg_physics);
     const std::size_t model_size = std::strlen(model) + 1;
     if (output_size < model_size || !writable_range(output, model_size)) {
         return found;
@@ -4779,7 +5024,9 @@ std::uintptr_t resolve_physics_model(
 
     const LONG incident = InterlockedIncrement(
         &g_legacy_physics_model_default_count);
-    if (incident <= kMaximumLegacyPhysicsDefaultReports) {
+    const std::uint8_t report_case =
+        a2fo_rs_stage9_a1_physics_log_case(incident);
+    if (report_case == 1) {
         char message[256]{};
         std::snprintf(
             message, sizeof(message),
@@ -4789,7 +5036,7 @@ std::uintptr_t resolve_physics_model(
             (borg_found & 0xffu) == 0 ? "missing" :
                 (borg_physics != 0 ? "1" : "0"));
         log_line(message);
-    } else if (incident == kMaximumLegacyPhysicsDefaultReports + 1) {
+    } else if (report_case == 2) {
         log_line("Further A1 physics model defaults suppressed");
     }
     return 1;
@@ -4813,29 +5060,8 @@ std::int32_t node_type(void* node) noexcept {
         a2fo_a1_call_thiscall_0(vtable[1], node));
 }
 
-bool parse_officer_quarter_index(
-    const char* name, std::uint32_t* output) noexcept {
-    if (!name || !output ||
-        (name[0] != 'o' && name[0] != 'O') ||
-        (name[1] != 'q' && name[1] != 'Q')) {
-        return false;
-    }
-
-    const char* cursor = name + 2;
-    if (*cursor < '0' || *cursor > '9') return false;
-
-    std::uint32_t value = 0;
-    while (*cursor >= '0' && *cursor <= '9') {
-        const std::uint32_t digit =
-            static_cast<std::uint32_t>(*cursor - '0');
-        if (value > (UINT32_MAX - digit) / 10u) return false;
-        value = (value * 10) + digit;
-        ++cursor;
-    }
-    if (*cursor != '\0' || value == 0) return false;
-
-    *output = value;
-    return true;
+[[maybe_unused]] bool parse_officer_quarter_index(const char* name,std::uint32_t* output) noexcept {
+    return a2fo_rs_stage9_a1_quarters_parse(name,output)!=0;
 }
 
 struct OfficerQuarterTraversal {
@@ -4847,49 +5073,32 @@ struct OfficerQuarterTraversal {
     bool truncated = false;
 };
 
-void prepare_officer_quarter_nodes(
-    void* node, std::size_t depth,
-    OfficerQuarterTraversal* traversal) noexcept {
+void prepare_officer_quarter_nodes(void* node,std::size_t depth,OfficerQuarterTraversal* traversal) noexcept {
     if (!node || !traversal) return;
-    if (depth > kMaximumOqTraversalDepth ||
-        traversal->remaining_nodes == 0) {
-        traversal->truncated = true;
-        return;
-    }
-    --traversal->remaining_nodes;
-
-    char name[96]{};
-    copy_node_name(node, name, sizeof(name));
-    std::uint32_t index = 0;
-    if (parse_officer_quarter_index(name, &index)) {
-        ++traversal->matches;
-        if (index > traversal->highest_index) {
-            traversal->highest_index = index;
+    // The native callback never receives the private traversal or Rust stats.
+    // Node hierarchy storage and checked pointer accesses remain native.
+    struct Context {std::array<char,96> name{};} context{};
+    const auto step=+[](void* opaque,std::uint32_t operation,std::uintptr_t address,std::uintptr_t argument) noexcept -> std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);void* node=reinterpret_cast<void*>(address);
+        switch(operation){
+        case 0:c.name.fill(0);copy_node_name(node,c.name.data(),c.name.size());return reinterpret_cast<std::uintptr_t>(c.name.data());
+        case 1:{auto* flags=reinterpret_cast<std::uint32_t*>(static_cast<std::uint8_t*>(node)+kNodeFlagsOffset);
+            if(!writable_range(flags,sizeof(*flags)))return UINT64_C(0x100000000);
+            std::uint32_t value=0;std::memcpy(&value,flags,sizeof(value));return value;}
+        case 2:{auto* flags=static_cast<std::uint8_t*>(node)+kNodeFlagsOffset;
+            const auto value=static_cast<std::uint32_t>(argument);std::memcpy(flags,&value,sizeof(value));return 0;}
+        case 3:return reinterpret_cast<std::uintptr_t>(read_pointer_at(node,kNodeFirstChildOffset));
+        case 4:return reinterpret_cast<std::uintptr_t>(read_pointer_at(node,kNodeNextSiblingOffset));
+        default:return 0;
         }
-
-        auto* flags_address = reinterpret_cast<std::uint32_t*>(
-            static_cast<std::uint8_t*>(node) + kNodeFlagsOffset);
-        if (writable_range(flags_address, sizeof(*flags_address))) {
-            std::uint32_t flags = 0;
-            std::memcpy(&flags, flags_address, sizeof(flags));
-            const std::uint32_t updated =
-                index <= traversal->visible_upgrades
-                    ? flags & ~kNodeHiddenFlag
-                    : flags | kNodeHiddenFlag;
-            if (updated != flags) {
-                std::memcpy(flags_address, &updated, sizeof(updated));
-                ++traversal->changed;
-            }
-        }
-    }
-
-    void* child = read_pointer_at(node, kNodeFirstChildOffset);
-    while (child && traversal->remaining_nodes != 0) {
-        void* next = read_pointer_at(child, kNodeNextSiblingOffset);
-        prepare_officer_quarter_nodes(child, depth + 1, traversal);
-        child = next;
-    }
-    if (child) traversal->truncated = true;
+    };
+    A2foA1QuarterStats wire{traversal->visible_upgrades,traversal->matches,traversal->changed,
+        traversal->highest_index,traversal->remaining_nodes,static_cast<std::uint8_t>(traversal->truncated)};
+    a2fo_rs_stage9_a1_quarters_walk(reinterpret_cast<std::uintptr_t>(node),depth,
+        kMaximumOqTraversalDepth,kNodeHiddenFlag,&context,step,&wire);
+    traversal->matches=wire.matches;traversal->changed=wire.changed;
+    traversal->highest_index=wire.highest;traversal->remaining_nodes=wire.remaining;
+    traversal->truncated=wire.truncated!=0;
 }
 
 void prepare_starbase_officer_quarters(void* starbase) noexcept {
@@ -4907,7 +5116,7 @@ void prepare_starbase_officer_quarters(void* starbase) noexcept {
 
     const LONG incident =
         InterlockedIncrement(&g_officer_quarter_prepare_count);
-    if (incident <= 32) {
+    if (a2fo_rs_stage9_a1_reporting_admit(incident,32,0)==1) {
         char odf_name[160]{};
         const auto* getter = at<std::uint8_t>(
             g_armada, kGameObjectClassGetOdfNameRva);
@@ -4997,15 +5206,15 @@ void* __attribute__((regparm(2))) fofs_get_virtual_directory_hook(
     if (!original) return nullptr;
 
     const auto* requested = static_cast<const char*>(delphi_directory_name);
-    const char* normalized = requested;
-    std::size_t prefix_count = 0;
-    while (prefix_count < 16 && readable_range(normalized, 3) &&
-           normalized[0] == '.' &&
-           (normalized[1] == '\\' || normalized[1] == '/') &&
-           normalized[2] != '\0') {
-        normalized += 2;
-        ++prefix_count;
-    }
+    struct Context {const char* requested;} context{requested};
+    const auto probe=+[](void* opaque,std::uint32_t operation,std::size_t offset) noexcept ->std::uint8_t {
+        const auto* base=static_cast<Context*>(opaque)->requested;
+        const char* cursor=offset ? base+offset : base;
+        if(operation==0)return readable_range(cursor,3);
+        return static_cast<std::uint8_t>(cursor[operation-1]);
+    };
+    const std::size_t skipped=a2fo_rs_stage9_a1_fofs_prefix(&context,probe);
+    const char* normalized=skipped ? requested+skipped : requested;
     if (normalized == requested) {
         return original(file_system, delphi_directory_name);
     }
@@ -5102,26 +5311,28 @@ void repair_legacy_tactical_cursor_pointers() noexcept {
         }
         void* cached_cursor = nullptr;
         std::memcpy(&cached_cursor, cache_slot, sizeof(cached_cursor));
-        if (cached_cursor && cached_cursor != fallback &&
-            !g_legacy_tactical_native_overview_cursors[index]) {
+        const auto read_native=+[](void* p) noexcept -> std::uintptr_t {return reinterpret_cast<std::uintptr_t>(g_legacy_tactical_native_overview_cursors[*static_cast<std::size_t*>(p)]);};
+        std::size_t cursor_index=index;
+        A2foA1CursorSlotDecision decision{};
+        a2fo_rs_stage9_a1_state_cursor_slot(reinterpret_cast<std::uintptr_t>(cached_cursor),reinterpret_cast<std::uintptr_t>(fallback),&cursor_index,read_native,&decision);
+        if (decision.capture_native) {
             g_legacy_tactical_native_overview_cursors[index] = cached_cursor;
         }
         void* const native_cursor =
             g_legacy_tactical_native_overview_cursors[index];
-        if (!active_replaced && native_cursor &&
-            active_cursor == native_cursor) {
+        if (a2fo_rs_stage9_a1_state_cursor_active(active_replaced,reinterpret_cast<std::uintptr_t>(native_cursor),reinterpret_cast<std::uintptr_t>(active_cursor))) {
             InterlockedExchangePointer(
                 reinterpret_cast<PVOID volatile*>(active_slot), fallback);
             active_replaced = true;
         }
-        if (cached_cursor != fallback) {
+        if (decision.replace_cache) {
             InterlockedExchangePointer(
                 reinterpret_cast<PVOID volatile*>(cache_slot), fallback);
             ++cache_replacements;
         }
     }
 
-    if ((active_replaced || cache_replacements != 0) &&
+    if (a2fo_rs_stage9_a1_state_cursor_changed(active_replaced,cache_replacements) &&
         InterlockedIncrement(&g_legacy_tactical_cursor_fallback_count) <= 8) {
         char message[400]{};
         std::snprintf(
@@ -5193,78 +5404,48 @@ bool install_legacy_virtual_directory_normalizer(
 bool __attribute__((regparm(3))) producer_build_button_visible_hook(
     void* producer_class, std::uintptr_t team_index,
     std::uintptr_t slot_index) noexcept {
-    const auto original = reinterpret_cast<ProducerBuildButtonVisibleFn>(
-        g_producer_build_button_visible_hook.gateway);
-    if (!original ||
-        !is_plausible_object_class(producer_class)) {
-        return true;
-    }
-    void** items = reinterpret_cast<void**>(
-        read_pointer_at(
-            producer_class, kProducerClassBuildItemsOffset));
-    if (!items || !readable_range(
-            items, kProducerClassBuildItemCapacity * sizeof(void*))) {
-        return false;
-    }
-
-    const bool visible = original(producer_class, team_index, slot_index);
-    if (slot_index >= kProducerClassBuildItemCapacity) {
-        return visible;
-    }
-
-    void* target_class = nullptr;
-    if (readable_range(items + slot_index, sizeof(target_class))) {
-        std::memcpy(&target_class, items + slot_index,
-                    sizeof(target_class));
-    }
-
-    // A1 puts all stock officer-upgrade classes in each Starbase build list,
-    // then selects exactly one through the owning race. Fleet Operations no
-    // longer consumes that race command. Hide non-matching upgrade buttons so
-    // only a race-correct option can be selected for a known starbase.
-    bool officer_upgrade = is_officer_upgrade_class(target_class);
-    if (!officer_upgrade && g_officer_state_lock_ready) {
-        OfficerStateLockGuard lock;
-        officer_upgrade = g_officer_upgrade_races.find(target_class) !=
-            g_officer_upgrade_races.end();
-    }
-
-    bool race_match = !officer_upgrade;
-    if (officer_upgrade) {
-        if (is_registered_a1_starbase_class(producer_class)) {
-            race_match = officer_upgrade_matches_registered_starbase(
-                producer_class, target_class);
-        } else if (producer_class_has_officer_upgrade_build_item(
-                       producer_class)) {
-            char producer_name[64]{};
-            copy_object_class_odf_name(
-                producer_class, producer_name, sizeof(producer_name));
-            if (producer_name[0]) {
-                std::array<char, 64> fallback_race{};
-                if (infer_starbase_race_from_object_name(
-                        producer_name, &fallback_race)) {
-                    bool target_matches = false;
-                    if (g_officer_state_lock_ready) {
-                        OfficerStateLockGuard lock;
-                        const auto target =
-                            g_officer_upgrade_races.find(target_class);
-                        target_matches =
-                            target != g_officer_upgrade_races.end() &&
-                            target->second[0] != '\0' &&
-                            _stricmp(
-                                fallback_race.data(), target->second.data()) == 0;
-                    }
-                    race_match = target_matches;
-                } else {
-                    race_match = true;
-                }
-            } else {
-                race_match = true;
-            }
-        }
-    }
-    const bool filtered_visible = visible && race_match;
-    return filtered_visible;
+    struct Context {void* producer=nullptr;std::uintptr_t team=0,slot=0;
+        ProducerBuildButtonVisibleFn original=nullptr;void** items=nullptr;void* target=nullptr;
+        char producer_name[64]{};std::array<char,64> fallback_race{};
+        std::optional<OfficerStateLockGuard> lock{};
+        decltype(g_officer_upgrade_races)::iterator race_target{};
+        std::exception_ptr error{};} context{};
+    context.producer=producer_class;context.team=team_index;context.slot=slot_index;
+    auto step=[](void* opaque,std::uint32_t op,std::size_t)->std::uint64_t{
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:c.original=reinterpret_cast<ProducerBuildButtonVisibleFn>(
+            g_producer_build_button_visible_hook.gateway);return c.original!=nullptr;
+        case 1:return is_plausible_object_class(c.producer);
+        case 2:c.items=reinterpret_cast<void**>(read_pointer_at(
+            c.producer,kProducerClassBuildItemsOffset));return c.items!=nullptr;
+        case 3:return readable_range(c.items,kProducerClassBuildItemCapacity*sizeof(void*));
+        case 4:return c.original(c.producer,c.team,c.slot);
+        case 5:return c.slot>=kProducerClassBuildItemCapacity;
+        case 6:return readable_range(c.items+c.slot,sizeof(c.target));
+        case 7:c.target=nullptr;std::memcpy(&c.target,c.items+c.slot,sizeof(c.target));return 0;
+        case 8:return is_officer_upgrade_class(c.target);
+        case 9:return g_officer_state_lock_ready;
+        case 10:{OfficerStateLockGuard lock;return g_officer_upgrade_races.find(c.target)!=
+            g_officer_upgrade_races.end();}
+        case 11:return is_registered_a1_starbase_class(c.producer);
+        case 12:return officer_upgrade_matches_registered_starbase(c.producer,c.target);
+        case 13:return producer_class_has_officer_upgrade_build_item(c.producer);
+        case 14:copy_object_class_odf_name(c.producer,c.producer_name,sizeof(c.producer_name));return 0;
+        case 15:return c.producer_name[0]!='\0';
+        case 16:return infer_starbase_race_from_object_name(c.producer_name,&c.fallback_race);
+        case 17:return g_officer_state_lock_ready;
+        case 18:c.lock.emplace();c.race_target=g_officer_upgrade_races.find(c.target);return 0;
+        case 19:return c.race_target!=g_officer_upgrade_races.end()&&
+            c.race_target->second[0]!='\0'&&
+            _stricmp(c.fallback_race.data(),c.race_target->second.data())==0;
+        case 20:c.lock.reset();return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const bool result=a2fo_rs_stage8_a1_officer(6,&context,step)!=0;
+    if(context.error)std::rethrow_exception(context.error);
+    return result;
 }
 
 bool install_producer_palette_race_filter(
@@ -5333,48 +5514,31 @@ void log_starbase_build_items(void* object_class) noexcept {
 }
 
 bool producer_class_has_build_items(void* object_class) noexcept {
-    if (!is_plausible_object_class(object_class)) return false;
-    void** items = reinterpret_cast<void**>(read_pointer_at(
-        object_class, kProducerClassBuildItemsOffset));
-    if (!items || !readable_range(
-            items, kProducerClassBuildItemCapacity * sizeof(void*))) {
-        return false;
-    }
-    for (std::size_t slot = 0;
-         slot < kProducerClassBuildItemCapacity; ++slot) {
-        void* target_class = nullptr;
-        std::memcpy(&target_class, items + slot, sizeof(target_class));
-        if (target_class && is_plausible_object_class(target_class)) {
-            return true;
-        }
-    }
-    return false;
+    struct Context {void* object=nullptr;void** items=nullptr;void* target=nullptr;std::exception_ptr error{};} context{};
+    context.object=object_class;
+    auto step=[](void* opaque,std::uint32_t op,std::size_t index)->std::uint64_t{
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return is_plausible_object_class(c.object);
+        case 1:c.items=reinterpret_cast<void**>(read_pointer_at(c.object,kProducerClassBuildItemsOffset));return c.items!=nullptr;
+        case 2:return readable_range(c.items,kProducerClassBuildItemCapacity*sizeof(void*));
+        case 3:return kProducerClassBuildItemCapacity;
+        case 4:c.target=nullptr;std::memcpy(&c.target,c.items+index,sizeof(c.target));return 0;
+        case 5:return c.target!=nullptr;
+        case 6:return is_plausible_object_class(c.target);
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const bool result=a2fo_rs_stage8_a1_officer(7,&context,step)!=0;
+    if(context.error)std::rethrow_exception(context.error);
+    return result;
 }
 
 bool contains_ci_substring(const char* source, const char* token) noexcept {
-    if (!source || !token || !*token) return false;
-    const std::size_t token_length = std::strlen(token);
-    if (token_length == 0) return false;
-
-    for (std::size_t index = 0; source[index] != '\0'; ++index) {
-        bool match = true;
-        for (std::size_t offset = 0; offset < token_length; ++offset) {
-            const char current_source = source[index + offset];
-            if (!current_source) {
-                match = false;
-                break;
-            }
-            if (static_cast<char>(std::tolower(
-                    static_cast<unsigned char>(current_source))) !=
-                static_cast<char>(
-                    std::tolower(static_cast<unsigned char>(token[offset])))) {
-                match = false;
-                break;
-            }
-        }
-        if (match) return true;
-    }
-    return false;
+    return a2fo_rs_stage8_a1_contains_ci(
+        reinterpret_cast<const std::uint8_t*>(source),
+        reinterpret_cast<const std::uint8_t*>(token),
+        &a1_policy_length,&a1_policy_lower,nullptr)!=0;
 }
 
 [[maybe_unused]] bool likely_constructionrig_class(void* object_class) noexcept {
@@ -5414,7 +5578,7 @@ void ensure_starbase_build_menu_capability(
 
         const LONG incident =
             InterlockedIncrement(&g_constructor_menu_capability_count);
-        if (incident <= 64) {
+        if (a2fo_rs_stage9_a1_reporting_admit(incident,64,0)==1) {
             char message[320]{};
             std::snprintf(
                 message, sizeof(message),
@@ -5424,7 +5588,7 @@ void ensure_starbase_build_menu_capability(
                 object_class,
                 static_cast<unsigned long>(menu_capabilities));
             log_line(message);
-        } else if (incident == 65) {
+        } else if (a2fo_rs_stage9_a1_reporting_admit(incident,64,1)==2) {
             log_line("Further A1 Starbase build menu capability updates suppressed");
         }
     }
@@ -5451,10 +5615,10 @@ void register_starbase_class_policy(void* object_class,
         is_starbase_label(class_label.data());
     const bool has_officer_upgrade_build_items =
         producer_class_has_officer_upgrade_build_item(object_class);
-    const bool is_constructor_like =
-        has_classlabel || has_officer_upgrade_build_items ||
-        likely_constructionrig_class(object_class);
-    if (!is_constructor_like && !has_maximum && !has_gain) return;
+    const auto classify=+[](void* object) noexcept -> std::uint8_t {return likely_constructionrig_class(object);};
+    A2foA1RegistrationDecision registration{};
+    a2fo_rs_stage9_a1_state_registration(has_classlabel,has_officer_upgrade_build_items,has_maximum,has_gain,object_class,classify,&registration);
+    if(!registration.admit)return;
 
     if (!read_parameter_race(parameter_db, &race)) {
         char odf_name[64]{};
@@ -5462,10 +5626,8 @@ void register_starbase_class_policy(void* object_class,
         infer_starbase_race_from_object_name(odf_name, &race);
     }
 
-    if (maximum_upgrades < 0) maximum_upgrades = 0;
-    if (maximum_upgrades > 256) maximum_upgrades = 256;
-    if (base_officer_gain < 0) base_officer_gain = 0;
-    if (base_officer_gain > 1000000) base_officer_gain = 1000000;
+    maximum_upgrades=a2fo_rs_stage9_a1_officer_maximum(maximum_upgrades);
+    base_officer_gain=a2fo_rs_stage9_a1_officer_gain(base_officer_gain);
 
     // A1 predates A2's context-sensitive builder_ship command.  Only add the
     // confirmed A2 capability after the class has passed the Starbase policy
@@ -5473,7 +5635,8 @@ void register_starbase_class_policy(void* object_class,
     // menu code that their A1 data was never structured to drive.
     ensure_starbase_build_menu_capability(object_class);
 
-    if (has_maximum || has_gain || race[0] != '\0') {
+    const auto has_race=+[](void* p) noexcept -> std::uint8_t {return (*static_cast<std::array<char,64>*>(p))[0]!='\0';};
+    if (a2fo_rs_stage9_a1_state_has_policy(has_maximum,has_gain,&race,has_race)!=0) {
         try {
             OfficerStateLockGuard lock;
             g_starbase_class_policies[object_class] =
@@ -5491,7 +5654,7 @@ void register_starbase_class_policy(void* object_class,
         "maximumUpgrades=%ld, officerGain=%ld, classLabel='%s', race='%s', "
         "menuCapabilities=0x%08lx",
         object_class,
-        (has_maximum || has_gain || race[0] != '\0') ? "yes" : "no",
+        (a2fo_rs_stage9_a1_state_has_policy(has_maximum,has_gain,&race,has_race)!=0) ? "yes" : "no",
         static_cast<long>(maximum_upgrades),
         static_cast<long>(base_officer_gain),
         class_label.data(),
@@ -5522,10 +5685,10 @@ void register_completed_starbase_class_policy(
             event->odf_fields, event->odf_field_count,
             "officerGain", &gain_text) &&
         parse_nonnegative_int32(gain_text, base_officer_gain);
-    if (!has_maximum && !has_gain) return;
+    if (!a2fo_rs_stage9_a1_state_completed_admit(has_maximum,has_gain)) return;
 
-    if (maximum_upgrades > 256) maximum_upgrades = 256;
-    if (base_officer_gain > 1000000) base_officer_gain = 1000000;
+    maximum_upgrades=a2fo_rs_stage9_a1_officer_maximum(maximum_upgrades);
+    base_officer_gain=a2fo_rs_stage9_a1_officer_gain(base_officer_gain);
 
     std::array<char, 64> race{};
     std::string race_text;
@@ -5679,10 +5842,9 @@ bool consume_officer_upgrade_completion(
         }
         std::int32_t active_builds = read_int32_at(
             technology_item, kTechnologyItemActiveBuildsOffset, 0);
-        if (active_builds > 0) {
-            write_int32_at(
-                technology_item, kTechnologyItemActiveBuildsOffset,
-                active_builds - 1);
+        std::int32_t decremented=0;
+        if (a2fo_rs_stage9_a1_officer_active_decrement(active_builds,&decremented)) {
+            write_int32_at(technology_item,kTechnologyItemActiveBuildsOffset,decremented);
         }
     }
 
@@ -5764,16 +5926,10 @@ void apply_starbase_team_credit(void* starbase) noexcept {
         OfficerStateLockGuard lock;
         StarbaseOfficerState& state =
             g_starbase_officer_states[starbase];
-        if (state.credited_team == team) return;
+        if (!a2fo_rs_stage9_a1_state_credit_transition(reinterpret_cast<std::uintptr_t>(state.credited_team),reinterpret_cast<std::uintptr_t>(team))) return;
         previous_team = state.credited_team;
         previous_gain = state.credited_officer_gain;
-        const std::int64_t total =
-            static_cast<std::int64_t>(policy.base_officer_gain) +
-            state.upgrade_officer_gain;
-        new_gain = static_cast<std::int32_t>(
-            total > std::numeric_limits<std::int32_t>::max()
-                ? std::numeric_limits<std::int32_t>::max()
-                : total);
+        new_gain=a2fo_rs_stage9_a1_officer_desired(policy.base_officer_gain,state.upgrade_officer_gain);
         state.credited_team = team;
         state.credited_officer_gain = new_gain;
     } catch (...) {
@@ -5828,15 +5984,14 @@ std::uintptr_t __attribute__((fastcall)) starbase_clear_team_hook(
 
 std::uint32_t queued_officer_upgrades(void* producer) noexcept {
     if (!producer) return 0;
-    void* item = read_pointer_at(producer, kQueueHeadOffset);
-    std::uint32_t count = 0;
-    for (std::size_t visited = 0;
-         item && visited < kMaximumProducerQueueWalk; ++visited) {
-        void* queued_class = read_pointer_at(item, 0);
-        if (is_officer_upgrade_class(queued_class)) ++count;
-        item = read_pointer_at(item, kQueueItemNextOffset);
-    }
-    return count;
+    static_assert(kMaximumProducerQueueWalk==10);
+    const auto step=+[](void* context,std::uint32_t op,std::uintptr_t item) noexcept ->std::uintptr_t {
+        if(op==0)return reinterpret_cast<std::uintptr_t>(read_pointer_at(context,kQueueHeadOffset));
+        void* current=reinterpret_cast<void*>(item);
+        if(op==1)return is_officer_upgrade_class(read_pointer_at(current,0));
+        return reinterpret_cast<std::uintptr_t>(read_pointer_at(current,kQueueItemNextOffset));
+    };
+    return a2fo_rs_stage9_a1_officer_workflow_queue(producer,step);
 }
 
 bool admit_officer_upgrade(void* starbase, void* target_class) noexcept {
@@ -5846,7 +6001,7 @@ bool admit_officer_upgrade(void* starbase, void* target_class) noexcept {
     if (!officer_upgrade_matches_race(policy.race, target_class)) {
         const LONG incident =
             InterlockedIncrement(&g_officer_upgrade_rejection_count);
-        if (incident <= 16) {
+        if (a2fo_rs_stage9_a1_reporting_admit(incident,16,0)==1) {
             char target_name[128]{};
             copy_object_class_odf_name(
                 target_class, target_name, sizeof(target_name));
@@ -5864,14 +6019,13 @@ bool admit_officer_upgrade(void* starbase, void* target_class) noexcept {
     }
     const std::uint32_t completed = completed_officer_upgrades(starbase);
     const std::uint32_t queued = queued_officer_upgrades(starbase);
-    if (completed + queued <
-        static_cast<std::uint32_t>(policy.maximum_upgrades)) {
+    if (a2fo_rs_stage9_a1_officer_admit(completed,queued,policy.maximum_upgrades)) {
         return true;
     }
 
     const LONG incident =
         InterlockedIncrement(&g_officer_upgrade_rejection_count);
-    if (incident <= 16) {
+    if (a2fo_rs_stage9_a1_reporting_admit(incident,16,0)==1) {
         char message[224]{};
         std::snprintf(
             message, sizeof(message),
@@ -5932,8 +6086,7 @@ void finish_officer_upgrade(void* starbase, void* target_class) noexcept {
 
     std::int32_t gain = read_int32_at(
         target_class, kOfficerUpgradeGainOffset, 15);
-    if (gain < 0) gain = 0;
-    if (gain > 1000000) gain = 1000000;
+    gain=a2fo_rs_stage9_a1_officer_gain(gain);
     void* current_team = read_pointer_at(starbase, kCraftTeamPointerOffset);
     void* previous_team = nullptr;
     std::int32_t previous_credit = 0;
@@ -5943,37 +6096,20 @@ void finish_officer_upgrade(void* starbase, void* target_class) noexcept {
         OfficerStateLockGuard lock;
         StarbaseOfficerState& state =
             g_starbase_officer_states[starbase];
-        if (state.completed_upgrades >=
-            static_cast<std::uint32_t>(policy.maximum_upgrades)) {
-            return;
-        }
-        previous_team = state.credited_team;
-        previous_credit = state.credited_officer_gain;
-        ++state.completed_upgrades;
-        if (state.upgrade_officer_gain <=
-            std::numeric_limits<std::int32_t>::max() - gain) {
-            state.upgrade_officer_gain += gain;
-        } else {
-            state.upgrade_officer_gain =
-                std::numeric_limits<std::int32_t>::max();
-        }
-        const std::int64_t desired =
-            static_cast<std::int64_t>(policy.base_officer_gain) +
-            state.upgrade_officer_gain;
-        const std::int32_t desired_credit = static_cast<std::int32_t>(
-            desired > std::numeric_limits<std::int32_t>::max()
-                ? std::numeric_limits<std::int32_t>::max()
-                : desired);
-        if (current_team == previous_team) {
-            current_team_delta = desired_credit - previous_credit;
-            previous_team = nullptr;
-            previous_credit = 0;
-        } else {
-            current_team_delta = desired_credit;
-        }
-        state.credited_team = current_team;
-        state.credited_officer_gain = current_team ? desired_credit : 0;
-        completed = state.completed_upgrades;
+        const A2foA1OfficerFinishIn input{state.completed_upgrades,state.upgrade_officer_gain,state.credited_officer_gain};
+        A2foA1OfficerFinishOut plan{};
+        a2fo_rs_stage9_a1_officer_finish(&input,policy.base_officer_gain,policy.maximum_upgrades,
+            gain,current_team==state.credited_team,current_team!=nullptr,&plan);
+        if (!plan.admitted) return;
+        previous_team=state.credited_team;
+        previous_credit=state.credited_officer_gain;
+        state.completed_upgrades=plan.completed;
+        state.upgrade_officer_gain=plan.upgrade_gain;
+        current_team_delta=plan.current_delta;
+        if (plan.clear_previous) {previous_team=nullptr;previous_credit=0;}
+        state.credited_team=current_team;
+        state.credited_officer_gain=plan.credited_gain;
+        completed=state.completed_upgrades;
     } catch (...) {
         log_line("Could not retain completed A1 officer-quarter state");
         return;
@@ -5985,7 +6121,7 @@ void finish_officer_upgrade(void* starbase, void* target_class) noexcept {
 
     const LONG incident =
         InterlockedIncrement(&g_officer_upgrade_completion_count);
-    if (incident <= 32) {
+    if (a2fo_rs_stage9_a1_reporting_admit(incident,32,0)==1) {
         char message[256]{};
         std::snprintf(
             message, sizeof(message),
@@ -6248,33 +6384,22 @@ bool install_producer_push_target_hook() noexcept {
 bool A2FO_CALL officer_producer_event_handler(
     const A2FO_ProducerEvent* event, void*) noexcept {
     if (!g_officer_upgrade_system_ready || !event ||
-        event->struct_size < sizeof(*event) || !event->producer) {
-        return true;
-    }
-    switch (event->kind) {
-        case A2FO_PRODUCER_EVENT_ADMIT:
-            if (is_officer_upgrade_class(event->target_class) &&
-                !g_officer_upgrade_completion_ready) {
-                return false;
-            }
-            return admit_officer_upgrade(
-                event->producer, event->target_class);
-        case A2FO_PRODUCER_EVENT_FINISHING:
-            // A1Compat owns Starbase::FinishBuild directly. Claiming the
-            // later generic Producer callback would still let Armada 2's
-            // Starbase post-processing enqueue a null finished object.
-            return true;
-        case A2FO_PRODUCER_EVENT_STARTING_EFFECT:
-            return !suppress_officer_upgrade_construction_effect(
-                event->producer, event->target_class);
-        case A2FO_PRODUCER_EVENT_FINISHED:
-            return true;
-        case A2FO_PRODUCER_EVENT_DESTROYING:
-            clear_starbase_team_credit(event->producer, true);
-            return true;
-        default:
-            return true;
-    }
+        event->struct_size < sizeof(*event) || !event->producer) return true;
+    static_assert(A2FO_PRODUCER_EVENT_ADMIT==0 && A2FO_PRODUCER_EVENT_FINISHED==1 &&
+        A2FO_PRODUCER_EVENT_DESTROYING==2 && A2FO_PRODUCER_EVENT_FINISHING==3 &&
+        A2FO_PRODUCER_EVENT_STARTING_EFFECT==4);
+    struct Context {const A2FO_ProducerEvent* event;} context{event};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t) noexcept ->std::uintptr_t {
+        const auto* current=static_cast<Context*>(opaque)->event;
+        switch(op){
+        case 0:return is_officer_upgrade_class(current->target_class);
+        case 1:return g_officer_upgrade_completion_ready;
+        case 2:return admit_officer_upgrade(current->producer,current->target_class);
+        case 3:return suppress_officer_upgrade_construction_effect(current->producer,current->target_class);
+        case 4:clear_starbase_team_credit(current->producer,true);return 0;
+        default:return 0;}
+    };
+    return a2fo_rs_stage9_a1_officer_workflow_event(event->kind,&context,step)!=0;
 }
 
 using FileOutBytesFn = bool (__cdecl*)(
@@ -6332,20 +6457,17 @@ std::uintptr_t __attribute__((fastcall)) starbase_load_hook(
     const bool native_loaded = a2fo_a1_call_thiscall_1(
         g_starbase_load_hook.gateway, starbase,
         reinterpret_cast<std::uintptr_t>(reader)) != 0;
-    if (!compatibility_loaded || saved.magic != kOfficerSaveMagic ||
-        saved.version != kOfficerSaveVersion) {
+    if (!a2fo_rs_stage9_a1_officer_workflow_save_valid(
+            compatibility_loaded,saved.magic,saved.version,kOfficerSaveMagic,kOfficerSaveVersion)) {
         log_line("A1 officer-quarter save state is missing or invalid");
         return 0;
     }
 
-    if (saved.completed_upgrades >
-        static_cast<std::uint32_t>(policy.maximum_upgrades)) {
-        saved.completed_upgrades =
-            static_cast<std::uint32_t>(policy.maximum_upgrades);
-    }
-    if (saved.upgrade_officer_gain < 0) {
-        saved.upgrade_officer_gain = 0;
-    }
+    A2foA1OfficerSanitizedSave sanitized{};
+    a2fo_rs_stage9_a1_officer_workflow_sanitize(saved.completed_upgrades,
+        saved.upgrade_officer_gain,policy.maximum_upgrades,&sanitized);
+    saved.completed_upgrades=sanitized.completed;
+    saved.upgrade_officer_gain=sanitized.gain;
     void* team = read_pointer_at(starbase, kCraftTeamPointerOffset);
     try {
         OfficerStateLockGuard lock;
@@ -6354,15 +6476,8 @@ std::uintptr_t __attribute__((fastcall)) starbase_load_hook(
         state.completed_upgrades = saved.completed_upgrades;
         state.upgrade_officer_gain = saved.upgrade_officer_gain;
         state.credited_team = team;
-        const std::int64_t credited =
-            static_cast<std::int64_t>(policy.base_officer_gain) +
-            saved.upgrade_officer_gain;
-        state.credited_officer_gain = team
-            ? static_cast<std::int32_t>(
-                credited > std::numeric_limits<std::int32_t>::max()
-                    ? std::numeric_limits<std::int32_t>::max()
-                    : credited)
-            : 0;
+        state.credited_officer_gain = team ? a2fo_rs_stage9_a1_officer_desired(
+            policy.base_officer_gain,saved.upgrade_officer_gain) : 0;
     } catch (...) {
         return 0;
     }
@@ -6650,8 +6765,11 @@ std::uintptr_t read_rtime_class_name(
 
     a1compat::A1BznHeader header;
     const bool a1_stream =
-        requested_size == a1compat::kA2SerializedRtimeClassNameSize &&
+        a2fo_rs_stage9_a1_bzn_inspect_width(requested_size) &&
         inspect_a1_bzn_reader(file_reader, &header);
+    static_assert(a1compat::kA2SerializedRtimeClassNameSize == 40 &&
+                  a1compat::kLegacySerializedRtimeClassNameSize == 32,
+                  "staged BZN width policy differs from native constants");
     std::uint32_t serialized_size = requested_size;
     std::uint32_t declared_size = 0;
 
@@ -6663,20 +6781,20 @@ std::uintptr_t read_rtime_class_name(
             sizeof(cursor_address));
         const auto* cursor = reinterpret_cast<const std::uint8_t*>(
             cursor_address);
-        if (readable_range(cursor, 8) && cursor[0] == 0x02) {
-            std::memcpy(&declared_size, cursor + 4, sizeof(declared_size));
-            if (declared_size ==
-                    a1compat::kLegacySerializedRtimeClassNameSize ||
-                declared_size == a1compat::kA2SerializedRtimeClassNameSize) {
-                serialized_size = declared_size;
-            }
+        if (readable_range(cursor, 8)) {
+            A2foRsA1BznFieldWidth width{};
+            a2fo_rs_stage9_a1_bzn_field_width(
+                cursor, requested_size, &width);
+            declared_size = width.declared;
+            serialized_size = width.serialized;
         }
     }
 
     if (a1_stream) {
         apply_a1_world_bounds(header);
     }
-    if (a1_stream && serialized_size < requested_size) {
+    if (a1_stream && a2fo_rs_stage9_a1_bzn_pad(
+            a1_stream, serialized_size, requested_size)) {
         // RtimeClass::Load owns a 40-byte A2 stack buffer. Zero-pad only when
         // the live labelled field itself declares the shorter legacy width.
         std::memset(output, 0, requested_size);
@@ -6722,6 +6840,54 @@ std::uintptr_t read_rtime_class_name(
 void* load_map_details(const char* filename,
                        bool selected_map = false) noexcept {
     if (!g_armada || !filename) return nullptr;
+
+    // Clear a previously selected SOL whenever GameSetup begins resolving a
+    // new map. A SOL selection below immediately replaces it; native BZN/A1
+    // BZN selections therefore cannot leave stale SOL runtime state behind.
+    if (selected_map) {
+        if (HMODULE sol_module = a2fo::startup_module_provider(
+                "A2FOSOLMaps.dll", {"A2FOSOLMaps_ClearSelected"})) {
+            using SolClearSelectedFn = void (__cdecl*)();
+            const FARPROC address = GetProcAddress(
+                sol_module, "A2FOSOLMaps_ClearSelected");
+            SolClearSelectedFn clear_selected = nullptr;
+            static_assert(sizeof(clear_selected) == sizeof(address),
+                          "SOL clear function pointer must match FARPROC");
+            std::memcpy(&clear_selected, &address, sizeof(clear_selected));
+            if (clear_selected) clear_selected();
+        }
+    }
+
+    // A2FOSOLMaps owns Legacy .sol parsing, while A1Compat remains the single
+    // owner of Armada's MapDetailsFactory call sites.  Delegating here avoids
+    // two modules patching the same instruction and keeps ordinary BZN/A1 BZN
+    // handling completely unchanged.
+    {
+        std::string lowered(filename);
+        std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                       [](unsigned char c) {
+                           return static_cast<char>(std::tolower(c));
+                       });
+        if (a2fo_rs_stage9_a1_bzn_sol_suffix(
+                reinterpret_cast<const std::uint8_t*>(lowered.data()),
+                lowered.size())) {
+            if (HMODULE sol_module = a2fo::startup_module_provider(
+                    "A2FOSOLMaps.dll",
+                    {"A2FOSOLMaps_CreateMapDetails"})) {
+                const FARPROC address = GetProcAddress(
+                    sol_module, "A2FOSOLMaps_CreateMapDetails");
+                SolMapDetailsLoadFn loader = nullptr;
+                static_assert(sizeof(loader) == sizeof(address),
+                              "SOL MapDetails function pointer must match FARPROC");
+                std::memcpy(&loader, &address, sizeof(loader));
+                if (loader) {
+                    return loader(filename, selected_map ? 1 : 0);
+                }
+            }
+            return nullptr;
+        }
+    }
+
     const auto original = reinterpret_cast<MapDetailsFactoryLoadFn>(
         at(g_armada, kMapDetailsFactoryLoadRva));
     void* details = original ? original(filename) : nullptr;
@@ -6784,8 +6950,9 @@ void* load_map_details(const char* filename,
                 char message[768]{};
                 const auto& first = mdf.start_locations[0];
                 const auto& last = mdf.start_locations[
-                    mdf.start_location_count == 0
-                        ? 0 : mdf.start_location_count - 1];
+                    a2fo_rs_stage9_a1_bzn_last_start(
+                        static_cast<std::uint32_t>(
+                            mdf.start_location_count))];
                 std::snprintf(
                     message, sizeof(message),
                     "Armada 1 MDF start bridge #%ld: '%s', starts=%lu, "
@@ -6817,7 +6984,31 @@ void* load_map_details(const char* filename,
     return details;
 }
 
+bool delegate_selected_sol_runtime(const char* export_name,
+                                   void* file_reader,
+                                   std::uintptr_t* result) noexcept {
+    if (!export_name || !result) return false;
+    HMODULE sol_module = a2fo::startup_module_provider(
+        "A2FOSOLMaps.dll", {"A2FOSOLMaps_IsSelected", export_name});
+    if (!sol_module) return false;
+    using IsSelectedFn = int (__cdecl*)();
+    using RuntimeFn = std::uintptr_t (__cdecl*)(void*);
+    const auto is_selected = reinterpret_cast<IsSelectedFn>(
+        GetProcAddress(sol_module, "A2FOSOLMaps_IsSelected"));
+    if (!is_selected || !is_selected()) return false;
+    const auto runtime = reinterpret_cast<RuntimeFn>(
+        GetProcAddress(sol_module, export_name));
+    if (!runtime) return false;
+    *result = runtime(file_reader);
+    return true;
+}
+
 std::uintptr_t load_game_objects(void* file_reader) noexcept {
+    std::uintptr_t sol_result = 0;
+    if (delegate_selected_sol_runtime(
+            "A2FOSOLMaps_LoadGameObjects", file_reader, &sol_result)) {
+        return sol_result;
+    }
     // Object positions are converted from the serialized map extents to the
     // live world extents inside the native loader. Publish A1's parsed bounds
     // before that conversion starts; doing this later at the first polymorphic
@@ -6839,11 +7030,8 @@ std::uintptr_t load_game_objects(void* file_reader) noexcept {
                 count_record.data(),
                 reinterpret_cast<const void*>(initial_state.cursor),
                 count_record.size());
-            std::uint32_t type = 0;
-            std::uint32_t size = 0;
-            std::memcpy(&type, count_record.data(), sizeof(type));
-            std::memcpy(&size, count_record.data() + 4, sizeof(size));
-            have_count_record = (type & 0xffu) == 4u && size == 4u;
+            have_count_record = a2fo_rs_stage9_a1_bzn_count_record(
+                count_record.data());
         }
     }
     const auto original = reinterpret_cast<FileReaderLoadFn>(
@@ -6925,7 +7113,24 @@ std::uintptr_t load_game_objects(void* file_reader) noexcept {
     return primary_loaded;
 }
 
+struct A1MissionProbeContext {
+    const std::uint8_t* cursor;
+    const std::uint8_t* end;
+};
+
+std::uint8_t a1_mission_probe(void* opaque, std::uint32_t distance) noexcept {
+    const auto& context = *static_cast<const A1MissionProbeContext*>(opaque);
+    return static_cast<std::uint8_t>(
+        a1compat::serialized_a1_mission_record_at(
+            context.cursor + distance, context.end));
+}
+
 std::uintptr_t load_ai_mission(void* file_reader) noexcept {
+    std::uintptr_t sol_result = 0;
+    if (delegate_selected_sol_runtime(
+            "A2FOSOLMaps_LoadAiMission", file_reader, &sol_result)) {
+        return sol_result;
+    }
     if (!g_armada || !file_reader) return 0;
 
     a1compat::A1BznHeader header;
@@ -6948,38 +7153,32 @@ std::uintptr_t load_ai_mission(void* file_reader) noexcept {
         constexpr std::size_t kMissionRecordSize =
             8 + a1compat::kA2SerializedRtimeClassNameSize;
 
-        if (a1compat::serialized_a1_mission_record_at(cursor, end)) {
-            mission_marker_count = 1;
-        } else {
-            const std::uintptr_t scan_limit = std::min<std::uintptr_t>(
-                mission_cursor.remaining, 1024u * 1024u);
-            std::uintptr_t replacement_cursor = 0;
-            for (std::uintptr_t distance = 1;
-                 distance + kMissionRecordSize <= scan_limit;
-                 ++distance) {
-                if (!a1compat::serialized_a1_mission_record_at(
-                        cursor + distance, end)) {
-                    continue;
-                }
-                ++mission_marker_count;
-                replacement_cursor = mission_cursor.cursor + distance;
-                if (mission_marker_count > 1) break;
-            }
-            if (mission_marker_count == 1) {
-                auto* cursor_slot =
-                    static_cast<std::uint8_t*>(file_reader) + 0x54;
-                if (writable_range(cursor_slot, sizeof(replacement_cursor))) {
-                    std::memcpy(
-                        cursor_slot, &replacement_cursor,
-                        sizeof(replacement_cursor));
-                    realigned_bytes = replacement_cursor -
-                        mission_cursor.cursor;
-                }
+        A1MissionProbeContext probe_context{cursor, end};
+        A2foRsA1MissionScanResult scan{};
+        a2fo_rs_stage9_a1_mission_scan(
+            static_cast<std::uint32_t>(mission_cursor.remaining),
+            static_cast<std::uint32_t>(kMissionRecordSize),
+            &probe_context, &a1_mission_probe, &scan);
+        mission_marker_count = scan.markers;
+        if (a2fo_rs_stage9_a1_bzn_unique_marker(
+                scan.markers, scan.last_distance)) {
+            const std::uintptr_t replacement_cursor =
+                mission_cursor.cursor + scan.last_distance;
+            auto* cursor_slot =
+                static_cast<std::uint8_t*>(file_reader) + 0x54;
+            if (writable_range(cursor_slot, sizeof(replacement_cursor))) {
+                std::memcpy(
+                    cursor_slot, &replacement_cursor,
+                    sizeof(replacement_cursor));
+                realigned_bytes = replacement_cursor -
+                    mission_cursor.cursor;
             }
         }
     }
     std::uintptr_t cursor_before = 0;
-    if (readable_range(file_reader, kFileReaderInspectionSize)) {
+    const bool have_before = readable_range(
+        file_reader, kFileReaderInspectionSize);
+    if (have_before) {
         std::memcpy(
             &cursor_before,
             static_cast<const std::uint8_t*>(file_reader) + 0x54,
@@ -6989,7 +7188,9 @@ std::uintptr_t load_ai_mission(void* file_reader) noexcept {
         at(g_armada, kAiMissionLoadRva));
     const bool loaded = original && original(file_reader);
     std::uintptr_t cursor_after = 0;
-    if (readable_range(file_reader, kFileReaderInspectionSize)) {
+    const bool have_after = readable_range(
+        file_reader, kFileReaderInspectionSize);
+    if (have_after) {
         std::memcpy(
             &cursor_after,
             static_cast<const std::uint8_t*>(file_reader) + 0x54,
@@ -6999,7 +7200,7 @@ std::uintptr_t load_ai_mission(void* file_reader) noexcept {
     void* mission = readable_range(current_slot, sizeof(*current_slot))
         ? *current_slot : nullptr;
     const LONG pass = InterlockedIncrement(&g_a1_bzn_ai_mission_load_count);
-    if (pass <= 16) {
+    if (a2fo_rs_stage9_a1_reporting_admit(pass, 16, 1) == 1) {
         char message[512]{};
         std::snprintf(
             message, sizeof(message),
@@ -7012,48 +7213,74 @@ std::uintptr_t load_ai_mission(void* file_reader) noexcept {
             static_cast<unsigned long>(mission_marker_count),
             static_cast<unsigned long>(realigned_bytes),
             static_cast<unsigned long>(
-                cursor_after >= cursor_before
-                    ? cursor_after - cursor_before : 0));
+                a2fo_rs_stage9_a1_bzn_consumed(
+                    have_before, have_after,
+                    cursor_before, cursor_after)));
         log_line(message);
-    } else if (pass == 17) {
+    } else if (a2fo_rs_stage9_a1_reporting_admit(pass, 16, 1) == 2) {
         log_line("Further Armada 1 BZN AiMission bridge reports suppressed");
     }
     return loaded ? 1u : 0u;
 }
 
 std::uintptr_t load_a2_craft_class_table(void* file_reader) noexcept {
-    if (!g_armada || !file_reader) return 0;
-
-    a1compat::A1BznHeader header;
-    if (!inspect_a1_bzn_reader(file_reader, &header)) {
-        const auto original = reinterpret_cast<FileReaderLoadFn>(
-            at(g_armada, kA2CraftClassTableLoadRva));
-        return original && original(file_reader) ? 1u : 0u;
-    }
-
-    std::uintptr_t cursor = 0;
-    if (readable_range(file_reader, kFileReaderInspectionSize)) {
-        std::memcpy(
-            &cursor,
-            static_cast<const std::uint8_t*>(file_reader) + 0x54,
-            sizeof(cursor));
-    }
-    const LONG pass = InterlockedIncrement(
-        &g_a1_bzn_a2_craft_class_table_skip_count);
-    if (pass <= 16) {
-        char message[320]{};
-        std::snprintf(
-            message, sizeof(message),
-            "Armada 1 BZN load-order bridge #%ld: version=%lu, "
-            "skipped A2-only craft-class table at cursor=%p",
-            static_cast<long>(pass),
-            static_cast<unsigned long>(header.version),
-            reinterpret_cast<void*>(cursor));
-        log_line(message);
-    } else if (pass == 17) {
-        log_line("Further Armada 1 BZN load-order reports suppressed");
-    }
-    return 1u;
+    struct DispatchContext {
+        void* reader;
+        std::uintptr_t sol_result;
+        std::uint32_t version;
+    } context{file_reader, 0, 0};
+    const auto step = +[](void* opaque, std::uint32_t operation)
+        noexcept -> std::uint64_t {
+        auto& c = *static_cast<DispatchContext*>(opaque);
+        switch (operation) {
+            case 0:
+                return delegate_selected_sol_runtime(
+                    "A2FOSOLMaps_LoadA2CraftClassTable", c.reader,
+                    &c.sol_result);
+            case 1:
+                return c.sol_result;
+            case 2: {
+                if (!g_armada || !c.reader) return 2;
+                a1compat::A1BznHeader header;
+                if (!inspect_a1_bzn_reader(c.reader, &header)) return 0;
+                c.version = header.version;
+                return 1;
+            }
+            case 3: {
+                const auto original = reinterpret_cast<FileReaderLoadFn>(
+                    at(g_armada, kA2CraftClassTableLoadRva));
+                return original && original(c.reader) ? 1u : 0u;
+            }
+            case 4: {
+                std::uintptr_t cursor = 0;
+                if (readable_range(c.reader, kFileReaderInspectionSize)) {
+                    std::memcpy(
+                        &cursor,
+                        static_cast<const std::uint8_t*>(c.reader) + 0x54,
+                        sizeof(cursor));
+                }
+                const LONG pass = InterlockedIncrement(
+                    &g_a1_bzn_a2_craft_class_table_skip_count);
+                if (pass <= 16) {
+                    char message[320]{};
+                    std::snprintf(
+                        message, sizeof(message),
+                        "Armada 1 BZN load-order bridge #%ld: version=%lu, "
+                        "skipped A2-only craft-class table at cursor=%p",
+                        static_cast<long>(pass),
+                        static_cast<unsigned long>(c.version),
+                        reinterpret_cast<void*>(cursor));
+                    log_line(message);
+                } else if (pass == 17) {
+                    log_line(
+                        "Further Armada 1 BZN load-order reports suppressed");
+                }
+                return 0;
+            }
+            default: return 0;
+        }
+    };
+    return a2fo_rs_stage9_a1_bzn_table_dispatch(&context, step);
 }
 
 bool install_a1_bzn_ai_mission_bridge(
@@ -7937,27 +8164,27 @@ void configure_gui_parameter_db(
         g_legacy_tooltip_background_colour = has_background
             ? configured_background
             : SpriteVector{0.5f, 0.5f, 0.5f};
+        const std::uint8_t tooltip_fallbacks =
+            a2fo_rs_stage9_a1_gui_tooltip_fallbacks(
+                has_background, has_text);
         InterlockedExchange(
             &g_legacy_tooltip_background_fallback,
-            has_background ? 0 : 1);
+            tooltip_fallbacks & 1);
         InterlockedExchange(
-            &g_legacy_tooltip_text_fallback, has_text ? 0 : 1);
+            &g_legacy_tooltip_text_fallback,
+            (tooltip_fallbacks >> 1) & 1);
 
         // Armada I renders verbose text as the same cursor-relative popup as
         // its short tooltip. A2 instead requires a seven-key framed layout;
         // use that A2 path only when the active mod actually supplies the
         // complete contract.
-        constexpr std::array<const char*, 7> frame_keys{{
-            "frameLocation", "tooltipFrameBottomRect_0",
-            "tooltipFrameBottomRect_1", "tooltipFrameTopRect_0",
-            "tooltipFrameTopRect_1", "tooltipFrameLeftRect",
-            "tooltipFrameRightRect"}};
-        bool has_complete_frame = true;
-        for (const char* key : frame_keys) {
-            has_complete_frame =
-                gui_parameter_rectangle(parameter_db, key) &&
-                has_complete_frame;
-        }
+        const auto read_frame = +[](void* opaque, const char* key)
+            noexcept -> std::uint8_t {
+            return gui_parameter_rectangle(opaque, key);
+        };
+        const bool has_complete_frame =
+            a2fo_rs_stage9_a1_gui_tooltip_frame(
+                parameter_db, read_frame) != 0;
         InterlockedExchange(
             &g_legacy_tooltip_frame_fallback,
             has_complete_frame ? 0 : 1);
@@ -7990,47 +8217,34 @@ void configure_gui_parameter_db(
             if (has_raw_legacy_config &&
                 a1compat::usable_legacy_ui_area(
                     raw_legacy_config.control_panel)) {
-                const a1compat::LegacyUiArea& raw_control =
-                    raw_legacy_config.control_panel;
-                const std::int32_t raw_right =
-                    raw_control.x + raw_control.width;
-                const std::int32_t raw_bottom =
-                    raw_control.y + raw_control.height;
-                if (raw_right == a1compat::kLegacyUiReferenceWidth) {
-                    legacy_ui_scale_x = static_cast<double>(
-                        control_panel.x + control_panel.width) /
-                        a1compat::kLegacyUiReferenceWidth;
-                } else {
-                    legacy_ui_scale_x = static_cast<double>(
-                        control_panel.width) / raw_control.width;
-                }
-                if (raw_bottom == a1compat::kLegacyUiReferenceHeight) {
-                    legacy_ui_scale_y = static_cast<double>(
-                        control_panel.y + control_panel.height) /
-                        a1compat::kLegacyUiReferenceHeight;
-                } else {
-                    legacy_ui_scale_y = static_cast<double>(
-                        control_panel.height) / raw_control.height;
-                }
+                static_assert(sizeof(a1compat::LegacyUiArea)==4*sizeof(std::int32_t));
+                a2fo_rs_stage9_a1_gui_scale_control(&raw_legacy_config.control_panel.x,
+                    &control_panel.x,&legacy_ui_scale_x,&legacy_ui_scale_y);
             }
             g_legacy_control_panel_rect =
                 a1compat::legacy_area_to_native_rectangle(control_panel);
-            for (std::uint32_t index = 0;
-                 index < a1compat::kLegacyControlButtonCount; ++index) {
+            static_assert(a1compat::kLegacyControlButtonCount == 12,
+                          "staged A1 control-button cap differs");
+            struct ControlContext { void* db; } control_context{parameter_db};
+            const auto capture_button = +[](void* opaque, std::uint32_t,
+                                             std::uint32_t index)
+                noexcept -> std::uint8_t {
+                const auto& c = *static_cast<ControlContext*>(opaque);
                 char key[32]{};
                 std::snprintf(
                     key, sizeof(key), "controlButton%lu",
                     static_cast<unsigned long>(index + 1));
                 a1compat::LegacyUiArea local_button{};
                 if (!gui_parameter_rectangle(
-                        parameter_db, key, &local_button)) {
-                    break;
-                }
+                        c.db, key, &local_button)) return 0;
                 g_legacy_control_button_rects[index] =
                     a1compat::legacy_area_to_native_rectangle(
                         local_button);
-                ++captured_button_count;
-            }
+                return 1;
+            };
+            captured_button_count =
+                a2fo_rs_stage9_a1_gui_control_buttons(
+                    &control_context, capture_button);
 
             a1compat::LegacyUiArea background_area{
                 0, 0, control_panel.width, control_panel.height};
@@ -8100,6 +8314,8 @@ void configure_gui_parameter_db(
             captured_speed_pieces{};
         std::array<char, 64> speed_background_sprite_base{};
         std::int32_t speed_background_piece_count = 0;
+        static_assert(kMaximumLegacySpeedBackgroundPieces == 16,
+                      "staged speed background cap differs");
         const bool has_speed_panel =
             gui_parameter_rectangle(
                 parameter_db, kLegacySpeedPanelAreaKey, &speed_panel) &&
@@ -8115,36 +8331,40 @@ void configure_gui_parameter_db(
                 speed_background_sprite_base.size()) &&
             gui_parameter_int(
                 parameter_db, "speedBackgroundPanelSize",
-                &speed_background_piece_count) &&
-            speed_background_piece_count > 0 &&
-            speed_background_piece_count <= static_cast<std::int32_t>(
-                kMaximumLegacySpeedBackgroundPieces);
-        for (std::int32_t index = 0;
-             complete_speed_background &&
-             index < speed_background_piece_count; ++index) {
+                &speed_background_piece_count);
+        struct SpeedBackgroundContext {
+            void* db;
+            a1compat::LegacyUiArea* background;
+            decltype(speed_background_pieces)* areas;
+            decltype(captured_speed_pieces)* captured;
+            const char* sprite_base;
+        } speed_background_context{
+            parameter_db, &speed_background, &speed_background_pieces,
+            &captured_speed_pieces, speed_background_sprite_base.data()};
+        const auto speed_background_piece = +[](
+                void* opaque, std::uint32_t,
+                std::uint32_t raw_index) noexcept -> std::uint8_t {
+            const auto& c = *static_cast<SpeedBackgroundContext*>(opaque);
+            const std::size_t index = static_cast<std::size_t>(raw_index);
             char rectangle_key[96]{};
             std::snprintf(
                 rectangle_key, sizeof(rectangle_key), "%s_%ld",
-                kLegacySpeedBackgroundPrefix, static_cast<long>(index));
+                kLegacySpeedBackgroundPrefix, static_cast<long>(raw_index));
             if (!gui_parameter_rectangle(
-                    parameter_db, rectangle_key,
-                    &speed_background_pieces[
-                        static_cast<std::size_t>(index)])) {
-                complete_speed_background = false;
-                break;
-            }
-            LegacyBackgroundPiece& piece =
-                captured_speed_pieces[static_cast<std::size_t>(index)];
+                    c.db, rectangle_key, &(*c.areas)[index])) return 0;
+            LegacyBackgroundPiece& piece = (*c.captured)[index];
             piece.rectangle = a1compat::legacy_area_to_native_rectangle(
                 a1compat::legacy_child_area_in_parent(
-                    speed_background,
-                    speed_background_pieces[
-                        static_cast<std::size_t>(index)]));
+                    *c.background, (*c.areas)[index]));
             std::snprintf(
                 piece.sprite_name.data(), piece.sprite_name.size(),
-                "%s.%ld", speed_background_sprite_base.data(),
-                static_cast<long>(index));
-        }
+                "%s.%ld", c.sprite_base, static_cast<long>(raw_index));
+            return 1;
+        };
+        complete_speed_background =
+            a2fo_rs_stage9_a1_gui_speed_background(
+                complete_speed_background, speed_background_piece_count,
+                &speed_background_context, speed_background_piece) != 0;
 
         a1compat::LegacyUiArea speed_single_button{};
         a1compat::LegacyUiArea speed_separator{};
@@ -8165,13 +8385,12 @@ void configure_gui_parameter_db(
             gui_parameter_int(
                 parameter_db, "speedSingleButtonGap",
                 &speed_single_button_gap) &&
-            legacy_ui_scale_x > 0.0 &&
-            std::isfinite(legacy_ui_scale_x);
+            a2fo_rs_stage9_a1_gui_scale_speed_valid(&legacy_ui_scale_x);
         if (complete_speed_controls) {
-            const std::int32_t scaled_gap = static_cast<std::int32_t>(
-                std::lround(
-                    static_cast<double>(speed_single_button_gap) *
-                    legacy_ui_scale_x));
+            const std::int32_t scaled_gap = a2fo_rs_stage9_a1_ui_scale_scalar(
+                speed_single_button_gap,
+                reinterpret_cast<const std::uint64_t*>(&legacy_ui_scale_x),
+                a1_ui_round_bits);
             for (std::size_t index = 0;
                  index < g_legacy_speed_queue_screen_rects.size(); ++index) {
                 const a1compat::LegacyUiArea local_slot =
@@ -8210,8 +8429,14 @@ void configure_gui_parameter_db(
             InterlockedExchange(
                 &g_legacy_speed_control_layout_available, 1);
         }
-        if (complete_speed_background &&
-            g_legacy_speed_panel_runtime_ready) {
+        const auto read_runtime_ready = +[](void* opaque)
+            noexcept -> std::uint8_t {
+            return *static_cast<bool*>(opaque);
+        };
+        if (a2fo_rs_stage9_a1_gui_ready(
+                complete_speed_background,
+                &g_legacy_speed_panel_runtime_ready,
+                read_runtime_ready)) {
             g_legacy_speed_panel_rect =
                 a1compat::legacy_area_to_native_rectangle(speed_panel);
             g_legacy_speed_background_pieces = captured_speed_pieces;
@@ -8229,18 +8454,11 @@ void configure_gui_parameter_db(
         const bool has_cinematic_panel = gui_parameter_rectangle(
                 parameter_db, "cinematicPanelArea", &cinematic_panel) &&
             a1compat::usable_legacy_ui_area(cinematic_panel);
-        if (has_raw_legacy_config && has_cinematic_panel &&
-            (legacy_ui_scale_x <= 0.0 || legacy_ui_scale_y <= 0.0) &&
-            a1compat::usable_legacy_ui_area(
-                raw_legacy_config.cinematic_panel)) {
-            legacy_ui_scale_x = static_cast<double>(cinematic_panel.width) /
-                raw_legacy_config.cinematic_panel.width;
-            legacy_ui_scale_y = static_cast<double>(cinematic_panel.height) /
-                raw_legacy_config.cinematic_panel.height;
-        }
-        const bool use_raw_cinematic_rectangles =
-            has_raw_legacy_config && legacy_ui_scale_x > 0.0 &&
-            legacy_ui_scale_y > 0.0;
+        a2fo_rs_stage9_a1_gui_scale_cinematic(has_raw_legacy_config,has_cinematic_panel,
+            &raw_legacy_config.cinematic_panel.x,&cinematic_panel.x,
+            &legacy_ui_scale_x,&legacy_ui_scale_y);
+        const bool use_raw_cinematic_rectangles=a2fo_rs_stage9_a1_gui_scale_use_raw(
+            has_raw_legacy_config,&legacy_ui_scale_x,&legacy_ui_scale_y)!=0;
         if (use_raw_cinematic_rectangles) {
             cinematic_background_panel = scale_legacy_gui_area(
                 raw_legacy_config.cinematic_background_panel,
@@ -8264,22 +8482,19 @@ void configure_gui_parameter_db(
                 parameter_db, "infoSingleEnergyBar",
                 g_legacy_ship_display_single_energy_sprite_name.data(),
                 g_legacy_ship_display_single_energy_sprite_name.size());
-            if (g_legacy_ship_display_single_energy_sprite_name[0] ==
-                    '\0') {
-                std::snprintf(
-                    g_legacy_ship_display_single_energy_sprite_name.data(),
-                    g_legacy_ship_display_single_energy_sprite_name.size(),
-                    "%s", "large_energy_bar");
+            if (const char* default_sprite=a2fo_rs_stage9_a1_gui_default_energy_sprite(
+                    0,g_legacy_ship_display_single_energy_sprite_name[0]!='\0')) {
+                std::snprintf(g_legacy_ship_display_single_energy_sprite_name.data(),
+                    g_legacy_ship_display_single_energy_sprite_name.size(),"%s",default_sprite);
             }
             gui_parameter_string(
                 parameter_db, "infoMultiEnergyBar",
                 g_legacy_ship_display_multi_energy_sprite_name.data(),
                 g_legacy_ship_display_multi_energy_sprite_name.size());
-            if (g_legacy_ship_display_multi_energy_sprite_name[0] == '\0') {
-                std::snprintf(
-                    g_legacy_ship_display_multi_energy_sprite_name.data(),
-                    g_legacy_ship_display_multi_energy_sprite_name.size(),
-                    "%s", "small_energy_bar");
+            if (const char* default_sprite=a2fo_rs_stage9_a1_gui_default_energy_sprite(
+                    1,g_legacy_ship_display_multi_energy_sprite_name[0]!='\0')) {
+                std::snprintf(g_legacy_ship_display_multi_energy_sprite_name.data(),
+                    g_legacy_ship_display_multi_energy_sprite_name.size(),"%s",default_sprite);
             }
             gui_parameter_vector(
                 parameter_db, "infoSingleEnergyBarColor",
@@ -8610,20 +8825,37 @@ void configure_gui_parameter_db(
                     1);
             }
         }
-        const bool complete_cinematic_layout = has_cinematic_panel &&
-            ((use_raw_cinematic_rectangles) ||
-             (gui_parameter_rectangle(
-                  parameter_db, "cinematicBackgroundPanelArea",
-                  &cinematic_background_panel) &&
-              gui_parameter_rectangle(
-                  parameter_db, "cinematicBackgroundArea",
-                  &cinematic_background) &&
-              gui_parameter_rectangle(
-                  parameter_db, "cinematicDisplayArea",
-                  &cinematic_display))) &&
-            a1compat::usable_legacy_ui_area(cinematic_background_panel) &&
-            a1compat::usable_legacy_ui_area(cinematic_background) &&
-            a1compat::usable_legacy_ui_area(cinematic_display);
+        struct CinematicContext {
+            void* db;
+            a1compat::LegacyUiArea* background_panel;
+            a1compat::LegacyUiArea* background;
+            a1compat::LegacyUiArea* display;
+            a1compat::LegacyUiArea* menu_button;
+            a1compat::LegacyUiArea* comm_button;
+        } cinematic_context{parameter_db, &cinematic_background_panel,
+                            &cinematic_background, &cinematic_display,
+                            &cinematic_menu_button, &cinematic_comm_button};
+        const auto layout_step = +[](void* opaque, std::uint32_t operation,
+                                     std::uint32_t) noexcept -> std::uint8_t {
+            const auto& c = *static_cast<CinematicContext*>(opaque);
+            switch (operation) {
+                case 0: return gui_parameter_rectangle(
+                    c.db, "cinematicBackgroundPanelArea", c.background_panel);
+                case 1: return gui_parameter_rectangle(
+                    c.db, "cinematicBackgroundArea", c.background);
+                case 2: return gui_parameter_rectangle(
+                    c.db, "cinematicDisplayArea", c.display);
+                case 3: return a1compat::usable_legacy_ui_area(
+                    *c.background_panel);
+                case 4: return a1compat::usable_legacy_ui_area(*c.background);
+                case 5: return a1compat::usable_legacy_ui_area(*c.display);
+                default: return 0;
+            }
+        };
+        const bool complete_cinematic_layout =
+            a2fo_rs_stage9_a1_gui_cinematic_layout(
+                has_cinematic_panel, use_raw_cinematic_rectangles,
+                &cinematic_context, layout_step) != 0;
         if (complete_cinematic_layout) {
             g_legacy_cinematic_panel_rect =
                 a1compat::legacy_area_to_native_rectangle(cinematic_panel);
@@ -8666,39 +8898,44 @@ void configure_gui_parameter_db(
             }
         }
 
-        const bool has_cinematic_button_rectangles =
-            (use_raw_cinematic_rectangles &&
-             raw_legacy_config.has_cinematic_buttons) ||
-            (!use_raw_cinematic_rectangles &&
-             gui_parameter_rectangle(
-                 parameter_db, "cinematicMenuButtonArea",
-                 &cinematic_menu_button) &&
-             gui_parameter_rectangle(
-                 parameter_db, "cinematicCommButtonArea",
-                 &cinematic_comm_button));
+        const auto buttons_step = +[](void* opaque, std::uint32_t operation,
+                                      std::uint32_t) noexcept -> std::uint8_t {
+            const auto& c = *static_cast<CinematicContext*>(opaque);
+            switch (operation) {
+                case 0: return gui_parameter_rectangle(
+                    c.db, "cinematicMenuButtonArea", c.menu_button);
+                case 1: return gui_parameter_rectangle(
+                    c.db, "cinematicCommButtonArea", c.comm_button);
+                case 2: return a1compat::usable_legacy_ui_area(*c.menu_button);
+                case 3: return a1compat::usable_legacy_ui_area(*c.comm_button);
+                case 4: return gui_parameter_string(
+                    c.db, "cinematicMenuButton",
+                    g_legacy_cinematic_menu_button_sprite_name.data(),
+                    g_legacy_cinematic_menu_button_sprite_name.size());
+                case 5: return gui_parameter_string(
+                    c.db, "cinematicMenuBorder",
+                    g_legacy_cinematic_menu_border_sprite_name.data(),
+                    g_legacy_cinematic_menu_border_sprite_name.size());
+                case 6: return gui_parameter_string(
+                    c.db, "cinematicCommButton",
+                    g_legacy_cinematic_comm_button_sprite_name.data(),
+                    g_legacy_cinematic_comm_button_sprite_name.size());
+                case 7: return gui_parameter_string(
+                    c.db, "cinematicCommBorder",
+                    g_legacy_cinematic_comm_border_sprite_name.data(),
+                    g_legacy_cinematic_comm_border_sprite_name.size());
+                default: return 0;
+            }
+        };
         const bool complete_cinematic_buttons =
-            complete_cinematic_layout &&
-            has_cinematic_button_rectangles &&
-            a1compat::usable_legacy_ui_area(cinematic_menu_button) &&
-            a1compat::usable_legacy_ui_area(cinematic_comm_button) &&
-            gui_parameter_string(
-                parameter_db, "cinematicMenuButton",
-                g_legacy_cinematic_menu_button_sprite_name.data(),
-                g_legacy_cinematic_menu_button_sprite_name.size()) &&
-            gui_parameter_string(
-                parameter_db, "cinematicMenuBorder",
-                g_legacy_cinematic_menu_border_sprite_name.data(),
-                g_legacy_cinematic_menu_border_sprite_name.size()) &&
-            gui_parameter_string(
-                parameter_db, "cinematicCommButton",
-                g_legacy_cinematic_comm_button_sprite_name.data(),
-                g_legacy_cinematic_comm_button_sprite_name.size()) &&
-            gui_parameter_string(
-                parameter_db, "cinematicCommBorder",
-                g_legacy_cinematic_comm_border_sprite_name.data(),
-                g_legacy_cinematic_comm_border_sprite_name.size());
-        if (complete_cinematic_buttons &&
-            g_legacy_cinematic_button_runtime_ready) {
+            a2fo_rs_stage9_a1_gui_cinematic_buttons(
+                complete_cinematic_layout, use_raw_cinematic_rectangles,
+                raw_legacy_config.has_cinematic_buttons,
+                &cinematic_context, buttons_step) != 0;
+        if (a2fo_rs_stage9_a1_gui_ready(
+                complete_cinematic_buttons,
+                &g_legacy_cinematic_button_runtime_ready,
+                read_runtime_ready)) {
             g_legacy_cinematic_menu_button_rect =
                 a1compat::legacy_area_to_native_rectangle(
                     cinematic_menu_button);
@@ -8721,25 +8958,38 @@ void configure_gui_parameter_db(
             kLegacyResourcePanelCount> resource_background_pieces{};
         std::array<std::size_t, kLegacyResourcePanelCount>
             resource_background_piece_counts{};
-        bool complete_resource_strip = true;
-        for (std::size_t index = 0;
-             index < kLegacyResourcePanelCount; ++index) {
+        static_assert(kLegacyResourcePanelCount == 3 &&
+                          kMaximumLegacyResourceBackgroundPieces == 16,
+                      "staged resource row or piece cap differs");
+        struct ResourceContext {
+            void* db;
+            decltype(resource_panels)* panels;
+            decltype(resource_texts)* texts;
+            decltype(resource_icons)* icons;
+            decltype(resource_background_pieces)* pieces;
+            decltype(resource_background_piece_counts)* counts;
+        } resource_context{
+            parameter_db, &resource_panels, &resource_texts,
+            &resource_icons, &resource_background_pieces,
+            &resource_background_piece_counts};
+        const auto resource_row = +[](
+                void* opaque, std::uint32_t,
+                std::uint32_t raw_index) noexcept -> std::uint8_t {
+            const auto& c = *static_cast<ResourceContext*>(opaque);
+            const std::size_t index = static_cast<std::size_t>(raw_index);
             if (!gui_parameter_rectangle(
-                    parameter_db, kLegacyResourcePanelAreaKeys[index],
-                    &resource_panels[index]) ||
+                    c.db, kLegacyResourcePanelAreaKeys[index],
+                    &(*c.panels)[index]) ||
                 !gui_parameter_rectangle(
-                    parameter_db, kLegacyResourceTextAreaKeys[index],
-                    &resource_texts[index]) ||
+                    c.db, kLegacyResourceTextAreaKeys[index],
+                    &(*c.texts)[index]) ||
                 !gui_parameter_rectangle(
-                    parameter_db, kLegacyResourceIconAreaKeys[index],
-                    &resource_icons[index]) ||
+                    c.db, kLegacyResourceIconAreaKeys[index],
+                    &(*c.icons)[index]) ||
                 !gui_parameter_string(
-                    parameter_db, kLegacyResourceIconKeys[index],
+                    c.db, kLegacyResourceIconKeys[index],
                     g_legacy_resource_icon_names[index].data(),
-                    g_legacy_resource_icon_names[index].size())) {
-                complete_resource_strip = false;
-                break;
-            }
+                    g_legacy_resource_icon_names[index].size())) return 0;
             std::array<char, 64> background_sprite_base{};
             char size_key[96]{};
             std::snprintf(
@@ -8747,46 +8997,55 @@ void configure_gui_parameter_db(
                 kLegacyResourceBackgroundPrefixes[index]);
             std::int32_t background_piece_count = 0;
             if (!gui_parameter_string(
-                    parameter_db,
+                    c.db,
                     kLegacyResourceBackgroundPrefixes[index],
                     background_sprite_base.data(),
                     background_sprite_base.size()) ||
                 !gui_parameter_int(
-                    parameter_db, size_key, &background_piece_count) ||
-                background_piece_count <= 0 ||
-                background_piece_count > static_cast<std::int32_t>(
-                    kMaximumLegacyResourceBackgroundPieces)) {
-                complete_resource_strip = false;
-                break;
-            }
-            resource_background_piece_counts[index] =
+                    c.db, size_key, &background_piece_count) ||
+                !a2fo_rs_stage9_a1_gui_background_count_valid(
+                    background_piece_count)) return 0;
+            (*c.counts)[index] =
                 static_cast<std::size_t>(background_piece_count);
-            for (std::size_t piece_index = 0;
-                 piece_index < resource_background_piece_counts[index];
-                 ++piece_index) {
+            struct PieceContext {
+                const ResourceContext* resources;
+                std::size_t row;
+                const char* sprite_base;
+            } piece_context{&c, index, background_sprite_base.data()};
+            const auto resource_piece = +[](
+                    void* piece_opaque, std::uint32_t,
+                    std::uint32_t raw_piece_index) noexcept -> std::uint8_t {
+                const auto& p = *static_cast<PieceContext*>(piece_opaque);
+                const std::size_t piece_index =
+                    static_cast<std::size_t>(raw_piece_index);
                 char rectangle_key[96]{};
                 std::snprintf(
                     rectangle_key, sizeof(rectangle_key), "%s_%lu",
-                    kLegacyResourceBackgroundPrefixes[index],
+                    kLegacyResourceBackgroundPrefixes[p.row],
                     static_cast<unsigned long>(piece_index));
                 if (!gui_parameter_rectangle(
-                        parameter_db, rectangle_key,
-                        &resource_background_pieces[index][piece_index])) {
-                    complete_resource_strip = false;
-                    break;
-                }
+                        p.resources->db, rectangle_key,
+                        &(*p.resources->pieces)[p.row][piece_index])) return 0;
                 std::snprintf(
-                    g_legacy_resource_background_pieces[index][piece_index]
+                    g_legacy_resource_background_pieces[p.row][piece_index]
                         .sprite_name.data(),
-                    g_legacy_resource_background_pieces[index][piece_index]
+                    g_legacy_resource_background_pieces[p.row][piece_index]
                         .sprite_name.size(),
-                    "%s.%lu", background_sprite_base.data(),
+                    "%s.%lu", p.sprite_base,
                     static_cast<unsigned long>(piece_index));
-            }
-            if (!complete_resource_strip) break;
-        }
-        if (complete_resource_strip &&
-            g_legacy_resource_panel_runtime_ready) {
+                return 1;
+            };
+            return a2fo_rs_stage9_a1_gui_background_pieces(
+                static_cast<std::uint32_t>(background_piece_count),
+                &piece_context, resource_piece);
+        };
+        const bool complete_resource_strip =
+            a2fo_rs_stage9_a1_gui_resource_strip(
+                &resource_context, resource_row) != 0;
+        if (a2fo_rs_stage9_a1_gui_ready(
+                complete_resource_strip,
+                &g_legacy_resource_panel_runtime_ready,
+                read_runtime_ready)) {
             const a1compat::LegacyUiArea resource_union =
                 a1compat::legacy_ui_area_union(
                     resource_panels[0], resource_panels[1],
@@ -9002,16 +9261,12 @@ void apply_legacy_cinematic_button_panel_layout(
     const auto& panel = g_legacy_cinematic_panel_rect;
     const auto& local_menu = g_legacy_cinematic_menu_button_rect;
     const auto& local_comm = g_legacy_cinematic_comm_button_rect;
-    const a1compat::NativeUiRectangle screen_menu{
-        panel.left + local_menu.left,
-        panel.top + local_menu.top,
-        panel.left + local_menu.right,
-        panel.top + local_menu.bottom};
-    const a1compat::NativeUiRectangle screen_comm{
-        panel.left + local_comm.left,
-        panel.top + local_comm.top,
-        panel.left + local_comm.right,
-        panel.top + local_comm.bottom};
+    a1compat::NativeUiRectangle screen_menu{};
+    a2fo_rs_stage9_a1_layout_screen_rectangle(
+        &panel.left, &local_menu.left, &screen_menu.left);
+    a1compat::NativeUiRectangle screen_comm{};
+    a2fo_rs_stage9_a1_layout_screen_rectangle(
+        &panel.left, &local_comm.left, &screen_comm.left);
 
     if (!write_component_rectangle(
             button_panel, kButtonPanelRectangleOffset,
@@ -9368,47 +9623,35 @@ void apply_legacy_ship_display_multi_layout(
     }
 }
 
-SpriteVector legacy_multi_ship_crew_colour(
-    const void* selected_object) noexcept {
-    const SpriteVector healthy{0.0f, 1.0f, 0.0f};
-    const SpriteVector low{1.0f, 1.0f, 0.0f};
-    const SpriteVector critical{1.0f, 0.0f, 0.0f};
-    if (!selected_object) return healthy;
+SpriteVector a1_crew_colour_from_words(const std::array<std::uint32_t,3>& words) noexcept {
+    SpriteVector result;static_assert(sizeof(result)==12);
+    std::memcpy(static_cast<void*>(&result),words.data(),12);return result;
+}
 
-    float current_crew = 0.0f;
-    float maximum_crew = 0.0f;
-    const void* current_source =
-        static_cast<const std::uint8_t*>(selected_object) +
-        kSelectedObjectCurrentCrewOffset;
-    const void* maximum_source =
-        static_cast<const std::uint8_t*>(selected_object) +
-        kSelectedObjectMaximumCrewOffset;
-    if (!readable_range(current_source, sizeof(current_crew))) {
-        return healthy;
+SpriteVector legacy_multi_ship_crew_colour(const void* selected_object) noexcept {
+    std::array<std::uint32_t,3> words{};
+    if (!selected_object) {
+        a2fo_rs_stage9_a1_crew_colour_words(0,words.data());
+        return a1_crew_colour_from_words(words);
     }
-    std::memcpy(&current_crew, current_source, sizeof(current_crew));
-    if (readable_range(maximum_source, sizeof(maximum_crew))) {
-        std::memcpy(&maximum_crew, maximum_source, sizeof(maximum_crew));
+    std::uint32_t current=0,maximum=0;
+    const void* current_source=static_cast<const std::uint8_t*>(selected_object)+kSelectedObjectCurrentCrewOffset;
+    const void* maximum_source=static_cast<const std::uint8_t*>(selected_object)+kSelectedObjectMaximumCrewOffset;
+    if (!readable_range(current_source,4)) {
+        a2fo_rs_stage9_a1_crew_colour_words(0,words.data());
+        return a1_crew_colour_from_words(words);
     }
-    if (!std::isfinite(current_crew)) return healthy;
-    if (!std::isfinite(maximum_crew) || maximum_crew <= 0.0f) {
-        void* object_class = read_pointer_at(
-            selected_object, kGameObjectClassOffset);
-        maximum_crew = static_cast<float>(std::max<std::int32_t>(
-            0, read_int32_at(
-                object_class, kObjectClassInitialCrewOffset, 0)));
-    }
-
-    switch (a1compat::legacy_crew_health(
-            current_crew, maximum_crew)) {
-        case a1compat::LegacyCrewHealth::healthy:
-            return healthy;
-        case a1compat::LegacyCrewHealth::low:
-            return low;
-        case a1compat::LegacyCrewHealth::critical:
-            return critical;
-    }
-    return healthy;
+    std::memcpy(&current,current_source,4);
+    const bool maximum_readable=readable_range(maximum_source,4);
+    if(maximum_readable)std::memcpy(&maximum,maximum_source,4);
+    struct Context {const void* selected;} context{selected_object};
+    const auto fallback=+[](void* opaque) noexcept ->std::int32_t {
+        const auto* selected=static_cast<Context*>(opaque)->selected;
+        void* object_class=read_pointer_at(selected,kGameObjectClassOffset);
+        return read_int32_at(object_class,kObjectClassInitialCrewOffset,0);
+    };
+    a2fo_rs_stage9_a1_crew_colour(current,maximum,maximum_readable,&context,fallback,words.data());
+    return a1_crew_colour_from_words(words);
 }
 
 void* legacy_energy_bar_colour_value(
@@ -9433,6 +9676,11 @@ void* legacy_energy_bar_values_value(
     return output;
 }
 
+std::int32_t a1_display_round_bits(std::uint64_t bits) noexcept {
+    double value;std::memcpy(&value,&bits,8);
+    return static_cast<std::int32_t>(std::lround(value));
+}
+
 bool legacy_special_energy_values(
     const void* selected_object, float* current,
     float* maximum) noexcept {
@@ -9449,11 +9697,10 @@ bool legacy_special_energy_values(
     }
     std::memcpy(maximum, maximum_source, sizeof(*maximum));
     std::memcpy(current, current_source, sizeof(*current));
-    if (!std::isfinite(*maximum) || *maximum <= 0.0f ||
-        !std::isfinite(*current)) {
-        return false;
-    }
-    *current = std::clamp(*current, 0.0f, *maximum);
+    std::uint32_t current_word,maximum_word,selected_word;
+    std::memcpy(&current_word,current,4);std::memcpy(&maximum_word,maximum,4);
+    if(!a2fo_rs_stage9_a1_display_energy(current_word,maximum_word,&selected_word))return false;
+    std::memcpy(current,&selected_word,4);
     return true;
 }
 
@@ -9593,43 +9840,20 @@ void draw_legacy_ship_display_energy_bars(
         ship_display, kShipDisplaySelectedObjectPointerOffset);
     std::size_t drawn_count = 0;
     const char* mode = "single";
-    if (selected_object) {
-        void* sprite = reinterpret_cast<void*>(a2fo_a1_call_thiscall_2(
-            at(g_armada, kInterfaceSpriteDatabaseGetRva), database,
-            reinterpret_cast<std::uintptr_t>(
-                g_legacy_ship_display_single_energy_sprite_name.data()),
-            0));
-        drawn_count += draw_legacy_special_energy_bar(
-            scratch_bar, sprite, selected_object,
-            g_legacy_ship_display_single_energy_rect,
-            g_legacy_ship_display_single_energy_colour,
-            g_legacy_ship_display_single_energy_disabled_colour)
-            ? 1u : 0u;
-    } else if (read_int32_at(
-                   ship_display, kShipDisplayLayoutIndexOffset, 0) != 0) {
-        mode = "multi";
-        void* sprite = reinterpret_cast<void*>(a2fo_a1_call_thiscall_2(
-            at(g_armada, kInterfaceSpriteDatabaseGetRva), database,
-            reinterpret_cast<std::uintptr_t>(
-                g_legacy_ship_display_multi_energy_sprite_name.data()),
-            0));
-        std::size_t active_count = 0;
-        for (std::size_t index = 0;
-             index < kLegacyMultiShipCount; ++index) {
-            void* tile = checked_multi_ship_tile(ship_display, index);
-            void* object = read_pointer_at(tile, 0x28);
-            if (!object) continue;
-            ++active_count;
-            if (draw_legacy_special_energy_bar(
-                    scratch_bar, sprite, object,
-                    g_legacy_ship_display_multi_energy_rects[index],
-                    g_legacy_ship_display_multi_energy_colour,
-                    g_legacy_ship_display_multi_energy_disabled_colour)) {
-                ++drawn_count;
-            }
+    struct Context{void* display;void* scratch;void* database;void* selected;void* sprite;void* object;const char*& mode;} c{ship_display,scratch_bar,database,selected_object,nullptr,nullptr,mode};
+    const auto step=+[](void* p,std::uint32_t op,std::size_t index) noexcept -> std::size_t {
+        auto& c=*static_cast<Context*>(p);
+        switch(op){
+        case 0:return read_int32_at(c.display,kShipDisplayLayoutIndexOffset,0)!=0;
+        case 1:{void* sprite=reinterpret_cast<void*>(a2fo_a1_call_thiscall_2(at(g_armada,kInterfaceSpriteDatabaseGetRva),c.database,reinterpret_cast<std::uintptr_t>(g_legacy_ship_display_single_energy_sprite_name.data()),0));
+            return draw_legacy_special_energy_bar(c.scratch,sprite,c.selected,g_legacy_ship_display_single_energy_rect,g_legacy_ship_display_single_energy_colour,g_legacy_ship_display_single_energy_disabled_colour);}
+        case 2:c.mode="multi";c.sprite=reinterpret_cast<void*>(a2fo_a1_call_thiscall_2(at(g_armada,kInterfaceSpriteDatabaseGetRva),c.database,reinterpret_cast<std::uintptr_t>(g_legacy_ship_display_multi_energy_sprite_name.data()),0));return 0;
+        case 3:{void* tile=checked_multi_ship_tile(c.display,index);c.object=read_pointer_at(tile,0x28);return c.object!=nullptr;}
+        case 4:return draw_legacy_special_energy_bar(c.scratch,c.sprite,c.object,g_legacy_ship_display_multi_energy_rects[index],g_legacy_ship_display_multi_energy_colour,g_legacy_ship_display_multi_energy_disabled_colour);
+        default:return 0;
         }
-        if (active_count < 2) return;
-    }
+    };
+    if(!a2fo_rs_stage9_a1_render_energy(selected_object!=nullptr,kLegacyMultiShipCount,&c,step,&drawn_count))return;
 
     if (drawn_count > 0 && InterlockedCompareExchange(
             &g_legacy_ship_display_energy_reported, 1, 0) == 0) {
@@ -9662,22 +9886,17 @@ void draw_legacy_ship_display_multi_crew_dots(
 
     std::array<void*, kLegacyMultiShipCount> active_tiles{};
     std::array<void*, kLegacyMultiShipCount> active_objects{};
-    std::size_t active_count = 0;
-    for (std::size_t index = 0; index < active_tiles.size(); ++index) {
-        void* tile = checked_multi_ship_tile(ship_display, index);
-        if (!tile || !readable_range(
-                tile, kMultiShipWireframePointerOffset + sizeof(void*))) {
-            continue;
-        }
-        void* selected_object = read_pointer_at(tile, 0x28);
-        if (!selected_object) {
-            continue;
-        }
-        active_tiles[index] = tile;
-        active_objects[index] = selected_object;
-        ++active_count;
-    }
-    if (active_count < 2) return;
+    struct Collect{void* display;std::array<void*,kLegacyMultiShipCount>& tiles;std::array<void*,kLegacyMultiShipCount>& objects;} collect{ship_display,active_tiles,active_objects};
+    const auto collect_step=+[](void* p,std::uint32_t,std::size_t index) noexcept -> std::size_t {
+        auto& c=*static_cast<Collect*>(p);
+        void* tile=checked_multi_ship_tile(c.display,index);
+        if(!tile||!readable_range(tile,kMultiShipWireframePointerOffset+sizeof(void*)))return 0;
+        void* object=read_pointer_at(tile,0x28);
+        if(!object)return 0;
+        c.tiles[index]=tile;c.objects[index]=object;return 1;
+    };
+    const std::size_t active_count=a2fo_rs_stage9_a1_render_collect(active_tiles.size(),&collect,collect_step);
+    if(!a2fo_rs_stage9_a1_render_multi_admit(active_count))return;
 
     a1compat::NativeUiRectangle parent_rectangle{};
     const void* rectangle_source = static_cast<const std::uint8_t*>(
@@ -9701,9 +9920,11 @@ void draw_legacy_ship_display_multi_crew_dots(
     }
     std::size_t wireframe_count = 0;
     std::size_t crew_dot_count = 0;
-    for (std::size_t index = 0; index < active_tiles.size(); ++index) {
-        void* tile = active_tiles[index];
-        if (!tile) continue;
+    struct Render{const std::array<void*,kLegacyMultiShipCount>& active_tiles;const std::array<void*,kLegacyMultiShipCount>& active_objects;bool has_parent_rectangle;const a1compat::NativeUiRectangle& parent_rectangle;void* sprite;std::size_t& wireframe_count;std::size_t& crew_dot_count;} render{active_tiles,active_objects,has_parent_rectangle,parent_rectangle,sprite,wireframe_count,crew_dot_count};
+    const auto render_step=+[](void* p,std::uint32_t,std::size_t index) noexcept -> std::size_t {
+        auto& c=*static_cast<Render*>(p);
+        void* tile = c.active_tiles[index];
+        if (!tile) return 0;
 
         // Fleet Operations can replace the concrete MultiShipIcon vtable,
         // so follow its retained child pointer and call that child's own
@@ -9723,21 +9944,23 @@ void draw_legacy_ship_display_multi_crew_dots(
             void* object_slot = static_cast<std::uint8_t*>(wireframe) + 0x28;
             if (writable_range(object_slot, sizeof(void*))) {
                 std::memcpy(
-                    object_slot, &active_objects[index], sizeof(void*));
+                    object_slot, &c.active_objects[index], sizeof(void*));
             }
             a2fo_a1_call_thiscall_0(wireframe_render, wireframe);
-            ++wireframe_count;
+            ++c.wireframe_count;
         }
 
-        if (has_parent_rectangle && sprite &&
+        if (c.has_parent_rectangle && c.sprite &&
             draw_legacy_gui_sprite_instance(
-                sprite, parent_rectangle,
+                c.sprite, c.parent_rectangle,
                 g_legacy_ship_display_multi_crew_rects[index],
                 legacy_multi_ship_crew_colour(
-                    active_objects[index]))) {
-            ++crew_dot_count;
+                    c.active_objects[index]))) {
+            ++c.crew_dot_count;
         }
-    }
+        return 0;
+    };
+    a2fo_rs_stage9_a1_render_visit(active_tiles.size(),&render,render_step);
     if (InterlockedCompareExchange(
             &g_legacy_ship_display_multi_crew_reported, 1, 0) == 0) {
         char message[320]{};
@@ -9881,28 +10104,27 @@ std::size_t apply_legacy_ship_text_layout(
 a1compat::NativeUiRectangle native_ui_rectangle_union(
     const a1compat::NativeUiRectangle& first,
     const a1compat::NativeUiRectangle& second) noexcept {
-    return a1compat::NativeUiRectangle{
-        std::min(first.left, second.left),
-        std::min(first.top, second.top),
-        std::max(first.right, second.right),
-        std::max(first.bottom, second.bottom)};
+    static_assert(sizeof(a1compat::NativeUiRectangle) ==
+                  4 * sizeof(std::int32_t));
+    std::array<std::int32_t, 4> result{};
+    a2fo_rs_stage9_a1_geometry_union(&first.left, &second.left,
+                                     result.data());
+    return {result[0], result[1], result[2], result[3]};
 }
 
 std::size_t apply_legacy_ship_crew_layout(
     void* ship_display, bool custom_identity_text) noexcept {
-    const bool has_crew_dot =
-        g_legacy_ship_display_crew_dot_rect.right >
-            g_legacy_ship_display_crew_dot_rect.left &&
-        g_legacy_ship_display_crew_dot_rect.bottom >
-            g_legacy_ship_display_crew_dot_rect.top;
-    const a1compat::NativeUiRectangle component_rectangle = has_crew_dot
-        ? native_ui_rectangle_union(
-              g_legacy_ship_display_crew_rect,
-              g_legacy_ship_display_crew_dot_rect)
-        : g_legacy_ship_display_crew_rect;
-    const a1compat::NativeUiRectangle text_rectangle = custom_identity_text
-        ? kHiddenLegacyResourceRectangle
-        : g_legacy_ship_display_crew_rect;
+    a1compat::NativeUiRectangle component_rectangle{};
+    a1compat::NativeUiRectangle text_rectangle{};
+    std::uint8_t has_crew_dot_value = 0;
+    a2fo_rs_stage9_a1_layout_crew(
+        &g_legacy_ship_display_crew_rect.left,
+        &g_legacy_ship_display_crew_dot_rect.left,
+        &kHiddenLegacyResourceRectangle.left,
+        custom_identity_text ? 1 : 0,
+        &component_rectangle.left, &text_rectangle.left,
+        &has_crew_dot_value);
+    const bool has_crew_dot = has_crew_dot_value != 0;
     void* crew_dot_sprite = nullptr;
     if (has_crew_dot &&
         g_legacy_ship_display_crew_dot_sprite_name[0] != '\0') {
@@ -9962,8 +10184,7 @@ std::size_t apply_legacy_ship_crew_layout(
 
 bool usable_native_ui_rectangle(
     const a1compat::NativeUiRectangle& rectangle) noexcept {
-    return rectangle.right > rectangle.left &&
-        rectangle.bottom > rectangle.top;
+    return a2fo_rs_stage9_a1_geometry_usable(&rectangle.left);
 }
 
 SpriteVector ship_text_component_colour(
@@ -9975,10 +10196,9 @@ SpriteVector ship_text_component_colour(
     if (readable_range(source, sizeof(colour))) {
         std::memcpy(&colour, source, sizeof(colour));
     }
-    if (!std::isfinite(colour.x) || !std::isfinite(colour.y) ||
-        !std::isfinite(colour.z)) {
-        return fallback;
-    }
+    std::array<std::uint32_t,3> words{};
+    std::memcpy(words.data(),&colour,12);
+    if(!a2fo_rs_stage9_a1_display_colour_finite(words.data()))return fallback;
     return colour;
 }
 
@@ -10030,29 +10250,29 @@ bool draw_legacy_ship_text(
     return true;
 }
 
-void localized_ship_label(
-    const char* key, const char* fallback,
-    char* output, std::size_t output_size) noexcept {
-    if (!output || output_size == 0) return;
-    output[0] = '\0';
-    const char* resolved = nullptr;
-    void* manager = g_armada
-        ? read_pointer_at(at(g_armada, kLocalizationManagerPointerRva), 0)
-        : nullptr;
-    if (manager && key && *key) {
-        resolved = reinterpret_cast<const char*>(
-            a2fo_a1_call_thiscall_1(
-                at(g_armada, kLocalizationLookupRva), manager,
-                reinterpret_cast<std::uintptr_t>(key)));
-        if (!resolved || IsBadStringPtrA(resolved, 512) || !*resolved ||
-            (_stricmp(resolved, key) == 0 &&
-             _strnicmp(key, "GUI_", 4) == 0)) {
-            resolved = nullptr;
-        }
-    }
-    std::snprintf(
-        output, output_size, "%s",
-        resolved ? resolved : (fallback ? fallback : ""));
+void localized_ship_label(const char* key,const char* fallback,char* output,std::size_t output_size) noexcept {
+    if(!output||output_size==0)return;
+    output[0]='\0';
+    void* manager=g_armada?read_pointer_at(at(g_armada,kLocalizationManagerPointerRva),0):nullptr;
+    struct Context {const char* key;const char* fallback;void* manager;const char* resolved=nullptr;} context{key,fallback,manager,nullptr};
+    const auto step=+[](void* opaque,std::uint32_t operation) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(operation){
+        case 0:return c.manager!=nullptr;
+        case 1:return c.key!=nullptr;
+        case 2:return *c.key!='\0';
+        case 3:c.resolved=reinterpret_cast<const char*>(a2fo_a1_call_thiscall_1(
+            at(g_armada,kLocalizationLookupRva),c.manager,reinterpret_cast<std::uintptr_t>(c.key)));
+            return reinterpret_cast<std::uintptr_t>(c.resolved);
+        case 4:return IsBadStringPtrA(c.resolved,512)!=0;
+        case 5:return *c.resolved!='\0';
+        case 6:return _stricmp(c.resolved,c.key)==0;
+        case 7:return _strnicmp(c.key,"GUI_",4)==0;
+        case 8:return reinterpret_cast<std::uintptr_t>(c.fallback);
+        default:return 0;}
+    };
+    const auto selected=a2fo_rs_stage9_a1_display_text_label(&context,step);
+    std::snprintf(output,output_size,"%s",reinterpret_cast<const char*>(selected));
 }
 
 void* preferred_ship_text_child(
@@ -10062,10 +10282,22 @@ void* preferred_ship_text_child(
     // The second child is the build/station presentation seen in A1's tall
     // status panel. Both variants use the same raw-A1 geometry and provide a
     // safe fallback for ordinary craft if Fleet Operations omits one path.
-    void* child = checked_ship_display_child(
-        ship_display, pointer_offsets[1], expected_vtable_rva);
-    return child ? child : checked_ship_display_child(
-        ship_display, pointer_offsets[0], expected_vtable_rva);
+    struct Context {
+        void* ship_display;
+        const std::array<std::size_t, 2>* pointer_offsets;
+        std::uintptr_t expected_vtable_rva;
+    } context{ship_display, &pointer_offsets, expected_vtable_rva};
+    const auto check_child = +[](void* opaque,
+                                 std::uint32_t child_index) noexcept
+        -> std::uintptr_t {
+        auto& state = *static_cast<Context*>(opaque);
+        if (child_index > 1) return 0;
+        return reinterpret_cast<std::uintptr_t>(checked_ship_display_child(
+            state.ship_display, (*state.pointer_offsets)[child_index],
+            state.expected_vtable_rva));
+    };
+    return reinterpret_cast<void*>(
+        a2fo_rs_stage9_a1_geometry_preferred_child(&context, check_child));
 }
 
 void draw_legacy_ship_display_identity_text(void* ship_display) noexcept {
@@ -10093,11 +10325,9 @@ void draw_legacy_ship_display_identity_text(void* ship_display) noexcept {
     std::memcpy(
         &current_crew_value, current_crew_source,
         sizeof(current_crew_value));
-    if (!std::isfinite(current_crew_value)) return;
-    const std::int32_t current_crew = static_cast<std::int32_t>(
-        std::lround(std::clamp(
-            static_cast<double>(current_crew_value), 0.0,
-            static_cast<double>(std::numeric_limits<std::int32_t>::max()))));
+    std::uint32_t current_word;std::memcpy(&current_word,&current_crew_value,4);
+    std::int32_t current_crew=0;
+    if(!a2fo_rs_stage9_a1_display_number(0,current_word,a1_display_round_bits,&current_crew))return;
     float maximum_crew_value = 0.0f;
     const void* maximum_crew_source =
         static_cast<const std::uint8_t*>(selected_object) +
@@ -10108,19 +10338,13 @@ void draw_legacy_ship_display_identity_text(void* ship_display) noexcept {
             sizeof(maximum_crew_value));
     }
     std::int32_t maximum_crew = 0;
-    if (std::isfinite(maximum_crew_value) && maximum_crew_value > 0.0f) {
-        maximum_crew = static_cast<std::int32_t>(std::lround(std::clamp(
-            static_cast<double>(maximum_crew_value), 0.0,
-            static_cast<double>(
-                std::numeric_limits<std::int32_t>::max()))));
-    } else {
-        maximum_crew = std::max<std::int32_t>(
-            0, read_int32_at(
-                object_class, kObjectClassInitialCrewOffset, 0));
+    std::uint32_t maximum_word;std::memcpy(&maximum_word,&maximum_crew_value,4);
+    if(!a2fo_rs_stage9_a1_display_number(1,maximum_word,a1_display_round_bits,&maximum_crew)) {
+        maximum_crew=a2fo_rs_stage9_a1_display_nonnegative(read_int32_at(
+            object_class,kObjectClassInitialCrewOffset,0));
     }
-    const std::int32_t officers = std::max<std::int32_t>(
-        0, read_int32_at(
-            object_class, kObjectClassOfficerCountOffset, 0));
+    const std::int32_t officers=a2fo_rs_stage9_a1_display_nonnegative(read_int32_at(
+        object_class,kObjectClassOfficerCountOffset,0));
 
     void* crew_text = preferred_ship_text_child(
         ship_display, kShipDisplayCrewPointerOffsets,
@@ -10143,7 +10367,7 @@ void draw_legacy_ship_display_identity_text(void* ship_display) noexcept {
     localized_ship_label(
         g_legacy_ship_display_officer_label_key.data(), "OFFICERS",
         officer_label, sizeof(officer_label));
-    if (maximum_crew > 0) {
+    if (a2fo_rs_stage9_a1_display_has_maximum(maximum_crew)) {
         std::snprintf(
             crew_amount, sizeof(crew_amount), "%ld/%ld",
             static_cast<long>(current_crew),
@@ -10220,12 +10444,15 @@ void apply_legacy_ship_display_identity_layout(
             &g_legacy_ship_display_identity_text_available, 0, 0) != 0;
     const std::size_t crew_count = apply_legacy_ship_crew_layout(
         ship_display, custom_identity_text);
+    a1compat::NativeUiRectangle officer_rectangle{};
+    a2fo_rs_stage9_a1_layout_select_rectangle(
+        &g_legacy_ship_display_officer_rect.left,
+        &kHiddenLegacyResourceRectangle.left,
+        custom_identity_text ? 1 : 0, &officer_rectangle.left);
     const std::size_t officer_count = apply_legacy_ship_text_layout(
         ship_display, kShipDisplayOfficerPointerOffsets,
         kShipOfficerDisplayVtableRva,
-        custom_identity_text
-            ? kHiddenLegacyResourceRectangle
-            : g_legacy_ship_display_officer_rect,
+        officer_rectangle,
         kShipAmountRenderRectangleOffset);
     if ((class_count + name_count + crew_count + officer_count) > 0 &&
         InterlockedCompareExchange(
@@ -10347,10 +10574,12 @@ bool bind_legacy_construction_bar_target(
         construction_rig, kGameObjectClassOffset);
     bool exact_construction_rig = construction_rig &&
         rig_vtable == at(g_armada, kConstructionRigVtableRva);
-    if (!construction_rig ||
-        (!exact_construction_rig &&
-         (!is_plausible_object_class(rig_class) ||
-          !likely_constructionrig_class(rig_class)))) {
+    struct RigContext{void*& object_class;} rig_context{rig_class};
+    const auto rig_step=+[](void* p,std::uint32_t op,std::size_t,std::size_t) noexcept -> std::size_t {
+        auto& c=*static_cast<RigContext*>(p);
+        return op==0?is_plausible_object_class(c.object_class):likely_constructionrig_class(c.object_class);
+    };
+    if (!a2fo_rs_stage9_a1_native_ui_rig(construction_rig!=nullptr,exact_construction_rig,&rig_context,rig_step)) {
         construction_rig = read_pointer_at(
             construction_bar, kConstructionBarObjectPointerOffset);
         rig_vtable = read_pointer_at(construction_rig, 0);
@@ -10359,10 +10588,7 @@ bool bind_legacy_construction_bar_target(
         exact_construction_rig = construction_rig &&
             rig_vtable == at(g_armada, kConstructionRigVtableRva);
     }
-    if (!construction_rig ||
-        (!exact_construction_rig &&
-         (!is_plausible_object_class(rig_class) ||
-          !likely_constructionrig_class(rig_class)))) {
+    if (!a2fo_rs_stage9_a1_native_ui_rig(construction_rig!=nullptr,exact_construction_rig,&rig_context,rig_step)) {
         return false;
     }
 
@@ -10381,7 +10607,7 @@ bool bind_legacy_construction_bar_target(
     // Retain a direct lookup fallback for a compatible ConstructionRig whose
     // vtable has been wrapped by another module but whose native ID tail is
     // still authoritative.
-    if (!construction_target && construction_object_id != 0) {
+    if (a2fo_rs_stage9_a1_native_ui_lookup(construction_target!=nullptr,construction_object_id)!=0) {
         using FindGameObjectByIdFn = void* (__cdecl*)(std::uint32_t);
         const auto find_game_object = reinterpret_cast<FindGameObjectByIdFn>(
             at(g_armada, kFindGameObjectByIdRva));
@@ -10405,7 +10631,7 @@ bool bind_legacy_construction_bar_target(
     }
     void* target_class = read_pointer_at(
         construction_target, kGameObjectClassOffset);
-    if (!construction_target || construction_target == construction_rig ||
+    if (!a2fo_rs_stage9_a1_native_ui_target(construction_target!=nullptr,construction_target==construction_rig) ||
         !is_plausible_object_class(target_class)) {
         return false;
     }
@@ -10477,6 +10703,8 @@ void apply_legacy_ship_display_build_queue_layout(
         &ship_display_rectangle, ship_display_rectangle_source,
         sizeof(ship_display_rectangle));
 
+    static_assert(sizeof(a1compat::NativeUiRectangle) ==
+                  4 * sizeof(std::int32_t));
     std::size_t placed_count = 0;
     std::size_t hidden_count = 0;
     for (std::size_t index = 0;
@@ -10487,14 +10715,15 @@ void apply_legacy_ship_display_build_queue_layout(
             kBuildQueueIconVtableRva);
         if (!queue_icon) continue;
 
-        if (index < g_legacy_speed_queue_screen_rects.size()) {
-            const a1compat::NativeUiRectangle& screen_rectangle =
-                g_legacy_speed_queue_screen_rects[index];
-            const a1compat::NativeUiRectangle local_rectangle{
-                screen_rectangle.left - ship_display_rectangle.left,
-                screen_rectangle.top - ship_display_rectangle.top,
-                screen_rectangle.right - ship_display_rectangle.left,
-                screen_rectangle.bottom - ship_display_rectangle.top};
+        a1compat::NativeUiRectangle local_rectangle{};
+        const bool has_screen_rectangle =
+            a2fo_rs_stage9_a1_layout_queue_rectangle(
+                &g_legacy_speed_queue_screen_rects[0].left,
+                g_legacy_speed_queue_screen_rects.size(), index,
+                &ship_display_rectangle.left,
+                &kHiddenLegacyResourceRectangle.left,
+                &local_rectangle.left);
+        if (has_screen_rectangle) {
             if (write_component_rectangle(
                     queue_icon, kDisplayComponentRectangleOffset,
                     local_rectangle)) {
@@ -10724,8 +10953,8 @@ void __attribute__((fastcall)) ship_display_render_hook(
 
 bool interface_cursor_in_rectangle(
     const a1compat::NativeUiRectangle& rectangle) noexcept {
-    if (!g_armada || rectangle.right < rectangle.left ||
-        rectangle.bottom < rectangle.top) {
+    if (!g_armada ||
+        !a2fo_rs_stage9_a1_geometry_cursor_preflight(&rectangle.left)) {
         return false;
     }
     const std::int32_t cursor_x = read_int32_at(
@@ -10734,8 +10963,8 @@ bool interface_cursor_in_rectangle(
     const std::int32_t cursor_y = read_int32_at(
         at(g_armada, kInterfaceCursorYRva), 0,
         std::numeric_limits<std::int32_t>::min());
-    return cursor_x >= rectangle.left && cursor_x <= rectangle.right &&
-        cursor_y >= rectangle.top && cursor_y <= rectangle.bottom;
+    return a2fo_rs_stage9_a1_geometry_contains(
+        &rectangle.left, cursor_x, cursor_y);
 }
 
 bool __attribute__((fastcall)) ship_display_cursor_over_hook(
@@ -10765,31 +10994,21 @@ bool control_button_ai_command(
     void* control_button, std::int32_t* output,
     void** resolved_action = nullptr) noexcept {
     if (!control_button || !output) return false;
-    // ControlButton owns mutually exclusive native bindings: a direct Action
-    // at +0x88, or ModeInfo at +0x84. Fleet Operations binds ordinary
-    // Transport directly for some selections and through type-2 ModeInfo for
-    // others, so accept both without interpreting either as a callback.
-    void* action = read_pointer_at(
-        control_button, kControlButtonDirectActionPointerOffset);
-    if (!action) {
-        void* mode_info = read_pointer_at(
-            control_button, kControlButtonModeInfoPointerOffset);
-        if (!mode_info) return false;
-        const std::uint32_t mode_info_type = static_cast<std::uint32_t>(
-            read_int32_at(mode_info, kModeInfoTypeOffset, -1));
-        if (mode_info_type != kActionModeInfoType) return false;
-        action = read_pointer_at(
-            mode_info, kModeInfoActionPointerOffset);
-    }
-    if (!action) return false;
-    std::int32_t ai_command = 0;
-    const void* command_source = static_cast<const std::uint8_t*>(action) +
-        kActionAiCommandOffset;
-    if (!readable_range(command_source, sizeof(ai_command))) return false;
-    std::memcpy(&ai_command, command_source, sizeof(ai_command));
-    *output = ai_command;
-    if (resolved_action) *resolved_action = action;
-    return true;
+    struct Context {void* button;std::int32_t* output;void** resolved;
+        void* action;void* mode;const void* source;} c{control_button,output,resolved_action,nullptr,nullptr,nullptr};
+    const auto step=+[](void* p,std::uint32_t op,std::size_t,std::size_t) noexcept -> std::size_t {
+        auto& c=*static_cast<Context*>(p);
+        switch(op){
+        case 0:c.action=read_pointer_at(c.button,kControlButtonDirectActionPointerOffset);return reinterpret_cast<std::uintptr_t>(c.action);
+        case 1:c.mode=read_pointer_at(c.button,kControlButtonModeInfoPointerOffset);return reinterpret_cast<std::uintptr_t>(c.mode);
+        case 2:return static_cast<std::uint32_t>(read_int32_at(c.mode,kModeInfoTypeOffset,-1));
+        case 3:c.action=read_pointer_at(c.mode,kModeInfoActionPointerOffset);return reinterpret_cast<std::uintptr_t>(c.action);
+        case 4:c.source=static_cast<const std::uint8_t*>(c.action)+kActionAiCommandOffset;return readable_range(c.source,sizeof(std::int32_t));
+        case 5:{std::int32_t command=0;std::memcpy(&command,c.source,sizeof(command));*c.output=command;if(c.resolved)*c.resolved=c.action;return 0;}
+        default:return 0;
+        }
+    };
+    return a2fo_rs_stage9_a1_native_ui_action(&c,step)!=0;
 }
 
 bool is_native_transport_control_button(
@@ -10797,32 +11016,21 @@ bool is_native_transport_control_button(
     if (!popup || !control_button) return false;
     std::int32_t ai_command = -1;
     return control_button_ai_command(control_button, &ai_command) &&
-        (ai_command == kTransportAiCommand ||
-         ai_command == kTransportSpecialAiCommand);
+        a2fo_rs_stage9_a1_native_ui_transport(ai_command)!=0;
 }
 
 bool is_native_speed_special_control_button(
     void* popup, void* control_button) noexcept {
     if (!popup || !control_button) return false;
-    std::int32_t ai_command = -1;
-    if (!control_button_ai_command(control_button, &ai_command) ||
-        ai_command == kTransportAiCommand ||
-        ai_command == kTransportSpecialAiCommand) {
-        return false;
-    }
-
-    // Fleet Operations binds contextual special weapons (the construction
-    // ship's Tractor Beam is one example) through type-2 Action ModeInfo even
-    // when that Action's generic AiCommand is not SPECIAL_ATTACK. Ordinary
-    // command-panel controls use type-3 ModeInfo or direct Actions. Accept the
-    // native type-2 binding, plus the explicit direct SPECIAL_ATTACK command.
-    void* mode_info = read_pointer_at(
-        control_button, kControlButtonModeInfoPointerOffset);
-    if (mode_info && static_cast<std::uint32_t>(read_int32_at(
-            mode_info, kModeInfoTypeOffset, -1)) == kActionModeInfoType) {
-        return true;
-    }
-    return ai_command == kSpecialAttackAiCommand;
+    std::int32_t ai_command=-1;
+    if(!control_button_ai_command(control_button,&ai_command))return false;
+    struct Context{void* button;void* mode;} c{control_button,nullptr};
+    const auto step=+[](void* p,std::uint32_t op,std::size_t,std::size_t) noexcept -> std::size_t {
+        auto& c=*static_cast<Context*>(p);
+        if(op==0){c.mode=read_pointer_at(c.button,kControlButtonModeInfoPointerOffset);return reinterpret_cast<std::uintptr_t>(c.mode);}
+        return static_cast<std::uint32_t>(read_int32_at(c.mode,kModeInfoTypeOffset,-1));
+    };
+    return a2fo_rs_stage9_a1_native_ui_special(ai_command,&c,step)!=0;
 }
 
 bool is_native_speed_control_button(
@@ -10959,17 +11167,17 @@ void clear_legacy_officer_root_bindings(
     void* const* popup_buttons) noexcept {
     if (g_armada && g_legacy_officer_root_control_runtime_ready) {
         if (popup_buttons) {
-            for (std::size_t index = 0;
-                 index < kFoPopupButtonCapacity; ++index) {
-                void* button = popup_buttons[index];
-                if (read_pointer_at(
-                        button, kControlButtonModeInfoPointerOffset) !=
-                    g_legacy_officer_root_mode_info.data()) {
-                    continue;
+            struct Context{void* const* buttons;void* button;} c{popup_buttons,nullptr};
+            const auto step=+[](void* p,std::uint32_t op,std::size_t index,std::size_t) noexcept -> std::size_t {
+                auto& c=*static_cast<Context*>(p);
+                switch(op){
+                case 0:c.button=c.buttons[index];return 0;
+                case 1:return read_pointer_at(c.button,kControlButtonModeInfoPointerOffset)==g_legacy_officer_root_mode_info.data();
+                case 2:a2fo_a1_call_thiscall_0(at(g_armada,kControlButtonClearRva),c.button);return 0;
+                default:return 0;
                 }
-                a2fo_a1_call_thiscall_0(
-                    at(g_armada, kControlButtonClearRva), button);
-            }
+            };
+            a2fo_rs_stage9_a1_native_ui_scan(0,kFoPopupButtonCapacity,0,&c,step);
         } else if (g_legacy_officer_root_button && read_pointer_at(
                        g_legacy_officer_root_button,
                        kControlButtonModeInfoPointerOffset) ==
@@ -11001,28 +11209,23 @@ void* selected_legacy_officer_upgrade_target(
             items, kProducerClassBuildItemCapacity * sizeof(void*))) {
         return nullptr;
     }
-    void* target = nullptr;
-    for (std::size_t slot = 0;
-         slot < kProducerClassBuildItemCapacity; ++slot) {
-        void* candidate = nullptr;
-        std::memcpy(&candidate, items + slot, sizeof(candidate));
-        if (!candidate || !is_officer_upgrade_class(candidate) ||
-            !officer_upgrade_matches_race(policy.race, candidate)) {
-            continue;
-        }
-        target = candidate;
-        break;
-    }
+    struct TargetContext {void** items;const std::array<char,64>* race;} context{items,&policy.race};
+    const auto probe=+[](void* opaque,std::uint32_t op,std::uintptr_t argument) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<TargetContext*>(opaque);
+        if(op==0){void* candidate=nullptr;std::memcpy(&candidate,c.items+argument,sizeof(candidate));return reinterpret_cast<std::uintptr_t>(candidate);}
+        void* candidate=reinterpret_cast<void*>(argument);
+        if(op==1)return is_officer_upgrade_class(candidate);
+        return officer_upgrade_matches_race(*c.race,candidate);
+    };
+    void* target=reinterpret_cast<void*>(a2fo_rs_stage9_a1_officer_ui_first_target(
+        &context,kProducerClassBuildItemCapacity,probe));
     if (!target) return nullptr;
     if (enabled) {
         const std::uint32_t completed =
             completed_officer_upgrades(selected_object);
         const std::uint32_t queued =
             queued_officer_upgrades(selected_object);
-        const std::uint32_t maximum = static_cast<std::uint32_t>(
-            std::max<std::int32_t>(0, policy.maximum_upgrades));
-        *enabled = completed < maximum &&
-            queued < maximum - completed;
+        *enabled=a2fo_rs_stage9_a1_officer_ui_enabled(completed,queued,policy.maximum_upgrades)!=0;
     }
     return target;
 }
@@ -11033,22 +11236,20 @@ void hide_legacy_officer_build_controls(
         !g_legacy_officer_root_control_runtime_ready) {
         return;
     }
-    std::size_t hidden = 0;
-    for (std::size_t index = 0; index < kFoPopupButtonCapacity; ++index) {
-        void* button = popup_buttons[index];
-        void* mode_info = read_pointer_at(
-            button, kControlButtonModeInfoPointerOffset);
-        if (!mode_info ||
-            read_int32_at(mode_info, kModeInfoTypeOffset, -1) != 1) {
-            continue;
+    struct Context{void* const* buttons;void* button;void* mode;void* target;} c{popup_buttons,nullptr,nullptr,nullptr};
+    const auto step=+[](void* p,std::uint32_t op,std::size_t index,std::size_t) noexcept -> std::size_t {
+        auto& c=*static_cast<Context*>(p);
+        switch(op){
+        case 0:c.button=c.buttons[index];return 0;
+        case 3:c.mode=read_pointer_at(c.button,kControlButtonModeInfoPointerOffset);return reinterpret_cast<std::uintptr_t>(c.mode);
+        case 4:return static_cast<std::uint32_t>(read_int32_at(c.mode,kModeInfoTypeOffset,-1));
+        case 5:c.target=read_pointer_at(c.mode,kModeInfoTargetClassOffset);return reinterpret_cast<std::uintptr_t>(c.target);
+        case 6:return is_officer_upgrade_class(c.target);
+        case 2:a2fo_a1_call_thiscall_0(at(g_armada,kControlButtonClearRva),c.button);return 0;
+        default:return 0;
         }
-        void* target = read_pointer_at(
-            mode_info, kModeInfoTargetClassOffset);
-        if (!target || !is_officer_upgrade_class(target)) continue;
-        a2fo_a1_call_thiscall_0(
-            at(g_armada, kControlButtonClearRva), button);
-        ++hidden;
-    }
+    };
+    const std::size_t hidden=a2fo_rs_stage9_a1_native_ui_scan(1,kFoPopupButtonCapacity,0,&c,step);
     if (hidden > 0 && InterlockedCompareExchange(
             &g_legacy_officer_build_control_hidden_reported,
             1, 0) == 0) {
@@ -11067,15 +11268,14 @@ void apply_legacy_officer_root_control(
     }
     const std::uint32_t menu = static_cast<std::uint32_t>(read_int32_at(
         popup, kPopupPaletteCurrentMenuOffset, -1));
-    if (menu == kLegacyPopupBuildMenu) {
+    const auto menu_action=a2fo_rs_stage9_a1_officer_ui_menu_action(
+        menu,kLegacyPopupBuildMenu,kLegacyPopupRootMenu);
+    if(menu_action==1){
         clear_legacy_officer_root_bindings(popup_buttons);
         hide_legacy_officer_build_controls(popup_buttons);
         return;
     }
-    if (menu != kLegacyPopupRootMenu) {
-        clear_legacy_officer_root_bindings(popup_buttons);
-        return;
-    }
+    if(menu_action==0){clear_legacy_officer_root_bindings(popup_buttons);return;}
 
     bool enabled = false;
     void* target = selected_legacy_officer_upgrade_target(&enabled);
@@ -11086,49 +11286,32 @@ void apply_legacy_officer_root_control(
 
     const LONG rectangle_count = InterlockedCompareExchange(
         &g_legacy_control_button_rect_count, 0, 0);
-    const std::size_t usable_count = std::min<std::size_t>(
-        static_cast<std::size_t>(std::max<LONG>(rectangle_count, 0)),
-        g_legacy_control_button_rects.size());
+    const std::size_t usable_count=a2fo_rs_stage9_a1_officer_ui_usable_count(
+        rectangle_count,g_legacy_control_button_rects.size());
     if (kLegacyOfficerRootControlSlot >= usable_count) return;
 
     void* previous_button = g_legacy_officer_root_button;
-    void* button = nullptr;
-    std::size_t button_index = kFoPopupButtonCapacity;
-    std::size_t duplicate_count = 0;
-    // Fleet Operations compacts the live palette with ControlButton::CopyModes.
-    // Type-1 ModeInfo is copied by pointer, so follow our ModeInfo identity
-    // across button objects instead of assuming the originally claimed object
-    // still owns it. Remove any duplicate left by an earlier failed repair.
-    for (std::size_t index = 0;
-         index < kFoPopupButtonCapacity; ++index) {
-        void* candidate = popup_buttons[index];
-        if (read_pointer_at(
-                candidate, kControlButtonModeInfoPointerOffset) !=
-            g_legacy_officer_root_mode_info.data()) {
-            continue;
-        }
-        if (!button && index < usable_count) {
-            button = candidate;
-            button_index = index;
-        } else {
-            a2fo_a1_call_thiscall_0(
-                at(g_armada, kControlButtonClearRva), candidate);
-            ++duplicate_count;
-        }
-    }
-    if (!button) {
-        // Any compatibility-owned occurrence outside the twelve A1 slots was
-        // cleared above. Claim the first genuinely free A1 control.
-        g_legacy_officer_root_button = nullptr;
-        g_legacy_officer_root_target = nullptr;
-        g_legacy_officer_root_enabled = false;
-        for (std::size_t index = 0; index < usable_count; ++index) {
-            if (!popup_control_is_bound(popup_buttons[index])) {
-                button = popup_buttons[index];
-                button_index = index;
-                break;
-            }
-        }
+    struct OwnerContext {void* const* buttons;} owner_context{popup_buttons};
+    const auto owner_step=+[](void* opaque,std::uint32_t operation,std::uintptr_t argument) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<OwnerContext*>(opaque);
+        if(operation==0)return reinterpret_cast<std::uintptr_t>(c.buttons[argument]);
+        if(operation==3)return popup_control_is_bound(c.buttons[argument]);
+        void* candidate=reinterpret_cast<void*>(argument);
+        if(operation==1)return read_pointer_at(candidate,kControlButtonModeInfoPointerOffset)==g_legacy_officer_root_mode_info.data();
+        a2fo_a1_call_thiscall_0(at(g_armada,kControlButtonClearRva),candidate);return 0;
+    };
+    A2foA1OfficerUiOwnerOut owner{};
+    a2fo_rs_stage9_a1_officer_ui_owner(&owner_context,kFoPopupButtonCapacity,usable_count,owner_step,&owner);
+    void* button=reinterpret_cast<void*>(owner.button);
+    std::size_t button_index=owner.index;
+    const std::size_t duplicate_count=owner.duplicates;
+    if(!button){
+        g_legacy_officer_root_button=nullptr;
+        g_legacy_officer_root_target=nullptr;
+        g_legacy_officer_root_enabled=false;
+        A2foA1OfficerUiFreeOut free_slot{};
+        a2fo_rs_stage9_a1_officer_ui_first_free(&owner_context,usable_count,owner_step,&free_slot);
+        button=reinterpret_cast<void*>(free_slot.button);button_index=free_slot.index;
     }
     if (!button || button_index >= usable_count) return;
 
@@ -11366,29 +11549,19 @@ std::size_t apply_legacy_speed_special_layout(
         return 0;
     }
 
-    std::size_t placed = 0;
-    for (std::size_t index = 0;
-         index < kFoPopupButtonCapacity &&
-         placed < g_legacy_speed_queue_screen_rects.size(); ++index) {
-        void* control_button = popup_buttons[index];
-        if (!is_native_speed_special_control_button(
-                popup, control_button)) {
-            continue;
+    struct Context{void* popup;void* const* buttons;const a1compat::NativeUiRectangle& panel;void* button;} c{popup,popup_buttons,panel,nullptr};
+    const auto step=+[](void* p,std::uint32_t op,std::size_t index,std::size_t) noexcept -> std::size_t {
+        auto& c=*static_cast<Context*>(p);
+        switch(op){
+        case 0:c.button=c.buttons[index];return 0;
+        case 7:return is_native_speed_special_control_button(c.popup,c.button);
+        case 8:{const auto& screen=g_legacy_speed_queue_screen_rects[index];a1compat::NativeUiRectangle local{};
+            a2fo_rs_stage9_a1_layout_local_rectangle(&screen.left,&c.panel.left,&local.left);
+            return write_component_rectangle(c.button,kControlButtonRectangleOffset,local);}
+        default:return 0;
         }
-        const a1compat::NativeUiRectangle& screen_rectangle =
-            g_legacy_speed_queue_screen_rects[placed];
-        const a1compat::NativeUiRectangle local_rectangle{
-            screen_rectangle.left - panel.left,
-            screen_rectangle.top - panel.top,
-            screen_rectangle.right - panel.left,
-            screen_rectangle.bottom - panel.top};
-        if (!write_component_rectangle(
-                control_button, kControlButtonRectangleOffset,
-                local_rectangle)) {
-            continue;
-        }
-        ++placed;
-    }
+    };
+    const std::size_t placed=a2fo_rs_stage9_a1_native_ui_scan(2,kFoPopupButtonCapacity,g_legacy_speed_queue_screen_rects.size(),&c,step);
     InterlockedExchange(
         &g_legacy_speed_special_layout_count,
         static_cast<LONG>(placed));
@@ -11416,21 +11589,16 @@ bool apply_legacy_speed_transport_layout(
 
     const a1compat::NativeUiRectangle& screen_rectangle =
         g_legacy_speed_transport_screen_rect;
-    const a1compat::NativeUiRectangle local_rectangle{
-        screen_rectangle.left - panel.left,
-        screen_rectangle.top - panel.top,
-        screen_rectangle.right - panel.left,
-        screen_rectangle.bottom - panel.top};
-    for (std::size_t index = 0; index < kFoPopupButtonCapacity; ++index) {
-        void* control_button = popup_buttons[index];
-        if (!is_native_transport_control_button(popup, control_button)) {
-            continue;
-        }
-        if (!write_component_rectangle(
-                control_button, kControlButtonRectangleOffset,
-                local_rectangle)) {
-            return false;
-        }
+    a1compat::NativeUiRectangle local_rectangle{};
+    a2fo_rs_stage9_a1_layout_local_rectangle(
+        &screen_rectangle.left, &panel.left, &local_rectangle.left);
+    struct Context{void* popup;void* const* buttons;const a1compat::NativeUiRectangle& screen;const a1compat::NativeUiRectangle& local;void* button;std::size_t index;} c{popup,popup_buttons,screen_rectangle,local_rectangle,nullptr,0};
+    const auto step=+[](void* p,std::uint32_t op,std::size_t index,std::size_t) noexcept -> std::size_t {
+        auto& c=*static_cast<Context*>(p);
+        if(op==0){c.index=index;c.button=c.buttons[index];return 0;}
+        if(op==9)return is_native_transport_control_button(c.popup,c.button);
+        if(op!=8)return 0;
+        if(!write_component_rectangle(c.button,kControlButtonRectangleOffset,c.local))return 0;
         if (InterlockedCompareExchange(
                 &g_legacy_speed_transport_layout_reported, 1, 0) == 0) {
             char message[320]{};
@@ -11438,19 +11606,22 @@ bool apply_legacy_speed_transport_layout(
                 message, sizeof(message),
                 "A1 SpeedRail Transport active: popup slot=%lu; "
                 "screen=[%ld,%ld,%ld,%ld]; local=[%ld,%ld,%ld,%ld]",
-                static_cast<unsigned long>(index),
-                static_cast<long>(screen_rectangle.left),
-                static_cast<long>(screen_rectangle.top),
-                static_cast<long>(screen_rectangle.right),
-                static_cast<long>(screen_rectangle.bottom),
-                static_cast<long>(local_rectangle.left),
-                static_cast<long>(local_rectangle.top),
-                static_cast<long>(local_rectangle.right),
-                static_cast<long>(local_rectangle.bottom));
+                static_cast<unsigned long>(c.index),
+                static_cast<long>(c.screen.left),
+                static_cast<long>(c.screen.top),
+                static_cast<long>(c.screen.right),
+                static_cast<long>(c.screen.bottom),
+                static_cast<long>(c.local.left),
+                static_cast<long>(c.local.top),
+                static_cast<long>(c.local.right),
+                static_cast<long>(c.local.bottom));
             log_line(message);
         }
-        return true;
-    }
+        return 1;
+    };
+    const std::size_t selected=a2fo_rs_stage9_a1_native_ui_scan(3,kFoPopupButtonCapacity,0,&c,step);
+    if(selected==SIZE_MAX)return false;
+    if(selected!=0)return true;
     report_legacy_popup_controls(popup, popup_buttons);
     return false;
 }
@@ -11627,8 +11798,10 @@ void report_legacy_ship_display_alias(
     const char* resolved) noexcept {
     const LONG report = InterlockedIncrement(
         &g_legacy_ship_display_alias_report_count);
-    if (report > kMaximumLegacyShipDisplayAliasReports) {
-        if (report == kMaximumLegacyShipDisplayAliasReports + 1) {
+    const std::uint8_t admission = a2fo_rs_stage9_a1_reporting_admit(
+        report, kMaximumLegacyShipDisplayAliasReports, 1);
+    if (admission != 1) {
+        if (admission == 2) {
             log_line("Further A1 ShipDisplay key-alias reports suppressed");
         }
         return;
@@ -12424,8 +12597,10 @@ void log_craft_level_up_race_default(
     if (race) return;
 
     const LONG incident = InterlockedIncrement(&g_missing_craft_race_count);
-    if (incident > 32) {
-        if (incident == 33) {
+    const std::uint8_t admission = a2fo_rs_stage9_a1_reporting_admit(
+        incident, 32, 1);
+    if (admission != 1) {
+        if (admission == 2) {
             log_line("Further A2 Classic neutral Race defaults suppressed");
         }
         return;
@@ -12500,30 +12675,48 @@ bool install_craft_level_up_race_default(
 }
 
 std::string join_path(const char* root, const char* name) {
-    if (!root || !*root) return {};
-    std::string path(root);
-    if (path.back() != '\\' && path.back() != '/') path.push_back('\\');
-    path += name;
-    return path;
+    struct Context {const char* root;const char* name;
+        std::optional<std::string> path{};std::exception_ptr error{};} c{root,name};
+    const auto op=[](void* opaque,std::uint32_t id) noexcept -> std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(id){
+        case 0:c.path.emplace(c.root);return 0;
+        case 1:return c.path->back()=='\\'||c.path->back()=='/';
+        case 2:c.path->push_back('\\');return 0;
+        case 3:*c.path+=c.name;return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    a2fo_rs_stage8_a1_join_path(reinterpret_cast<const std::uint8_t*>(root),&c,op);
+    if(c.error)std::rethrow_exception(c.error);
+    return c.path?std::move(*c.path):std::string{};
 }
 
 bool enabled_in_mod_chain() noexcept {
-    if (!g_api || !g_api->extension_root_count || !g_api->extension_root) {
-        return false;
-    }
-    const std::uint32_t count = g_api->extension_root_count();
-    if (count == 0 || count > 4096) return false;
-    for (std::uint32_t index = 0; index < count; ++index) {
-        const std::string marker =
-            join_path(g_api->extension_root(index), "a1compat.ini");
-        if (marker.empty()) continue;
-        const DWORD attributes = GetFileAttributesA(marker.c_str());
-        if (attributes != INVALID_FILE_ATTRIBUTES &&
-            (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
-            return true;
-        }
-    }
-    return false;
+    struct Context {std::uint32_t index{};std::optional<std::string> marker{};
+        DWORD attributes{};std::exception_ptr error{};} c;
+    const auto op=[](void* opaque,std::uint32_t id) noexcept -> std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {
+            if(id>=0x10000){c.index=id-0x10000;return 0;}
+            switch(id){
+            case 10:return g_api!=nullptr;
+            case 11:return g_api->extension_root_count!=nullptr;
+            case 12:return g_api->extension_root!=nullptr;
+            case 13:return g_api->extension_root_count();
+            case 14:c.marker.emplace(join_path(g_api->extension_root(c.index),"a1compat.ini"));return 0;
+            case 15:return c.marker->empty();
+            case 16:c.attributes=GetFileAttributesA(c.marker->c_str());return 0;
+            case 17:return c.attributes!=INVALID_FILE_ATTRIBUTES;
+            case 18:return (c.attributes&FILE_ATTRIBUTE_DIRECTORY)==0;
+            case 19:c.marker.reset();return 0;
+            default:return 0;
+            }
+        }catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const bool enabled=a2fo_rs_stage8_a1_mod_chain(&c,op)!=0;
+    if(c.error)std::rethrow_exception(c.error);
+    return enabled;
 }
 
 }  // namespace
@@ -12659,145 +12852,110 @@ extern "C" void __cdecl a2fo_a1_run_to_the_death_check(
 
 extern "C" __declspec(dllexport)
 bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
-    if (!api || api->struct_size < A2FO_MODULE_API_V4_BASE_SIZE ||
-        api->api_version != A2FO_MODULE_API_VERSION || !api->log ||
-        !api->armada_module || !api->fleetops_module ||
-        !api->install_inline_hook || !api->patch_call || !api->patch_jump ||
-        !api->extension_root_count || !api->extension_root ||
-        !api->register_classlabel_alias ||
-        !A2FO_MODULE_API_HAS(api, register_classlabel_odf_defaults) ||
-        !A2FO_MODULE_API_HAS(api, register_odf_overlay_directory) ||
-        !A2FO_MODULE_API_HAS(api, register_producer_event_handler) ||
-        !A2FO_MODULE_API_HAS(
-            api, register_game_object_class_loaded_handler) ||
-        !A2FO_MODULE_API_HAS(api, register_race_loaded_handler) ||
-        !A2FO_MODULE_API_HAS(api, register_race_odf_defaults) ||
-        api->api_revision < 17 ||
-        (api->capabilities & A2FO_CAP_CLASSLABEL_ODF_DEFAULTS) == 0 ||
-        (api->capabilities & A2FO_CAP_ODF_OVERLAY_DIRECTORIES) == 0 ||
-        (api->capabilities & A2FO_CAP_PRODUCER_EVENTS) == 0 ||
-        (api->capabilities & A2FO_CAP_GAME_OBJECT_CLASS_LOADED) == 0 ||
-        (api->capabilities & A2FO_CAP_RACE_LOADED) == 0 ||
-        (api->capabilities & A2FO_CAP_RACE_ODF_DEFAULTS) == 0 ||
-        !api->register_classlabel_odf_defaults ||
-        !api->register_odf_overlay_directory ||
-        !api->register_producer_event_handler ||
-        !api->register_game_object_class_loaded_handler ||
-        !api->register_race_loaded_handler ||
-        !api->register_race_odf_defaults) {
-        return false;
-    }
-
-    g_api = api;
-    g_armada = api->armada_module();
-    g_fleet_ops = api->fleetops_module();
-    if (!enabled_in_mod_chain()) {
-        log_line("STA1 Classic marker not found; A1 policy remains inactive");
-        g_api = nullptr;
-        return false;
-    }
-    if (!api->register_classlabel_alias(
-            kModuleName, "wingman", "craft")) {
-        log_line("wingman -> craft registration failed");
-        g_api = nullptr;
-        return false;
-    }
-    if (!api->register_classlabel_odf_defaults(
-            kModuleName, "wingman", kWingmanOdfDefaults.data(),
-            static_cast<std::uint32_t>(kWingmanOdfDefaults.size()))) {
-        log_line("wingman ODF-default registration failed");
-        g_api = nullptr;
-        return false;
-    }
-    if (!api->register_classlabel_odf_defaults(
-            kModuleName, "constructionrig",
-            kConstructionRigOdfDefaults.data(),
-            static_cast<std::uint32_t>(
-                kConstructionRigOdfDefaults.size()))) {
-        log_line("constructionrig ODF-default registration failed");
-        g_api = nullptr;
-        return false;
-    }
-    if (!api->register_classlabel_odf_defaults(
-            kModuleName, "freighter", kFreighterOdfDefaults.data(),
-            static_cast<std::uint32_t>(kFreighterOdfDefaults.size()))) {
-        log_line("freighter ODF-default registration failed");
-        g_api = nullptr;
-        return false;
-    }
-    if (!api->register_classlabel_odf_defaults(
-            kModuleName, "mining", kMiningOdfDefaults.data(),
-            static_cast<std::uint32_t>(kMiningOdfDefaults.size()))) {
-        log_line("mining ODF-default registration failed");
-        g_api = nullptr;
-        return false;
-    }
-    if (!api->register_classlabel_odf_defaults(
-            kModuleName, "shipyard", kShipyardOdfDefaults.data(),
-            static_cast<std::uint32_t>(kShipyardOdfDefaults.size()))) {
-        log_line("shipyard ODF-default registration failed");
-        g_api = nullptr;
-        return false;
-    }
-    if (!api->register_classlabel_odf_defaults(
-            kModuleName, "research", kResearchOdfDefaults.data(),
-            static_cast<std::uint32_t>(kResearchOdfDefaults.size()))) {
-        log_line("research ODF-default registration failed");
-        g_api = nullptr;
-        return false;
-    }
-    if (!api->register_game_object_class_loaded_handler(
-            kModuleName, kLegacyMenuCapabilityOdfFields.data(),
-            static_cast<std::uint32_t>(
-                kLegacyMenuCapabilityOdfFields.size()),
-            &legacy_menu_capability_class_loaded_handler, nullptr)) {
-        log_line("legacy menu-capability default registration failed");
-        g_api = nullptr;
-        return false;
-    }
-    if (!api->register_odf_overlay_directory(
-            kModuleName, "Addon", A2FO_ODF_OVERLAY_OVERRIDE)) {
-        log_line("Addon ODF overlay registration failed");
-        g_api = nullptr;
-        return false;
-    }
-    if (!apply_legacy_native_resource_limits()) {
-        log_line("A1 legacy resource-maximum bridge failed");
-        g_api = nullptr;
-        return false;
-    }
-    InterlockedExchange(
-        &g_legacy_resource_maximum_post_config_pending, 1);
-    g_legacy_starting_resource_defaults =
-        load_starting_resource_defaults();
-    if (!register_starting_resource_defaults(
-            api, g_legacy_starting_resource_defaults)) {
-        log_line("A1 Race starting-resource default registration failed");
-        g_api = nullptr;
-        return false;
-    }
-    if (!api->register_race_loaded_handler(
-            kModuleName, kLegacyRaceFields.data(),
-            static_cast<std::uint32_t>(kLegacyRaceFields.size()),
-            &legacy_race_loaded_handler, nullptr)) {
-        log_line("Legacy race-menu callback registration failed");
-        g_api = nullptr;
-        return false;
-    }
-    reset_legacy_race_menu_state();
-    g_race_menu_callback_ready = true;
-    A1CompatSettings settings{};
-    const bool has_settings = read_a1compat_settings(settings);
-    if (has_settings) {
-        char safe_mode_message[256];
-        std::snprintf(
-            safe_mode_message, sizeof(safe_mode_message),
-            "A1Compat settings loaded (%s): SafeMode=%s",
-            kA1CompatIniFileName,
-            settings.safe_mode ? "true" : "false");
-        log_line(safe_mode_message);
-    }
-    g_constructor_menu_capability_count = 0;
+    struct Context {
+        const A2FO_ModuleApi* api;
+        std::exception_ptr error{};
+        std::optional<A1CompatSettings> settings{};
+        bool essential_gui_sprite_loader{};
+        bool legacy_default_cursor_fallback{};
+        bool legacy_tactical_cursor_fallback{};
+        bool legacy_gameplay_ui_scaling{};
+        bool legacy_tooltip_adapter{};
+        bool legacy_cinematic_view_adapter{};
+        bool legacy_control_panel_adapter{};
+        bool legacy_resource_panel_render{};
+        bool legacy_explore_command_bridge{};
+        bool legacy_team_color_translation{};
+        bool legacy_virtual_directory_normalizer{};
+        bool legacy_moon_resource_defaults{};
+        bool legacy_physics_defaults{};
+        bool legacy_neutral_race_registry{};
+        bool nebula_guard{};
+        bool legacy_aip_name_bridge{};
+        bool legacy_aip_missing_unit_guard{};
+        bool a1_bzn_map_bounds_bridge{};
+        bool a1_bzn_ai_mission_bridge{};
+        bool a1_bzn_runtime_class_bridge{};
+        bool a1_relationship_bridge{};
+        bool craft_level_up_race_default{};
+        bool officer_quarter_compatibility{};
+        bool starbase_policy_system{};
+        bool palette_race_filter{};
+        bool legacy_ship_display_adapter{};
+    } context{api};
+    const auto op=[](void* opaque,std::uint32_t id,std::uint64_t value) noexcept -> std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(id){
+            case 0:return c.api!=nullptr;
+            case 1:return c.api->struct_size>=A2FO_MODULE_API_V4_BASE_SIZE;
+            case 2:return c.api->api_version==A2FO_MODULE_API_VERSION;
+            case 3:return c.api->log!=nullptr;
+            case 4:return c.api->armada_module!=nullptr;
+            case 5:return c.api->fleetops_module!=nullptr;
+            case 6:return c.api->install_inline_hook!=nullptr;
+            case 7:return c.api->patch_call!=nullptr;
+            case 8:return c.api->patch_jump!=nullptr;
+            case 9:return c.api->extension_root_count!=nullptr;
+            case 10:return c.api->extension_root!=nullptr;
+            case 11:return c.api->register_classlabel_alias!=nullptr;
+            case 12:return A2FO_MODULE_API_HAS(c.api,register_classlabel_odf_defaults);
+            case 13:return A2FO_MODULE_API_HAS(c.api,register_odf_overlay_directory);
+            case 14:return A2FO_MODULE_API_HAS(c.api,register_producer_event_handler);
+            case 15:return A2FO_MODULE_API_HAS(c.api,register_game_object_class_loaded_handler);
+            case 16:return A2FO_MODULE_API_HAS(c.api,register_race_loaded_handler);
+            case 17:return A2FO_MODULE_API_HAS(c.api,register_race_odf_defaults);
+            case 18:return c.api->api_revision>=17;
+            case 19:return (c.api->capabilities&A2FO_CAP_CLASSLABEL_ODF_DEFAULTS)!=0;
+            case 20:return (c.api->capabilities&A2FO_CAP_ODF_OVERLAY_DIRECTORIES)!=0;
+            case 21:return (c.api->capabilities&A2FO_CAP_PRODUCER_EVENTS)!=0;
+            case 22:return (c.api->capabilities&A2FO_CAP_GAME_OBJECT_CLASS_LOADED)!=0;
+            case 23:return (c.api->capabilities&A2FO_CAP_RACE_LOADED)!=0;
+            case 24:return (c.api->capabilities&A2FO_CAP_RACE_ODF_DEFAULTS)!=0;
+            case 25:return c.api->register_classlabel_odf_defaults!=nullptr;
+            case 26:return c.api->register_odf_overlay_directory!=nullptr;
+            case 27:return c.api->register_producer_event_handler!=nullptr;
+            case 28:return c.api->register_game_object_class_loaded_handler!=nullptr;
+            case 29:return c.api->register_race_loaded_handler!=nullptr;
+            case 30:return c.api->register_race_odf_defaults!=nullptr;
+            case 31:{g_api=c.api;return 0;}
+            case 32:{g_armada=c.api->armada_module();return 0;}
+            case 33:{g_fleet_ops=c.api->fleetops_module();return 0;}
+            case 34:{return enabled_in_mod_chain();}
+            case 35:{log_line("STA1 Classic marker not found; A1 policy remains inactive");return 0;}
+            case 36:{g_api=nullptr;return 0;}
+            case 37:{return c.api->register_classlabel_alias(kModuleName,"wingman","craft");}
+            case 38:{log_line("wingman -> craft registration failed");return 0;}
+            case 39:{return c.api->register_classlabel_odf_defaults(kModuleName,"wingman",kWingmanOdfDefaults.data(),static_cast<std::uint32_t>(kWingmanOdfDefaults.size()));}
+            case 40:{log_line("wingman ODF-default registration failed");return 0;}
+            case 41:{return c.api->register_classlabel_odf_defaults(kModuleName,"constructionrig",kConstructionRigOdfDefaults.data(),static_cast<std::uint32_t>(kConstructionRigOdfDefaults.size()));}
+            case 42:{log_line("constructionrig ODF-default registration failed");return 0;}
+            case 43:{return c.api->register_classlabel_odf_defaults(kModuleName,"freighter",kFreighterOdfDefaults.data(),static_cast<std::uint32_t>(kFreighterOdfDefaults.size()));}
+            case 44:{log_line("freighter ODF-default registration failed");return 0;}
+            case 45:{return c.api->register_classlabel_odf_defaults(kModuleName,"mining",kMiningOdfDefaults.data(),static_cast<std::uint32_t>(kMiningOdfDefaults.size()));}
+            case 46:{log_line("mining ODF-default registration failed");return 0;}
+            case 47:{return c.api->register_classlabel_odf_defaults(kModuleName,"shipyard",kShipyardOdfDefaults.data(),static_cast<std::uint32_t>(kShipyardOdfDefaults.size()));}
+            case 48:{log_line("shipyard ODF-default registration failed");return 0;}
+            case 49:{return c.api->register_classlabel_odf_defaults(kModuleName,"research",kResearchOdfDefaults.data(),static_cast<std::uint32_t>(kResearchOdfDefaults.size()));}
+            case 50:{log_line("research ODF-default registration failed");return 0;}
+            case 51:{return c.api->register_game_object_class_loaded_handler(kModuleName,kLegacyMenuCapabilityOdfFields.data(),static_cast<std::uint32_t>(kLegacyMenuCapabilityOdfFields.size()),&legacy_menu_capability_class_loaded_handler,nullptr);}
+            case 52:{log_line("legacy menu-capability default registration failed");return 0;}
+            case 53:{return c.api->register_odf_overlay_directory(kModuleName,"Addon",A2FO_ODF_OVERLAY_OVERRIDE);}
+            case 54:{log_line("Addon ODF overlay registration failed");return 0;}
+            case 55:{return apply_legacy_native_resource_limits();}
+            case 56:{log_line("A1 legacy resource-maximum bridge failed");return 0;}
+            case 57:{InterlockedExchange(&g_legacy_resource_maximum_post_config_pending,1);return 0;}
+            case 58:{g_legacy_starting_resource_defaults=load_starting_resource_defaults();return 0;}
+            case 59:{return register_starting_resource_defaults(c.api,g_legacy_starting_resource_defaults);}
+            case 60:{log_line("A1 Race starting-resource default registration failed");return 0;}
+            case 61:{return c.api->register_race_loaded_handler(kModuleName,kLegacyRaceFields.data(),static_cast<std::uint32_t>(kLegacyRaceFields.size()),&legacy_race_loaded_handler,nullptr);}
+            case 62:{log_line("Legacy race-menu callback registration failed");return 0;}
+            case 63:{reset_legacy_race_menu_state();return 0;}
+            case 64:{g_race_menu_callback_ready=true;return 0;}
+            case 65:{c.settings.emplace();return read_a1compat_settings(*c.settings);}
+            case 66:{char message[256];std::snprintf(message,sizeof(message),"A1Compat settings loaded (%s): SafeMode=%s",kA1CompatIniFileName,c.settings->safe_mode?"true":"false");log_line(message);return 0;}
+            case 67:{    g_constructor_menu_capability_count = 0;
+    g_legacy_sod_lod0_suppression_count = 0;
+    g_legacy_sod_bounds_repair_count = 0;
     g_legacy_scout_menu_capability_count = 0;
     g_legacy_station_menu_capability_count = 0;
     g_legacy_moon_menu_capability_count = 0;
@@ -12958,263 +13116,114 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     g_missing_aip_technology_unit_count = 0;
     InterlockedExchange(&g_synthetic_neutral_race_index, -1);
     g_project_id_get_odf_name = nullptr;
-    const bool safe_mode_enabled = settings.safe_mode;
-    if (safe_mode_enabled) {
-        log_line("A1Compat safe mode active; risky hooks disabled; legacy "
-                 "race-menu fallback retained");
-    }
-    const bool essential_gui_sprite_loader_enabled =
-        install_essential_gui_sprite_loader(api);
-    if (!essential_gui_sprite_loader_enabled) {
-        log_line("Essential a2_gui_global.spr loader installation failed; "
-                 "A1Compat cannot guarantee the required A2 interface "
-                 "sprite database");
-        g_race_menu_callback_ready = false;
-        reset_legacy_race_menu_state();
-        g_api = nullptr;
-        g_armada = nullptr;
-        g_fleet_ops = nullptr;
-        return false;
-    }
-    g_legacy_cursor_override_required =
-        detect_incompatible_legacy_cursor_table(
-            g_legacy_cursor_override_source,
-            &g_legacy_tactical_cursor_override_required);
-    if (g_legacy_cursor_override_required ||
-        g_legacy_tactical_cursor_override_required) {
-        char message[720]{};
-        std::snprintf(
-            message, sizeof(message),
-            "Detected incompatible legacy cursor overview entries in %s; "
-            "scheduling loaded-cursor fallbacks (GUI=%s, tactical=%s)",
-            g_legacy_cursor_override_source.c_str(),
-            g_legacy_cursor_override_required ? "yes" : "no",
-            g_legacy_tactical_cursor_override_required ? "yes" : "no");
-        log_line(message);
-    }
-    const bool legacy_default_cursor_fallback_enabled =
-        install_legacy_default_cursor_fallback(api);
-    if (!legacy_default_cursor_fallback_enabled) {
-        log_line("A1 legacy default-cursor fallback installation failed; "
-                 "an unflagged or oversized standard cursor may remain "
-                 "invisible");
-    }
-    const bool legacy_tactical_cursor_fallback_enabled =
-        install_legacy_tactical_cursor_fallback(api);
-    if (!legacy_tactical_cursor_fallback_enabled) {
-        log_line("A1 legacy tactical-cursor fallback installation failed; "
-                 "the main map overview cursor may remain invisible");
-    }
-    const bool legacy_gameplay_ui_scaling_enabled =
-        install_legacy_gameplay_ui_scaling(api);
-    if (!legacy_gameplay_ui_scaling_enabled) {
-        log_line("A1 gameplay UI 640x480 scaling bridge installation "
-                 "failed; raw legacy CFG rectangles will retain A2's "
-                 "1600x1200 reference size");
-    }
-    const bool legacy_tooltip_adapter_enabled =
-        install_legacy_tooltip_adapter(api);
-    if (!legacy_tooltip_adapter_enabled) {
-        log_line("A1 tooltip presentation adapter installation failed; "
-                 "raw legacy CFGs may retain an unreadable or collapsed "
-                 "A2 tooltip frame");
-    }
-    const bool legacy_cinematic_view_adapter_enabled =
-        install_legacy_cinematic_view_adapter(api);
-    if (!legacy_cinematic_view_adapter_enabled) {
-        log_line("A1 CinematicView layout adapter installation failed; "
-                 "the live 3D viewport may retain Fleet Operations "
-                 "geometry");
-    }
-    const bool legacy_control_panel_adapter_enabled =
-        install_legacy_control_panel_adapter(api);
-    if (!legacy_control_panel_adapter_enabled) {
-        log_line("A1 ControlPanel button-layout adapter installation "
-                 "failed; PopupPalette controls will retain the Fleet "
-                 "Operations layout");
-    }
-    const bool legacy_resource_panel_render_enabled =
-        install_legacy_resource_panel_adapter();
-    if (!legacy_resource_panel_render_enabled) {
-        log_line("A1 ResourcePanel render adapter installation failed; "
-                 "legacy resource artwork will remain unavailable");
-    }
-    g_legacy_resource_panel_runtime_ready =
-        legacy_control_panel_adapter_enabled &&
-        legacy_resource_panel_render_enabled &&
-        readable_range(
-            at(g_armada, kInterfaceSpriteDatabaseGetRva),
-            sizeof(kExpectedInterfaceSpriteDatabaseGet)) &&
-        std::memcmp(
-            at(g_armada, kInterfaceSpriteDatabaseGetRva),
-            kExpectedInterfaceSpriteDatabaseGet,
-            sizeof(kExpectedInterfaceSpriteDatabaseGet)) == 0 &&
-        readable_range(
-            at(g_fleet_ops, kFoSpriteSetColourRva),
-            sizeof(kExpectedFoSpriteSetColour)) &&
-        std::memcmp(
-            at(g_fleet_ops, kFoSpriteSetColourRva),
-            kExpectedFoSpriteSetColour,
-            sizeof(kExpectedFoSpriteSetColour)) == 0 &&
-        readable_range(
-            at(g_fleet_ops, kFoSpriteDrawScaled2DRva),
-            sizeof(kExpectedFoSpriteDrawScaled2D)) &&
-        std::memcmp(
-            at(g_fleet_ops, kFoSpriteDrawScaled2DRva),
-            kExpectedFoSpriteDrawScaled2D,
-            sizeof(kExpectedFoSpriteDrawScaled2D)) == 0;
-    g_legacy_speed_panel_runtime_ready =
-        g_legacy_resource_panel_runtime_ready;
-    if (!g_legacy_speed_panel_runtime_ready) {
-        log_line("A1 SpeedRail artwork adapter unavailable");
-    }
-    const bool legacy_explore_command_bridge_enabled =
-        install_legacy_explore_command_bridge(api);
-    if (!legacy_explore_command_bridge_enabled) {
-        log_line("A1 scout/Explore command basename-collision bridge "
-                 "installation failed; Explore may remain unavailable");
-    }
-    const bool legacy_team_color_translation_available =
-        install_legacy_team_color_translation(api);
-    if (!legacy_team_color_translation_available) {
-        log_line("A1 team-colour translation installation failed; legacy "
-                 "IA/minimap colours remain unavailable");
-    }
-    const bool legacy_virtual_directory_normalizer_enabled =
-        install_legacy_virtual_directory_normalizer(api);
-    if (!legacy_virtual_directory_normalizer_enabled) {
-        log_line("Legacy .\\ virtual-directory normalizer installation "
-                 "failed; dotted Armada 1 AI paths remain unsupported");
-    }
-    const bool legacy_moon_resource_defaults_enabled =
-        install_legacy_moon_resource_defaults(api);
-    if (!legacy_moon_resource_defaults_enabled) {
-        log_line("A2 Classic Scrap/moon missing-code defaults installation "
-                 "failed; inherited A2 maps may remain incompatible");
-    }
-    const bool legacy_physics_defaults_enabled =
-        install_legacy_physics_defaults(api);
-    if (!legacy_physics_defaults_enabled) {
-        log_line("A1 physics missing-code defaults installation failed; "
-                 "legacy craft may remain stationary");
-    }
-    const bool legacy_neutral_race_registry_enabled =
-        install_legacy_neutral_race_registry(api);
-    if (!legacy_neutral_race_registry_enabled) {
-        log_line("A2 Classic neutral Race registry default installation "
-                 "failed; A1 neutral sides may remain raceless");
-    }
-    InitializeCriticalSection(&g_officer_state_lock);
-    g_officer_state_lock_ready = true;
-    try {
-        g_starbase_class_policies.reserve(64);
-        g_starbase_officer_states.reserve(256);
-        g_officer_upgrade_races.reserve(32);
-    } catch (...) {
-        log_line("A1 officer state preallocation failed; dynamic allocation "
-                 "will be used");
-    }
-    bool nebula_guard_enabled = false;
-    bool legacy_aip_name_bridge_enabled = false;
-    bool legacy_aip_missing_unit_guard_enabled = false;
-    bool a1_bzn_map_bounds_bridge_enabled = false;
-    bool a1_bzn_ai_mission_bridge_enabled = false;
-    bool a1_bzn_runtime_class_bridge_enabled = false;
-    bool a1_relationship_bridge_enabled = false;
-    bool craft_level_up_race_default_enabled = false;
-    bool officer_quarter_compatibility_enabled = false;
-    bool starbase_policy_system_enabled = false;
-    bool palette_race_filter_enabled = false;
-
-    if (!safe_mode_enabled) {
-        const bool producer_events_registered =
-            api->register_producer_event_handler(
-                kModuleName, &officer_producer_event_handler, nullptr);
-        g_producer_events_ready = producer_events_registered;
-        if (!producer_events_registered) {
-            log_line("A1 Producer event registration failed");
-        }
-        nebula_guard_enabled = install_nebula_node_guard(api);
-        if (!nebula_guard_enabled) {
-            log_line("Nebula sprite-node guard installation failed");
-        }
-        legacy_aip_name_bridge_enabled =
-            install_legacy_aip_name_bridge(api);
-        if (!legacy_aip_name_bridge_enabled) {
-            log_line("Armada 1 Instant Action AIP name bridge installation "
-                     "failed");
-        }
-        legacy_aip_missing_unit_guard_enabled =
-            install_legacy_aip_missing_unit_guard(api);
-        if (!legacy_aip_missing_unit_guard_enabled) {
-            log_line("A1/A2 unresolved AIP technology-unit guard "
-                     "installation failed");
-        }
-        a1_bzn_map_bounds_bridge_enabled =
-            install_a1_bzn_map_bounds_bridge(api);
-        if (!a1_bzn_map_bounds_bridge_enabled) {
-            log_line("Armada 1 BZN map-bounds bridge installation failed; "
-                     "Instant Action may report a 0x0 map size");
-        }
-        a1_bzn_ai_mission_bridge_enabled =
-            install_a1_bzn_ai_mission_bridge(api);
-        if (!a1_bzn_ai_mission_bridge_enabled) {
-            log_line("Armada 1 BZN AiMission bridge installation failed");
-        }
-        a1_bzn_runtime_class_bridge_enabled =
-            install_a1_bzn_runtime_class_bridge(api);
-        if (!a1_bzn_runtime_class_bridge_enabled) {
-            log_line("Armada 1 BZN runtime-class width bridge installation "
-                     "failed");
-        }
-        a1_relationship_bridge_enabled =
-            install_a1_relationship_bridge(api);
-        if (!a1_relationship_bridge_enabled) {
-            log_line("A1 Instant Action relationship bridge installation "
-                     "failed");
-        }
-        craft_level_up_race_default_enabled =
-            install_craft_level_up_race_default(api);
-        if (!craft_level_up_race_default_enabled) {
-            log_line("Craft_mLevelUp neutral Race default installation "
-                     "failed");
-        }
-        officer_quarter_compatibility_enabled =
-            install_starbase_officer_quarter_compatibility(api);
-        if (!officer_quarter_compatibility_enabled) {
-            log_line("A1 officer-quarter compatibility installation failed");
-        }
-
-        starbase_policy_system_enabled = install_officer_upgrade_system(api);
-        if (!starbase_policy_system_enabled) {
-            log_line("A1 Starbase policy/menu installation failed");
-        }
-        palette_race_filter_enabled =
-            install_producer_palette_race_filter(api);
-        if (!palette_race_filter_enabled) {
-            log_line("A1 Producer palette race filter installation failed");
-        }
-    } else {
-        g_producer_events_ready = false;
-    }
-
-    // Install this last so every earlier UI adapter can preflight the native
-    // StandardBackground initializer before the checked prefix-alias detour
-    // is present.
-    const bool legacy_ship_display_adapter_enabled =
-        install_legacy_ship_display_adapter(api);
-    if (!legacy_ship_display_adapter_enabled) {
-        log_line("A1 ShipDisplay one-panel key adapter installation failed; "
-                 "the A2 low/middle/tall layouts may remain displaced");
-    }
-    g_legacy_resource_panel_runtime_ready =
-        g_legacy_resource_panel_runtime_ready &&
-        legacy_ship_display_adapter_enabled;
-    if (!g_legacy_resource_panel_runtime_ready) {
-        log_line("A1 resource-strip adapter unavailable");
-    }
-
-    char message[1500]{};
+return 0;}
+            case 68:{return c.settings->safe_mode;}
+            case 69:{log_line("A1Compat safe mode active; risky hooks disabled; legacy race-menu fallback retained");return 0;}
+            case 70:{c.essential_gui_sprite_loader=install_essential_gui_sprite_loader(c.api);return c.essential_gui_sprite_loader;}
+            case 71:{log_line("Essential a2_gui_global.spr loader installation failed; A1Compat cannot guarantee the required A2 interface sprite database");return 0;}
+            case 72:{g_race_menu_callback_ready=false;return 0;}
+            case 73:{reset_legacy_race_menu_state();return 0;}
+            case 74:{g_api=nullptr;return 0;}
+            case 75:{g_armada=nullptr;return 0;}
+            case 76:{g_fleet_ops=nullptr;return 0;}
+            case 77:{g_legacy_cursor_override_required=detect_incompatible_legacy_cursor_table(g_legacy_cursor_override_source,&g_legacy_tactical_cursor_override_required);return 0;}
+            case 78:{return g_legacy_cursor_override_required||g_legacy_tactical_cursor_override_required;}
+            case 79:{char message[720]{};std::snprintf(message,sizeof(message),"Detected incompatible legacy cursor overview entries in %s; scheduling loaded-cursor fallbacks (GUI=%s, tactical=%s)",g_legacy_cursor_override_source.c_str(),g_legacy_cursor_override_required?"yes":"no",g_legacy_tactical_cursor_override_required?"yes":"no");log_line(message);return 0;}
+            case 80:{c.legacy_default_cursor_fallback=install_legacy_default_cursor_fallback(c.api);return c.legacy_default_cursor_fallback;}
+            case 81:{log_line("A1 legacy default-cursor fallback installation failed; an unflagged or oversized standard cursor may remain invisible");return 0;}
+            case 82:{c.legacy_tactical_cursor_fallback=install_legacy_tactical_cursor_fallback(c.api);return c.legacy_tactical_cursor_fallback;}
+            case 83:{log_line("A1 legacy tactical-cursor fallback installation failed; the main map overview cursor may remain invisible");return 0;}
+            case 84:{c.legacy_gameplay_ui_scaling=install_legacy_gameplay_ui_scaling(c.api);return c.legacy_gameplay_ui_scaling;}
+            case 85:{log_line("A1 gameplay UI 640x480 scaling bridge installation failed; raw legacy CFG rectangles will retain A2's 1600x1200 reference size");return 0;}
+            case 86:{c.legacy_tooltip_adapter=install_legacy_tooltip_adapter(c.api);return c.legacy_tooltip_adapter;}
+            case 87:{log_line("A1 tooltip presentation adapter installation failed; raw legacy CFGs may retain an unreadable or collapsed A2 tooltip frame");return 0;}
+            case 88:{c.legacy_cinematic_view_adapter=install_legacy_cinematic_view_adapter(c.api);return c.legacy_cinematic_view_adapter;}
+            case 89:{log_line("A1 CinematicView layout adapter installation failed; the live 3D viewport may retain Fleet Operations geometry");return 0;}
+            case 90:{c.legacy_control_panel_adapter=install_legacy_control_panel_adapter(c.api);return c.legacy_control_panel_adapter;}
+            case 91:{log_line("A1 ControlPanel button-layout adapter installation failed; PopupPalette controls will retain the Fleet Operations layout");return 0;}
+            case 92:{c.legacy_resource_panel_render=install_legacy_resource_panel_adapter();return c.legacy_resource_panel_render;}
+            case 93:{log_line("A1 ResourcePanel render adapter installation failed; legacy resource artwork will remain unavailable");return 0;}
+            case 105:{c.legacy_explore_command_bridge=install_legacy_explore_command_bridge(c.api);return c.legacy_explore_command_bridge;}
+            case 106:{log_line("A1 scout/Explore command basename-collision bridge installation failed; Explore may remain unavailable");return 0;}
+            case 107:{c.legacy_team_color_translation=install_legacy_team_color_translation(c.api);return c.legacy_team_color_translation;}
+            case 108:{log_line("A1 team-colour translation installation failed; legacy IA/minimap colours remain unavailable");return 0;}
+            case 109:{c.legacy_virtual_directory_normalizer=install_legacy_virtual_directory_normalizer(c.api);return c.legacy_virtual_directory_normalizer;}
+            case 110:{log_line("Legacy .\\ virtual-directory normalizer installation failed; dotted Armada 1 AI paths remain unsupported");return 0;}
+            case 111:{c.legacy_moon_resource_defaults=install_legacy_moon_resource_defaults(c.api);return c.legacy_moon_resource_defaults;}
+            case 112:{log_line("A2 Classic Scrap/moon missing-code defaults installation failed; inherited A2 maps may remain incompatible");return 0;}
+            case 113:{c.legacy_physics_defaults=install_legacy_physics_defaults(c.api);return c.legacy_physics_defaults;}
+            case 114:{log_line("A1 physics missing-code defaults installation failed; legacy craft may remain stationary");return 0;}
+            case 115:{c.legacy_neutral_race_registry=install_legacy_neutral_race_registry(c.api);return c.legacy_neutral_race_registry;}
+            case 116:{log_line("A2 Classic neutral Race registry default installation failed; A1 neutral sides may remain raceless");return 0;}
+            case 122:{c.nebula_guard=install_nebula_node_guard(c.api);return c.nebula_guard;}
+            case 123:{log_line("Nebula sprite-node guard installation failed");return 0;}
+            case 124:{c.legacy_aip_name_bridge=install_legacy_aip_name_bridge(c.api);return c.legacy_aip_name_bridge;}
+            case 125:{log_line("Armada 1 Instant Action AIP name bridge installation failed");return 0;}
+            case 126:{c.legacy_aip_missing_unit_guard=install_legacy_aip_missing_unit_guard(c.api);return c.legacy_aip_missing_unit_guard;}
+            case 127:{log_line("A1/A2 unresolved AIP technology-unit guard installation failed");return 0;}
+            case 128:{c.a1_bzn_map_bounds_bridge=install_a1_bzn_map_bounds_bridge(c.api);return c.a1_bzn_map_bounds_bridge;}
+            case 129:{log_line("Armada 1 BZN map-bounds bridge installation failed; Instant Action may report a 0x0 map size");return 0;}
+            case 130:{c.a1_bzn_ai_mission_bridge=install_a1_bzn_ai_mission_bridge(c.api);return c.a1_bzn_ai_mission_bridge;}
+            case 131:{log_line("Armada 1 BZN AiMission bridge installation failed");return 0;}
+            case 132:{c.a1_bzn_runtime_class_bridge=install_a1_bzn_runtime_class_bridge(c.api);return c.a1_bzn_runtime_class_bridge;}
+            case 133:{log_line("Armada 1 BZN runtime-class width bridge installation failed");return 0;}
+            case 134:{c.a1_relationship_bridge=install_a1_relationship_bridge(c.api);return c.a1_relationship_bridge;}
+            case 135:{log_line("A1 Instant Action relationship bridge installation failed");return 0;}
+            case 136:{c.craft_level_up_race_default=install_craft_level_up_race_default(c.api);return c.craft_level_up_race_default;}
+            case 137:{log_line("Craft_mLevelUp neutral Race default installation failed");return 0;}
+            case 138:{c.officer_quarter_compatibility=install_starbase_officer_quarter_compatibility(c.api);return c.officer_quarter_compatibility;}
+            case 139:{log_line("A1 officer-quarter compatibility installation failed");return 0;}
+            case 140:{c.starbase_policy_system=install_officer_upgrade_system(c.api);return c.starbase_policy_system;}
+            case 141:{log_line("A1 Starbase policy/menu installation failed");return 0;}
+            case 142:{c.palette_race_filter=install_producer_palette_race_filter(c.api);return c.palette_race_filter;}
+            case 143:{log_line("A1 Producer palette race filter installation failed");return 0;}
+            case 94:{return c.legacy_control_panel_adapter;}
+            case 95:{return c.legacy_resource_panel_render;}
+            case 96:{return readable_range(at(g_armada,kInterfaceSpriteDatabaseGetRva),sizeof(kExpectedInterfaceSpriteDatabaseGet));}
+            case 97:{return std::memcmp(at(g_armada,kInterfaceSpriteDatabaseGetRva),kExpectedInterfaceSpriteDatabaseGet,sizeof(kExpectedInterfaceSpriteDatabaseGet))==0;}
+            case 98:{return readable_range(at(g_fleet_ops,kFoSpriteSetColourRva),sizeof(kExpectedFoSpriteSetColour));}
+            case 99:{return std::memcmp(at(g_fleet_ops,kFoSpriteSetColourRva),kExpectedFoSpriteSetColour,sizeof(kExpectedFoSpriteSetColour))==0;}
+            case 100:{return readable_range(at(g_fleet_ops,kFoSpriteDrawScaled2DRva),sizeof(kExpectedFoSpriteDrawScaled2D));}
+            case 101:{return std::memcmp(at(g_fleet_ops,kFoSpriteDrawScaled2DRva),kExpectedFoSpriteDrawScaled2D,sizeof(kExpectedFoSpriteDrawScaled2D))==0;}
+            case 102:{g_legacy_resource_panel_runtime_ready=value!=0;return 0;}
+            case 103:{g_legacy_speed_panel_runtime_ready=g_legacy_resource_panel_runtime_ready;return 0;}
+            case 104:{if(value==0)return g_legacy_speed_panel_runtime_ready;log_line("A1 SpeedRail artwork adapter unavailable");return 0;}
+            case 117:{InitializeCriticalSection(&g_officer_state_lock);g_officer_state_lock_ready=true;return 0;}
+            case 118:{try{g_starbase_class_policies.reserve(64);g_starbase_officer_states.reserve(256);g_officer_upgrade_races.reserve(32);}catch(...){log_line("A1 officer state preallocation failed; dynamic allocation will be used");}return 0;}
+            case 119:{return c.api->register_producer_event_handler(kModuleName,&officer_producer_event_handler,nullptr);}
+            case 120:{g_producer_events_ready=value!=0;return 0;}
+            case 121:{log_line("A1 Producer event registration failed");return 0;}
+            case 144:{g_producer_events_ready=false;return 0;}
+            case 145:{c.legacy_ship_display_adapter=install_legacy_ship_display_adapter(c.api);return c.legacy_ship_display_adapter;}
+            case 146:{log_line("A1 ShipDisplay one-panel key adapter installation failed; the A2 low/middle/tall layouts may remain displaced");return 0;}
+            case 147:{return g_legacy_resource_panel_runtime_ready;}
+            case 148:{g_legacy_resource_panel_runtime_ready=value!=0;return 0;}
+            case 149:{log_line("A1 resource-strip adapter unavailable");return 0;}
+            case 150:{                const bool legacy_default_cursor_fallback_enabled=c.legacy_default_cursor_fallback;
+                const bool legacy_tactical_cursor_fallback_enabled=c.legacy_tactical_cursor_fallback;
+                const bool legacy_gameplay_ui_scaling_enabled=c.legacy_gameplay_ui_scaling;
+                const bool legacy_cinematic_view_adapter_enabled=c.legacy_cinematic_view_adapter;
+                const bool legacy_control_panel_adapter_enabled=c.legacy_control_panel_adapter;
+                const bool legacy_explore_command_bridge_enabled=c.legacy_explore_command_bridge;
+                const bool legacy_team_color_translation_available=c.legacy_team_color_translation;
+                const bool legacy_virtual_directory_normalizer_enabled=c.legacy_virtual_directory_normalizer;
+                const bool legacy_moon_resource_defaults_enabled=c.legacy_moon_resource_defaults;
+                const bool legacy_physics_defaults_enabled=c.legacy_physics_defaults;
+                const bool legacy_neutral_race_registry_enabled=c.legacy_neutral_race_registry;
+                const bool nebula_guard_enabled=c.nebula_guard;
+                const bool legacy_aip_name_bridge_enabled=c.legacy_aip_name_bridge;
+                const bool legacy_aip_missing_unit_guard_enabled=c.legacy_aip_missing_unit_guard;
+                const bool a1_bzn_map_bounds_bridge_enabled=c.a1_bzn_map_bounds_bridge;
+                const bool a1_bzn_ai_mission_bridge_enabled=c.a1_bzn_ai_mission_bridge;
+                const bool a1_bzn_runtime_class_bridge_enabled=c.a1_bzn_runtime_class_bridge;
+                const bool a1_relationship_bridge_enabled=c.a1_relationship_bridge;
+                const bool craft_level_up_race_default_enabled=c.craft_level_up_race_default;
+                const bool officer_quarter_compatibility_enabled=c.officer_quarter_compatibility;
+                const bool starbase_policy_system_enabled=c.starbase_policy_system;
+                const bool palette_race_filter_enabled=c.palette_race_filter;
+                const bool legacy_ship_display_adapter_enabled=c.legacy_ship_display_adapter;
+                const bool essential_gui_sprite_loader_enabled=c.essential_gui_sprite_loader;
+                char message[1500]{};
     std::snprintf(
         message, sizeof(message),
         "Armada 1 compatibility initialized: wingman -> craft; A2 scout "
@@ -13279,293 +13288,355 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
         g_officer_upgrade_completion_ready ? "enabled" : "unavailable",
         palette_race_filter_enabled ? "enabled" : "unavailable");
     log_line(message);
-    return true;
+                return 0;}
+            default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const bool initialized=a2fo_rs_stage8_a1_lifecycle_init(&context,op)!=0;
+    if(context.error)std::rethrow_exception(context.error);
+    return initialized;
 }
 
 extern "C" __declspec(dllexport)
 void A2FO_CALL A2FO_ModuleShutdown() {
-    log_line("Armada 1 compatibility module shutting down");
-    destroy_legacy_control_background();
-    destroy_legacy_speed_background();
-    destroy_legacy_resource_backgrounds();
-    if (g_resource_panel_render_vtable_hook_installed &&
-        g_resource_panel_render_vtable_slot &&
-        g_resource_panel_render_original &&
-        readable_range(
-            g_resource_panel_render_vtable_slot, sizeof(void*)) &&
-        *g_resource_panel_render_vtable_slot ==
-            reinterpret_cast<void*>(
-                &resource_panel_render_vtable_hook)) {
-        DWORD old_protect = 0;
-        if (VirtualProtect(
-                g_resource_panel_render_vtable_slot, sizeof(void*),
-                PAGE_READWRITE, &old_protect)) {
-            InterlockedExchangePointer(
-                reinterpret_cast<PVOID volatile*>(
-                    g_resource_panel_render_vtable_slot),
-                g_resource_panel_render_original);
-            DWORD restored = 0;
-            VirtualProtect(
-                g_resource_panel_render_vtable_slot, sizeof(void*),
-                old_protect, &restored);
+    struct ShutdownContext { std::exception_ptr error{}; } context;
+    const auto operation = [](void* opaque, std::uint32_t id) noexcept -> std::uint64_t {
+        auto& context = *static_cast<ShutdownContext*>(opaque);
+        try {
+            switch (id) {
+            case 0: {
+                log_line("Armada 1 compatibility module shutting down");
+                return 0;
+            }
+            case 1: {
+                destroy_legacy_control_background();
+                return 0;
+            }
+            case 2: {
+                destroy_legacy_speed_background();
+                return 0;
+            }
+            case 3: {
+                destroy_legacy_resource_backgrounds();
+                return 0;
+            }
+            case 4: {
+                if (g_resource_panel_render_vtable_hook_installed &&
+                    g_resource_panel_render_vtable_slot &&
+                    g_resource_panel_render_original &&
+                    readable_range(
+                        g_resource_panel_render_vtable_slot, sizeof(void*)) &&
+                    *g_resource_panel_render_vtable_slot ==
+                        reinterpret_cast<void*>(
+                            &resource_panel_render_vtable_hook)) {
+                    DWORD old_protect = 0;
+                    if (VirtualProtect(
+                            g_resource_panel_render_vtable_slot, sizeof(void*),
+                            PAGE_READWRITE, &old_protect)) {
+                        InterlockedExchangePointer(
+                            reinterpret_cast<PVOID volatile*>(
+                                g_resource_panel_render_vtable_slot),
+                            g_resource_panel_render_original);
+                        DWORD restored = 0;
+                        VirtualProtect(
+                            g_resource_panel_render_vtable_slot, sizeof(void*),
+                            old_protect, &restored);
+                    }
+                }
+                g_resource_panel_render_vtable_slot = nullptr;
+                g_resource_panel_render_original = nullptr;
+                g_resource_panel_render_vtable_hook_installed = false;
+                return 0;
+            }
+            case 5: {
+                if (g_control_button_press_vtable_hook_installed &&
+                    g_control_button_press_vtable_slot &&
+                    g_control_button_press_original &&
+                    readable_range(
+                        g_control_button_press_vtable_slot, sizeof(void*)) &&
+                    *g_control_button_press_vtable_slot ==
+                        reinterpret_cast<void*>(
+                            &control_button_press_vtable_hook)) {
+                    DWORD old_protect = 0;
+                    if (VirtualProtect(
+                            g_control_button_press_vtable_slot, sizeof(void*),
+                            PAGE_READWRITE, &old_protect)) {
+                        InterlockedExchangePointer(
+                            reinterpret_cast<PVOID volatile*>(
+                                g_control_button_press_vtable_slot),
+                            g_control_button_press_original);
+                        DWORD restored = 0;
+                        VirtualProtect(
+                            g_control_button_press_vtable_slot, sizeof(void*),
+                            old_protect, &restored);
+                    }
+                }
+                g_control_button_press_vtable_slot = nullptr;
+                g_control_button_press_original = nullptr;
+                g_control_button_press_vtable_hook_installed = false;
+                return 0;
+            }
+            case 6: {
+                if (g_producer_push_target_hook_installed &&
+                    g_producer_push_target_slot &&
+                    g_producer_push_target_original &&
+                    readable_range(g_producer_push_target_slot, sizeof(void*)) &&
+                    writable_range(g_producer_push_target_slot, sizeof(void*)) &&
+                    *g_producer_push_target_slot ==
+                        reinterpret_cast<void*>(
+                            &producer_push_build_queue_item_hook)) {
+                    InterlockedExchangePointer(
+                        reinterpret_cast<PVOID volatile*>(
+                            g_producer_push_target_slot),
+                        g_producer_push_target_original);
+                }
+                g_producer_push_target_slot = nullptr;
+                g_producer_push_target_original = nullptr;
+                g_producer_push_target_hook_installed = false;
+                return 0;
+            }
+            case 7: {
+                if (g_starbase_start_effect_vtable_hook_installed &&
+                    g_starbase_start_effect_vtable_slot &&
+                    g_starbase_start_effect_original &&
+                    readable_range(
+                        g_starbase_start_effect_vtable_slot, sizeof(void*)) &&
+                    *g_starbase_start_effect_vtable_slot ==
+                        reinterpret_cast<void*>(
+                            &starbase_start_construction_effect_hook)) {
+                    DWORD old_protect = 0;
+                    if (VirtualProtect(
+                            g_starbase_start_effect_vtable_slot, sizeof(void*),
+                            PAGE_READWRITE, &old_protect)) {
+                        InterlockedExchangePointer(
+                            reinterpret_cast<PVOID volatile*>(
+                                g_starbase_start_effect_vtable_slot),
+                            g_starbase_start_effect_original);
+                        DWORD restored = 0;
+                        VirtualProtect(
+                            g_starbase_start_effect_vtable_slot, sizeof(void*),
+                            old_protect, &restored);
+                    }
+                }
+                g_starbase_start_effect_vtable_slot = nullptr;
+                g_starbase_start_effect_original = nullptr;
+                g_starbase_start_effect_vtable_hook_installed = false;
+                return 0;
+            }
+            case 8: {
+                if (g_starbase_finish_build_vtable_hook_installed &&
+                    g_starbase_finish_build_vtable_slot &&
+                    g_starbase_finish_build_original &&
+                    readable_range(g_starbase_finish_build_vtable_slot, sizeof(void*)) &&
+                    *g_starbase_finish_build_vtable_slot ==
+                        reinterpret_cast<void*>(&starbase_finish_build_hook)) {
+                    DWORD old_protect = 0;
+                    if (VirtualProtect(
+                            g_starbase_finish_build_vtable_slot, sizeof(void*),
+                            PAGE_READWRITE, &old_protect)) {
+                        InterlockedExchangePointer(
+                            reinterpret_cast<PVOID volatile*>(
+                                g_starbase_finish_build_vtable_slot),
+                            g_starbase_finish_build_original);
+                        DWORD restored = 0;
+                        VirtualProtect(
+                            g_starbase_finish_build_vtable_slot, sizeof(void*),
+                            old_protect, &restored);
+                    }
+                }
+                g_starbase_finish_build_vtable_slot = nullptr;
+                g_starbase_finish_build_original = nullptr;
+                g_starbase_finish_build_vtable_hook_installed = false;
+                return 0;
+            }
+            case 9: {
+                g_officer_upgrade_completion_ready = false;
+                g_officer_upgrade_admission_ready = false;
+                g_officer_upgrade_identity_ready = false;
+                g_producer_events_ready = false;
+                g_officer_upgrade_system_ready = false;
+                g_constructor_menu_capability_count = 0;
+                g_legacy_scout_menu_capability_count = 0;
+                g_legacy_station_menu_capability_count = 0;
+                g_legacy_moon_menu_capability_count = 0;
+                g_legacy_explore_command_collision_count = 0;
+                g_gui_sprite_table_load_count = 0;
+                g_legacy_cursor_fallback_count = 0;
+                g_legacy_tactical_cursor_fallback_count = 0;
+                g_legacy_cursor_fallback_failure_reported = 0;
+                g_legacy_cursor_override_required = false;
+                g_legacy_tactical_cursor_override_required = false;
+                g_legacy_cursor_override_source.clear();
+                g_legacy_tactical_native_overview_cursors = {};
+                g_legacy_gameplay_ui_active = 0;
+                g_legacy_tooltip_background_fallback = 0;
+                g_legacy_tooltip_text_fallback = 0;
+                g_legacy_tooltip_frame_fallback = 0;
+                g_legacy_tooltip_colour_reported = 0;
+                g_legacy_tooltip_background_colour = {};
+                g_legacy_control_button_rect_count = 0;
+                g_legacy_control_button_adapter_reported = 0;
+                g_legacy_control_background_available = 0;
+                g_legacy_control_black_mask_available = 0;
+                g_legacy_control_black_mask_reported = 0;
+                g_legacy_ship_display_black_mask_available = 0;
+                g_legacy_ship_display_black_mask_reported = 0;
+                g_legacy_ship_display_wireframe_available = 0;
+                g_legacy_ship_display_wireframe_reported = 0;
+                g_legacy_ship_display_race_icon_available = 0;
+                g_legacy_ship_display_race_icon_reported = 0;
+                g_legacy_ship_display_race_icon_background_reported = 0;
+                g_legacy_ship_display_identity_available = 0;
+                g_legacy_ship_display_identity_reported = 0;
+                g_legacy_ship_display_identity_text_available = 0;
+                g_legacy_ship_display_identity_text_reported = 0;
+                g_legacy_ship_display_identity_background_available = 0;
+                g_legacy_ship_display_identity_background_reported = 0;
+                g_legacy_ship_display_system_strip_reported = 0;
+                g_legacy_ship_display_progress_available = 0;
+                g_legacy_ship_display_progress_reported = 0;
+                g_legacy_ship_display_multi_layout_available = 0;
+                g_legacy_ship_display_multi_layout_reported = 0;
+                g_legacy_ship_display_multi_constructor_reported = 0;
+                g_legacy_ship_display_multi_crew_reported = 0;
+                g_legacy_ship_display_energy_available = 0;
+                g_legacy_ship_display_energy_reported = 0;
+                g_legacy_speed_control_layout_available = 0;
+                g_legacy_speed_queue_layout_reported = 0;
+                g_legacy_speed_special_layout_reported = 0;
+                g_legacy_speed_special_layout_count = 0;
+                g_legacy_speed_transport_layout_reported = 0;
+                g_legacy_popup_control_diagnostic_reported = 0;
+                g_legacy_officer_root_control_reported = 0;
+                g_legacy_officer_root_repair_report_count = 0;
+                g_legacy_officer_root_order_latched_reported = 0;
+                g_legacy_officer_root_return_reported = 0;
+                g_legacy_officer_root_direct_dispatch_reported = 0;
+                g_legacy_officer_build_control_hidden_reported = 0;
+                g_legacy_control_black_mask_runtime_ready = false;
+                g_legacy_ship_display_render_runtime_ready = false;
+                g_legacy_ship_display_background_runtime_ready = false;
+                g_legacy_ship_display_opaque_black_runtime_ready = false;
+                g_legacy_ship_display_race_icon_background_runtime_ready = false;
+                g_legacy_ship_display_text_runtime_ready = false;
+                g_legacy_construction_bar_target_runtime_ready = false;
+                g_legacy_construction_bar_target_reported = 0;
+                g_legacy_construction_rig_progress_diagnostic_reported = 0;
+                g_legacy_cinematic_button_runtime_ready = false;
+                g_legacy_cinematic_caption_reported = 0;
+                g_legacy_caption_text_component = nullptr;
+                g_legacy_officer_root_control_runtime_ready = false;
+                g_legacy_selected_object = nullptr;
+                g_legacy_officer_root_button = nullptr;
+                g_legacy_officer_root_target = nullptr;
+                g_legacy_officer_root_enabled = false;
+                g_legacy_officer_root_dispatch_producer = nullptr;
+                g_legacy_officer_root_dispatch_target = nullptr;
+                g_legacy_officer_root_pending_producer = nullptr;
+                g_legacy_officer_root_direct_dispatch_active = false;
+                g_legacy_officer_root_mode_info = {};
+                g_legacy_resource_render_bridge_active = 0;
+                g_legacy_speed_panel_available = 0;
+                g_legacy_speed_panel_reported = 0;
+                g_legacy_speed_panel_runtime_ready = false;
+                g_legacy_cinematic_layout_available = 0;
+                g_legacy_cinematic_layout_reported = 0;
+                g_legacy_cinematic_buttons_available = 0;
+                g_legacy_cinematic_buttons_reported = 0;
+                g_legacy_resource_panel_available = 0;
+                g_legacy_resource_panel_reported = 0;
+                g_legacy_resource_background_suppression_reported = 0;
+                g_legacy_resource_panel_runtime_ready = false;
+                g_legacy_ship_display_alias_report_count = 0;
+                g_legacy_control_button_rects = {};
+                g_legacy_control_panel_rect = {};
+                g_legacy_control_background_rect = {};
+                g_legacy_control_black_rect = {};
+                g_legacy_speed_panel_rect = {};
+                g_legacy_speed_queue_screen_rects = {};
+                g_legacy_speed_transport_screen_rect = {};
+                g_legacy_speed_background_pieces = {};
+                g_legacy_speed_background_piece_count = 0;
+                g_legacy_cinematic_panel_rect = {};
+                g_legacy_cinematic_background_panel_rect = {};
+                g_legacy_cinematic_background_rect = {};
+                g_legacy_cinematic_display_rect = {};
+                g_legacy_cinematic_menu_button_rect = {};
+                g_legacy_cinematic_comm_button_rect = {};
+                g_legacy_cinematic_menu_button_sprite_name = {};
+                g_legacy_cinematic_menu_border_sprite_name = {};
+                g_legacy_cinematic_comm_button_sprite_name = {};
+                g_legacy_cinematic_comm_border_sprite_name = {};
+                g_legacy_cinematic_button_art_owner = nullptr;
+                g_legacy_ship_display_black_rect = {};
+                g_legacy_ship_display_wireframe_rect = {};
+                g_legacy_ship_display_race_icon_rect = {};
+                g_legacy_ship_display_race_icon_display_rect = {};
+                g_legacy_ship_display_class_rect = {};
+                g_legacy_ship_display_name_rect = {};
+                g_legacy_ship_display_crew_rect = {};
+                g_legacy_ship_display_crew_dot_rect = {};
+                g_legacy_ship_display_officer_rect = {};
+                g_legacy_ship_display_crew_label_rect = {};
+                g_legacy_ship_display_officer_label_rect = {};
+                g_legacy_ship_display_progress_rect = {};
+                g_legacy_ship_display_single_energy_rect = {};
+                g_legacy_ship_display_multi_tile_rects = {};
+                g_legacy_ship_display_multi_shield_rects = {};
+                g_legacy_ship_display_multi_wireframe_rects = {};
+                g_legacy_ship_display_multi_crew_rects = {};
+                g_legacy_ship_display_multi_energy_rects = {};
+                g_legacy_ship_display_single_energy_sprite_name = {};
+                g_legacy_ship_display_multi_energy_sprite_name = {};
+                g_legacy_ship_display_multi_crew_sprite_name = {};
+                g_legacy_ship_display_crew_label_key = {};
+                g_legacy_ship_display_officer_label_key = {};
+                g_legacy_ship_display_crew_dot_sprite_name = {};
+                g_legacy_ship_display_identity_background_pieces = {};
+                g_legacy_ship_display_identity_background_piece_count = 0;
+                g_legacy_resource_panel_rect = {};
+                g_legacy_resource_text_rects = {};
+                g_legacy_resource_icon_rects = {};
+                g_legacy_resource_icon_names = {};
+                g_legacy_resource_background_pieces = {};
+                g_legacy_resource_background_piece_counts = {};
+                g_race_menu_callback_ready = false;
+                g_project_id_get_odf_name = nullptr;
+                g_legacy_team_color_palette = {};
+                g_legacy_team_color_palette_active = false;
+                g_legacy_team_color_apply_count = 0;
+                InterlockedExchange(
+                    &g_legacy_resource_maximum_post_config_pending, 0);
+                g_legacy_physics_combat_speed_default_count = 0;
+                g_legacy_physics_impulse_speed_translation_count = 0;
+                g_legacy_physics_warp_speed_translation_count = 0;
+                g_legacy_physics_model_default_count = 0;
+                g_legacy_smooth_profile_translation_count = 0;
+                return 0;
+            }
+            case 10: {
+                reset_legacy_race_menu_state();
+                return 0;
+            }
+            case 11: {
+                g_api = nullptr;
+                return 0;
+            }
+            case 12: {
+                g_armada = nullptr;
+                return 0;
+            }
+            case 13: {
+                g_fleet_ops = nullptr;
+                return 0;
+            }
+            default: return 0;
+            }
+        } catch (...) {
+            context.error = std::current_exception();
+            return UINT64_MAX;
         }
-    }
-    g_resource_panel_render_vtable_slot = nullptr;
-    g_resource_panel_render_original = nullptr;
-    g_resource_panel_render_vtable_hook_installed = false;
-    if (g_control_button_press_vtable_hook_installed &&
-        g_control_button_press_vtable_slot &&
-        g_control_button_press_original &&
-        readable_range(
-            g_control_button_press_vtable_slot, sizeof(void*)) &&
-        *g_control_button_press_vtable_slot ==
-            reinterpret_cast<void*>(
-                &control_button_press_vtable_hook)) {
-        DWORD old_protect = 0;
-        if (VirtualProtect(
-                g_control_button_press_vtable_slot, sizeof(void*),
-                PAGE_READWRITE, &old_protect)) {
-            InterlockedExchangePointer(
-                reinterpret_cast<PVOID volatile*>(
-                    g_control_button_press_vtable_slot),
-                g_control_button_press_original);
-            DWORD restored = 0;
-            VirtualProtect(
-                g_control_button_press_vtable_slot, sizeof(void*),
-                old_protect, &restored);
-        }
-    }
-    g_control_button_press_vtable_slot = nullptr;
-    g_control_button_press_original = nullptr;
-    g_control_button_press_vtable_hook_installed = false;
-    if (g_producer_push_target_hook_installed &&
-        g_producer_push_target_slot &&
-        g_producer_push_target_original &&
-        readable_range(g_producer_push_target_slot, sizeof(void*)) &&
-        writable_range(g_producer_push_target_slot, sizeof(void*)) &&
-        *g_producer_push_target_slot ==
-            reinterpret_cast<void*>(
-                &producer_push_build_queue_item_hook)) {
-        InterlockedExchangePointer(
-            reinterpret_cast<PVOID volatile*>(
-                g_producer_push_target_slot),
-            g_producer_push_target_original);
-    }
-    g_producer_push_target_slot = nullptr;
-    g_producer_push_target_original = nullptr;
-    g_producer_push_target_hook_installed = false;
-    if (g_starbase_start_effect_vtable_hook_installed &&
-        g_starbase_start_effect_vtable_slot &&
-        g_starbase_start_effect_original &&
-        readable_range(
-            g_starbase_start_effect_vtable_slot, sizeof(void*)) &&
-        *g_starbase_start_effect_vtable_slot ==
-            reinterpret_cast<void*>(
-                &starbase_start_construction_effect_hook)) {
-        DWORD old_protect = 0;
-        if (VirtualProtect(
-                g_starbase_start_effect_vtable_slot, sizeof(void*),
-                PAGE_READWRITE, &old_protect)) {
-            InterlockedExchangePointer(
-                reinterpret_cast<PVOID volatile*>(
-                    g_starbase_start_effect_vtable_slot),
-                g_starbase_start_effect_original);
-            DWORD restored = 0;
-            VirtualProtect(
-                g_starbase_start_effect_vtable_slot, sizeof(void*),
-                old_protect, &restored);
-        }
-    }
-    g_starbase_start_effect_vtable_slot = nullptr;
-    g_starbase_start_effect_original = nullptr;
-    g_starbase_start_effect_vtable_hook_installed = false;
-    if (g_starbase_finish_build_vtable_hook_installed &&
-        g_starbase_finish_build_vtable_slot &&
-        g_starbase_finish_build_original &&
-        readable_range(g_starbase_finish_build_vtable_slot, sizeof(void*)) &&
-        *g_starbase_finish_build_vtable_slot ==
-            reinterpret_cast<void*>(&starbase_finish_build_hook)) {
-        DWORD old_protect = 0;
-        if (VirtualProtect(
-                g_starbase_finish_build_vtable_slot, sizeof(void*),
-                PAGE_READWRITE, &old_protect)) {
-            InterlockedExchangePointer(
-                reinterpret_cast<PVOID volatile*>(
-                    g_starbase_finish_build_vtable_slot),
-                g_starbase_finish_build_original);
-            DWORD restored = 0;
-            VirtualProtect(
-                g_starbase_finish_build_vtable_slot, sizeof(void*),
-                old_protect, &restored);
-        }
-    }
-    g_starbase_finish_build_vtable_slot = nullptr;
-    g_starbase_finish_build_original = nullptr;
-    g_starbase_finish_build_vtable_hook_installed = false;
-    g_officer_upgrade_completion_ready = false;
-    g_officer_upgrade_admission_ready = false;
-    g_officer_upgrade_identity_ready = false;
-    g_producer_events_ready = false;
-    g_officer_upgrade_system_ready = false;
-    g_constructor_menu_capability_count = 0;
-    g_legacy_scout_menu_capability_count = 0;
-    g_legacy_station_menu_capability_count = 0;
-    g_legacy_moon_menu_capability_count = 0;
-    g_legacy_explore_command_collision_count = 0;
-    g_gui_sprite_table_load_count = 0;
-    g_legacy_cursor_fallback_count = 0;
-    g_legacy_tactical_cursor_fallback_count = 0;
-    g_legacy_cursor_fallback_failure_reported = 0;
-    g_legacy_cursor_override_required = false;
-    g_legacy_tactical_cursor_override_required = false;
-    g_legacy_cursor_override_source.clear();
-    g_legacy_tactical_native_overview_cursors = {};
-    g_legacy_gameplay_ui_active = 0;
-    g_legacy_tooltip_background_fallback = 0;
-    g_legacy_tooltip_text_fallback = 0;
-    g_legacy_tooltip_frame_fallback = 0;
-    g_legacy_tooltip_colour_reported = 0;
-    g_legacy_tooltip_background_colour = {};
-    g_legacy_control_button_rect_count = 0;
-    g_legacy_control_button_adapter_reported = 0;
-    g_legacy_control_background_available = 0;
-    g_legacy_control_black_mask_available = 0;
-    g_legacy_control_black_mask_reported = 0;
-    g_legacy_ship_display_black_mask_available = 0;
-    g_legacy_ship_display_black_mask_reported = 0;
-    g_legacy_ship_display_wireframe_available = 0;
-    g_legacy_ship_display_wireframe_reported = 0;
-    g_legacy_ship_display_race_icon_available = 0;
-    g_legacy_ship_display_race_icon_reported = 0;
-    g_legacy_ship_display_race_icon_background_reported = 0;
-    g_legacy_ship_display_identity_available = 0;
-    g_legacy_ship_display_identity_reported = 0;
-    g_legacy_ship_display_identity_text_available = 0;
-    g_legacy_ship_display_identity_text_reported = 0;
-    g_legacy_ship_display_identity_background_available = 0;
-    g_legacy_ship_display_identity_background_reported = 0;
-    g_legacy_ship_display_system_strip_reported = 0;
-    g_legacy_ship_display_progress_available = 0;
-    g_legacy_ship_display_progress_reported = 0;
-    g_legacy_ship_display_multi_layout_available = 0;
-    g_legacy_ship_display_multi_layout_reported = 0;
-    g_legacy_ship_display_multi_constructor_reported = 0;
-    g_legacy_ship_display_multi_crew_reported = 0;
-    g_legacy_ship_display_energy_available = 0;
-    g_legacy_ship_display_energy_reported = 0;
-    g_legacy_speed_control_layout_available = 0;
-    g_legacy_speed_queue_layout_reported = 0;
-    g_legacy_speed_special_layout_reported = 0;
-    g_legacy_speed_special_layout_count = 0;
-    g_legacy_speed_transport_layout_reported = 0;
-    g_legacy_popup_control_diagnostic_reported = 0;
-    g_legacy_officer_root_control_reported = 0;
-    g_legacy_officer_root_repair_report_count = 0;
-    g_legacy_officer_root_order_latched_reported = 0;
-    g_legacy_officer_root_return_reported = 0;
-    g_legacy_officer_root_direct_dispatch_reported = 0;
-    g_legacy_officer_build_control_hidden_reported = 0;
-    g_legacy_control_black_mask_runtime_ready = false;
-    g_legacy_ship_display_render_runtime_ready = false;
-    g_legacy_ship_display_background_runtime_ready = false;
-    g_legacy_ship_display_opaque_black_runtime_ready = false;
-    g_legacy_ship_display_race_icon_background_runtime_ready = false;
-    g_legacy_ship_display_text_runtime_ready = false;
-    g_legacy_construction_bar_target_runtime_ready = false;
-    g_legacy_construction_bar_target_reported = 0;
-    g_legacy_construction_rig_progress_diagnostic_reported = 0;
-    g_legacy_cinematic_button_runtime_ready = false;
-    g_legacy_cinematic_caption_reported = 0;
-    g_legacy_caption_text_component = nullptr;
-    g_legacy_officer_root_control_runtime_ready = false;
-    g_legacy_selected_object = nullptr;
-    g_legacy_officer_root_button = nullptr;
-    g_legacy_officer_root_target = nullptr;
-    g_legacy_officer_root_enabled = false;
-    g_legacy_officer_root_dispatch_producer = nullptr;
-    g_legacy_officer_root_dispatch_target = nullptr;
-    g_legacy_officer_root_pending_producer = nullptr;
-    g_legacy_officer_root_direct_dispatch_active = false;
-    g_legacy_officer_root_mode_info = {};
-    g_legacy_resource_render_bridge_active = 0;
-    g_legacy_speed_panel_available = 0;
-    g_legacy_speed_panel_reported = 0;
-    g_legacy_speed_panel_runtime_ready = false;
-    g_legacy_cinematic_layout_available = 0;
-    g_legacy_cinematic_layout_reported = 0;
-    g_legacy_cinematic_buttons_available = 0;
-    g_legacy_cinematic_buttons_reported = 0;
-    g_legacy_resource_panel_available = 0;
-    g_legacy_resource_panel_reported = 0;
-    g_legacy_resource_background_suppression_reported = 0;
-    g_legacy_resource_panel_runtime_ready = false;
-    g_legacy_ship_display_alias_report_count = 0;
-    g_legacy_control_button_rects = {};
-    g_legacy_control_panel_rect = {};
-    g_legacy_control_background_rect = {};
-    g_legacy_control_black_rect = {};
-    g_legacy_speed_panel_rect = {};
-    g_legacy_speed_queue_screen_rects = {};
-    g_legacy_speed_transport_screen_rect = {};
-    g_legacy_speed_background_pieces = {};
-    g_legacy_speed_background_piece_count = 0;
-    g_legacy_cinematic_panel_rect = {};
-    g_legacy_cinematic_background_panel_rect = {};
-    g_legacy_cinematic_background_rect = {};
-    g_legacy_cinematic_display_rect = {};
-    g_legacy_cinematic_menu_button_rect = {};
-    g_legacy_cinematic_comm_button_rect = {};
-    g_legacy_cinematic_menu_button_sprite_name = {};
-    g_legacy_cinematic_menu_border_sprite_name = {};
-    g_legacy_cinematic_comm_button_sprite_name = {};
-    g_legacy_cinematic_comm_border_sprite_name = {};
-    g_legacy_cinematic_button_art_owner = nullptr;
-    g_legacy_ship_display_black_rect = {};
-    g_legacy_ship_display_wireframe_rect = {};
-    g_legacy_ship_display_race_icon_rect = {};
-    g_legacy_ship_display_race_icon_display_rect = {};
-    g_legacy_ship_display_class_rect = {};
-    g_legacy_ship_display_name_rect = {};
-    g_legacy_ship_display_crew_rect = {};
-    g_legacy_ship_display_crew_dot_rect = {};
-    g_legacy_ship_display_officer_rect = {};
-    g_legacy_ship_display_crew_label_rect = {};
-    g_legacy_ship_display_officer_label_rect = {};
-    g_legacy_ship_display_progress_rect = {};
-    g_legacy_ship_display_single_energy_rect = {};
-    g_legacy_ship_display_multi_tile_rects = {};
-    g_legacy_ship_display_multi_shield_rects = {};
-    g_legacy_ship_display_multi_wireframe_rects = {};
-    g_legacy_ship_display_multi_crew_rects = {};
-    g_legacy_ship_display_multi_energy_rects = {};
-    g_legacy_ship_display_single_energy_sprite_name = {};
-    g_legacy_ship_display_multi_energy_sprite_name = {};
-    g_legacy_ship_display_multi_crew_sprite_name = {};
-    g_legacy_ship_display_crew_label_key = {};
-    g_legacy_ship_display_officer_label_key = {};
-    g_legacy_ship_display_crew_dot_sprite_name = {};
-    g_legacy_ship_display_identity_background_pieces = {};
-    g_legacy_ship_display_identity_background_piece_count = 0;
-    g_legacy_resource_panel_rect = {};
-    g_legacy_resource_text_rects = {};
-    g_legacy_resource_icon_rects = {};
-    g_legacy_resource_icon_names = {};
-    g_legacy_resource_background_pieces = {};
-    g_legacy_resource_background_piece_counts = {};
-    g_race_menu_callback_ready = false;
-    g_project_id_get_odf_name = nullptr;
-    g_legacy_team_color_palette = {};
-    g_legacy_team_color_palette_active = false;
-    g_legacy_team_color_apply_count = 0;
-    InterlockedExchange(
-        &g_legacy_resource_maximum_post_config_pending, 0);
-    g_legacy_physics_combat_speed_default_count = 0;
-    g_legacy_physics_impulse_speed_translation_count = 0;
-    g_legacy_physics_warp_speed_translation_count = 0;
-    g_legacy_physics_model_default_count = 0;
-    g_legacy_smooth_profile_translation_count = 0;
-    reset_legacy_race_menu_state();
-    g_api = nullptr;
-    g_armada = nullptr;
-    g_fleet_ops = nullptr;
+    };
+    a2fo_rs_stage8_a1_shutdown(&context, operation);
+    if (context.error) std::rethrow_exception(context.error);
 }

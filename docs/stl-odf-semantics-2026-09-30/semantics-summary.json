@@ -1,0 +1,24 @@
+{
+  "keys": 538,
+  "families": 413,
+  "basis_counts": {
+    "unresolved": 9,
+    "inferred": 191,
+    "documented": 213
+  },
+  "confidence_counts": {
+    "low": 25,
+    "medium": 205,
+    "high": 183
+  },
+  "role_counts": {
+    "ambiguous": 10,
+    "gameplay": 198,
+    "presentation": 135,
+    "asset": 51,
+    "ui": 10,
+    "schema": 9
+  },
+  "source_citations_checked": 648,
+  "retained_scope_keys_no_longer_candidates": 19
+}

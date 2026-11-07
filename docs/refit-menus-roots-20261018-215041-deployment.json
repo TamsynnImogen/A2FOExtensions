@@ -1,0 +1,48 @@
+{
+  "status": "deployed and enabled for next launch; in-game visual acceptance pending",
+  "timestamp": "20261018-215041",
+  "data_root": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data",
+  "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/refit-menus-roots-20261018-215041",
+  "artifacts": [
+    {
+      "path": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FORefitMenus.dll",
+      "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/refit-menus-roots-20261018-215041/Data/modules/A2FORefitMenus.dll",
+      "previous_sha256": "deaed7c0bf14f7d23fa5764e58383e0b9397643cb3aa9a07e0fd29fc48d1d9ed",
+      "sha256": "3ce8a6d6699f7a75f481bb94bc2fda8d236ca231a31d1c4b958e947fc85ac51d"
+    },
+    {
+      "path": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FORefitMenus.ini",
+      "backup": null,
+      "previous_sha256": null,
+      "sha256": "ad7ed38800935476383a206bf9811a5f6d6c4f8f6f3e1e55937568d23ff7ff6f"
+    },
+    {
+      "path": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/info.ini",
+      "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/refit-menus-roots-20261018-215041/Data/Mods/test/info.ini",
+      "previous_sha256": "118fdd8f55337d3eba7dfc6354a52a14300b1b6e207ebc41119a9b42eaec2e30",
+      "sha256": "68cef7963cf436691dc775dae6efc07d9ed4a9545d1b71f596b1d3b8a76061ac"
+    },
+    {
+      "path": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/licenses/armada2-refit.txt",
+      "backup": null,
+      "previous_sha256": null,
+      "sha256": "35a427baddf84b00c8925cb5604fb20a93d667dabd952a105ceefe62a23465b7"
+    }
+  ],
+  "protected_unchanged": {
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe": "817b1ddb9876cfb9c5d781b42d2513de48fef9cbdbc408aa43c878c573581a18",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll": "3fd18eeee4201a9a1297ac26b3eb88f78c5f72e8c55a62c25179f1d4932e4c11",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.dll": "45be55e79afe53365dc26f1e4238bfcd9d74120299215b52bca6458f072d4b05",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOArmadaProfiles.txt": "08ffa42a487354a7959fa5d4b184eb8120b331d2bca62284ac59f0da1cb52dac",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/info.ini": "d40efd9f80bc8e07d95186ede2ddd2a44277c758f45ac58171712f8eaa9a7192",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/STA2 Classic Mod/info.ini": "9f599f3f5217d0219d80ef0dd8a01990a72e9995b51a0b5cc372ff709cf77976"
+  },
+  "native_checks": "33/33 console processes passed",
+  "file_audit": "13 native signatures and main class/size passed",
+  "reason": [
+    "Test mod active list excluded RefitMenus",
+    "Root module INI absent",
+    "October Roots DLL needed exact profile"
+  ],
+  "gui_or_input_automation": false
+}

@@ -1,0 +1,160 @@
+// --- File identity and inheritance ---
+basename = "fed_akira"
+originalclass = "fed_akiraZ"
+
+// --- Display and localization ---
+unitname = "Akira Class"
+tooltip = "Akira Class [Nexus]"
+verbosetooltip = "AUTOTOOLTIP-fed_akiraZ.odf"
+race = "unitedfederation"
+possiblecraftnames = "USS Albatross" "USS Almirante" "USS Altai" "USS Amberjack" "USS America" "USS Antononia" "USS Apogon" "USS Arcadia" "USS Asama" "USS Batu" "USS Berlin" "USS Boston" "USS Byzantium" "USS Cameroon" "USS Cerberus" "USS Champion" "USS Charlotte" "USS Chivo" "USS Crockett" "USS Dragoon" "USS Eduard" "USS Elgon" "USS England" "USS Falchion" "USS Fauna" "USS Freya" "USS Frost" "USS Fuiagy" "USS Fuji" "USS Gallium" "USS Garrison" "USS Ghrimsvotn" "USS Grafton" "USS Haruna" "USS Horizon" "USS Hyllus" "USS India" "USS Isikari" "USS Kant" "USS Karma" "USS Kenya" "USS Kilauea" "USS Kilimanjaro" "USS Kongo" "USS Kourna" "USS Kursk" "USS Labo" "USS Lacona" "USS Lagafell" "USS Lee" "USS Ling" "USS London" "USS Louisiana" "USS Lyoren" "USS Mars" "USS Mauna Kea" "USS Medvedev" "USS Mekong" "USS Minsk" "USS Moccasin" "USS Mooi" "USS Mylae" "USS Nevada" "USS Nomad" "USS North Carolina" "USS Owen" "USS Paulson" "USS Pele" "USS Ramo" "USS Remmel" "USS Roddenberry" "USS Rotorua" "USS Saarland" "USS Santa Fe" "USS Scimitar" "USS September" "USS Silence" "USS Singapore" "USS Sioux" "USS Sirocco" "USS Spitfire" "USS Springfield" "USS Stripe" "USS Syracuse" "USS Tallinn" "USS Tambora" "USS Taupo" "USS Thor" "USS Tokyo" "USS Torian" "USS Turtle" "USS Urban" "USS Vault" "USS Vendace" "USS Vivaldi" "USS Walden" "USS Werdenberg" "USS Willmott" "USS Xiamen" "USS Yavuz"
+hotkeylabel = "GAME-HOTKEY-K"
+shipclass = "cruiser"
+
+// --- Construction and costs ---
+buildtime = 89
+officercost = 0
+crewcost = 125
+dilithiumcost = 557
+latinumcost = 168
+biomattercost = 16
+
+// --- Hull, shields, crew, and energy ---
+maxhealth = 176
+curhealth = 176
+healthrate = 1.464
+maxshields = 590
+curshields = 590
+shieldrate = 7.502
+maxspecialenergy = 178
+specialenergyrate = 0.000
+specialenergydisplaymode = 1
+shielddelay = 2
+
+// --- Subsystems, damage, and repair ---
+shieldgeneratorhitpoints = 46
+engineshitpoints = 46
+weaponshitpoints = 46
+lifesupporthitpoints = 46
+sensorshitpoints = 46
+enginesrepairtime = 1.0
+lifesupportrepairtime = 0.25
+weaponsrepairtime = 1.0
+shieldgeneratorrepairtime = 1.0
+sensorsrepairtime = 1.0
+enginescrewloss = 10.0f
+lifesupportcrewloss = 10.0f
+weaponscrewloss = 10.0f
+shieldgeneratorcrewloss = 10.0f
+sensorscrewloss = 5.0f
+lifesupportloss = 2
+engineshitpercent = 7.0f
+lifesupporthitpercent = 7.0f
+weaponshitpercent = 7.0f
+shieldgeneratorhitpercent = 1.0f
+sensorshitpercent = 0
+crewhitpercent = 7.0f
+hullhitpercent = 71.0f
+
+// --- Weapons and ordnance ---
+weapon1 = "fedW_akiraZ1"
+weapon2 = "nx_fedW_akiraZ2"
+weapon3 = "fed_defense_patternsA"
+maxextraweapons = 10
+
+// --- Accuracy, hardpoints, and targeting ---
+weaponhardpoints1 = "hp20" "hp21" "hp22" "hp23" "hp24" "hp25" "hp26"
+weaponhardpoints2 = "hp27" "hp28"
+weaponhardpoints3 = "root"
+weapon1iconpos = 60	50
+weapon2iconpos = 83	50
+weapon3iconpos = 65	50
+hulltargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06" "hp07" "hp08" "hp09"
+lifesupporttargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05"
+weaponstargethardpoints = "hp20" "hp21" "hp22" "hp23" "hp24" "hp25" "hp26" "hp27" "hp28"
+shieldgeneratortargethardpoints = "hp06" "hp07" "hp08" "hp09"
+sensorstargethardpoints = "hp10" "hp11" "hp12" "hp13"
+enginestargethardpoints = "hp14" "hp15" "hp16" "hp17" "hp18" "hp19"
+criticaltargethardpoints = "hp10" "hp11" "hp12" "hp13"
+extraweaponhardpoints = "root"
+
+// --- Artificial intelligence and tactical behavior ---
+attackpower = 1.000
+intrinsicvalue = 1.000
+avoidanceclass = 5
+shiptype = "C"
+rangescan = 850
+damagedscan = 50.0
+ainame = "CraftProcess"
+alert = 1
+can_explore = 1
+combat = 1
+
+// --- Interface and controls ---
+show_sw_autonomy = 1
+show_movement_autonomy = 1
+overlaysod = "effect_defensepatterns"
+
+// --- Audio and events ---
+eventselect = "Basic1CruiserSelect"
+eventacknowledge = "Basic1CruiserAcknowledge"
+eventattack = "Basic1CruiserAttack"
+eventstop = "Basic1CruiserStop"
+eventmove = "Basic1CruiserMove"
+eventrepair = "Basic1CruiserRepair"
+eventRepairCombat = "Basic1CruiserRepair"
+eventMoveFleeCombat = "Basic1CruiserMove"
+
+// --- Movement and physics ---
+physicsfile = "smooth_physics_110.odf"
+trekphysicsfile = "smooth_physics_110.odf"
+weldingradius = 0.25
+distanceBelowGrid = 43
+
+// --- Progression and variants ---
+xplevel = 1
+nextrankclass = "fed_akiraZMr2"
+nextrankxp = 35
+worthxp = 61
+
+// --- Resource handling and recycling ---
+recycledilithium = 167
+recycletime = 49
+recyclelatinum = 53
+recyclebiomatter = 5
+
+// --- Art, animation, and effects ---
+fireball = "x_large_explosion"
+shieldhit = "shield_fed_hitM"
+shieldhitcritical = "shield_fed_hitcritM"
+shielddown = "shield_fed_down"
+
+// --- Capabilities and object behavior ---
+ship = 1
+has_hitpoints = 1
+has_crew = 1
+transporter = 1
+can_sandd = 1
+buildablebyownerraceonly = 1
+
+// --- Runtime class ---
+classlabel = "craft"
+
+// FO4Nexus overlay
+directionalShields = 1
+directionalShieldValueDisplayMode = 1
+forwardShieldStrength = 206
+aftShieldStrength = 88
+portShieldStrength = 147
+starboardShieldStrength = 149
+shieldTooltip = "Directional shields"
+shieldVerboseTooltip = "Four shield facings: forward 35%, aft 15%, port 25%, starboard 25%. Face incoming fire with the strongest shield."
+possibleCaptainNames = "Avery Morgan" "Robin Shaw" "Leah Winters" "Taylor Arden" "Dara Bennett" "Samira Ellis" "Robin Shaw" "Alex Mercer" "Samira Ellis" "Casey Rowan" "Nadia Clarke" "Casey Rowan" "Leah Winters" "Riley Quinn" "Alex Mercer" "Nadia Clarke" "Morgan Hale" "Dara Bennett" "Jordan Vale" "Morgan Hale" "Dara Bennett" "Alex Mercer" "Avery Morgan" "Leah Winters" "Alex Mercer" "Riley Quinn" "Nadia Clarke" "Avery Morgan" "Morgan Hale" "Nadia Clarke" "Samira Ellis" "Casey Rowan" "Riley Quinn" "Dara Bennett" "Morgan Hale" "Samira Ellis" "Samira Ellis" "Robin Shaw" "Jordan Vale" "Leah Winters" "Nadia Clarke" "Avery Morgan" "Samira Ellis" "Samira Ellis" "Leah Winters" "Alex Mercer" "Taylor Arden" "Morgan Hale" "Riley Quinn" "Nadia Clarke" "Samira Ellis" "Morgan Hale" "Casey Rowan" "Casey Rowan" "Taylor Arden" "Alex Mercer" "Robin Shaw" "Samira Ellis" "Alex Mercer" "Nadia Clarke" "Casey Rowan" "Leah Winters" "Morgan Hale" "Jordan Vale" "Riley Quinn" "Nadia Clarke" "Taylor Arden" "Casey Rowan" "Nadia Clarke" "Morgan Hale" "Riley Quinn" "Jordan Vale" "Dara Bennett" "Alex Mercer" "Jordan Vale" "Alex Mercer" "Taylor Arden" "Taylor Arden" "Casey Rowan" "Samira Ellis" "Taylor Arden" "Leah Winters" "Morgan Hale" "Avery Morgan" "Taylor Arden" "Casey Rowan" "Riley Quinn" "Taylor Arden" "Avery Morgan" "Alex Mercer" "Leah Winters" "Morgan Hale" "Nadia Clarke" "Robin Shaw" "Casey Rowan" "Taylor Arden" "Taylor Arden" "Jordan Vale" "Alex Mercer" "Nadia Clarke"
+possibleCraftRegistry = "NCC-989562576" "NCC-251950635" "NCC-113808189" "NCC-070781959" "NCC-521314438" "NCC-229734708" "NCC-902083153" "NCC-963571041" "NCC-155928634" "NCC-424265801" "NCC-850864443" "NCC-247921369" "NCC-388743619" "NCC-790902302" "NCC-188087021" "NCC-584980391" "NCC-990809806" "NCC-336307821" "NCC-831173032" "NCC-324429258" "NCC-517087021" "NCC-610745474" "NCC-144633582" "NCC-367673455" "NCC-501724259" "NCC-917464526" "NCC-272561408" "NCC-399332929" "NCC-486189521" "NCC-046099883" "NCC-893079597" "NCC-873599919" "NCC-020405889" "NCC-000926125" "NCC-621288470" "NCC-938633615" "NCC-655072128" "NCC-371947403" "NCC-560843234" "NCC-893390658" "NCC-021444195" "NCC-832699852" "NCC-101101734" "NCC-172151405" "NCC-342910069" "NCC-864210537" "NCC-942548559" "NCC-257323828" "NCC-677421701" "NCC-878947943" "NCC-760791294" "NCC-066017924" "NCC-856346859" "NCC-428496954" "NCC-608096450" "NCC-247146493" "NCC-739993460" "NCC-900059892" "NCC-776906222" "NCC-841553649" "NCC-156367155" "NCC-685096287" "NCC-393020993" "NCC-173829838" "NCC-303831713" "NCC-103580151" "NCC-192624168" "NCC-341515990" "NCC-585747319" "NCC-085927178" "NCC-129494532" "NCC-977703949" "NCC-672344842" "NCC-848022328" "NCC-866726585" "NCC-092839110" "NCC-061015690" "NCC-028267339" "NCC-405097008" "NCC-817668991" "NCC-518598121" "NCC-909070856" "NCC-171319299" "NCC-772703039" "NCC-256153215" "NCC-593273804" "NCC-623660673" "NCC-589893127" "NCC-829513061" "NCC-115701754" "NCC-072480671" "NCC-650081914" "NCC-844377065" "NCC-078464934" "NCC-939890863" "NCC-630702000" "NCC-141766074" "NCC-901313261" "NCC-557670537" "NCC-271047902"
+maxPhotonTorpedoes = 96
+photonTorpedoRate = 3
+photonTorpedoRechargeMode = 2
+photonTorpedoDisplayMode = 1
+photonTorpedoValueDisplayMode = 1
+photonTorpedoTooltip = "Photon Torpedoes"
+photonTorpedoVerboseTooltip = "Photon Torpedoes: one round per projectile; reloads near a same-team shipyard."

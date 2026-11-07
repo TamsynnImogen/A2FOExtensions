@@ -1,0 +1,16 @@
+{
+  "assets": [
+    {
+      "file": "shield_quad.tga",
+      "copied_from": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/textures/shield_quad.tga",
+      "sha256": "80454ea3b78cf7c4c13717c44dbb3afdf8dd050213850d339073dd94d579b58b",
+      "distribution_provenance": "pending; local development asset"
+    },
+    {
+      "file": "shield_quad_side.tga",
+      "copied_from": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/textures/shield_quad_side.tga",
+      "sha256": "02f94126ad6b2e68d411bc6184ac0233ea9f6b178d0016a83295bf7b9f3bb374",
+      "distribution_provenance": "pending; local development asset"
+    }
+  ]
+}

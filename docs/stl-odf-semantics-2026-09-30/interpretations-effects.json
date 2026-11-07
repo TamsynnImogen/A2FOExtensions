@@ -1,0 +1,1197 @@
+{
+  "methodology": "Interpretations use the 53 lexical families and sampled assignment contexts in evidence-effects.json. Documented means an authored ODF comment supports the core description, not that engine behavior was verified. Inferred means syntax, values, and neighboring assignments support a bounded hypothesis. All examples are static STL ODF evidence; runtime parsing, units, formulas, and class ownership remain open where stated. A family can span distinct owning classes, especially size<N>. The evidence extractor marks these sampled assignments parsed; that is lexical evidence only and does not establish numeric acceptance or runtime use.",
+  "entries": [
+    {
+      "family": "alwaysvisible",
+      "keys": [
+        "alwaysvisible"
+      ],
+      "meaning": "Requests that this particle system stay visible, plausibly bypassing an ordinary visibility condition.",
+      "basis": "inferred",
+      "confidence": "low",
+      "value_form": "numeric flag 1",
+      "units": "unknown",
+      "caveats": "No local comment defines the condition, lifetime, or culling effect.",
+      "follow_up": "Find a native reader or compare visible output with this flag toggled.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psphaser_hit1.odf",
+          "line": 75,
+          "reason": "assignment and adjacent ODF settings"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "burstamount",
+      "keys": [
+        "burstamount"
+      ],
+      "meaning": "Number of particles created at each launch.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric count; examples include integer-looking decimals",
+      "units": "particles per launch",
+      "caveats": "No rounding rule is established for values such as 3.0.",
+      "follow_up": "Determine whether fractional inputs are truncated or parsed as integers.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 44,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "burstlaunchradius",
+      "keys": [
+        "burstlaunchradius"
+      ],
+      "meaning": "Additional radius setting adjacent to burstAmount and launchRadius, likely affecting the spread of one burst.",
+      "basis": "inferred",
+      "confidence": "low",
+      "value_form": "decimal scalar",
+      "units": "unknown",
+      "caveats": "Its distinction from launchRadius is undocumented; the two fields coexist.",
+      "follow_up": "Determine how burstlaunchRadius differs from launchRadius in the emitter.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire2.odf",
+          "line": 45,
+          "reason": "assignment and adjacent ODF settings"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "databasename",
+      "keys": [
+        "databasename"
+      ],
+      "meaning": "Names the M3D asset used by the explosion object.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted asset basename",
+      "units": "not applicable",
+      "caveats": "The comment does not establish resolution path or fallback.",
+      "follow_up": "Resolve xplode against the installed M3D assets and identify the explosion loader.",
+      "sources": [
+        {
+          "source": "odf/Explosions/xMine.odf",
+          "line": 8,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "asset"
+    },
+    {
+      "family": "dependentparticlesystems",
+      "keys": [
+        "dependentparticlesystems"
+      ],
+      "meaning": "Lists additional particle-system ODF names to fire with this particle system.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "space-separated quoted names; an empty value also occurs",
+      "units": "not applicable",
+      "caveats": "Launch order, attachment and failure handling are unknown; empty assignment may be intentional.",
+      "follow_up": "Check dependent-system launch order and meaning of an empty assignment.",
+      "sources": [
+        {
+          "source": "odf/Explosions/pssupernova.odf",
+          "line": 65,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "emitterfollow",
+      "keys": [
+        "emitterfollow"
+      ],
+      "meaning": "Controls how closely particles follow emitter motion, according to an authored comment.",
+      "basis": "documented",
+      "confidence": "medium",
+      "value_form": "decimal scalar, observed 0 through 1; one source has trailing semicolon",
+      "units": "unknown",
+      "caveats": "Comment says follow exactly but provides 0.95; endpoints and whether it applies to existing particles are unknown.",
+      "follow_up": "Inspect parsing of the semicolon and test emitter motion at 0 and 1.",
+      "sources": [
+        {
+          "source": "odf/other/psbeamsparks.odf",
+          "line": 53,
+          "reason": "direct authored comment and assignment"
+        },
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 81,
+          "reason": "assignment and adjacent ODF settings"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "enabletextureanimation",
+      "keys": [
+        "enabletextureanimation"
+      ],
+      "meaning": "Enables or disables texture-frame animation for particle sprites.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric flag 0 or 1",
+      "units": "not applicable",
+      "caveats": "Frame rate and interaction with randomizeStartFrame are unspecified.",
+      "follow_up": "Check animation behavior with both flags combined.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 9,
+          "reason": "direct authored comment and assignment"
+        },
+        {
+          "source": "odf/Explosions/pssparks.odf",
+          "line": 8,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "endcolor",
+      "keys": [
+        "endcolor"
+      ],
+      "meaning": "Specifies the ending RGB color for a smoke particle transition, paired with startcolor.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "three whitespace-separated decimal components",
+      "units": "unknown",
+      "caveats": "No direct comment describes this field or its interaction with particleColor<N>.",
+      "follow_up": "Identify which emitter class consumes startcolor/endcolor and the transition timing.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psdamagedsmoke.odf",
+          "line": 59,
+          "reason": "assignment and adjacent ODF settings"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "expansionrate",
+      "keys": [
+        "expansionrate"
+      ],
+      "meaning": "Sets the shockwave expansion rate.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "The comment does not specify distance unit, time base, or whether growth is linear.",
+      "follow_up": "Find the shockwave expansion calculation or measure radius over time.",
+      "sources": [
+        {
+          "source": "odf/Explosions/swMine.odf",
+          "line": 5,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "explosionsoundgroup",
+      "keys": [
+        "explosionsoundgroup"
+      ],
+      "meaning": "Names the sound group used for the explosion.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted group name",
+      "units": "not applicable",
+      "caveats": "Selection within the group and playback timing remain unknown.",
+      "follow_up": "Trace the sound-group lookup for xMine.",
+      "sources": [
+        {
+          "source": "odf/Explosions/xMine.odf",
+          "line": 5,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "asset"
+    },
+    {
+      "family": "friction",
+      "keys": [
+        "friction"
+      ],
+      "meaning": "Controls the rate at which particles slow.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "decimal scalar",
+      "units": "unknown",
+      "caveats": "The scale and time dependence of deceleration are not documented.",
+      "follow_up": "Measure decay or identify the particle update formula.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 56,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "full3d",
+      "keys": [
+        "full3d"
+      ],
+      "meaning": "Requests arbitrary 3D particle orientation.",
+      "basis": "documented",
+      "confidence": "medium",
+      "value_form": "numeric flag 0 observed",
+      "units": "not applicable",
+      "caveats": "Only value 0 occurs in the sample; how 3D orientation differs from rotate is unclear.",
+      "follow_up": "Inspect an emitter with full3d=1 or identify the orientation reader.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psdebris.odf",
+          "line": 50,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "hostvelocityscale",
+      "keys": [
+        "hostvelocityscale"
+      ],
+      "meaning": "Likely scales a host-velocity contribution to particle motion.",
+      "basis": "inferred",
+      "confidence": "low",
+      "value_form": "decimal scalar 1.2 observed",
+      "units": "unknown",
+      "caveats": "No comment or comparison isolates which velocity term is scaled.",
+      "follow_up": "Compare moving-host output with this field changed.",
+      "sources": [
+        {
+          "source": "odf/Explosions/pscontrail_smoke3.odf",
+          "line": 38,
+          "reason": "assignment and adjacent ODF settings"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "launchdelay",
+      "keys": [
+        "launchdelay"
+      ],
+      "meaning": "Delay before the first particle launch.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "decimal scalar",
+      "units": "unknown",
+      "caveats": "No unit is stated; zero and fractional values occur.",
+      "follow_up": "Establish whether delay uses seconds or another clock.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 53,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "launchperiod",
+      "keys": [
+        "launchperiod"
+      ],
+      "meaning": "Time between particle launches.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "decimal scalar, including zero",
+      "units": "unknown",
+      "caveats": "Zero-period behavior and precise time unit are not established.",
+      "follow_up": "Check emitter scheduling for launchPeriod=0.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psdebris_trail_fire.odf",
+          "line": 46,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "launchradius",
+      "keys": [
+        "launchradius"
+      ],
+      "meaning": "Radius of the particle creation area.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "decimal scalar",
+      "units": "unknown",
+      "caveats": "The origin, geometry, and distance unit are unspecified.",
+      "follow_up": "Identify spawn position calculation and relation to burstlaunchRadius.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 50,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "maxparticles",
+      "keys": [
+        "maxparticles"
+      ],
+      "meaning": "Maximum number of particles existing at one time.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric count",
+      "units": "particles",
+      "caveats": "Behavior when a launch would exceed the maximum is not shown.",
+      "follow_up": "Determine whether excess launches are skipped or older particles removed.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 38,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "minsize<N>",
+      "keys": [
+        "minsize0",
+        "minsize1",
+        "minsize2"
+      ],
+      "meaning": "Indexed minimum-size parameter belonging to each chunkgen explosion entry.",
+      "basis": "inferred",
+      "confidence": "low",
+      "value_form": "indexed decimal scalar",
+      "units": "unknown",
+      "caveats": "The f_ds9_root sample has minSize0=0.77 but size0=0.48, so these must not be treated as a conventional numeric min/max pair without recovering the schema.",
+      "follow_up": "Find the chunk generator consumer and define minSize relative to size.",
+      "sources": [
+        {
+          "source": "odf/chunkgen/f_ds9_root.odf",
+          "line": 6,
+          "reason": "assignment and adjacent ODF settings"
+        }
+      ],
+      "role": "schema"
+    },
+    {
+      "family": "numchunks<N>",
+      "keys": [
+        "numchunks0",
+        "numchunks1",
+        "numchunks2"
+      ],
+      "meaning": "Indexed count of chunks associated with each chunkgen explosion entry.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "indexed integer count",
+      "units": "chunks, inferred",
+      "caveats": "No authored comment defines whether the value is an exact output count or generation target.",
+      "follow_up": "Inspect chunk generator output against numChunks values.",
+      "sources": [
+        {
+          "source": "odf/chunkgen/f_ds9_root.odf",
+          "line": 7,
+          "reason": "assignment and adjacent ODF settings"
+        }
+      ],
+      "role": "schema"
+    },
+    {
+      "family": "numexplosions",
+      "keys": [
+        "numexplosions"
+      ],
+      "meaning": "Declares how many indexed explosion entries follow in a chunkgen root.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "integer count",
+      "units": "entries, inferred",
+      "caveats": "The observed groups use offset/size/minSize/numChunks, but missing-index behavior is unknown.",
+      "follow_up": "Check whether the reader iterates exactly numExplosions indices.",
+      "sources": [
+        {
+          "source": "odf/chunkgen/f_ds9_root.odf",
+          "line": 3,
+          "reason": "assignment and adjacent ODF settings"
+        }
+      ],
+      "role": "schema"
+    },
+    {
+      "family": "offset<N>",
+      "keys": [
+        "offset0",
+        "offset1",
+        "offset2"
+      ],
+      "meaning": "Three-component offset for an indexed chunkgen explosion entry.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "indexed comma-separated three-decimal vector",
+      "units": "unknown",
+      "caveats": "Coordinate frame and whether offsets are normalized are not established.",
+      "follow_up": "Identify the chunkgen coordinate origin and offset scale.",
+      "sources": [
+        {
+          "source": "odf/chunkgen/f_ds9_root.odf",
+          "line": 4,
+          "reason": "assignment and adjacent ODF settings"
+        }
+      ],
+      "role": "schema"
+    },
+    {
+      "family": "opacity",
+      "keys": [
+        "opacity"
+      ],
+      "meaning": "Sets overall particle opacity; an authored smoke comment describes partial visibility through it.",
+      "basis": "documented",
+      "confidence": "medium",
+      "value_form": "decimal scalar, including a value of 3",
+      "units": "unknown",
+      "caveats": "Values above 1 occur, so clamping or normalization cannot be assumed.",
+      "follow_up": "Determine rendering behavior for opacity greater than 1.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire_smoke.odf",
+          "line": 80,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "particleangularvelocity",
+      "keys": [
+        "particleangularvelocity"
+      ],
+      "meaning": "Particle angular-velocity setting; in debris ODFs it appears alongside minimum and maximum random angular-velocity bounds.",
+      "basis": "inferred",
+      "confidence": "low",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "The bounds and base value can coexist, so their interaction is unclear.",
+      "follow_up": "Find the angular-velocity selection calculation when all three fields are present.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psasteroid_chunks_md.odf",
+          "line": 36,
+          "reason": "direct authored comment and assignment"
+        },
+        {
+          "source": "odf/Explosions/psasteroid_chunks_sm.odf",
+          "line": 36,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "particleangularvelocitymax",
+      "keys": [
+        "particleangularvelocitymax"
+      ],
+      "meaning": "Upper bound of a randomly chosen angular velocity, paired with particleAngularVelocityMin.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "signed decimal scalar",
+      "units": "unknown",
+      "caveats": "The nearby comment describes the range collectively; distribution and relation to particleAngularVelocity are unclear.",
+      "follow_up": "Check random sampling and base angular-velocity use.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 35,
+          "reason": "assignment and adjacent ODF settings"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "particleangularvelocitymin",
+      "keys": [
+        "particleangularvelocitymin"
+      ],
+      "meaning": "Lower bound of a randomly chosen angular velocity, paired with particleAngularVelocityMax.",
+      "basis": "documented",
+      "confidence": "medium",
+      "value_form": "signed decimal scalar",
+      "units": "unknown",
+      "caveats": "The comment covers the range, not the exact axis or angular unit.",
+      "follow_up": "Identify the angular unit and 3D rotation axis selection.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 34,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "particlecolor<N>",
+      "keys": [
+        "particlecolor0",
+        "particlecolor1",
+        "particlecolor2"
+      ],
+      "meaning": "Indexed RGB colors establish a particle color transition over its lifetime.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "indexed whitespace-separated RGB triples",
+      "units": "unknown",
+      "caveats": "One observed triple is malformed (.60.36 .28); interpolation and accepted ranges are not proven.",
+      "follow_up": "Check malformed color parsing and transition interpolation.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 68,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "particlecolorinterpolant",
+      "keys": [
+        "particlecolorinterpolant"
+      ],
+      "meaning": "Selects the rate or curve of transition between particle colors; value 5 is annotated fast ramp up.",
+      "basis": "documented",
+      "confidence": "medium",
+      "value_form": "integer code 5 observed",
+      "units": "not applicable",
+      "caveats": "An authored comment says only two colors can be supplied with an interpolant; other codes are undocumented.",
+      "follow_up": "Identify supported interpolant codes and verify the two-color limit.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psselfdestruct.odf",
+          "line": 64,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "particlecolorvariance",
+      "keys": [
+        "particlecolorvariance"
+      ],
+      "meaning": "Adds variation to a spawned particle’s RGB color.",
+      "basis": "documented",
+      "confidence": "medium",
+      "value_form": "three decimal components; malformed .2.1 0 also occurs",
+      "units": "unknown",
+      "caveats": "Distribution, sign convention and handling of malformed syntax are unknown.",
+      "follow_up": "Check the parser and sampled color distribution.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 73,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "particledirectionspread",
+      "keys": [
+        "particledirectionspread"
+      ],
+      "meaning": "Controls spread away from the base emission direction; a comment maps 0 to directly behind and 1 to all directions.",
+      "basis": "documented",
+      "confidence": "medium",
+      "value_form": "decimal scalar; values above 1 occur",
+      "units": "unknown",
+      "caveats": "The 0-to-1 description may be local to a trail; values 1.3 occur elsewhere.",
+      "follow_up": "Determine behavior above 1 and the reference direction for each emitter.",
+      "sources": [
+        {
+          "source": "odf/other/psartiltrail.odf",
+          "line": 25,
+          "reason": "direct authored comment and assignment"
+        },
+        {
+          "source": "odf/other/psbeamsparks.odf",
+          "line": 35,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "particlegrowthinterpolant",
+      "keys": [
+        "particlegrowthinterpolant"
+      ],
+      "meaning": "Selects a particle growth curve, but the authored code labels conflict: 1 is called sinusoidal, 5 natural logarithmic, and 2 is called both sinusoidal and exponential in different files.",
+      "basis": "documented",
+      "confidence": "low",
+      "value_form": "integer code",
+      "units": "not applicable",
+      "caveats": "Value 2 has contradictory authored comments; the code-to-curve mapping and exact formulas cannot be resolved from ODF text.",
+      "follow_up": "Resolve the conflicting value-2 labels from the native curve reader or controlled visuals.",
+      "sources": [
+        {
+          "source": "odf/Explosions/pssupernova.odf",
+          "line": 5,
+          "reason": "direct authored comment and assignment"
+        },
+        {
+          "source": "odf/Explosions/pssupernova_dust.odf",
+          "line": 5,
+          "reason": "direct authored comment and assignment"
+        },
+        {
+          "source": "odf/Explosions/psexplosion_sparks.odf",
+          "line": 5,
+          "reason": "direct authored comment and assignment"
+        },
+        {
+          "source": "odf/Explosions/psfire_smoke.odf",
+          "line": 5,
+          "reason": "value 2 is annotated exponential, contradicting the sparks file"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "particlegrowthrate",
+      "keys": [
+        "particlegrowthrate"
+      ],
+      "meaning": "Rate at which a particle grows or shrinks.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "signed or unsigned decimal scalar",
+      "units": "unknown",
+      "caveats": "No unit, sign rule or relationship to start size is documented.",
+      "follow_up": "Identify the size update formula and negative-rate behavior.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 3,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "particleinfinitelifetime",
+      "keys": [
+        "particleinfinitelifetime"
+      ],
+      "meaning": "Requests particles that never expire until explicitly removed.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric flag 1",
+      "units": "not applicable",
+      "caveats": "Removal trigger and interaction with maxParticles are unknown.",
+      "follow_up": "Find removal conditions for infinite-lived particles.",
+      "sources": [
+        {
+          "source": "odf/Explosions/pssupernova.odf",
+          "line": 11,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "particlelifetime",
+      "keys": [
+        "particlelifetime"
+      ],
+      "meaning": "Sets particle lifetime.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "decimal scalar",
+      "units": "unknown",
+      "caveats": "The file does not state a time unit.",
+      "follow_up": "Verify lifetime clock and interaction with variance.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 16,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "particlelifetimevariance",
+      "keys": [
+        "particlelifetimevariance"
+      ],
+      "meaning": "Adds random additional particle lifetime.",
+      "basis": "documented",
+      "confidence": "medium",
+      "value_form": "nonnegative decimal scalar",
+      "units": "unknown",
+      "caveats": "Distribution and whether additional means strictly positive are unverified.",
+      "follow_up": "Measure or inspect the variance sampling rule.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 19,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "particlesize",
+      "keys": [
+        "particlesize"
+      ],
+      "meaning": "Sets particle size.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "decimal scalar",
+      "units": "unknown",
+      "caveats": "Geometry and scale relative to the host are not documented.",
+      "follow_up": "Measure rendered dimensions for a known particleSize.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 22,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "particlesizevariance",
+      "keys": [
+        "particlesizevariance"
+      ],
+      "meaning": "Adds random additional particle size.",
+      "basis": "documented",
+      "confidence": "medium",
+      "value_form": "nonnegative decimal scalar",
+      "units": "unknown",
+      "caveats": "Distribution and interaction with particleStartSize are unknown.",
+      "follow_up": "Inspect spawn-size sampling with and without particleStartSize.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 25,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "particlestartsize",
+      "keys": [
+        "particlestartsize"
+      ],
+      "meaning": "Sets the size at which particles start.",
+      "basis": "documented",
+      "confidence": "medium",
+      "value_form": "decimal scalar",
+      "units": "unknown",
+      "caveats": "Relationship to particleSize and growthRate is undocumented.",
+      "follow_up": "Determine precedence when particleStartSize and particleSize coexist.",
+      "sources": [
+        {
+          "source": "odf/Explosions/pssparks.odf",
+          "line": 24,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "particleuniformcolorvariance",
+      "keys": [
+        "particleuniformcolorvariance"
+      ],
+      "meaning": "Restricts color variation to a single component, described in one ODF as the maximum.",
+      "basis": "documented",
+      "confidence": "medium",
+      "value_form": "numeric flag 0 or 1",
+      "units": "not applicable",
+      "caveats": "The phrase single component (the maximum) does not say whether one RGB channel changes or one variance scalar is shared across channels; the formula is not recovered.",
+      "follow_up": "Recover how the maximum variance component is selected and applied to the RGB channels.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 76,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "particlevelocity",
+      "keys": [
+        "particlevelocity"
+      ],
+      "meaning": "Sets particle velocity.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "decimal scalar",
+      "units": "unknown",
+      "caveats": "Direction and motion unit are unspecified.",
+      "follow_up": "Determine velocity unit and base-direction combination.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 28,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "particlevelocityvariance",
+      "keys": [
+        "particlevelocityvariance"
+      ],
+      "meaning": "Adds random particle velocity.",
+      "basis": "documented",
+      "confidence": "medium",
+      "value_form": "nonnegative decimal scalar",
+      "units": "unknown",
+      "caveats": "Distribution and whether variation can lower speed are unclear.",
+      "follow_up": "Inspect speed sampling around particleVelocity.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 31,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "randomizestartframe",
+      "keys": [
+        "randomizestartframe"
+      ],
+      "meaning": "Randomizes the initial texture frame; with texture animation disabled, a comment says this randomizes the chosen texture.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric flag 0 or 1",
+      "units": "not applicable",
+      "caveats": "The frame selection distribution and atlas/list interaction are unknown.",
+      "follow_up": "Check random frame choice for animated and static sprites.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 13,
+          "reason": "direct authored comment and assignment"
+        },
+        {
+          "source": "odf/Explosions/pssparks.odf",
+          "line": 12,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "randomseed",
+      "keys": [
+        "randomseed"
+      ],
+      "meaning": "Supplies an integer seed for repeatable random particle or nebula settings.",
+      "basis": "documented",
+      "confidence": "medium",
+      "value_form": "integer",
+      "units": "not applicable",
+      "caveats": "A consistent-seed comment exists, but scope of the random stream is unspecified.",
+      "follow_up": "Identify which random generator reads randomSeed in each class.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psexplosion_major.odf",
+          "line": 72,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "rotate",
+      "keys": [
+        "rotate"
+      ],
+      "meaning": "Randomizes particle initial orientation; an authored comment calls the result random but fixed.",
+      "basis": "documented",
+      "confidence": "medium",
+      "value_form": "numeric scalar including 0, 0.25 and 1",
+      "units": "unknown",
+      "caveats": "Fractional values occur, so boolean-only semantics are unsafe; rotation axis is unclear.",
+      "follow_up": "Determine how rotate=0.25 differs from 1 and whether later rotation is separate.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 65,
+          "reason": "direct authored comment and assignment"
+        },
+        {
+          "source": "odf/Explosions/pssmoke.odf",
+          "line": 41,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "seed",
+      "keys": [
+        "seed"
+      ],
+      "meaning": "Seed value in generated chunkgen roots, plausibly making generated chunk patterns repeatable.",
+      "basis": "inferred",
+      "confidence": "low",
+      "value_form": "integer",
+      "units": "not applicable",
+      "caveats": "The comment says generated using random defaults but does not define what seed controls.",
+      "follow_up": "Find the chunk generator consumer and test identical seeds.",
+      "sources": [
+        {
+          "source": "odf/chunkgen/f_ds9_root.odf",
+          "line": 2,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "schema"
+    },
+    {
+      "family": "size<N>",
+      "keys": [
+        "size0",
+        "size1",
+        "size2",
+        "size10",
+        "size11",
+        "size12",
+        "size13",
+        "size14",
+        "size15",
+        "size16",
+        "size17",
+        "size18",
+        "size3",
+        "size6",
+        "size7",
+        "size8",
+        "size9"
+      ],
+      "meaning": "Indexed size field used both for a chunkgen explosion entry and for a lens-flare sprite entry.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "indexed decimal scalar",
+      "units": "unknown",
+      "caveats": "The shared lexical family spans different owning classes; size semantics and scale may differ.",
+      "follow_up": "Identify separate chunkgen and lens-flare readers and their size scales.",
+      "sources": [
+        {
+          "source": "odf/other/lens_flare.odf",
+          "line": 16,
+          "reason": "assignment and adjacent ODF settings"
+        },
+        {
+          "source": "odf/chunkgen/f_ds9_root.odf",
+          "line": 5,
+          "reason": "indexed chunkgen size assignment beside offset0, minSize0, and numChunks0"
+        }
+      ],
+      "role": "ambiguous"
+    },
+    {
+      "family": "spritelist",
+      "keys": [
+        "spritelist"
+      ],
+      "meaning": "Names candidate sprites; one is selected randomly when each particle is created.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "one or more space-separated quoted sprite names",
+      "units": "not applicable",
+      "caveats": "Fallback for missing sprites and selection weighting are unknown.",
+      "follow_up": "Check asset lookup and random-choice distribution.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psfire.odf",
+          "line": 62,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "asset"
+    },
+    {
+      "family": "startcolor",
+      "keys": [
+        "startcolor"
+      ],
+      "meaning": "Specifies the starting RGB color for a smoke particle transition, paired with endcolor.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "three whitespace-separated decimal components",
+      "units": "unknown",
+      "caveats": "No direct comment explains interpolation or relation to particleColor<N>.",
+      "follow_up": "Identify the reader and transition timing for startcolor/endcolor.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psdamagedsmoke.odf",
+          "line": 58,
+          "reason": "assignment and adjacent ODF settings"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "stretch",
+      "keys": [
+        "stretch"
+      ],
+      "meaning": "Stretches sprites along their velocity vector to simulate motion blur.",
+      "basis": "documented",
+      "confidence": "medium",
+      "value_form": "decimal scalar, including zero and values above 1",
+      "units": "unknown",
+      "caveats": "The value scale and distinction from stretchFactor are not stated.",
+      "follow_up": "Inspect sprite aspect ratio for stretch values 0, 1 and 2.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psflash.odf",
+          "line": 48,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "stretchfactor",
+      "keys": [
+        "stretchfactor"
+      ],
+      "meaning": "A time-related factor for velocity-aligned sprite stretching.",
+      "basis": "documented",
+      "confidence": "medium",
+      "value_form": "decimal scalar",
+      "units": "unknown",
+      "caveats": "The authored comment says time but does not define an actual unit or formula.",
+      "follow_up": "Find stretch calculation involving stretchFactor.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psflash.odf",
+          "line": 51,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "timetofadein",
+      "keys": [
+        "timetofadein"
+      ],
+      "meaning": "Likely duration of particle-system fade-in, paired with timetofadeout.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "decimal scalar 0.5 observed",
+      "units": "unknown",
+      "caveats": "The shared preceding comment says fade in and out times; the time unit is unspecified.",
+      "follow_up": "Determine whether fade-in applies per particle or to the whole system.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psdamagedsmoke.odf",
+          "line": 56,
+          "reason": "assignment and adjacent ODF settings"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "timetofadeout",
+      "keys": [
+        "timetofadeout"
+      ],
+      "meaning": "Likely duration of particle-system fade-out; paired smoke settings are described as fade in and out times.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "decimal scalar",
+      "units": "unknown",
+      "caveats": "Other occurrences lack a direct comment, and fade trigger/time unit are unknown.",
+      "follow_up": "Determine fade-out trigger and whether it applies per particle or system.",
+      "sources": [
+        {
+          "source": "odf/Explosions/pshull_chunks.odf",
+          "line": 75,
+          "reason": "direct authored comment and assignment"
+        },
+        {
+          "source": "odf/Explosions/psasteroid_chunks_lrg.odf",
+          "line": 74,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "trackhost",
+      "keys": [
+        "trackhost"
+      ],
+      "meaning": "Requests tracking of the host object for this particle system.",
+      "basis": "documented",
+      "confidence": "medium",
+      "value_form": "numeric flag 1",
+      "units": "not applicable",
+      "caveats": "Distinction from emitterfollow and tracking after host destruction is unknown.",
+      "follow_up": "Compare trackHost and emitterfollow behavior during host motion/destruction.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psdebris_trail_smoke.odf",
+          "line": 78,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "velocityregulatesemission",
+      "keys": [
+        "velocityregulatesemission"
+      ],
+      "meaning": "Makes host speed regulate particle emission rate, as stated in a trail ODF.",
+      "basis": "documented",
+      "confidence": "medium",
+      "value_form": "numeric flag 1",
+      "units": "not applicable",
+      "caveats": "No speed-to-rate mapping, zero-speed behavior, or normalization is given.",
+      "follow_up": "Measure particle launch rate across host speeds.",
+      "sources": [
+        {
+          "source": "odf/Explosions/psdebris_trail_fire.odf",
+          "line": 82,
+          "reason": "direct authored comment and assignment"
+        }
+      ],
+      "role": "presentation"
+    }
+  ]
+}

@@ -38,8 +38,10 @@ targets.
 
 ## Supported binary identities
 
-The core rejects `FleetOpsHook.dll` unless its PE timestamp and `SizeOfImage`
-match. It accepts the canonical `ArmadaL.exe` identity below, plus the
+The core accepts `FleetOpsHook.dll` through its legacy timestamp/`SizeOfImage`
+check or an exact external profile within the fixed PE layout family described
+in [Engine update profiles](engine-update-profiles.md). It accepts the canonical
+`ArmadaL.exe` identity below, plus the
 header-normalized form produced by ArmadaTextSave and related Fleet Ops tools.
 That form has a save-time timestamp which changes on every rewrite and a
 section-aligned `SizeOfImage` of `0x00404000`; the core therefore verifies its
@@ -54,17 +56,48 @@ The Jan_B September 2026 build is also accepted with `SizeOfImage`
 entry point, image base, and timestamp remain fixed. This profile checks three
 on-disk CRC-32 fingerprints: `.text` (`0x002ac6c4` bytes, `0x5458da70`),
 `.rdata` (`0x0003de90` bytes, `0xcd47b19c`), and `.test` (`0x0000a999` bytes,
-`0x785c09e4`). This does not relax validation for arbitrary enlarged images.
+`0x785c09e4`). The September 5 profile now also verifies initialized `.data`
+(file offset `0x002ec000`, raw size `0x00049000`, CRC-32 `0x830d0160`),
+preventing old code from being paired with a newer data section. This does not
+relax validation for arbitrary enlarged images.
+The September 30 Roots engine update has the same PE headers and section
+layout, but is accepted as a separate `janb_20260930` profile: `.text` CRC-32
+`0x98ed8dbd`, `.rdata` `0xcd47b19c`, `.test` `0x6592de0f`, and initialized
+`.data` (file offset `0x002ec000`, raw size `0x00049000`) `0x3049ef39`.
+Code fingerprints must match one complete profile; mixed September versions
+remain unsupported. This engine implements native station rotation, so
+A2FOStationRotation leaves its placement and footprint code untouched.
+Collective XP additionally accepts FleetOpsHook `.text` CRC-32 `0xca18aa0c`
+only with this Armada identity; all XP and persistence instruction signatures
+remain required. See `docs/roots-engine-compat-2026-10-01.md` for evidence.
 The native CraftIdentity object editor uses the same shared identity gate.
 SHA-256 and file size identify the exact local reference binaries used for this
 audit; they are not otherwise runtime checks.
 
+The Oct 23, 2026 Roots Armada executable keeps the September PE timestamp,
+`SizeOfImage`, and fixed section geometry, but changes 246 bytes across 23
+spans, including two `.rdata` float constants and native build-order/rendering
+code. Its external `A2FOArmadaProfiles.txt` row fingerprints the 0x1000-byte
+header and all seven complete raw sections. The matching identity remains
+limited to this fixed Roots layout and the existing native-rotation family;
+individual hook signatures continue to gate every patch. The Oct 23
+FleetOpsHook.dll is byte-identical to the Oct 12 DLL and can be approved with
+an `A2FOFleetOpsProfiles.txt` row containing its timestamp, fixed image and
+file sizes, and whole-file CRC-32. These are reviewed profile files, not a
+general future-build compatibility mechanism. See
+[`engine-update-profiles.md`](engine-update-profiles.md) for the exact
+fingerprints, file locations, tool commands, and validation boundary.
+
 | Image | PE timestamp | `SizeOfImage` | Preferred base | File size | Reference SHA-256 |
 | --- | ---: | ---: | ---: | ---: | --- |
+| `ArmadaL.exe` (Roots September 30 2026) | `0x3c4c76bd` | `0x00405000` | `0x00400000` | `4,816,251` | `470bf8f4b0196e22fe179d3845cab671e74d9af19cf90a7dafed0b0bbd394318` |
+| `FleetOpsHook.dll` (Roots September 30 2026) | `0x51f6475c` | `0x00322000` | `0x5a800000` | `3,043,840` | `d2a0829e87aaa927e27146b90be61fc6359c6cbf3d81aed2c644019dd375b9b6` |
 | `ArmadaL.exe` (Jan_B September 2026) | `0x3c4c76bd` | `0x00405000` | `0x00400000` | `4,816,251` | `63bd645d82aec75cdd7ee3e3271fb67bb54f4ae1d1636a736b0db620bd997e36` |
 | `FleetOpsHook.dll` (Jan_B September 2026) | `0x51f6475c` | `0x00322000` | `0x5a800000` | `3,043,840` | `0843058788c6ffd1138d69871e2d9b1911bb6be8ee06db42f59f56b9a4494a97` |
 | `ArmadaL.exe` (Armada II 1.1) | `0x3c4c76bd` | `0x00403999` | `0x00400000` | `4,810,516` | `9752cd058ea47090009f86836327a3d71f1c73dcdb923b62b0b6cba53bf85191` |
 | `FleetOpsHook.dll` (supported Fleet Ops build) | `0x51f6475c` | `0x00322000` | `0x5a800000` | `3,043,840` | `30b4265c792cf5b53edafd9c25b694a051d6a7ba5a61c5c6d768a9addbdc67b2` |
+| `ArmadaL.exe` (Roots Oct 23 2026 staged) | `0x3c4c76bd` | `0x00405000` | `0x00400000` | `4,816,251` | `4300ab71731e323f5767d8ee05457e6444401b823253aebee86c5ac23c2b00de` |
+| `FleetOpsHook.dll` (Roots Oct 23 2026 staged; same as Oct 12) | `0x51f6475c` | `0x00322000` | `0x5a800000` | `3,043,840` | `3fd18eeee4201a9a1297ac26b3eb88f78c5f72e8c55a62c25179f1d4932e4c11` |
 | stock `Win2kDisableTaskSwitch.dll` | `0x2a425e19` | `0x0000a000` | `0x4a800000` | `16,384` | `db6071ae53ed0e5ca2855ba729b763ec7b68eba8c2cae95f61e3f7199548b035` |
 
 The deployed stock startup DLL is renamed to
@@ -165,8 +198,28 @@ through `TControl.SetParent` (`0x000c55f0`), sets its VCL bounds and caption,
 assigns the stock large-centred button images through
 `FODialogAssignButtonImagesLargeCenter` (`0x001784c0`, style `8`),
 and intercepts only `TJetButton.Click` at RVA `0x000dd260` to open the selector
-for that one object. This uses Fleet Operations' normal control renderer and
-event dispatch; it installs no input-device hook or capture.
+for that one object. The Mods screen also adds `/nointro` and `/noai` toggles. The integration
+first attempts to construct native `TJvgCheckBox` controls through the checked
+constructor (`0x00165e34`) and shared CHEKOV/CHEKON image helper
+(`0x001786d0`). Some Fleet Ops builds do not expose a recoverable Delphi VMT
+class reference on this form. Ordinary child HWND/GDI controls are unsuitable
+here because Fleet Operations' windowless VCL paint path repaints over them.
+When native checkbox construction is unavailable, two genuine form-owned
+`TJetButton` controls are therefore used as checkbox-style toggles with `[ ]`
+and `[X]` captions. They are drawn in the unused space immediately left of
+Modules and feed the same launch/shortcut state. Both toggles default off.
+
+When Launch Mod executes, the existing `actLaunchNowExecute` path is retained.
+While that handler runs, the extension temporarily amends process-launch
+arguments at FleetOpsHook's imported `CreateProcess*`, `ShellExecute*`, or
+`WinExec` entry (whichever the validated build actually uses), adding only the
+checked switches. Create Shortcut is discovered as the nearest stock
+`TJetButton` to the right of Launch rather than by a new form-field offset. Its
+native click runs first; the extension then updates only the just-created
+desktop shortcut whose `/mod` argument matches the selected mod, preserving
+the native target, icon, working directory, and description. This uses Fleet
+Operations' normal control renderer and event dispatch; it installs no
+input-device hook or capture.
 
 The Graphics Options bridge uses the supported form HWND at `+0x1c4` and adds
 form-owned VCL label and combo-box controls in the unused space between the
@@ -661,6 +714,13 @@ handles the alternate CannonImp branch only while that selector is pending.
 Mode-2 resupply
 uses GameObject class/team/position fields at `+0x40`, `+0xec`, and `+0xac`;
 cleanup notifications remove provider and store sidecars before pointer reuse.
+`resupplyweapon` aliases to native `cannon`. Its owner's weapons are read from
+Craft `+0x128` Carrier vector `+0x0c/+0x10`; Weapon `+0x18` must match the
+owner handle at `+0x28`, and `+0x2c` is the active byte. The module calls the
+public `Weapon::Trigger(GameObject const*)` at RVA `0x00271290` (checked prefix
+`55 8b ec 8b 45 08`) with the receiver, and uses a shared-trigger precheck
+to refuse every other activation. The two Weapon selectors and the CannonImp
+selector also refuse its shots unless they are aimed at an active receiver.
 Its selected-info handler uses the native captain text component at
 `InfoDisplay+0xbc`, its live rectangle at `+0x58`, the GUI ParameterDB pointer
 at RVA `0x0036502c`, typed rectangle/colour getters at RVAs `0x001358f0` and
@@ -1224,23 +1284,18 @@ Source:
 | Fleet Ops | `0x122c8c` | inline | 6 | `55 8b ec 83 c4 c8` | `producer_act_delete_hook`; cancel repeat after manual item deletion |
 | Fleet Ops | `0x122ef4` | inline | 6 | `55 8b ec 83 c4 cc` | `producer_clear_hook`; cancel repeat after queue clear |
 
-### FeaturePack BuildYard pseudo-technology hooks
+### FeaturePack BuildYard technology-entry hooks
 
-Source:
 [`../modules/A2FOFeaturePack/buildyard_pseudo_technology.cpp`](../modules/A2FOFeaturePack/buildyard_pseudo_technology.cpp)
 
-| Image | RVA | Kind | Bytes | Expected bytes | Handler and purpose |
+| Module | RVA | Kind | Size | Expected bytes | Use |
 | --- | ---: | --- | ---: | --- | --- |
-| Fleet Ops | `0x13b488` | inline | 8 | `55 8b ec b9 11 00 00 00` | `configuration_parse_hook`; bracket one BuildYard configuration parse and attach captured pseudo gates to its returned configuration |
-| Fleet Ops | `0x13b5cb` | CALL | 5 | `e8 a0 77 0a 00` | `a2fo_buildyard_project_id_call_bridge`; preserve native `moduleXRequiredTechnology` parsing and query the matching `moduleXPseudoTechnology` project ID from the same ParameterDB |
-| Fleet Ops | `0x13b880` | inline | 6 | `53 56 8b f0 8b c6` | `configuration_destroy_hook`; remove dual-requirement sidecars before a BuildYard configuration is freed |
-| Fleet Ops | `0x1def64` | inline | 6 | `55 8b ec 83 c4 f4` | `technology_available_hook`; require the captured pseudo project ID after the native project ID succeeds |
-
-Pseudo-only declarations are written into the native per-module cPrjID field
-at record offset `+0x08`. Dual declarations keep the native ID in place and
-index the second ID by that stable field address until configuration
-destruction. The parser's module record stride is `0x60`; the extension does
-not enlarge or reinterpret the native allocation.
+| Fleet Ops | `0x13b5cb` | CALL | 5 | `e8 a0 77 0a 00` | `a2fo_buildyard_project_id_call_bridge`; preserve native `moduleXRequiredTechnology` parsing, then substitute `moduleXTechnologyEntry` / compatibility `moduleXPseudoTechnology` into the same cPrjID output and force a successful lookup |
+| Fleet Ops | `0x13d4a4` | inline (v11) | 6 | `55 8b ec 83 c4 e8` | private BuildYard module-button `GetTooltip` / `GetVerboseTooltip` provider; after native AUTOTOOLTIP generation, append the live missing symbolic MODULE requirements directly to the same Armada ostream |
+| Fleet Ops | `0x1def64` | inline | 6 | `55 8b ec 83 c4 f4` | `technology_available_hook`; leave normal BuildYard project IDs native, but route custom technology-entry IDs to the recursive team `.tt` evaluator |
+| Fleet Ops | `0x120680` | direct | 16-byte preflight | `53 51 89 14 24 33 d2 8b 40 0c 8b 0c 24 8b 5c 88` | recursive team technology-tree evaluator called with EAX=team tree, EDX=project ID |
+| Armada | `0x081c90` | inline (v8 localized-key fallback) | runtime-recognised whole prologue, at least 5 bytes | copied live after conservative prologue validation | shared localization lookup; bound `moduleXButtonTooltip` keys append live missing MODULE requirements. v5 FleetOps direct-call scanning remains the fallback when this prologue is not recognised |
+| Armada | `0x0010c040`, `0x0010c080` | inline (v9 BuildYard AUTOTOOLTIP path) | 9, 9 | `55 8b ec 56 8b f1 8b 46 20` / `55 8b ec 56 8b f1 8b 46 24` | `StandardComponent::SetTooltipText` / `SetVerboseTooltipText`; append live missing symbolic `MODULE=` requirements while Fleet Ops assigns generated Borg module tooltip text. The full 9-byte first instruction sequence must be copied into the trampoline; v8 incorrectly used 8 bytes and split `mov eax,[esi+disp8]`, causing an immediate crash on the first tooltip assignment. |
 
 ### FeaturePack configurable upgrade-pod hooks
 
@@ -1259,14 +1314,14 @@ Source:
 | Fleet Ops | `0x1e3ea0` | inline | 9 | `55 8b ec 51 53 56 8b 75 08` | `station_can_build_hook`; admit sidecar-only higher-tier pods |
 | Fleet Ops | `0x1fcffc` | inline | 5 | `55 8b ec 51 53` | `same_type_hook`; compare extended pod identity safely |
 
-### FeaturePack Bink patches
+### ShellDisplay Bink patches
 
 Source:
-[`../modules/A2FOFeaturePack/bink_video.cpp`](../modules/A2FOFeaturePack/bink_video.cpp)
+[`../modules/A2FOShellDisplay/bink_video.cpp`](../modules/A2FOShellDisplay/bink_video.cpp)
 
 | Image | RVA | Kind | Bytes | Expected bytes | Handler and purpose |
 | --- | ---: | --- | ---: | --- | --- |
-| Fleet Ops | `0x1aa6ab` | CALL | 5 | `e8 c0 fd ff ff` | `bink_render_hook`; prepare a full D3D9 target viewport before the native renderer |
+| Fleet Ops | `0x1aa6ab` | CALL | 5 | `e8 c0 fd ff ff` | `bink_render_hook`; match the intro HWND to shell presentation and prepare an aspect-fitted D3D9 viewport |
 | Armada | `0x0639ba` | CALL | 6 | `ff 15 98 7a 7b 00` | `armada_bink_set_dibits_scaled`; replace the unscaled GDI `SetDIBitsToDevice` call |
 | Armada | `0x0e5da5` | CALL | 5 | `e8 a6 e5 f7 ff` | `armada_bink_texture_render_scaled`; first menu/campaign texture-render call |
 | Armada | `0x0e6153` | CALL | 5 | `e8 f8 e1 f7 ff` | same wrapper for the second texture-render call |
@@ -1640,8 +1695,8 @@ then restores the shared hierarchy after the draw returns.
 
 The supported object layout reads `GameObject+0xfc` for the live owning Race,
 matching Armada's native Borg update. `CraftClass+0x1d8` owns the geometry;
-its first Storm3D node is at geometry `+0x3c`. Nodes link siblings/children at
-`+0x1c/+0x20`, store their name pointer at `+0x08`, and store render flags at
+its first Storm3D node is at geometry `+0x3c`. Native nodes link siblings/children at
+`+0x20/+0x1c`, store their name pointer at `+0x08`, and store render flags at
 `+0xbc`. Like the native `borg` route, custom faction nodes clear flag bits 0
 and 1 for the matching owner and set both for other loaded races; all other
 bits are preserved. Descendants inherit the parent node state. The native
@@ -1649,8 +1704,8 @@ bits are preserved. Descendants inherit the parent node state. The native
 `+0x13c`. Cached original `ST3D_Texture` database/name/flags fields are
 `+0x04/+0x08/+0x18`.
 
-Subsystem entries additionally enumerate the configured node's complete
-child hierarchy through `+0x20`, following `+0x1c` only within each direct
+The intended subtree enumeration follows the configured node's complete
+child hierarchy through `+0x1c`, following `+0x20` only within each direct
 child list so unrelated siblings cannot be captured. While the part is
 missing, bits 0 and 1 are set on the root and every descendant. During repair,
 the root may render at its eased scale but every descendant remains hidden
@@ -1658,6 +1713,14 @@ until completion. Applying this after native damage/`borg` selection prevents
 either native branch from revealing an attachment in empty space. Exact
 pre-draw flags and scales are restored after each draw because the model is
 shared between every instance of its CraftClass.
+
+Correction (2026-09-29): this section previously reversed the native child and
+sibling fields. The constructor at VA `0x6386d3..0x6386dc` and collector at
+`0x639db9..0x639dd9` prove the layout above on the pinned ArmadaL image; see
+[disassembly](m3d-node-links-2026-09-29.asm). The M3D module's traversal is corrected
+and its pointer-rewriting repair removed. Other modules' subtree-specific uses
+need a separate audit; this documentation correction does not claim they were
+changed or revalidated with M3D.
 
 Subsystem runtime state uses `Craft+0x1e0`, a pointer to five 0x30-byte
 CraftSystem records ordered sensors, engines, weapons, life support, and
@@ -2136,3 +2199,23 @@ binary address must update this register in the same change, including:
 - owner and semantic purpose;
 - validation/provenance notes;
 - any related object-layout offsets or module-order assumptions.
+
+### A2FOVideo modern container dispatcher
+
+| Image | RVA | Kind | Owner/target | Use |
+|---|---:|---|---|---|
+| Armada | `0x086020` | entry JMP after Fleet Ops startup | Fleet Ops `Program_PlayMovie_New` | A2FOVideo verifies this Fleet Ops ownership then installs its modern-container dispatcher |
+| Fleet Ops | `0x1d3cf0` | routine | `FleetOpsFunctionsHook.Program_PlayMovie_New` | preserved native fallback for `.bik` and every extension not claimed by A2FOVideo |
+| Fleet Ops | `0x1aa740` | routine | `uBinkIntro.TBinkIntro.loadMovie` | documented native Bink loader; intentionally not replaced by A2FOVideo |
+
+The modern dispatcher claims `.mp4`, `.webm`, and `.mkv`. All other requests are
+forwarded directly to Fleet Ops' `Program_PlayMovie_New`, so Bink behavior and
+A2FOShellDisplay's existing Bink scaling hooks remain unchanged.
+
+### A2FOVideo direct movie dispatcher hook (third pass)
+
+- `FleetOpsHook.dll + 0x001D3CF0` — `FleetOpsFunctionsHook.Program_PlayMovie_New`
+- Verified prologue: `55 8B EC 83 C4 F4` (6 bytes; do not cut at 5 bytes)
+- Function terminates with `C2 04 00`, confirming one stack argument with callee cleanup (`stdcall`).
+- Native trampoline resumes at `FleetOpsHook.dll + 0x001D3CF6`.
+- `Armada.exe + 0x00086020` remains Fleet Ops' legacy jump site but is no longer the A2FOVideo patch target.

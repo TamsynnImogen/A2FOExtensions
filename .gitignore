@@ -18,3 +18,17 @@ __pycache__/
 .DS_Store
 Thumbs.db
 *~
+# Local working data (not source)
+/.build/
+/.work-backups/
+/reverse_engineering/
+/armada_missions/
+/A2FOExtensions*.zip
+*.ppdb
+**/target/
+/third_party/armada2-refit/
+/third_party/armada2-refit-native/
+/third_party/ffmpeg-win32/
+/third_party/mmm/
+/third_party/rust-media/
+/third_party/rust-bink-evaluation/

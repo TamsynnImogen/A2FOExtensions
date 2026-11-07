@@ -13,6 +13,15 @@ enum class Facing : std::uint32_t {
     starboard = 3,
 };
 
+enum class Mode : std::uint32_t {
+    none = 0,
+    quad = 1,
+    tri_forward = 2,
+    tri_rear = 3,
+    hemisphere_forward_rear = 4,
+    hemisphere_port_starboard = 5,
+};
+
 constexpr std::size_t kFacingCount = 4;
 
 // Armada Matrix34 layout: world-space right, up, and forward axes followed
@@ -23,6 +32,7 @@ struct Matrix34 {
 
 struct ShieldPolicy {
     std::array<float, kFacingCount> maximum{};
+    Mode mode = Mode::quad;
 };
 
 struct ShieldStores {
@@ -30,6 +40,7 @@ struct ShieldStores {
 };
 
 std::size_t facing_index(Facing facing) noexcept;
+bool facing_active(Mode mode, Facing facing) noexcept;
 ShieldPolicy normalize_policy(ShieldPolicy policy) noexcept;
 bool valid_policy(const ShieldPolicy& policy) noexcept;
 float total_capacity(const ShieldPolicy& policy) noexcept;
@@ -56,8 +67,17 @@ bool should_suppress_native_impact_effect(
     std::int32_t shield_type, bool facing_resolved,
     float facing_remaining) noexcept;
 
-// Chooses the dominant horizontal quadrant in target-local space. Exact
-// diagonal boundaries belong to forward/aft, keeping the result stable.
+// Chooses the active shield arc in target-local space. Quad mode keeps the
+// legacy dominant-axis boundaries; tri-forward divides the horizontal plane
+// into equal forward/port/starboard sectors, tri-rear mirrors that geometry
+// around aft/port/starboard. Forward/rear hemisphere mode splits the
+// horizontal plane into two 180-degree halves along the local-forward axis;
+// port/starboard hemisphere mode does the same along the local-right axis.
+bool select_facing(Mode mode, const Matrix34& target_transform,
+                   const float attacker_position[3],
+                   Facing* facing) noexcept;
+
+// Backward-compatible source helper: unchanged callers retain quad geometry.
 bool select_facing(const Matrix34& target_transform,
                    const float attacker_position[3],
                    Facing* facing) noexcept;
@@ -65,6 +85,11 @@ bool select_facing(const Matrix34& target_transform,
 // ShieldEffect receives a matrix already expressed in the target craft's
 // local space. Its translation therefore identifies the impacted facing
 // directly and must not be transformed as another world-space position.
+bool select_local_effect_facing(Mode mode,
+                                const Matrix34& shield_transform,
+                                Facing* facing) noexcept;
+
+// Backward-compatible source helper: unchanged callers retain quad geometry.
 bool select_local_effect_facing(const Matrix34& shield_transform,
                                 Facing* facing) noexcept;
 

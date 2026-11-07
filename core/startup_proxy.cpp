@@ -28,7 +28,10 @@ HMODULE g_extension = nullptr;
 SetHookIdFunction g_set_hook_id = nullptr;
 LowLevelKeyboardProcFunction g_low_level_keyboard_proc = nullptr;
 
-// 0 = not attempted, 1 = loading, 2 = ready, -1 = failed.
+// Original: 0 = not attempted, 1 = loading, 2 = ready, -1 = failed.
+// Extension: 0 = not attempted, 1 = initializing, 2 = ready,
+// 3 = attached from DllMain but deferred initialization not yet confirmed,
+// -1 = failed.
 volatile LONG g_original_state = 0;
 volatile LONG g_extension_state = 0;
 
@@ -170,58 +173,83 @@ bool ensure_original_loaded() {
 }
 
 bool ensure_extension_loaded() {
-    const LONG previous = InterlockedCompareExchange(&g_extension_state, 1, 0);
-    if (previous == 2) {
+    for (;;) {
+        const LONG state = InterlockedCompareExchange(&g_extension_state, 0, 0);
+        if (state == 2) return true;
+        if (state == -1) return false;
+        if (state == 1) return wait_for_state(&g_extension_state);
+
+        if (state == 3) {
+            if (InterlockedCompareExchange(&g_extension_state, 1, 3) != 3)
+                continue;
+            if (!g_extension) {
+                proxy_log("Extension marked attached but module handle is null");
+                InterlockedExchange(&g_extension_state, -1);
+                return false;
+            }
+            ExtensionInitializeFunction initialize = nullptr;
+            if (!load_export(g_extension, "A2FO_Initialize", initialize)) {
+                proxy_log("A2FOExtensions.dll is missing A2FO_Initialize",
+                          GetLastError());
+                InterlockedExchange(&g_extension_state, -1);
+                return false;
+            }
+            proxy_log("Completing deferred A2FO_Initialize before startup export returns");
+            if (!initialize()) {
+                proxy_log("A2FO_Initialize reported failure");
+                InterlockedExchange(&g_extension_state, -1);
+                return false;
+            }
+            InterlockedExchange(&g_extension_state, 2);
+            proxy_log("A2FOExtensions.dll initialized");
+            return true;
+        }
+
+        if (state != 0 || InterlockedCompareExchange(&g_extension_state, 1, 0) != 0)
+            continue;
+
+        // Load the original first because FleetOpsHook.dll must be present before
+        // A2FOExtensions validates and patches Fleet Operations addresses.
+        if (!ensure_original_loaded()) {
+            proxy_log("Extension not loaded because original startup DLL failed");
+            InterlockedExchange(&g_extension_state, -1);
+            return false;
+        }
+
+        proxy_log("Loading A2FOExtensions.dll");
+        char path[32768]{};
+        if (!sibling_path(g_proxy, "A2FOExtensions.dll", path, sizeof(path))) {
+            proxy_log("Could not construct extension DLL path");
+            InterlockedExchange(&g_extension_state, -1);
+            return false;
+        }
+
+        SetLastError(ERROR_SUCCESS);
+        g_extension = LoadLibraryA(path);
+        if (!g_extension) {
+            proxy_log("LoadLibrary failed for A2FOExtensions.dll", GetLastError());
+            InterlockedExchange(&g_extension_state, -1);
+            return false;
+        }
+
+        ExtensionInitializeFunction initialize = nullptr;
+        if (!load_export(g_extension, "A2FO_Initialize", initialize)) {
+            proxy_log("A2FOExtensions.dll is missing A2FO_Initialize",
+                      GetLastError());
+            InterlockedExchange(&g_extension_state, -1);
+            return false;
+        }
+        proxy_log("Calling A2FO_Initialize outside the loader lock");
+        if (!initialize()) {
+            proxy_log("A2FO_Initialize reported failure");
+            InterlockedExchange(&g_extension_state, -1);
+            return false;
+        }
+
+        InterlockedExchange(&g_extension_state, 2);
+        proxy_log("A2FOExtensions.dll initialized");
         return true;
     }
-    if (previous == -1) {
-        return false;
-    }
-    if (previous == 1) {
-        return wait_for_state(&g_extension_state);
-    }
-
-    // Load the original first because FleetOpsHook.dll must be present before
-    // A2FOExtensions validates and patches Fleet Operations addresses.
-    if (!ensure_original_loaded()) {
-        proxy_log("Extension not loaded because original startup DLL failed");
-        InterlockedExchange(&g_extension_state, -1);
-        return false;
-    }
-
-    proxy_log("Loading A2FOExtensions.dll");
-    char path[32768]{};
-    if (!sibling_path(g_proxy, "A2FOExtensions.dll", path, sizeof(path))) {
-        proxy_log("Could not construct extension DLL path");
-        InterlockedExchange(&g_extension_state, -1);
-        return false;
-    }
-
-    SetLastError(ERROR_SUCCESS);
-    g_extension = LoadLibraryA(path);
-    if (!g_extension) {
-        proxy_log("LoadLibrary failed for A2FOExtensions.dll", GetLastError());
-        InterlockedExchange(&g_extension_state, -1);
-        return false;
-    }
-
-    ExtensionInitializeFunction initialize = nullptr;
-    if (!load_export(g_extension, "A2FO_Initialize", initialize)) {
-        proxy_log("A2FOExtensions.dll is missing A2FO_Initialize",
-                  GetLastError());
-        InterlockedExchange(&g_extension_state, -1);
-        return false;
-    }
-    proxy_log("Calling A2FO_Initialize outside the loader lock");
-    if (!initialize()) {
-        proxy_log("A2FO_Initialize reported failure");
-        InterlockedExchange(&g_extension_state, -1);
-        return false;
-    }
-
-    InterlockedExchange(&g_extension_state, 2);
-    proxy_log("A2FOExtensions.dll initialized");
-    return true;
 }
 
 bool attach_extension_early() {
@@ -244,7 +272,7 @@ bool attach_extension_early() {
     // The core's DllMain installs only the proven early built-in hooks and
     // schedules A2FO_Initialize on a worker. Windows serializes DLL attach, so
     // that worker cannot discover modules until the loader lock is released.
-    InterlockedExchange(&g_extension_state, 2);
+    InterlockedExchange(&g_extension_state, 3);
     proxy_log("A2FOExtensions.dll attached; deferred initialization scheduled");
     return true;
 }

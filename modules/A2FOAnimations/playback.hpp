@@ -90,6 +90,17 @@ inline bool parse(const Fields& fields, std::vector<Clip>& result, std::string& 
     }
     result=std::move(parsed); return true;
 }
+// Some SOD writers store the channel's byte length (count*48+2) in the float
+// duration slot, which reads as a denormal and would finish any clip in one
+// tick. Fall back to the common 30 samples/second for implausible durations.
+inline constexpr double fallback_seconds_per_sample = 1.0/30;
+inline bool plausible_duration(float duration,std::uint32_t count) {
+    return count && std::isnormal(duration) && duration>0 && duration<=100000 &&
+        double(duration)/count>=1e-4;
+}
+inline double seconds_per_sample(float duration,std::uint32_t count) {
+    return plausible_duration(duration,count)?double(duration)/count:fallback_seconds_per_sample;
+}
 struct Playback {
     Clip clip{};
     double frame=0, spacing=0, travelled=0;

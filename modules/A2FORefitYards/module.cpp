@@ -5,10 +5,13 @@
 
 #include "docking_transform.hpp"
 #include "refit_policy.hpp"
+#include "../../rust/stage10_presentation_completion_ffi.h"
+#include "../../rust/stage8_refit_ffi.h"
 
 #include "../A2FOFeaturePack/refit_queue_bridge_api.hpp"
 #include "../A2FOHybridBuild/refit_ui_bridge_api.hpp"
 #include "../../sdk/include/a2fo_module_api.h"
+#include "../../sdk/include/a2fo_module_provider.hpp"
 
 #include <windows.h>
 
@@ -19,6 +22,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -365,60 +369,45 @@ a2fo::refit::OdfFields copy_fields(
     return fields;
 }
 
-void A2FO_CALL class_loaded_handler(
-    const A2FO_GameObjectClassLoadedEvent* event, void*) {
-    if (!event || event->struct_size < sizeof(*event) ||
-        !event->object_class) {
-        return;
-    }
-    try {
-        const a2fo::refit::ClassPolicy policy =
-            a2fo::refit::parse_class_policy(copy_fields(event));
-        if (policy.is_refit_source()) {
-            SourceConfig source;
-            source.count = std::min(policy.refit_items.size(),
-                                    source.items.size());
-            for (std::size_t index = 0; index < source.count; ++index) {
-                source.items[index] = policy.refit_items[index];
-            }
-            g_source_classes.insert_or_assign(
-                event->object_class, std::move(source));
-        }
-        if (policy.is_supported_yard()) {
-            YardConfig yard;
-            yard.hardpoint = policy.refit_hardpoint;
-            g_yard_classes.insert_or_assign(
-                event->object_class, std::move(yard));
-        } else if (!policy.refit_hardpoint.empty()) {
-            log_line("Ignored refit yard: requires classLabel shipyard and "
-                     "matching refitHardpoint/buildHardpoint");
-        }
-    } catch (...) {
-        log_line("Could not allocate refit class policy");
-    }
+struct RefitClassContext {const A2FO_GameObjectClassLoadedEvent* event;a2fo::refit::ClassPolicy policy{};SourceConfig source{};};
+std::uint64_t refit_class_step(void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t) noexcept {
+    auto& c=*static_cast<RefitClassContext*>(opaque);
+    try {switch(op){
+    case 0:return c.event&&c.event->struct_size>=sizeof(*c.event);
+    case 1:return c.event->object_class!=nullptr;
+    case 2:c.policy=a2fo::refit::parse_class_policy(copy_fields(c.event));return 0;
+    case 3:return c.policy.is_refit_source();
+    case 4:return c.policy.refit_items.size();
+    case 5:c.source.count=a;return 0;
+    case 6:c.source.items[a]=c.policy.refit_items[a];return 0;
+    case 7:g_source_classes.insert_or_assign(c.event->object_class,std::move(c.source));return 0;
+    case 8:return c.policy.is_supported_yard();
+    case 9:{YardConfig yard;yard.hardpoint=c.policy.refit_hardpoint;g_yard_classes.insert_or_assign(c.event->object_class,std::move(yard));return 0;}
+    case 10:return !c.policy.refit_hardpoint.empty();
+    case 11:log_line("Ignored refit yard: requires classLabel shipyard and matching refitHardpoint/buildHardpoint");return 0;
+    case 12:log_line("Could not allocate refit class policy");return 0;
+    default:return 0;
+    }}catch(...){return UINT64_MAX;}
+}
+void A2FO_CALL class_loaded_handler(const A2FO_GameObjectClassLoadedEvent* event,void*) {
+    RefitClassContext context{event};a2fo_rs_stage8_refit_flow(9,&refit_class_step,&context);
 }
 
-bool resolve_yard_hardpoint(void* yard, YardConfig* config) noexcept {
-    if (!yard || !config || !g_armada) return false;
-    if (config->hardpoint_resolved) {
-        return config->hardpoint_node != nullptr;
+struct RefitHardpointContext {void* yard;YardConfig* config;void* root=nullptr;};
+std::uint64_t refit_hardpoint_step(void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept {
+    auto& c=*static_cast<RefitHardpointContext*>(opaque);
+    switch(op){
+    case 0:return c.yard&&c.config&&g_armada;
+    case 1:return c.config->hardpoint_resolved;
+    case 2:return c.config->hardpoint_node!=nullptr;
+    case 3:c.config->hardpoint_resolved=true;return 0;
+    case 4:c.root=reinterpret_cast<void*>(a2fo_refit_call_thiscall_0(at(g_armada,kGameObjectClassGetHierarchyRootRva),object_class(c.yard)));return c.root!=nullptr;
+    case 5:c.config->hardpoint_node=reinterpret_cast<void*>(a2fo_refit_call_thiscall_1(at(g_armada,kSt3dNodeFindRecursiveRva),c.root,reinterpret_cast<std::uintptr_t>(c.config->hardpoint.c_str())));return 0;
+    case 6:log_line("Configured refitHardpoint was not found in yard SOD");return 0;
+    default:return 0;
     }
-    config->hardpoint_resolved = true;
-    void* root = reinterpret_cast<void*>(a2fo_refit_call_thiscall_0(
-        at(g_armada, kGameObjectClassGetHierarchyRootRva),
-        object_class(yard)));
-    if (root) {
-        config->hardpoint_node = reinterpret_cast<void*>(
-            a2fo_refit_call_thiscall_1(
-                at(g_armada, kSt3dNodeFindRecursiveRva), root,
-                reinterpret_cast<std::uintptr_t>(
-                    config->hardpoint.c_str())));
-    }
-    if (!config->hardpoint_node) {
-        log_line("Configured refitHardpoint was not found in yard SOD");
-    }
-    return config->hardpoint_node != nullptr;
 }
+bool resolve_yard_hardpoint(void* yard,YardConfig* config) noexcept {RefitHardpointContext c{yard,config};return a2fo_rs_stage8_refit_flow(16,&refit_hardpoint_step,&c)!=0;}
 
 bool yard_transform(void* yard, Matrix34* output) noexcept {
     if (!yard || !output || object_expired(yard)) return false;
@@ -504,67 +493,83 @@ float distance_squared(const Matrix34& left,
 
 template <typename Visitor>
 void for_each_live_object(Visitor&& visitor) noexcept {
-    if (!g_armada) return;
-    void* list = read_at<void*>(
-        at(g_armada, kGameObjectListPointerRva), 0, nullptr);
-    if (!readable_range(list, 12)) return;
-    void* head = read_at<void*>(list, 4, nullptr);
-    const std::uint32_t count = read_at<std::uint32_t>(list, 8, 0);
-    if (!readable_range(head, 12) || count > kMaximumObjects) return;
-    void* node = read_at<void*>(head, 0, nullptr);
-    for (std::uint32_t index = 0;
-         node && node != head && index < count; ++index) {
-        void* next = read_at<void*>(node, 0, nullptr);
-        void* object = read_at<void*>(node, 8, nullptr);
-        if (object && !object_expired(object)) visitor(object);
-        if (next == node) break;
-        node = next;
-    }
+    struct Context {Visitor& visitor;void* list{};void* head{};void* node{};void* next{};void* object{};
+        std::uint8_t failed{};} c{visitor};
+    const auto step=+[](void* opaque,std::uint32_t id,std::uint64_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(id){
+        case 0:return g_armada!=nullptr;
+        case 1:c.list=read_at<void*>(at(g_armada,kGameObjectListPointerRva),0,nullptr);return readable_range(c.list,12);
+        case 2:c.head=read_at<void*>(c.list,4,nullptr);return 0;
+        case 3:return read_at<std::uint32_t>(c.list,8,0);
+        case 4:return readable_range(c.head,12);
+        case 6:c.node=read_at<void*>(c.head,0,nullptr);return 0;
+        case 7:return c.node!=nullptr;
+        case 8:return c.node!=c.head;
+        case 10:c.next=read_at<void*>(c.node,0,nullptr);return 0;
+        case 11:c.object=read_at<void*>(c.node,8,nullptr);return 0;
+        case 12:return c.object!=nullptr;
+        case 13:return object_expired(c.object);
+        case 14:c.visitor(c.object);return 0;
+        case 15:return c.next==c.node;
+        case 16:c.node=c.next;return 0;
+        default:return 0;
+        }
+    };
+    a2fo_rs_stage10_presentation_flow(6,&c,step,&c.failed,kMaximumObjects);
 }
 
-void* nearest_refit_yard(void* source,
-                         Matrix34* transform_output) noexcept {
-    Matrix34 source_transform{};
-    if (!source || !object_transform(source, &source_transform)) {
-        return nullptr;
+struct RefitNearestContext {
+    void* source;Matrix34* output;Matrix34 source_transform{},best_transform{},candidate_transform{};
+    std::int32_t team=-1;void* best=nullptr;void* candidate=nullptr;
+    float best_distance=0,distance=0;std::uint32_t best_handle=0,handle=0;
+};
+std::uint64_t refit_candidate_step(void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept {
+    auto& c=*static_cast<RefitNearestContext*>(opaque);
+    switch(op){
+    case 0:return static_cast<std::uint64_t>(static_cast<std::int64_t>(object_team(c.candidate)));
+    case 1:return static_cast<std::uint64_t>(static_cast<std::int64_t>(c.team));
+    case 2:return g_yard_classes.find(object_class(c.candidate))!=g_yard_classes.end();
+    case 3:c.candidate_transform={};return yard_transform(c.candidate,&c.candidate_transform);
+    case 4:c.distance=distance_squared(c.source_transform,c.candidate_transform);return 0;
+    case 5:c.handle=object_handle(c.candidate);return 0;
+    case 6:return c.best!=nullptr;
+    case 7:return c.distance<c.best_distance;
+    case 8:return c.distance==c.best_distance;
+    case 9:return c.handle<c.best_handle;
+    case 10:c.best=c.candidate;c.best_transform=c.candidate_transform;c.best_distance=c.distance;c.best_handle=c.handle;return 0;
+    default:return 0;
     }
-    const std::int32_t team = object_team(source);
-    void* best = nullptr;
-    Matrix34 best_transform{};
-    float best_distance = 0.0f;
-    std::uint32_t best_handle = 0;
-    for_each_live_object([&](void* candidate) noexcept {
-        if (object_team(candidate) != team ||
-            g_yard_classes.find(object_class(candidate)) ==
-                g_yard_classes.end()) {
-            return;
-        }
-        Matrix34 candidate_transform{};
-        if (!yard_transform(candidate, &candidate_transform)) return;
-        const float distance = distance_squared(
-            source_transform, candidate_transform);
-        const std::uint32_t handle = object_handle(candidate);
-        if (!best || distance < best_distance ||
-            (distance == best_distance && handle < best_handle)) {
-            best = candidate;
-            best_transform = candidate_transform;
-            best_distance = distance;
-            best_handle = handle;
-        }
-    });
-    if (best && transform_output) *transform_output = best_transform;
-    return best;
 }
-
-bool allowed_target(void* source, void* target_class) noexcept {
-    const auto found = g_source_classes.find(object_class(source));
-    if (found == g_source_classes.end() || !target_class) return false;
-    for (std::size_t index = 0; index < found->second.count; ++index) {
-        if (find_class(found->second.items[index]) == target_class) {
-            return true;
-        }
+std::uint64_t refit_nearest_step(void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept {
+    auto& c=*static_cast<RefitNearestContext*>(opaque);
+    switch(op){
+    case 0:return c.source!=nullptr;
+    case 1:return object_transform(c.source,&c.source_transform);
+    case 2:c.team=object_team(c.source);return 0;
+    case 3:for_each_live_object([&](void* candidate)noexcept{c.candidate=candidate;a2fo_rs_stage8_refit_flow(20,&refit_candidate_step,&c);});return 0;
+    case 4:return c.best!=nullptr;
+    case 5:return c.output!=nullptr;
+    case 6:*c.output=c.best_transform;return 0;
+    case 7:return reinterpret_cast<std::uintptr_t>(c.best);
+    default:return 0;
     }
-    return false;
+}
+void* nearest_refit_yard(void* source,Matrix34* transform_output) noexcept {RefitNearestContext c{source,transform_output};return reinterpret_cast<void*>(static_cast<std::uintptr_t>(a2fo_rs_stage8_refit_flow(21,&refit_nearest_step,&c)));}
+
+struct RefitTargetContext {void* source;void* target;SourceConfig* config=nullptr;};
+std::uint64_t refit_target_step(void* opaque,std::uint32_t op,std::uintptr_t index,std::uintptr_t) noexcept {
+    auto& c=*static_cast<RefitTargetContext*>(opaque);
+    switch(op){
+    case 0:{const auto found=g_source_classes.find(object_class(c.source));c.config=found==g_source_classes.end()?nullptr:&found->second;return c.config!=nullptr;}
+    case 1:return c.target!=nullptr;
+    case 2:return c.config->count;
+    case 3:return find_class(c.config->items[index])==c.target;
+    default:return 0;
+    }
+}
+bool allowed_target(void* source,void* target_class) noexcept {
+    RefitTargetContext c{source,target_class};return a2fo_rs_stage8_refit_flow(15,&refit_target_step,&c)!=0;
 }
 
 void execute_move_to_refit_approach(
@@ -589,216 +594,196 @@ void execute_docking_stop(void* source) noexcept {
         3, &unused_destination, 0);
 }
 
-bool suppress_source_avoidance(void* source,
-                               RefitJob* job) noexcept {
-    if (!source || !job) return false;
-    if (job->avoidance_suppressed) {
-        const std::uint8_t disabled = 0;
-        return write_at(source, kObjectAvoidMeOffset, disabled);
-    }
-    job->saved_avoid_me = read_at<std::uint8_t>(
-        source, kObjectAvoidMeOffset, 0);
-    const std::uint8_t disabled = 0;
-    if (!write_at(source, kObjectAvoidMeOffset, disabled)) return false;
-    job->avoidance_suppressed = true;
-    return true;
-}
-
-bool restore_source_avoidance(void* source,
-                              RefitJob* job) noexcept {
-    if (!job || !job->avoidance_suppressed) return true;
-    if (!source ||
-        !write_at(source, kObjectAvoidMeOffset, job->saved_avoid_me) ||
-        read_at<std::uint8_t>(source, kObjectAvoidMeOffset, 0xff) !=
-            job->saved_avoid_me) {
-        return false;
-    }
-    job->avoidance_suppressed = false;
-    return true;
-}
-
-void restore_job_source(RefitJob* job) noexcept {
-    if (!job || !job->avoidance_suppressed) return;
-    restore_source_avoidance(find_entity(job->source_handle), job);
-}
-
-bool begin_source_ejection(RefitJob* job) noexcept {
-    if (!job) return false;
-    if (job->phase == RefitPhase::ejecting) return true;
-    if (job->phase != RefitPhase::active ||
-        !job->avoidance_suppressed) {
-        return false;
-    }
-    void* source = find_entity(job->source_handle);
-    void* yard = find_entity(job->yard_handle);
-    if (!source || object_expired(source) || !yard ||
-        object_expired(yard)) {
-        return false;
-    }
-    void* output_queue = read_at<void*>(
-        yard, kShipyardBuildOutputQueueOffset, nullptr);
-    if (!output_queue || !readable_range(output_queue, sizeof(void*))) {
-        return false;
-    }
-    void** output_vtable = read_at<void**>(output_queue, 0, nullptr);
-    if (output_vtable !=
-            at<void*>(g_armada, kOutputQueueManagerVtableRva) ||
-        !readable_range(output_vtable + 4, sizeof(void*))) {
-        return false;
-    }
-    void* add_method = output_vtable[4];
-    if (!executable_address(add_method)) return false;
-
-    // Shipyard::FinishBuild calls this same virtual slot against the manager
-    // at Shipyard+0x2b4. Resolving the slot dynamically preserves any runtime
-    // hook already installed on QueueManager::add while the exact vtable and
-    // executable-page checks keep the indirect call constrained to the native
-    // OutputQueueManager. It gives a cancelled source the yard's real output
-    // path instead of synthesizing a reverse docking transform.
-    execute_docking_stop(source);
-    a2fo_refit_call_thiscall_1(
-        add_method, output_queue,
-        reinterpret_cast<std::uintptr_t>(source));
-    if (read_at<std::uint32_t>(source, kCraftQueueStageOffset, 0) == 0 ||
-        read_at<std::uint32_t>(source, kCraftQueueOwnerOffset, 0) !=
-            job->yard_handle) {
-        return false;
-    }
-    job->queue_id = 0;
-    job->phase = RefitPhase::ejecting;
-    // QueueEnter now protects the overlap exactly as it does for an ordinary
-    // completed ship, so our temporary per-instance suppression can end.
-    restore_source_avoidance(source, job);
-    return true;
-}
-
-bool consume_synchronized_refit(
-    void* source, void* target_class) noexcept {
-    if (!g_runtime_ready || !source || object_expired(source) ||
-        !allowed_target(source, target_class)) {
-        return false;
-    }
-    const std::uint32_t source_handle = object_handle(source);
-    if (source_handle == 0 || g_jobs.find(source_handle) != g_jobs.end()) {
-        return false;
-    }
-    Matrix34 yard_position{};
-    void* yard = nearest_refit_yard(source, &yard_position);
-    if (!yard) return false;
-
-    RefitJob job;
-    job.source_handle = source_handle;
-    job.yard_handle = object_handle(yard);
-    job.target_class = target_class;
-    try {
-        g_jobs.emplace(source_handle, job);
-    } catch (...) {
-        return false;
-    }
-    const Matrix34 approach = refit_approach_transform(
-        source, yard, yard_position);
-    execute_move_to_refit_approach(source, approach);
-    log_line("Synchronized refit accepted; native GO_SINGLE installed locally "
-             "for travel to the nearest yard's oriented approach point");
-    return true;
-}
-
-std::size_t enumerate_refit_items(
-    void* source, A2FO_RefitUiItem* output,
-    std::size_t capacity) noexcept {
-    if (!g_runtime_ready || !source || object_expired(source)) return 0;
-    const auto found = g_source_classes.find(object_class(source));
-    if (found == g_source_classes.end()) return 0;
-    const bool already_refitting =
-        g_jobs.find(object_handle(source)) != g_jobs.end();
-    const bool yard_available = nearest_refit_yard(source, nullptr) != nullptr;
-    std::size_t count = 0;
-    for (std::size_t index = 0; index < found->second.count; ++index) {
-        void* target_class = find_class(found->second.items[index]);
-        if (!target_class) continue;
-        if (output && count < capacity) {
-            output[count].target_class = target_class;
-            output[count].enabled =
-                !already_refitting && yard_available ? 1u : 0u;
-        }
-        ++count;
-    }
-    return count;
-}
-
-bool request_refit(void* source, void* target_class) noexcept {
-    if (!g_runtime_ready || !source || !target_class ||
-        object_expired(source) || !allowed_target(source, target_class) ||
-        g_jobs.find(object_handle(source)) != g_jobs.end() ||
-        !nearest_refit_yard(source, nullptr)) {
-        return false;
-    }
-    a2fo_refit_call_thiscall_2(
-        at(g_armada, kGameObjectQueueClassCommandRva), source,
-        A2FO_REFIT_CLASS_COMMAND,
-        reinterpret_cast<std::uintptr_t>(target_class));
-    return true;
-}
-
-bool request_refit_cancel(void* source) noexcept {
-    if (!g_runtime_ready || !source || object_expired(source) ||
-        !object_class(source)) {
-        return false;
-    }
-    // QueueClassCommand serializes a target-class project ID, so supply the
-    // source's own valid class as an ignored payload for the cancel marker.
-    a2fo_refit_call_thiscall_2(
-        at(g_armada, kGameObjectQueueClassCommandRva), source,
-        A2FO_REFIT_CANCEL_CLASS_COMMAND,
-        reinterpret_cast<std::uintptr_t>(object_class(source)));
-    return true;
-}
-
-bool has_waiting_refit(void* producer) noexcept {
-    const std::uint32_t handle = object_handle(producer);
-    if (handle == 0) return false;
-    for (const auto& entry : g_jobs) {
-        const RefitJob& job = entry.second;
-        if (job.yard_handle == handle &&
-            job.phase == RefitPhase::waiting_for_queue) {
-            return true;
-        }
-    }
-    return false;
-}
-
-void erase_jobs_for_yard(std::uint32_t yard_handle) noexcept {
-    for (auto iterator = g_jobs.begin(); iterator != g_jobs.end();) {
-        if (iterator->second.yard_handle == yard_handle) {
-            restore_job_source(&iterator->second);
-            iterator = g_jobs.erase(iterator);
-        } else {
-            ++iterator;
-        }
+struct RefitAvoidanceContext {void* source;RefitJob* job;};
+std::uint64_t refit_avoidance_step(void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept {
+    auto& c=*static_cast<RefitAvoidanceContext*>(opaque);
+    switch(op){
+    case 0:return c.job!=nullptr;
+    case 1:return c.source!=nullptr;
+    case 2:return c.job->avoidance_suppressed;
+    case 3:c.job->saved_avoid_me=read_at<std::uint8_t>(c.source,kObjectAvoidMeOffset,0);return 0;
+    case 4:return write_at(c.source,kObjectAvoidMeOffset,std::uint8_t{0});
+    case 5:c.job->avoidance_suppressed=true;return 0;
+    case 6:return write_at(c.source,kObjectAvoidMeOffset,c.job->saved_avoid_me);
+    case 7:return read_at<std::uint8_t>(c.source,kObjectAvoidMeOffset,0xff)==c.job->saved_avoid_me;
+    case 8:c.job->avoidance_suppressed=false;return 0;
+    default:return 0;
     }
 }
+bool suppress_source_avoidance(void* source,RefitJob* job) noexcept {RefitAvoidanceContext c{source,job};return a2fo_rs_stage8_refit_flow(12,&refit_avoidance_step,&c)!=0;}
 
-void job_removed(void* producer, std::uint32_t queue_id,
-                 void*, std::uint32_t removal_kind) noexcept {
-    const std::uint32_t yard_handle = object_handle(producer);
-    if (yard_handle == 0) return;
-    for (auto iterator = g_jobs.begin(); iterator != g_jobs.end();) {
-        RefitJob& job = iterator->second;
-        const bool producer_destroyed =
-            removal_kind == A2FO_REFIT_QUEUE_PRODUCER_DESTROYED;
-        const bool exact = job.yard_handle == yard_handle &&
-            queue_id != 0 && job.queue_id == queue_id;
-        if (producer_destroyed && job.yard_handle == yard_handle) {
-            restore_job_source(&job);
-            iterator = g_jobs.erase(iterator);
-        } else if (exact && begin_source_ejection(&job)) {
-            ++iterator;
-        } else if (exact) {
-            restore_job_source(&job);
-            iterator = g_jobs.erase(iterator);
-        } else {
-            ++iterator;
-        }
+bool restore_source_avoidance(void* source,RefitJob* job) noexcept {RefitAvoidanceContext c{source,job};return a2fo_rs_stage8_refit_flow(13,&refit_avoidance_step,&c)!=0;}
+
+struct RefitRestoreContext {RefitJob* job;void* source=nullptr;};
+std::uint64_t refit_restore_step(void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept {
+    auto& c=*static_cast<RefitRestoreContext*>(opaque);
+    switch(op){
+    case 0:return c.job!=nullptr;
+    case 1:return c.job->avoidance_suppressed;
+    case 2:c.source=find_entity(c.job->source_handle);return 0;
+    case 3:return restore_source_avoidance(c.source,c.job);
+    default:return 0;
+    }
+}
+void restore_job_source(RefitJob* job) noexcept {RefitRestoreContext c{job};a2fo_rs_stage8_refit_flow(18,&refit_restore_step,&c);}
+
+struct RefitEjectionContext {RefitJob* job;void* source=nullptr;void* yard=nullptr;void* output_queue=nullptr;void* add_method=nullptr;};
+std::uint64_t refit_ejection_step(void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept {
+    auto& c=*static_cast<RefitEjectionContext*>(opaque);
+    switch(op){
+    case 0:return c.job!=nullptr;
+    case 1:return static_cast<std::uint8_t>(c.job->phase);
+    case 2:return c.job->avoidance_suppressed;
+    case 3:c.source=find_entity(c.job->source_handle);return 0;
+    case 4:c.yard=find_entity(c.job->yard_handle);return 0;
+    case 5:return c.source!=nullptr;
+    case 6:return object_expired(c.source);
+    case 7:return c.yard!=nullptr;
+    case 8:return object_expired(c.yard);
+    case 9:{
+        c.output_queue=read_at<void*>(c.yard,kShipyardBuildOutputQueueOffset,nullptr);
+        if(!c.output_queue||!readable_range(c.output_queue,sizeof(void*)))return 0;
+        void** table=read_at<void**>(c.output_queue,0,nullptr);
+        if(table!=at<void*>(g_armada,kOutputQueueManagerVtableRva)||!readable_range(table+4,sizeof(void*)))return 0;
+        c.add_method=table[4];return executable_address(c.add_method);
+    }
+    case 10:execute_docking_stop(c.source);return 0;
+    case 11:a2fo_refit_call_thiscall_1(c.add_method,c.output_queue,reinterpret_cast<std::uintptr_t>(c.source));return 0;
+    case 12:return read_at<std::uint32_t>(c.source,kCraftQueueStageOffset,0);
+    case 13:return read_at<std::uint32_t>(c.source,kCraftQueueOwnerOffset,0);
+    case 14:return c.job->yard_handle;
+    case 15:c.job->queue_id=0;return 0;
+    case 16:c.job->phase=RefitPhase::ejecting;return 0;
+    case 17:return restore_source_avoidance(c.source,c.job);
+    default:return 0;
+    }
+}
+bool begin_source_ejection(RefitJob* job) noexcept {RefitEjectionContext c{job};return a2fo_rs_stage8_refit_flow(11,&refit_ejection_step,&c)!=0;}
+
+struct RefitConsumeContext {void* source;void* target;std::uint32_t handle=0;void* yard=nullptr;Matrix34 position{},approach{};};
+std::uint64_t refit_consume_step(void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept {
+    auto& c=*static_cast<RefitConsumeContext*>(opaque);
+    switch(op){
+    case 0:return g_runtime_ready;
+    case 1:return c.source!=nullptr;
+    case 2:return object_expired(c.source);
+    case 3:return allowed_target(c.source,c.target);
+    case 4:c.handle=object_handle(c.source);return c.handle;
+    case 5:return g_jobs.find(c.handle)!=g_jobs.end();
+    case 6:c.yard=nearest_refit_yard(c.source,&c.position);return c.yard!=nullptr;
+    case 7:{RefitJob job;job.source_handle=c.handle;job.yard_handle=object_handle(c.yard);job.target_class=c.target;
+        try{g_jobs.emplace(c.handle,job);return 1;}catch(...){return 0;}}
+    case 8:c.approach=refit_approach_transform(c.source,c.yard,c.position);return 0;
+    case 9:execute_move_to_refit_approach(c.source,c.approach);return 0;
+    case 10:log_line("Synchronized refit accepted; native GO_SINGLE installed locally for travel to the nearest yard's oriented approach point");return 0;
+    default:return 0;
+    }
+}
+bool consume_synchronized_refit(void* source,void* target_class) noexcept {
+    RefitConsumeContext c{source,target_class};return a2fo_rs_stage8_refit_flow(0,&refit_consume_step,&c)!=0;
+}
+
+struct RefitEnumerateContext {void* source;A2FO_RefitUiItem* output;std::size_t capacity;SourceConfig* config=nullptr;void* target=nullptr;};
+std::uint64_t refit_enumerate_step(void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t b) noexcept {
+    auto& c=*static_cast<RefitEnumerateContext*>(opaque);
+    switch(op){
+    case 0:return g_runtime_ready;
+    case 1:return c.source!=nullptr;
+    case 2:return object_expired(c.source);
+    case 3:{const auto found=g_source_classes.find(object_class(c.source));c.config=found==g_source_classes.end()?nullptr:&found->second;return c.config!=nullptr;}
+    case 4:return g_jobs.find(object_handle(c.source))!=g_jobs.end();
+    case 5:return nearest_refit_yard(c.source,nullptr)!=nullptr;
+    case 6:return c.config->count;
+    case 7:c.target=find_class(c.config->items[a]);return c.target!=nullptr;
+    case 8:return c.output && a<c.capacity;
+    case 9:c.output[a].target_class=c.target;c.output[a].enabled=static_cast<std::uint32_t>(b);return 0;
+    default:return 0;
+    }
+}
+std::size_t enumerate_refit_items(void* source,A2FO_RefitUiItem* output,std::size_t capacity) noexcept {
+    RefitEnumerateContext c{source,output,capacity};return static_cast<std::size_t>(a2fo_rs_stage8_refit_flow(1,&refit_enumerate_step,&c));
+}
+
+struct RefitRequestContext {void* source;void* target;};
+std::uint64_t refit_request_step(void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept {
+    auto& c=*static_cast<RefitRequestContext*>(opaque);
+    switch(op){
+    case 0:return g_runtime_ready;
+    case 1:return c.source!=nullptr;
+    case 2:return c.target!=nullptr;
+    case 3:return object_expired(c.source);
+    case 4:return allowed_target(c.source,c.target);
+    case 5:return g_jobs.find(object_handle(c.source))!=g_jobs.end();
+    case 6:return nearest_refit_yard(c.source,nullptr)!=nullptr;
+    case 7:a2fo_refit_call_thiscall_2(at(g_armada,kGameObjectQueueClassCommandRva),c.source,A2FO_REFIT_CLASS_COMMAND,reinterpret_cast<std::uintptr_t>(c.target));return 0;
+    default:return 0;
+    }
+}
+bool request_refit(void* source,void* target_class) noexcept {
+    RefitRequestContext c{source,target_class};return a2fo_rs_stage8_refit_flow(2,&refit_request_step,&c)!=0;
+}
+
+std::uint64_t refit_cancel_request_step(void* source,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept {
+    switch(op){
+    case 0:return g_runtime_ready;
+    case 1:return source!=nullptr;
+    case 2:return object_expired(source);
+    case 3:return object_class(source)!=nullptr;
+    case 4:a2fo_refit_call_thiscall_2(at(g_armada,kGameObjectQueueClassCommandRva),source,A2FO_REFIT_CANCEL_CLASS_COMMAND,reinterpret_cast<std::uintptr_t>(object_class(source)));return 0;
+    default:return 0;
+    }
+}
+bool request_refit_cancel(void* source) noexcept {return a2fo_rs_stage8_refit_flow(3,&refit_cancel_request_step,source)!=0;}
+
+struct RefitWaitingContext {void* producer;std::uint32_t handle=0;std::unordered_map<std::uint32_t,RefitJob>::const_iterator iterator{};};
+std::uint64_t refit_waiting_step(void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept {
+    auto& c=*static_cast<RefitWaitingContext*>(opaque);
+    switch(op){
+    case 0:c.handle=object_handle(c.producer);return c.handle;
+    case 1:c.iterator=g_jobs.begin();return 0;
+    case 2:return c.iterator!=g_jobs.end();
+    case 3:return c.iterator->second.yard_handle==c.handle;
+    case 4:return c.iterator->second.phase==RefitPhase::waiting_for_queue;
+    case 5:++c.iterator;return 0;
+    default:return 0;
+    }
+}
+bool has_waiting_refit(void* producer) noexcept {RefitWaitingContext c{producer};return a2fo_rs_stage8_refit_flow(4,&refit_waiting_step,&c)!=0;}
+
+struct RefitEraseContext {std::uint32_t handle;std::unordered_map<std::uint32_t,RefitJob>::iterator iterator{};};
+std::uint64_t refit_erase_step(void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept {
+    auto& c=*static_cast<RefitEraseContext*>(opaque);
+    switch(op){
+    case 0:c.iterator=g_jobs.begin();return 0;
+    case 1:return c.iterator!=g_jobs.end();
+    case 2:return c.iterator->second.yard_handle==c.handle;
+    case 3:restore_job_source(&c.iterator->second);return 0;
+    case 4:c.iterator=g_jobs.erase(c.iterator);return 0;
+    case 5:++c.iterator;return 0;
+    default:return 0;
+    }
+}
+void erase_jobs_for_yard(std::uint32_t yard_handle) noexcept {RefitEraseContext c{yard_handle};a2fo_rs_stage8_refit_flow(19,&refit_erase_step,&c);}
+
+struct RefitRemovedContext {RefitJob* job;std::uint32_t yard,queue;};
+std::uint64_t refit_removed_step(void* opaque,std::uint32_t op,
+                                std::uintptr_t,std::uintptr_t) noexcept {
+    auto& c=*static_cast<RefitRemovedContext*>(opaque);
+    switch(op) {
+    case 0:return c.job->yard_handle==c.yard;
+    case 1:restore_job_source(c.job);return 0;
+    case 2:return c.queue!=0;
+    case 3:return c.job->queue_id==c.queue;
+    case 4:return begin_source_ejection(c.job);
+    default:return 0;
+    }
+}
+void job_removed(void* producer,std::uint32_t queue_id,void*,std::uint32_t removal_kind) noexcept {
+    const auto yard=object_handle(producer);if(yard==0)return;
+    for(auto i=g_jobs.begin();i!=g_jobs.end();) {
+        RefitRemovedContext context{&i->second,yard,queue_id};
+        if(a2fo_rs_stage8_refit_removed(removal_kind==A2FO_REFIT_QUEUE_PRODUCER_DESTROYED,
+            &refit_removed_step,&context))i=g_jobs.erase(i);else ++i;
     }
 }
 
@@ -818,278 +803,225 @@ void remove_original_after_swap(void* original) noexcept {
     }
 }
 
-void job_finished(void* producer, std::uint32_t queue_id,
-                  void* target_class, void* result) noexcept {
-    const std::uint32_t yard_handle = object_handle(producer);
-    auto found = g_jobs.end();
-    for (auto iterator = g_jobs.begin(); iterator != g_jobs.end(); ++iterator) {
-        const RefitJob& job = iterator->second;
-        if (job.yard_handle == yard_handle &&
-            job.queue_id == queue_id &&
-            job.target_class == target_class) {
-            found = iterator;
-            break;
-        }
-    }
-    if (found == g_jobs.end()) return;
-    const std::uint32_t source_handle = found->second.source_handle;
-    void* source = find_entity(source_handle);
-    if (!source || !result || object_expired(source)) {
-        if (source && !object_expired(source)) {
-            restore_source_avoidance(source, &found->second);
-        }
-        g_jobs.erase(found);
-        log_line("Refit build finished without a live replacement source");
-        return;
-    }
-
-    // Keep the old hull non-avoiding through the identity handoff. Restoring
-    // it here would make the two overlapping ships repel one another during
-    // the completion tick. The source is removed immediately after the swap.
-    g_jobs.erase(found);
-    Matrix34 source_transform{};
-    if (object_transform(source, &source_transform)) {
-        a2fo_refit_call_thiscall_1(
-            at(g_armada, kGameObjectSetTransformRva), result,
-            reinterpret_cast<std::uintptr_t>(&source_transform));
-    }
-    a2fo_refit_call_thiscall_1(
-        at(g_armada, kEvolverSwapObjectsRva), source,
-        reinterpret_cast<std::uintptr_t>(result));
-    remove_original_after_swap(source);
-    if (!g_logged_completed) {
-        g_logged_completed = true;
-        log_line("Refit completed; replacement inherited the original "
-                 "ship identity and the original was removed");
+struct RefitFinishedContext {
+    void* producer;std::uint32_t queue;void* target;void* result;
+    std::unordered_map<std::uint32_t,RefitJob>::iterator found{};
+    void* source=nullptr;Matrix34 transform{};
+    std::uint32_t yard=0;std::unordered_map<std::uint32_t,RefitJob>::iterator iterator{};
+};
+std::uint64_t refit_finish_find_step(void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept {
+    auto& c=*static_cast<RefitFinishedContext*>(opaque);
+    switch(op){
+    case 0:c.yard=object_handle(c.producer);c.found=g_jobs.end();c.iterator=g_jobs.begin();return 0;
+    case 1:return c.iterator!=g_jobs.end();
+    case 2:return c.iterator->second.yard_handle;
+    case 3:return c.yard;
+    case 4:return c.iterator->second.queue_id;
+    case 5:return c.queue;
+    case 6:return reinterpret_cast<std::uintptr_t>(c.iterator->second.target_class);
+    case 7:return reinterpret_cast<std::uintptr_t>(c.target);
+    case 8:c.found=c.iterator;return 0;
+    case 9:++c.iterator;return 0;
+    default:return 0;
     }
 }
-
-void update_refit_job(void* source, RefitJob* job,
-                      float elapsed_seconds) noexcept {
-    if (!source || !job) return;
-    void* yard = find_entity(job->yard_handle);
-    if (!yard || object_expired(yard) ||
-        object_team(yard) != object_team(source)) {
-        restore_source_avoidance(source, job);
-        g_jobs.erase(job->source_handle);
-        return;
-    }
-
-    if (job->phase == RefitPhase::ejecting) {
-        const bool avoidance_restored =
-            restore_source_avoidance(source, job);
-        const std::uint32_t queue_stage = read_at<std::uint32_t>(
-            source, kCraftQueueStageOffset, 0);
-        if (avoidance_restored && queue_stage == 0) {
-            const std::uint32_t source_handle = job->source_handle;
-            g_jobs.erase(source_handle);
-            if (!g_logged_ejecting) {
-                g_logged_ejecting = true;
-                log_line("Cancelled refit handed to the yard's native "
-                         "completed-ship output queue; source collision "
-                         "avoidance restored");
-            }
-        }
-        return;
-    }
-
-    Matrix34 source_transform{};
-    Matrix34 refit_transform{};
-    if (!object_transform(source, &source_transform) ||
-        !yard_transform(yard, &refit_transform)) {
-        return;
-    }
-    const Matrix34 approach_transform = refit_approach_transform(
-        source, yard, refit_transform);
-
-    if (job->phase == RefitPhase::travelling) {
-        const float arrival_distance =
-            refit_approach_arrival_distance(source);
-        const float remaining_squared =
-            distance_squared(source_transform, approach_transform);
-        if (!g_logged_travelling) {
-            g_logged_travelling = true;
-            char message[192]{};
-            std::snprintf(
-                message, sizeof(message),
-                "Refit travel started: %.1f units from yard approach "
-                "(arrival radius %.1f)",
-                std::sqrt(std::max(remaining_squared, 0.0f)),
-                arrival_distance);
-            log_line(message);
-        }
-        if (job->last_distance_squared < 0.0f) {
-            job->last_distance_squared = remaining_squared;
-        }
-        if (remaining_squared <= arrival_distance * arrival_distance) {
-            execute_docking_stop(source);
-            job->phase = RefitPhase::waiting_for_queue;
-            job->retry_ticks = kRetryIntervalTicks;
-            if (!g_logged_waiting) {
-                g_logged_waiting = true;
-                log_line("Refit ship arrived and is waiting for a native "
-                         "Producer queue slot");
-            }
-        } else if (++job->move_ticks >= kMoveRefreshTicks) {
-            job->move_ticks = 0;
-            if (!g_logged_travel_progress) {
-                g_logged_travel_progress = true;
-                char message[192]{};
-                const float previous = std::sqrt(std::max(
-                    job->last_distance_squared, 0.0f));
-                const float current = std::sqrt(std::max(
-                    remaining_squared, 0.0f));
-                std::snprintf(
-                    message, sizeof(message),
-                    "Refit travel checkpoint: %.1f units remain "
-                    "(%.1f units moved toward yard)",
-                    current, previous - current);
-                log_line(message);
-            }
-            job->last_distance_squared = remaining_squared;
-            execute_move_to_refit_approach(source, approach_transform);
-        }
-        return;
-    }
-
-    if (job->phase == RefitPhase::waiting_for_queue) {
-        if (++job->retry_ticks < kRetryIntervalTicks) return;
-        job->retry_ticks = 0;
-        const std::uint32_t queue_id = g_push_refit
-            ? g_push_refit(yard, job->target_class) : 0;
-        if (queue_id == 0) return;
-        job->queue_id = queue_id;
-        job->phase = RefitPhase::queued;
-        if (!g_logged_queued) {
-            g_logged_queued = true;
-            log_line("Refit entered the yard's native production queue");
-        }
-        return;
-    }
-
-    const std::uint32_t current_id = read_at<std::uint32_t>(
-        yard, kCurrentQueueIdOffset, 0);
-    void* current_class = read_at<void*>(
-        yard, kCurrentBuildClassOffset, nullptr);
-    const bool active = current_id == job->queue_id &&
-        current_class == job->target_class;
-    if (active) {
-        const bool entering_active = job->phase != RefitPhase::active;
-        suppress_source_avoidance(source, job);
-        if (entering_active) {
-            execute_docking_stop(source);
-            job->docking_origin = source_transform;
-            job->docking_elapsed_seconds = 0.0f;
-        }
-        job->phase = RefitPhase::active;
-        const float simulation_step =
-            std::isfinite(elapsed_seconds) && elapsed_seconds > 0.0f
-                ? elapsed_seconds : 0.0f;
-        job->docking_elapsed_seconds = std::min(
-            kDockingTransitionSeconds,
-            job->docking_elapsed_seconds + simulation_step);
-        Matrix34 docking_transform = refit_transform;
-        if (job->docking_elapsed_seconds <
-            kDockingTransitionSeconds) {
-            const float progress =
-                job->docking_elapsed_seconds /
-                kDockingTransitionSeconds;
-            docking_transform = a2fo::refit::interpolate_docking_transform(
-                job->docking_origin, refit_transform, progress);
-        }
-        a2fo_refit_call_thiscall_1(
-            at(g_armada, kGameObjectSetTransformRva), source,
-            reinterpret_cast<std::uintptr_t>(&docking_transform));
-        if (!g_logged_active) {
-            g_logged_active = true;
-            log_line("Refit construction active; source collision avoidance "
-                     "suspended for a five-second smooth dock into the yard "
-                     "build hardpoint, then held while progress fills");
-        }
-    } else if (++job->move_ticks >= kMoveRefreshTicks) {
-        job->move_ticks = 0;
-        execute_move_to_refit_approach(source, approach_transform);
+std::uint64_t refit_finished_step(void* opaque,std::uint32_t op,
+                                 std::uintptr_t,std::uintptr_t) noexcept {
+    auto& c=*static_cast<RefitFinishedContext*>(opaque);
+    switch(op) {
+    case 0:return a2fo_rs_stage8_refit_flow(22,&refit_finish_find_step,&c);
+    case 1:c.source=find_entity(c.found->second.source_handle);return 0;
+    case 2:return c.source!=nullptr;
+    case 3:return c.result!=nullptr;
+    case 4:return object_expired(c.source);
+    case 5:return restore_source_avoidance(c.source,&c.found->second);
+    case 6:g_jobs.erase(c.found);return 0;
+    case 7:log_line("Refit build finished without a live replacement source");return 0;
+    case 8:return object_transform(c.source,&c.transform);
+    case 9:a2fo_refit_call_thiscall_1(at(g_armada,kGameObjectSetTransformRva),c.result,
+        reinterpret_cast<std::uintptr_t>(&c.transform));return 0;
+    case 10:a2fo_refit_call_thiscall_1(at(g_armada,kEvolverSwapObjectsRva),c.source,
+        reinterpret_cast<std::uintptr_t>(c.result));return 0;
+    case 11:remove_original_after_swap(c.source);return 0;
+    case 12:return g_logged_completed;
+    case 13:g_logged_completed=true;log_line("Refit completed; replacement inherited the original ship identity and the original was removed");return 0;
+    default:return 0;
     }
 }
+void job_finished(void* producer,std::uint32_t queue_id,void* target_class,void* result) noexcept {
+    RefitFinishedContext context{producer,queue_id,target_class,result};
+    a2fo_rs_stage8_refit_finished(&refit_finished_step,&context);
+}
 
-bool cancel_source_job(void* source,
-                       bool allow_ejection = true) noexcept {
-    const std::uint32_t source_handle = object_handle(source);
-    auto found = g_jobs.find(source_handle);
-    if (found == g_jobs.end()) return false;
-    const std::uint32_t yard_handle = found->second.yard_handle;
-    const std::uint32_t queue_id = found->second.queue_id;
-    if (!allow_ejection) {
-        restore_source_avoidance(source, &found->second);
-        g_jobs.erase(found);
+struct RefitUpdateContext {
+    void* source; RefitJob* job; float elapsed; void* yard=nullptr;
+    Matrix34 source_transform{},refit_transform{},approach_transform{},docking_transform{};
+    float arrival_distance=0,remaining_squared=0;
+};
+std::uint64_t refit_update_step(void* opaque,std::uint32_t op,
+                               std::uintptr_t a,std::uintptr_t) noexcept {
+    auto& c=*static_cast<RefitUpdateContext*>(opaque);
+    switch(op) {
+    case 0:return c.source && c.job;
+    case 1:c.yard=find_entity(c.job->yard_handle);return c.yard!=nullptr;
+    case 2:return object_expired(c.yard);
+    case 3:return static_cast<std::uint64_t>(static_cast<std::int64_t>(object_team(c.yard)));
+    case 4:return static_cast<std::uint64_t>(static_cast<std::int64_t>(object_team(c.source)));
+    case 5:return restore_source_avoidance(c.source,c.job);
+    case 6:g_jobs.erase(c.job->source_handle);return 0;
+    case 7:return static_cast<std::uint8_t>(c.job->phase);
+    case 8:return read_at<std::uint32_t>(c.source,kCraftQueueStageOffset,0);
+    case 9:return object_transform(c.source,&c.source_transform);
+    case 10:return yard_transform(c.yard,&c.refit_transform);
+    case 11:c.approach_transform=refit_approach_transform(c.source,c.yard,c.refit_transform);return 0;
+    case 12:
+        c.arrival_distance=refit_approach_arrival_distance(c.source);
+        c.remaining_squared=distance_squared(c.source_transform,c.approach_transform);return 0;
+    case 13:return g_logged_travelling;
+    case 14:{
+        g_logged_travelling=true;char message[192]{};
+        std::snprintf(message,sizeof(message),
+            "Refit travel started: %.1f units from yard approach (arrival radius %.1f)",
+            std::sqrt(std::max(c.remaining_squared,0.0f)),c.arrival_distance);
+        log_line(message);return 0;
     }
-    if (queue_id != 0) {
-        if (void* yard = find_entity(yard_handle)) {
-            a2fo_refit_call_thiscall_1(
-                at(g_fleet_ops, kFoProducerActDeleteRva), yard, queue_id);
+    case 15:return c.job->last_distance_squared<0.0f;
+    case 16:c.job->last_distance_squared=c.remaining_squared;return 0;
+    case 17:return c.remaining_squared<=c.arrival_distance*c.arrival_distance;
+    case 18:execute_docking_stop(c.source);return 0;
+    case 19:c.job->phase=RefitPhase::waiting_for_queue;return 0;
+    case 20:c.job->retry_ticks=kRetryIntervalTicks;return 0;
+    case 21:return g_logged_waiting;
+    case 22:g_logged_waiting=true;log_line("Refit ship arrived and is waiting for a native Producer queue slot");return 0;
+    case 23:return ++c.job->move_ticks>=kMoveRefreshTicks;
+    case 24:c.job->move_ticks=0;return 0;
+    case 25:return g_logged_travel_progress;
+    case 26:{
+        g_logged_travel_progress=true;char message[192]{};
+        const float previous=std::sqrt(std::max(c.job->last_distance_squared,0.0f));
+        const float current=std::sqrt(std::max(c.remaining_squared,0.0f));
+        std::snprintf(message,sizeof(message),
+            "Refit travel checkpoint: %.1f units remain (%.1f units moved toward yard)",
+            current,previous-current);log_line(message);return 0;
+    }
+    case 27:execute_move_to_refit_approach(c.source,c.approach_transform);return 0;
+    case 28:return ++c.job->retry_ticks<kRetryIntervalTicks;
+    case 29:c.job->retry_ticks=0;return 0;
+    case 30:return g_push_refit?g_push_refit(c.yard,c.job->target_class):0;
+    case 31:c.job->queue_id=static_cast<std::uint32_t>(a);return 0;
+    case 32:c.job->phase=RefitPhase::queued;return 0;
+    case 33:return g_logged_queued;
+    case 34:g_logged_queued=true;log_line("Refit entered the yard's native production queue");return 0;
+    case 35:return read_at<std::uint32_t>(c.yard,kCurrentQueueIdOffset,0);
+    case 36:return reinterpret_cast<std::uintptr_t>(read_at<void*>(c.yard,kCurrentBuildClassOffset,nullptr));
+    case 37:return c.job->queue_id;
+    case 38:return reinterpret_cast<std::uintptr_t>(c.job->target_class);
+    case 39:c.job->phase=RefitPhase::active;return 0;
+    case 40:return suppress_source_avoidance(c.source,c.job);
+    case 41:c.job->docking_origin=c.source_transform;return 0;
+    case 42:c.job->docking_elapsed_seconds=0.0f;return 0;
+    case 43:{
+        // This is the original GNU x87/store kernel, not a reassociated Rust sum.
+        const float step=std::isfinite(c.elapsed)&&c.elapsed>0.0f?c.elapsed:0.0f;
+        c.job->docking_elapsed_seconds=std::min(kDockingTransitionSeconds,
+            c.job->docking_elapsed_seconds+step);return 0;
+    }
+    case 44:
+        c.docking_transform=c.refit_transform;
+        if(c.job->docking_elapsed_seconds<kDockingTransitionSeconds) {
+            const float progress=c.job->docking_elapsed_seconds/kDockingTransitionSeconds;
+            c.docking_transform=a2fo::refit::interpolate_docking_transform(
+                c.job->docking_origin,c.refit_transform,progress);
         }
-    }
-    if (!allow_ejection) return true;
-
-    // Producer deletion normally calls job_removed and starts native output.
-    // Keep this fallback for a missing/late optional bridge.
-    found = g_jobs.find(source_handle);
-    if (found == g_jobs.end()) return true;
-    if (begin_source_ejection(&found->second)) return true;
-    restore_source_avoidance(source, &found->second);
-    g_jobs.erase(found);
-    return true;
-}
-
-bool cancel_synchronized_refit(void* source) noexcept {
-    if (!g_runtime_ready || !source || object_expired(source)) return false;
-    if (cancel_source_job(source)) {
-        log_line("Synchronized refit cancelled by Halt");
-    }
-    // Treat cancellation as idempotent: the source may receive repeated Halt
-    // packets or its refit may have completed just before this packet arrived.
-    return true;
-}
-
-void __attribute__((fastcall)) dequeue_command_vector_hook(
-    void* source, void*, std::int32_t command,
-    const Vector3* destination, std::int32_t value) noexcept {
-    // Halt itself is a synchronized command-0x10 packet.  Cancel the local
-    // refit job while every peer is processing that same packet, then preserve
-    // Armada's ordinary STOP behaviour through the gateway.
-    if (g_runtime_ready && command == 3 && cancel_source_job(source)) {
-        log_line("Synchronized refit cancelled by native Halt command");
-    }
-    a2fo_refit_call_thiscall_command_vector_int(
-        g_dequeue_command_vector_hook.gateway, source,
-        command, destination, value);
-}
-
-void A2FO_CALL craft_event_handler(
-    const A2FO_CraftEvent* event, void*) {
-    if (!event || event->struct_size < sizeof(*event) ||
-        !g_runtime_ready || !event->craft) {
-        return;
-    }
-    void* craft = event->craft;
-    if (event->kind == A2FO_CRAFT_EVENT_CLEANUP) {
-        cancel_source_job(craft, false);
-        if (g_yard_classes.find(object_class(craft)) !=
-                g_yard_classes.end()) {
-            erase_jobs_for_yard(object_handle(craft));
-        }
-        return;
-    }
-    if (event->kind != A2FO_CRAFT_EVENT_SIMULATE_POST ||
-        object_expired(craft)) {
-        return;
-    }
-    const auto found = g_jobs.find(object_handle(craft));
-    if (found != g_jobs.end()) {
-        update_refit_job(craft, &found->second,
-                         event->elapsed_seconds);
+        return 0;
+    case 45:a2fo_refit_call_thiscall_1(at(g_armada,kGameObjectSetTransformRva),c.source,
+        reinterpret_cast<std::uintptr_t>(&c.docking_transform));return 0;
+    case 46:return g_logged_active;
+    case 47:g_logged_active=true;
+        log_line("Refit construction active; source collision avoidance suspended for a five-second smooth dock into the yard build hardpoint, then held while progress fills");return 0;
+    case 48:return g_logged_ejecting;
+    case 49:g_logged_ejecting=true;
+        log_line("Cancelled refit handed to the yard's native completed-ship output queue; source collision avoidance restored");return 0;
+    default:return 0;
     }
 }
+void update_refit_job(void* source,RefitJob* job,float elapsed_seconds) noexcept {
+    RefitUpdateContext context{source,job,elapsed_seconds};
+    a2fo_rs_stage8_refit_update(&refit_update_step,&context);
+}
+
+struct RefitCancelContext {
+    void* source;std::uint32_t source_handle=0,yard_handle=0,queue_id=0;
+    std::unordered_map<std::uint32_t,RefitJob>::iterator found{};
+    void* yard=nullptr;
+};
+std::uint64_t refit_cancel_step(void* opaque,std::uint32_t op,
+                               std::uintptr_t,std::uintptr_t) noexcept {
+    auto& c=*static_cast<RefitCancelContext*>(opaque);
+    switch(op) {
+    case 0:c.found=g_jobs.find(c.source_handle);return c.found!=g_jobs.end();
+    case 1:c.yard_handle=c.found->second.yard_handle;c.queue_id=c.found->second.queue_id;return 0;
+    case 2:restore_source_avoidance(c.source,&c.found->second);return 0;
+    case 3:g_jobs.erase(c.found);return 0;
+    case 4:return c.queue_id;
+    case 5:c.yard=find_entity(c.yard_handle);return c.yard!=nullptr;
+    case 6:a2fo_refit_call_thiscall_1(at(g_fleet_ops,kFoProducerActDeleteRva),c.yard,c.queue_id);return 0;
+    case 7:return begin_source_ejection(&c.found->second);
+    default:return 0;
+    }
+}
+bool cancel_source_job(void* source,bool allow_ejection=true) noexcept {
+    RefitCancelContext context{source};context.source_handle=object_handle(source);
+    return a2fo_rs_stage8_refit_cancel(allow_ejection,&refit_cancel_step,&context)!=0;
+}
+
+std::uint64_t refit_cancel_synchronized_step(void* source,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept {
+    switch(op){
+    case 0:return g_runtime_ready;
+    case 1:return source!=nullptr;
+    case 2:return object_expired(source);
+    case 3:return cancel_source_job(source);
+    case 4:log_line("Synchronized refit cancelled by Halt");return 0;
+    default:return 0;
+    }
+}
+bool cancel_synchronized_refit(void* source) noexcept {return a2fo_rs_stage8_refit_flow(7,&refit_cancel_synchronized_step,source)!=0;}
+
+struct RefitDequeueContext {void* source;std::int32_t command;const Vector3* destination;std::int32_t value;};
+std::uint64_t refit_dequeue_step(void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept {
+    auto& c=*static_cast<RefitDequeueContext*>(opaque);
+    switch(op){
+    case 0:return g_runtime_ready;
+    case 1:return static_cast<std::uint64_t>(static_cast<std::int64_t>(c.command));
+    case 2:return cancel_source_job(c.source);
+    case 3:log_line("Synchronized refit cancelled by native Halt command");return 0;
+    case 4:a2fo_refit_call_thiscall_command_vector_int(g_dequeue_command_vector_hook.gateway,c.source,c.command,c.destination,c.value);return 0;
+    default:return 0;
+    }
+}
+void __attribute__((fastcall)) dequeue_command_vector_hook(void* source,void*,std::int32_t command,const Vector3* destination,std::int32_t value) noexcept {
+    RefitDequeueContext c{source,command,destination,value};a2fo_rs_stage8_refit_flow(8,&refit_dequeue_step,&c);
+}
+
+struct RefitEventContext {const A2FO_CraftEvent* event;void* craft=nullptr;RefitJob* job=nullptr;};
+std::uint64_t refit_event_step(void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept {
+    auto& c=*static_cast<RefitEventContext*>(opaque);
+    switch(op){
+    case 0:return c.event&&c.event->struct_size>=sizeof(*c.event);
+    case 1:return g_runtime_ready;
+    case 2:return c.event->craft!=nullptr;
+    case 3:c.craft=c.event->craft;return 0;
+    case 4:return c.event->kind;
+    case 5:return cancel_source_job(c.craft,false);
+    case 6:return g_yard_classes.find(object_class(c.craft))!=g_yard_classes.end();
+    case 7:erase_jobs_for_yard(object_handle(c.craft));return 0;
+    case 8:return object_expired(c.craft);
+    case 9:{const auto found=g_jobs.find(object_handle(c.craft));c.job=found==g_jobs.end()?nullptr:&found->second;return c.job!=nullptr;}
+    case 10:update_refit_job(c.craft,c.job,c.event->elapsed_seconds);return 0;
+    default:return 0;
+    }
+}
+void A2FO_CALL craft_event_handler(const A2FO_CraftEvent* event,void*) {RefitEventContext c{event};a2fo_rs_stage8_refit_flow(6,&refit_event_step,&c);}
 
 template <typename Function>
 bool import_export(HMODULE module, const char* name,
@@ -1102,40 +1034,36 @@ bool import_export(HMODULE module, const char* name,
     return *output != nullptr;
 }
 
-bool register_bridges() noexcept {
-    HMODULE feature_pack = GetModuleHandleA("A2FOFeaturePack.dll");
-    HMODULE hybrid_build = GetModuleHandleA("A2FOHybridBuild.dll");
-    A2FO_RegisterRefitQueueBridgeFn register_queue = nullptr;
-    A2FO_RegisterRefitUiBridgeFn register_ui = nullptr;
-    if (!import_export(feature_pack, "A2FO_RegisterRefitQueueBridge",
-                       &register_queue) ||
-        !import_export(feature_pack, "A2FO_ProducerPushRefit",
-                       &g_push_refit) ||
-        !import_export(hybrid_build, "A2FO_RegisterRefitUiBridge",
-                       &register_ui)) {
-        log_line("FeaturePack/HybridBuild refit bridge exports unavailable");
-        return false;
+struct RefitBridgesContext {
+    HMODULE feature=nullptr,hybrid=nullptr;A2FO_RegisterRefitQueueBridgeFn queue=nullptr;
+    A2FO_RegisterRefitUiBridgeFn ui=nullptr;bool(A2FO_CALL* ready)()noexcept=nullptr;
+    A2FO_RefitQueueBridge queue_bridge{};A2FO_RefitUiBridge ui_bridge{};
+};
+std::uint64_t refit_bridges_step(void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept {
+    auto& c=*static_cast<RefitBridgesContext*>(opaque);
+    switch(op){
+    case 0:c.feature=a2fo::startup_module_provider("A2FOFeaturePack.dll",{"A2FO_RegisterRefitQueueBridge","A2FO_ProducerPushRefit","A2FO_ProducerEventsReady"});return 0;
+    case 1:c.hybrid=a2fo::startup_module_provider("A2FOHybridBuild.dll",{"A2FO_RegisterRefitUiBridge"});return 0;
+    case 2:return import_export(c.feature,"A2FO_RegisterRefitQueueBridge",&c.queue);
+    case 3:return import_export(c.feature,"A2FO_ProducerPushRefit",&g_push_refit);
+    case 4:return import_export(c.hybrid,"A2FO_RegisterRefitUiBridge",&c.ui);
+    case 5:return import_export(c.feature,"A2FO_ProducerEventsReady",&c.ready);
+    case 6:return c.ready();
+    case 7:
+        c.queue_bridge.struct_size=sizeof(c.queue_bridge);c.queue_bridge.version=A2FO_REFIT_QUEUE_BRIDGE_VERSION;
+        c.queue_bridge.consume_synchronized_command=&consume_synchronized_refit;
+        c.queue_bridge.cancel_synchronized_command=&cancel_synchronized_refit;
+        c.queue_bridge.has_waiting_job=&has_waiting_refit;c.queue_bridge.job_finished=&job_finished;c.queue_bridge.job_removed=&job_removed;
+        c.ui_bridge.struct_size=sizeof(c.ui_bridge);c.ui_bridge.version=A2FO_REFIT_UI_BRIDGE_VERSION;
+        c.ui_bridge.enumerate_items=&enumerate_refit_items;c.ui_bridge.request_refit=&request_refit;c.ui_bridge.cancel_refit=&request_refit_cancel;
+        return c.queue(&c.queue_bridge);
+    case 8:return c.ui(&c.ui_bridge);
+    case 9:log_line("FeaturePack/HybridBuild refit bridge exports unavailable");return 0;
+    case 10:log_line("FeaturePack Producer event dispatch unavailable");return 0;
+    default:return 0;
     }
-
-    A2FO_RefitQueueBridge queue_bridge{};
-    queue_bridge.struct_size = sizeof(queue_bridge);
-    queue_bridge.version = A2FO_REFIT_QUEUE_BRIDGE_VERSION;
-    queue_bridge.consume_synchronized_command =
-        &consume_synchronized_refit;
-    queue_bridge.cancel_synchronized_command =
-        &cancel_synchronized_refit;
-    queue_bridge.has_waiting_job = &has_waiting_refit;
-    queue_bridge.job_finished = &job_finished;
-    queue_bridge.job_removed = &job_removed;
-
-    A2FO_RefitUiBridge ui_bridge{};
-    ui_bridge.struct_size = sizeof(ui_bridge);
-    ui_bridge.version = A2FO_REFIT_UI_BRIDGE_VERSION;
-    ui_bridge.enumerate_items = &enumerate_refit_items;
-    ui_bridge.request_refit = &request_refit;
-    ui_bridge.cancel_refit = &request_refit_cancel;
-    return register_queue(&queue_bridge) && register_ui(&ui_bridge);
 }
+bool register_bridges() noexcept {RefitBridgesContext c;return a2fo_rs_stage8_refit_flow(14,&refit_bridges_step,&c)!=0;}
 
 }  // namespace
 
@@ -1154,66 +1082,48 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
         !api->register_craft_event_handler_masked) {
         return false;
     }
-    g_api = api;
-    g_armada = static_cast<HMODULE>(api->armada_module());
-    g_fleet_ops = static_cast<HMODULE>(api->fleetops_module());
-    if (!g_armada || !g_fleet_ops || !preflight_signatures()) {
-        log_line("Native refit dependency signature mismatch; disabled");
-        return false;
-    }
-    if (!api->install_inline_hook(
-            at(g_armada, kDequeueCommandVectorRva),
-            reinterpret_cast<void*>(&dequeue_command_vector_hook),
-            sizeof(kExpectedDequeueCommandVector),
-            kExpectedDequeueCommandVector,
-            &g_dequeue_command_vector_hook)) {
-        log_line("Native synchronized movement receiver hook failed; disabled");
-        return false;
-    }
-    try {
-        g_source_classes.reserve(128);
-        g_yard_classes.reserve(32);
-        g_jobs.reserve(64);
-    } catch (...) {
-        log_line("Refit registry allocation failed");
-        return false;
-    }
-    const bool classes_registered =
-        api->register_game_object_class_loaded_handler(
-            kModuleName, kRequiredFields.data(),
-            static_cast<std::uint32_t>(kRequiredFields.size()),
-            &class_loaded_handler, nullptr);
-    const bool craft_registered =
-        api->register_craft_event_handler_masked(
-            kModuleName,
-            A2FO_CRAFT_EVENT_MASK_SIMULATE_POST |
-                A2FO_CRAFT_EVENT_MASK_CLEANUP,
-            &craft_event_handler, nullptr);
-    if (!classes_registered || !craft_registered) {
-        log_line("Shared class/Craft event registration failed");
-        // The core may already retain one callback. Keep the DLL resident;
-        // g_runtime_ready remains false so every partial registration is a
-        // fail-closed no-op.
-        return true;
-    }
-    if (!register_bridges()) {
-        // One of the two hook owners may already retain this DLL's callback.
-        // Keep it resident and disabled rather than leave a dangling pointer.
-        log_line("Refit bridge registration failed; module kept resident "
-                 "with gameplay disabled");
-        return true;
-    }
-    g_runtime_ready = true;
-    log_line("Refit yards initialized with synchronized requests, nearest-"
-             "yard travel, native queue progress, and replacement handoff");
-    return true;
+    g_api=api;
+    struct Context {const A2FO_ModuleApi* api;std::exception_ptr error{};} c{api};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& state=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:g_armada=static_cast<HMODULE>(state.api->armada_module());return 0;
+        case 1:g_fleet_ops=static_cast<HMODULE>(state.api->fleetops_module());return 0;
+        case 2:return g_armada&&g_fleet_ops;
+        case 3:return preflight_signatures();
+        case 4:return state.api->install_inline_hook(at(g_armada,kDequeueCommandVectorRva),reinterpret_cast<void*>(&dequeue_command_vector_hook),sizeof(kExpectedDequeueCommandVector),kExpectedDequeueCommandVector,&g_dequeue_command_vector_hook);
+        case 5:try{g_source_classes.reserve(128);g_yard_classes.reserve(32);g_jobs.reserve(64);return 1;}catch(...){return 0;}
+        case 6:return state.api->register_game_object_class_loaded_handler(kModuleName,kRequiredFields.data(),static_cast<std::uint32_t>(kRequiredFields.size()),&class_loaded_handler,nullptr);
+        case 7:return state.api->register_craft_event_handler_masked(kModuleName,A2FO_CRAFT_EVENT_MASK_SIMULATE_POST|A2FO_CRAFT_EVENT_MASK_CLEANUP,&craft_event_handler,nullptr);
+        case 8:return register_bridges();
+        case 9:g_runtime_ready=true;return 0;
+        case 10:log_line("Refit yards initialized with synchronized requests, nearest-yard travel, native queue progress, and replacement handoff");return 0;
+        case 11:log_line("Native refit dependency signature mismatch; disabled");return 0;
+        case 12:log_line("Native synchronized movement receiver hook failed; disabled");return 0;
+        case 13:log_line("Refit registry allocation failed");return 0;
+        case 14:log_line("Shared class/Craft event registration failed");return 0;
+        case 15:log_line("Refit bridge registration failed; module kept resident with gameplay disabled");return 0;
+        default:return 0;
+        }}catch(...){state.error=std::current_exception();return UINT64_MAX;}
+    };
+    const bool result=a2fo_rs_stage8_refit_flow(10,step,&c)!=0;
+    if(c.error)std::rethrow_exception(c.error);
+    return result;
 }
-
 extern "C" __declspec(dllexport)
 void A2FO_CALL A2FO_ModuleShutdown() {
-    g_runtime_ready = false;
-    for (auto& entry : g_jobs) {
-        restore_job_source(&entry.second);
-    }
-    g_jobs.clear();
+    struct Context {std::unordered_map<std::uint32_t,RefitJob>::iterator iterator{};} c;
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& state=*static_cast<Context*>(opaque);
+        switch(op){
+        case 0:g_runtime_ready=false;return 0;
+        case 1:state.iterator=g_jobs.begin();return 0;
+        case 2:return state.iterator!=g_jobs.end();
+        case 3:restore_job_source(&state.iterator->second);return 0;
+        case 4:++state.iterator;return 0;
+        case 5:g_jobs.clear();return 0;
+        default:return 0;
+        }
+    };
+    a2fo_rs_stage8_refit_flow(5,step,&c);
 }

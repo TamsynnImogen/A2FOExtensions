@@ -1,3 +1,7 @@
+#include "../rust/native_hooks_ffi.h"
+#include "../rust/stage10_core_pixels_ffi.h"
+#include "../rust/stage10_core_render_ffi.h"
+#include <utility>
 /*
  * Fleet Operations DX8 per-pixel lighting derived from armadaNebulaPatch.
  *
@@ -12,14 +16,40 @@
  */
 
 #include "nebula_renderer.hpp"
+#include "native11_capture.hpp"
+#include "../renderer/refit/startup.hpp"
+#include "refit_scene.hpp"
+#include "refit_scene_test.hpp"
+#include "native11_assets.hpp"
+#include "native11_lifecycle.hpp"
+#include "native11_sprites.hpp"
+#include "native11_textures.hpp"
+#include "native11_materials.hpp"
+#include "native11_nodes.hpp"
+#include "native11_animation_clock.hpp"
+#include "builtin_animation_observation.hpp"
+#include "native11_world_lights.hpp"
+#include "native11_world_pipeline.hpp"
+#include "native11_light_classes.hpp"
+#include "native11_rgb_owner.hpp"
+#include "../rust/stage9_core_nebula_ffi.h"
+#include <exception>
+#include "builtin_startup_modules.hpp"
+#include "../renderer/d3d8_compat/game/factory.hpp"
+#include "../renderer/d3d8_compat/observer.hpp"
 #include "amd_dot3_compat.hpp"
 #include "com_owner.hpp"
 #include "nebula_emissive.hpp"
 #include "renderer_draw_policy.hpp"
+#include "renderer_cloak_policy.hpp"
+#include "../renderer/cloak/refraction.hpp"
+#include "../renderer/shadows/pass.hpp"
+#include "extension_roots.hpp"
 #include "renderer_options.hpp"
-#include "decal_math.hpp"
-#include "hook.hpp"
+#include "../rust/text_geometry_ffi.h"
+#include "../rust/native_hooks_ffi.h"
 #include "../sdk/include/a2fo_supported_armada.hpp"
+#include "../sdk/include/a2fo_supported_fleetops.hpp"
 
 #include <windows.h>
 #include <d3d8.h>
@@ -27,9 +57,11 @@
 #include <array>
 #include <algorithm>
 #include <cstdint>
+#include <climits>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <iterator>
 #include <memory>
@@ -96,6 +128,16 @@ void* g_a2fo_nebula_mesh_selector_legacy = nullptr;
 }
 
 namespace {
+
+// Runtime meshes created by A2FOM3D. Registered after Storm3D parsing so the
+// renderer can apply M3D-only compatibility without affecting native SODs.
+std::unordered_set<const void*> g_m3d_runtime_meshes;
+thread_local void* g_m3d_active_render_mesh = nullptr;
+volatile LONG g_logged_m3d_fixed_draw = 0;
+
+bool registered_m3d_mesh(const void* mesh) noexcept {
+    return mesh && g_m3d_runtime_meshes.find(mesh) != g_m3d_runtime_meshes.end();
+}
 
 using AssembleShaderFromFile = HRESULT (WINAPI*)(
     LPCSTR file_name, DWORD flags, ID3DXBuffer** constants,
@@ -397,22 +439,22 @@ volatile LONG g_system_dot3_compat_attempted = 0;
 volatile LONG g_direct_d3d9_adapter_logged = 0;
 volatile LONG g_direct_d3d9_dot3_compat_logged = 0;
 volatile LONG g_direct_d3d9_dot3_native_logged = 0;
-a2fo::InlineHook g_compile_hook{};
-a2fo::InlineHook g_ensure_dot3_shader_hook{};
-a2fo::InlineHook g_direct_d3d9_dot3_create_hook{};
-a2fo::InlineHook g_alpha_hook{};
-a2fo::InlineHook g_standard_pre_hook{};
-a2fo::InlineHook g_standard_post_hook{};
-a2fo::InlineHook g_nonvb_pre_hook{};
-a2fo::InlineHook g_nonvb_post_hook{};
-a2fo::InlineHook g_workspace_dx8_draw_hook{};
-a2fo::InlineHook g_frame_begin_hook{};
-a2fo::InlineHook g_frame_bloom_hook{};
-a2fo::InlineHook g_device_reset_hook{};
-a2fo::InlineHook g_device_destroy_hook{};
-a2fo::InlineHook g_dot3_draw_hook{};
-a2fo::InlineHook g_fleetops_dot3_light_draw_hook{};
-a2fo::InlineHook g_fleetops_dot3_draw_hook{};
+A2foRsInlineHook g_compile_hook{};
+A2foRsInlineHook g_ensure_dot3_shader_hook{};
+A2foRsInlineHook g_direct_d3d9_dot3_create_hook{};
+A2foRsInlineHook g_alpha_hook{};
+A2foRsInlineHook g_standard_pre_hook{};
+A2foRsInlineHook g_standard_post_hook{};
+A2foRsInlineHook g_nonvb_pre_hook{};
+A2foRsInlineHook g_nonvb_post_hook{};
+A2foRsInlineHook g_workspace_dx8_draw_hook{};
+A2foRsInlineHook g_frame_begin_hook{};
+A2foRsInlineHook g_frame_bloom_hook{};
+A2foRsInlineHook g_device_reset_hook{};
+A2foRsInlineHook g_device_destroy_hook{};
+A2foRsInlineHook g_dot3_draw_hook{};
+A2foRsInlineHook g_fleetops_dot3_light_draw_hook{};
+A2foRsInlineHook g_fleetops_dot3_draw_hook{};
 bool g_hooks_ready = false;
 bool g_system_dot3_compat_armed = false;
 bool g_system_dot3_compat_applied = false;
@@ -664,6 +706,11 @@ extern "C" bool a2fo_nebula_general_mesh_enabled() noexcept;
 extern "C" void release_transparent_mesh_indices(IDirect3DDevice8*) noexcept;
 extern "C" void clear_cloak_composite_selection() noexcept;
 extern "C" void release_cloak_composite_shaders(IDirect3DDevice8* device) noexcept;
+extern "C" void release_refit_cloak_pass() noexcept;
+extern "C" void release_ingame_shadows() noexcept;
+extern "C" void set_ingame_shadow_group(const void*, UINT) noexcept;
+extern "C" bool refit_cloak_diagnostics_enabled() noexcept;
+extern "C" void report_refit_cloak_mesh(void* craft, unsigned reason, bool dot3, bool m3d) noexcept;
 thread_local bool g_emissive_mask_draw_active = false;
 volatile LONG g_logged_emissive_mask_draw = 0;
 volatile LONG g_logged_emissive_bloom_composite = 0;
@@ -675,6 +722,21 @@ volatile LONG g_logged_workspace_context_fallback = 0;
 void release_bloom_resources() noexcept;
 bool ensure_specular_pixel_shader(IDirect3DDevice8* device) noexcept;
 bool ensure_fast_nonbump_vertex_shader(IDirect3DDevice8* device) noexcept;
+
+// Native storage/cursors retain every exception until synchronous Rust returns.
+template<class Context, class Step>
+std::uint64_t nebula_policy(std::uint32_t kind, Context& context, Step step) {
+    struct Call { Context& context; Step& step; std::exception_ptr error; std::uint8_t failed = 0; };
+    Call call{context, step, {}, 0};
+    const auto bridge = +[](void* opaque, std::uint32_t op, std::uint64_t arg) -> std::uint64_t {
+        auto& c = *static_cast<Call*>(opaque);
+        try { return c.step(c.context, op, arg); }
+        catch (...) { c.error = std::current_exception(); c.failed = 1; return 0; }
+    };
+    const auto result = a2fo_rs_stage9_nebula_flow(kind, bridge, &call, &call.failed);
+    if (call.error) std::rethrow_exception(call.error);
+    return result;
+}
 
 std::string renderer_ini_path() {
     if (g_root_directory.empty()) return "A2FORenderer.ini";
@@ -693,47 +755,32 @@ std::string renderer_data_path(const char* relative_path) {
         relative_path;
 }
 
-bool same_file_contents(const std::string& left,
-                        const std::string& right) noexcept {
-    HANDLE left_file = CreateFileA(
-        left.c_str(), GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (left_file == INVALID_HANDLE_VALUE) return false;
-    HANDLE right_file = CreateFileA(
-        right.c_str(), GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (right_file == INVALID_HANDLE_VALUE) {
-        CloseHandle(left_file);
-        return false;
-    }
-
-    LARGE_INTEGER left_size{};
-    LARGE_INTEGER right_size{};
-    bool equal = GetFileSizeEx(left_file, &left_size) &&
-                 GetFileSizeEx(right_file, &right_size) &&
-                 left_size.QuadPart == right_size.QuadPart;
-    std::array<std::uint8_t, 16 * 1024> left_buffer{};
-    std::array<std::uint8_t, 16 * 1024> right_buffer{};
-    while (equal) {
-        DWORD left_read = 0;
-        DWORD right_read = 0;
-        if (!ReadFile(left_file, left_buffer.data(), left_buffer.size(),
-                      &left_read, nullptr) ||
-            !ReadFile(right_file, right_buffer.data(), right_buffer.size(),
-                      &right_read, nullptr) ||
-            left_read != right_read ||
-            std::memcmp(left_buffer.data(), right_buffer.data(), left_read) !=
-                0) {
-            equal = false;
-            break;
+bool same_file_contents(const std::string& left, const std::string& right) noexcept {
+    struct Context {
+        const std::string& left; const std::string& right;
+        HANDLE a = INVALID_HANDLE_VALUE, b = INVALID_HANDLE_VALUE;
+        LARGE_INTEGER a_size{}, b_size{};
+        std::array<std::uint8_t, 16 * 1024> a_buffer{}, b_buffer{};
+        DWORD a_read = 0, b_read = 0;
+    } c{left, right};
+    return nebula_policy(0, c, [](Context& x, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        switch (op) {
+        case 0: x.a = CreateFileA(x.left.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr); return x.a != INVALID_HANDLE_VALUE;
+        case 1: x.b = CreateFileA(x.right.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr); return x.b != INVALID_HANDLE_VALUE;
+        case 2: return GetFileSizeEx(x.a, &x.a_size);
+        case 3: return GetFileSizeEx(x.b, &x.b_size);
+        case 4: return static_cast<std::uint64_t>(x.a_size.QuadPart);
+        case 5: return static_cast<std::uint64_t>(x.b_size.QuadPart);
+        case 6: x.a_read = 0; x.b_read = 0; return ReadFile(x.a, x.a_buffer.data(), x.a_buffer.size(), &x.a_read, nullptr);
+        case 7: return ReadFile(x.b, x.b_buffer.data(), x.b_buffer.size(), &x.b_read, nullptr);
+        case 8: return x.a_read;
+        case 9: return x.b_read;
+        case 10: CloseHandle(x.a); return 0;
+        case 11: CloseHandle(x.b); return 0;
+        case 12: return static_cast<std::uint64_t>(static_cast<std::int64_t>(std::memcmp(x.a_buffer.data(), x.b_buffer.data(), x.a_read)));
+        default: return 0;
         }
-        if (left_read == 0) break;
-    }
-    CloseHandle(right_file);
-    CloseHandle(left_file);
-    return equal;
+    }) != 0;
 }
 
 bool load_dxvk_backend_policy() noexcept {
@@ -757,9 +804,10 @@ bool load_dxvk_backend_policy() noexcept {
 
 bool load_native_framebuffer_bloom_policy() noexcept {
     const std::string ini = renderer_ini_path();
-    const bool requested = GetPrivateProfileIntA(
-        "Effects", "EmissiveBloom", 1, ini.c_str()) != 0;
-    return requested && g_dxvk_backend_active;
+    return nebula_policy(2, ini, [](const std::string& path, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        if (op == 0) return GetPrivateProfileIntA("Effects", "EmissiveBloom", 1, path.c_str()) != 0;
+        return g_dxvk_backend_active;
+    }) != 0;
 }
 
 bool load_mapped_texture_cloak_diagnostics_policy() noexcept {
@@ -987,131 +1035,160 @@ T read_live_at(const void* object, std::size_t offset,
 void* at(HMODULE module, std::uintptr_t rva) noexcept;
 
 void release_emissive_composite(EmissiveComposite& composite) noexcept {
-    if (composite.texture) composite.texture->Release();
-    if (composite.estimated_bytes <= g_emissive_composite_cache_bytes) {
-        g_emissive_composite_cache_bytes -= composite.estimated_bytes;
-    } else {
-        g_emissive_composite_cache_bytes = 0;
-    }
-    composite = EmissiveComposite{};
+    nebula_policy(8, composite, [](EmissiveComposite& x, std::uint32_t op, std::uint64_t arg) -> std::uint64_t {
+        switch (op) {
+        case 0: return x.texture != nullptr;
+        case 1: x.texture->Release(); return 0;
+        case 2: return x.estimated_bytes;
+        case 3: return g_emissive_composite_cache_bytes;
+        case 4: g_emissive_composite_cache_bytes = static_cast<std::size_t>(arg); return 0;
+        case 5: x = EmissiveComposite{}; return 0;
+        default: return 0;
+        }
+    });
 }
 
 void release_emissive_gpu_cache(EmissiveMaterialPolicy& policy) noexcept {
-    for (auto& entry : policy.composites) {
-        release_emissive_composite(entry.second);
-    }
-    policy.composites.clear();
+    struct Context { EmissiveMaterialPolicy& policy; decltype(policy.composites)::iterator item{}, end{}; } c{policy};
+    nebula_policy(9, c, [](Context& x, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        switch (op) {
+        case 0: x.item = x.policy.composites.begin(); x.end = x.policy.composites.end(); return 0;
+        case 1: return x.item != x.end;
+        case 2: release_emissive_composite(x.item->second); return 0;
+        case 3: ++x.item; return 0;
+        case 4: x.policy.composites.clear(); return 0;
+        default: return 0;
+        }
+    });
 }
 
 void release_all_emissive_gpu_caches() noexcept {
-    if (g_black_emissive_texture) {
-        g_black_emissive_texture->Release();
-        g_black_emissive_texture = nullptr;
-    }
-    for (auto& entry : g_emissive_policies) {
-        if (!entry.second) continue;
-        for (auto& material : entry.second->materials) {
-            if (material) release_emissive_gpu_cache(*material);
+    struct Context {
+        decltype(g_emissive_policies)::iterator item{}, end{};
+        decltype(EmissiveClassPolicy::materials)::iterator material{}, material_end{};
+    } c;
+    nebula_policy(10, c, [](Context& x, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        switch (op) {
+        case 0: return g_black_emissive_texture != nullptr;
+        case 1: g_black_emissive_texture->Release(); return 0;
+        case 2: g_black_emissive_texture = nullptr; return 0;
+        case 3: x.item = g_emissive_policies.begin(); x.end = g_emissive_policies.end(); return 0;
+        case 4: return x.item != x.end;
+        case 5: return x.item->second != nullptr;
+        case 6: x.material = x.item->second->materials.begin(); x.material_end = x.item->second->materials.end(); return 0;
+        case 7: return x.material != x.material_end;
+        case 8: return *x.material != nullptr;
+        case 9: release_emissive_gpu_cache(**x.material); return 0;
+        case 10: ++x.material; return 0;
+        case 11: ++x.item; return 0;
+        case 12: g_diffuse_texture_keys.clear(); return 0;
+        case 13: g_emissive_composite_cache_bytes = 0; return 0;
+        default: return 0;
         }
-    }
-    g_diffuse_texture_keys.clear();
-    g_emissive_composite_cache_bytes = 0;
+    });
 }
 
 void release_all_specular_gpu_caches() noexcept {
-    for (auto& class_entry : g_specular_policies) {
-        if (!class_entry.second) continue;
-        for (auto& material : class_entry.second->materials) {
-            if (!material) continue;
-            if (material->texture) material->texture->Release();
-            material->texture = nullptr;
-            material->device = nullptr;
-            material->load_attempted = false;
+    struct Context {
+        decltype(g_specular_policies)::iterator item{}, end{};
+        decltype(SpecularClassPolicy::materials)::iterator material{}, material_end{};
+    } c;
+    nebula_policy(11, c, [](Context& x, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        switch (op) {
+        case 3: x.item = g_specular_policies.begin(); x.end = g_specular_policies.end(); return 0;
+        case 4: return x.item != x.end;
+        case 5: return x.item->second != nullptr;
+        case 6: x.material = x.item->second->materials.begin(); x.material_end = x.item->second->materials.end(); return 0;
+        case 7: return x.material != x.material_end;
+        case 8: return *x.material != nullptr;
+        case 10: ++x.material; return 0;
+        case 11: ++x.item; return 0;
+        case 14: return (*x.material)->texture != nullptr;
+        case 15: (*x.material)->texture->Release(); return 0;
+        case 16: (*x.material)->texture = nullptr; (*x.material)->device = nullptr; (*x.material)->load_attempted = false; return 0;
+        default: return 0;
         }
-    }
+    });
 }
 
 std::size_t emissive_texture_bytes(UINT width, UINT height) noexcept {
-    std::size_t total = 0;
-    while (width != 0 && height != 0) {
-        total += static_cast<std::size_t>(width) * height *
-            sizeof(std::uint32_t);
-        if (width == 1 && height == 1) break;
-        width = std::max<UINT>(1, width / 2);
-        height = std::max<UINT>(1, height / 2);
-    }
-    return total;
+    static_assert(sizeof(std::size_t) == sizeof(std::uint32_t), "native cache accounting is 32-bit");
+    return a2fo_rs_stage9_nebula_texture_bytes(width, height);
 }
 
-bool evict_oldest_emissive_composite(
-    EmissiveMaterialPolicy& policy) noexcept {
-    if (policy.composites.empty()) return false;
-    auto oldest = policy.composites.begin();
-    for (auto candidate = std::next(policy.composites.begin());
-         candidate != policy.composites.end(); ++candidate) {
-        if (candidate->second.last_used < oldest->second.last_used) {
-            oldest = candidate;
+bool evict_oldest_emissive_composite(EmissiveMaterialPolicy& policy) noexcept {
+    struct Context { EmissiveMaterialPolicy& policy; decltype(policy.composites)::iterator oldest{}, candidate{}; } c{policy};
+    return nebula_policy(12, c, [](Context& x, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        switch (op) {
+        case 0: return x.policy.composites.empty();
+        case 1: x.oldest = x.policy.composites.begin(); x.candidate = std::next(x.policy.composites.begin()); return 0;
+        case 2: return x.candidate != x.policy.composites.end();
+        case 3: return x.candidate->second.last_used;
+        case 4: return x.oldest->second.last_used;
+        case 5: x.oldest = x.candidate; return 0;
+        case 6: ++x.candidate; return 0;
+        case 7: release_emissive_composite(x.oldest->second); return 0;
+        case 8: x.policy.composites.erase(x.oldest); return 0;
+        case 9: return static_cast<std::uint32_t>(InterlockedCompareExchange(&g_logged_emissive_cache_eviction, 1, 0));
+        case 10: log_line("Bounded emissive composite cache evicted an inactive derived texture"); return 0;
+        default: return 0;
         }
-    }
-    release_emissive_composite(oldest->second);
-    policy.composites.erase(oldest);
-    if (InterlockedCompareExchange(
-            &g_logged_emissive_cache_eviction, 1, 0) == 0) {
-        log_line("Bounded emissive composite cache evicted an inactive "
-                 "derived texture");
-    }
-    return true;
+    }) != 0;
 }
 
 void trim_emissive_composite_cache() noexcept {
-    while (g_emissive_composite_cache_bytes >
-           kEmissiveCompositeCacheBudgetBytes) {
-        EmissiveMaterialPolicy* oldest_policy = nullptr;
-        std::uint64_t oldest_use = static_cast<std::uint64_t>(-1);
-        // Keep one composite per material to avoid rebuilding the ordinary
-        // visible state every frame when many ship classes share the scene.
-        for (auto& class_entry : g_emissive_policies) {
-            if (!class_entry.second) continue;
-            for (auto& material : class_entry.second->materials) {
-                if (!material || material->composites.size() <= 1) continue;
-                for (const auto& composite : material->composites) {
-                    if (composite.second.last_used < oldest_use) {
-                        oldest_use = composite.second.last_used;
-                        oldest_policy = material.get();
-                    }
-                }
-            }
+    struct Context {
+        EmissiveMaterialPolicy* oldest = nullptr;
+        decltype(g_emissive_policies)::iterator item{};
+        decltype(EmissiveClassPolicy::materials)::iterator material{}, material_end{};
+        decltype(EmissiveMaterialPolicy::composites)::const_iterator composite{}, composite_end{};
+    } c;
+    nebula_policy(13, c, [](Context& x, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        switch (op) {
+        case 0: return g_emissive_composite_cache_bytes;
+        case 1: return kEmissiveCompositeCacheBudgetBytes;
+        case 2: x.oldest = nullptr; return 0;
+        case 3: x.item = g_emissive_policies.begin(); return 0;
+        case 4: return x.item != g_emissive_policies.end();
+        case 5: return x.item->second != nullptr;
+        case 6: x.material = x.item->second->materials.begin(); x.material_end = x.item->second->materials.end(); return 0;
+        case 7: return x.material != x.material_end;
+        case 8: return *x.material != nullptr;
+        case 9: return (*x.material)->composites.size();
+        case 10: x.composite = (*x.material)->composites.begin(); x.composite_end = (*x.material)->composites.end(); return 0;
+        case 11: return x.composite != x.composite_end;
+        case 12: return x.composite->second.last_used;
+        case 13: x.oldest = x.material->get(); return 0;
+        case 14: ++x.composite; return 0;
+        case 15: ++x.material; return 0;
+        case 16: ++x.item; return 0;
+        case 17: return x.oldest != nullptr;
+        case 18: return evict_oldest_emissive_composite(*x.oldest);
+        case 19: return static_cast<std::uint32_t>(InterlockedCompareExchange(&g_logged_emissive_cache_floor, 1, 0));
+        case 20: log_line("Emissive cache budget reached its one-texture-per-material floor"); return 0;
+        default: return 0;
         }
-        if (!oldest_policy ||
-            !evict_oldest_emissive_composite(*oldest_policy)) {
-            if (InterlockedCompareExchange(
-                    &g_logged_emissive_cache_floor, 1, 0) == 0) {
-                log_line("Emissive cache budget reached its one-texture-per-"
-                         "material floor");
-            }
-            break;
-        }
-    }
+    });
 }
 
-IDirect3DTexture8* ensure_black_emissive_texture(
-    IDirect3DDevice8* device) noexcept {
-    if (g_black_emissive_texture) return g_black_emissive_texture;
-    if (!device) return nullptr;
-    IDirect3DTexture8* texture = nullptr;
-    HRESULT result = device->CreateTexture(
-        1, 1, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &texture);
-    if (FAILED(result) || !texture) return nullptr;
-    D3DLOCKED_RECT locked{};
-    result = texture->LockRect(0, &locked, nullptr, 0);
-    if (FAILED(result) || !locked.pBits) {
-        texture->Release();
-        return nullptr;
-    }
-    *static_cast<std::uint32_t*>(locked.pBits) = 0xff000000u;
-    texture->UnlockRect(0);
-    g_black_emissive_texture = texture;
-    return texture;
+IDirect3DTexture8* ensure_black_emissive_texture(IDirect3DDevice8* device) noexcept {
+    struct Context { IDirect3DDevice8* device; IDirect3DTexture8* texture = nullptr; D3DLOCKED_RECT locked{}; } c{device};
+    return reinterpret_cast<IDirect3DTexture8*>(static_cast<std::uintptr_t>(nebula_policy(14, c, [](Context& x, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        switch (op) {
+        case 0: return reinterpret_cast<std::uintptr_t>(g_black_emissive_texture);
+        case 1: return x.device != nullptr;
+        case 2: return SUCCEEDED(x.device->CreateTexture(1, 1, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &x.texture));
+        case 3: return x.texture != nullptr;
+        case 4: return SUCCEEDED(x.texture->LockRect(0, &x.locked, nullptr, 0));
+        case 5: return x.locked.pBits != nullptr;
+        case 6: x.texture->Release(); return 0;
+        case 7: *static_cast<std::uint32_t*>(x.locked.pBits) = 0xff000000u; return 0;
+        case 8: x.texture->UnlockRect(0); return 0;
+        case 9: g_black_emissive_texture = x.texture; return 0;
+        case 10: return reinterpret_cast<std::uintptr_t>(x.texture);
+        default: return 0;
+        }
+    })));
 }
 
 bool load_emissive_source(EmissiveMaterialPolicy& policy,
@@ -1134,8 +1211,12 @@ bool load_emissive_source(EmissiveMaterialPolicy& policy,
     IDirect3DTexture8* source = nullptr;
     const UINT width = policy.width ? policy.width : kD3dxDefault;
     const UINT height = policy.height ? policy.height : kD3dxDefault;
+    // Existing emissive composition reads RGBA pixels on the CPU. Preserve that
+    // contract using the untouched parent source in the compressed test child.
+    const std::string legacy_source=a2fo::renderer::game::legacy_source_path(device,policy.paths[index].c_str());
+    const char* source_path=legacy_source.empty()?policy.paths[index].c_str():legacy_source.c_str();
     const HRESULT load_result = g_create_texture_from_file(
-        device, policy.paths[index].c_str(), width, height, 1, 0,
+        device, source_path, width, height, 1, 0,
         D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, kD3dxDefault, kD3dxDefault,
         0, nullptr, nullptr, &source);
     if (FAILED(load_result) || !source) {
@@ -1174,31 +1255,22 @@ bool load_emissive_source(EmissiveMaterialPolicy& policy,
             static_cast<std::size_t>(policy.width) * policy.height;
         const auto* source_bytes = static_cast<const std::uint8_t*>(
             locked.pBits);
-        std::size_t non_black_count = 0;
-        for (UINT y = 0; y < policy.height; ++y) {
-            const auto* row = reinterpret_cast<const std::uint32_t*>(
-                source_bytes + static_cast<std::size_t>(y) * locked.Pitch);
-            for (UINT x = 0; x < policy.width; ++x) {
-                if ((row[x] & 0x00ffffffu) != 0) ++non_black_count;
-            }
-        }
-        const bool sparse_is_smaller =
-            non_black_count * sizeof(SparseEmissivePixel) <
-            pixel_count * sizeof(std::uint32_t);
+        const std::size_t non_black_count=a2fo_rs_stage10_core_pixels_nonblack_count(
+            source_bytes,policy.width,policy.height,static_cast<std::size_t>(locked.Pitch));
+        const bool sparse_is_smaller=a2fo_rs_stage10_core_pixels_sparse_is_smaller(non_black_count,pixel_count)!=0;
         if (sparse_is_smaller) {
             pixels.sparse.reserve(non_black_count);
-            for (UINT y = 0; y < policy.height; ++y) {
-                const auto* row = reinterpret_cast<const std::uint32_t*>(
-                    source_bytes +
-                    static_cast<std::size_t>(y) * locked.Pitch);
-                for (UINT x = 0; x < policy.width; ++x) {
-                    const std::uint32_t pixel = row[x];
-                    if ((pixel & 0x00ffffffu) == 0) continue;
-                    pixels.sparse.push_back(SparseEmissivePixel{
-                        static_cast<std::uint32_t>(
-                            static_cast<std::size_t>(y) * policy.width + x),
-                        pixel});
-                }
+            struct Push {std::vector<SparseEmissivePixel>* output;std::exception_ptr error{};};
+            Push push{&pixels.sparse};
+            const auto append=+[](void* opaque,std::uint32_t offset,std::uint32_t pixel) noexcept -> std::uint8_t {
+                auto& c=*static_cast<Push*>(opaque);
+                try {c.output->push_back(SparseEmissivePixel{offset,pixel});return 1;}
+                catch(...){c.error=std::current_exception();return 0;}
+            };
+            if(!a2fo_rs_stage10_core_pixels_fill_sparse(source_bytes,policy.width,policy.height,
+                    static_cast<std::size_t>(locked.Pitch),append,&push)) {
+                auto error=std::exchange(push.error,std::exception_ptr{});
+                std::rethrow_exception(error);
             }
         } else {
             pixels.dense.resize(pixel_count);
@@ -1257,34 +1329,7 @@ bool upload_emissive_mip_chain(
             const UINT next_height = std::max<UINT>(1, height / 2);
             std::vector<std::uint32_t> next(
                 static_cast<std::size_t>(next_width) * next_height);
-            for (UINT y = 0; y < next_height; ++y) {
-                for (UINT x = 0; x < next_width; ++x) {
-                    std::array<std::uint32_t, 4> samples{};
-                    std::size_t sample_index = 0;
-                    for (UINT dy = 0; dy < 2; ++dy) {
-                        for (UINT dx = 0; dx < 2; ++dx) {
-                            const UINT source_x = std::min(
-                                width - 1, x * 2 + dx);
-                            const UINT source_y = std::min(
-                                height - 1, y * 2 + dy);
-                            samples[sample_index++] = pixels[
-                                static_cast<std::size_t>(source_y) * width +
-                                source_x];
-                        }
-                    }
-                    std::uint32_t averaged = 0;
-                    for (unsigned shift = 0; shift < 32; shift += 8) {
-                        const std::uint32_t channel =
-                            ((samples[0] >> shift) & 0xffu) +
-                            ((samples[1] >> shift) & 0xffu) +
-                            ((samples[2] >> shift) & 0xffu) +
-                            ((samples[3] >> shift) & 0xffu);
-                        averaged |= ((channel + 2u) / 4u) << shift;
-                    }
-                    next[static_cast<std::size_t>(y) * next_width + x] =
-                        averaged;
-                }
-            }
+            a2fo_rs_stage10_core_pixels_next_mip(pixels.data(),width,height,next.data());
             pixels.swap(next);
             width = next_width;
             height = next_height;
@@ -1308,14 +1353,15 @@ IDirect3DTexture8* build_emissive_composite(
         return existing->second.texture;
     }
 
-    std::uint8_t loaded_mask = requested_mask & policy.path_mask;
-    for (std::size_t index = 0; index < policy.paths.size(); ++index) {
-        const std::uint8_t bit = static_cast<std::uint8_t>(1u << index);
-        if ((loaded_mask & bit) != 0 &&
-            !load_emissive_source(policy, index, device)) {
-            loaded_mask = static_cast<std::uint8_t>(loaded_mask & ~bit);
-        }
-    }
+    struct Load {EmissiveMaterialPolicy& policy;IDirect3DDevice8* device;};
+    Load load{policy,device};
+    const auto load_step=+[](void* opaque,std::uint32_t operation,std::uintptr_t index) noexcept -> std::uintptr_t {
+        auto& c=*static_cast<Load*>(opaque);
+        if(operation==0)return c.policy.paths.size();
+        return load_emissive_source(c.policy,index,c.device);
+    };
+    const auto loaded_mask=static_cast<std::uint8_t>(a2fo_rs_stage10_core_render_flow(
+        4,&load,load_step,requested_mask&policy.path_mask));
     if (loaded_mask == 0 || policy.width == 0 || policy.height == 0) {
         return ensure_black_emissive_texture(device);
     }
@@ -1327,29 +1373,27 @@ IDirect3DTexture8* build_emissive_composite(
         const std::size_t pixel_count =
             static_cast<std::size_t>(policy.width) * policy.height;
         base_pixels.assign(pixel_count, 0xff000000u);
-        for (std::size_t source_index = 0;
-             source_index < policy.pixels.size(); ++source_index) {
-            if ((loaded_mask & (1u << source_index)) == 0) continue;
-            const EmissiveSourcePixels& source =
-                policy.pixels[source_index];
-            const std::uint32_t percent = intensity_percent[source_index];
-            if (!source.dense.empty()) {
-                for (std::size_t pixel_index = 0;
-                     pixel_index < pixel_count; ++pixel_index) {
-                    base_pixels[pixel_index] =
-                        a2fo::nebula::merge_emissive_pixel(
-                            base_pixels[pixel_index],
-                            source.dense[pixel_index], percent);
-                }
-            } else {
-                for (const SparseEmissivePixel& pixel : source.sparse) {
-                    if (pixel.index >= base_pixels.size()) continue;
-                    base_pixels[pixel.index] =
-                        a2fo::nebula::merge_emissive_pixel(
-                            base_pixels[pixel.index], pixel.pixel, percent);
-                }
+        static_assert(sizeof(SparseEmissivePixel)==sizeof(A2foRsSparseEmissivePixel) &&
+            alignof(SparseEmissivePixel)==alignof(A2foRsSparseEmissivePixel) &&
+            offsetof(SparseEmissivePixel,index)==offsetof(A2foRsSparseEmissivePixel,index) &&
+            offsetof(SparseEmissivePixel,pixel)==offsetof(A2foRsSparseEmissivePixel,pixel),"Sparse pixel C ABI");
+        struct Merge {EmissiveMaterialPolicy& policy;std::vector<std::uint32_t>& base;
+            const decltype(intensity_percent)& intensity;std::size_t count,index=0;};
+        Merge merge{policy,base_pixels,intensity_percent,pixel_count};
+        const auto merge_step=+[](void* opaque,std::uint32_t operation,std::uintptr_t index) noexcept -> std::uintptr_t {
+            auto& c=*static_cast<Merge*>(opaque);
+            switch(operation){
+            case 0:return c.policy.pixels.size();
+            case 1:c.index=index;return 0;
+            case 2:return !c.policy.pixels[c.index].dense.empty();
+            case 3:a2fo_rs_stage10_core_pixels_merge_dense(c.base.data(),c.policy.pixels[c.index].dense.data(),c.count,c.intensity[c.index]);return 0;
+            case 4:{const auto& source=c.policy.pixels[c.index].sparse;
+                a2fo_rs_stage10_core_pixels_merge_sparse(c.base.data(),c.count,
+                    reinterpret_cast<const A2foRsSparseEmissivePixel*>(source.data()),source.size(),c.intensity[c.index]);return 0;}
+            default:return 0;
             }
-        }
+        };
+        a2fo_rs_stage10_core_render_flow(5,&merge,merge_step,loaded_mask);
     } catch (...) {
         return ensure_black_emissive_texture(device);
     }
@@ -1372,10 +1416,11 @@ IDirect3DTexture8* build_emissive_composite(
         texture->Release();
         return ensure_black_emissive_texture(device);
     }
-    while (policy.composites.size() >=
-           kMaximumEmissiveCompositesPerMaterial) {
-        if (!evict_oldest_emissive_composite(policy)) break;
-    }
+    const auto evict=+[](void* opaque,std::uint32_t operation,std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& p=*static_cast<EmissiveMaterialPolicy*>(opaque);
+        return operation==0?p.composites.size():evict_oldest_emissive_composite(p);
+    };
+    a2fo_rs_stage10_core_render_flow(6,&policy,evict,kMaximumEmissiveCompositesPerMaterial);
     const std::size_t estimated_bytes = emissive_texture_bytes(
         policy.width, policy.height);
     policy.composites.emplace(
@@ -1587,27 +1632,25 @@ std::string current_texture_key(
     return key;
 }
 
-std::string faction_base_texture_key(
-    const std::string& live_key) noexcept {
-    if (live_key.empty() || g_faction_texture_suffixes.empty()) return {};
+std::string faction_base_texture_key(const std::string& live_key) noexcept {
     try {
-        std::size_t best_length = 0;
-        for (const std::string& suffix : g_faction_texture_suffixes) {
-            if (suffix.empty() || suffix.size() >= live_key.size() ||
-                suffix.size() <= best_length) {
-                continue;
+        struct Context { const std::string& key; decltype(g_faction_texture_suffixes)::const_iterator suffix{}, end{}; std::string output; } c{live_key, {}, {}, {}};
+        nebula_policy(6, c, [](Context& x, std::uint32_t op, std::uint64_t arg) -> std::uint64_t {
+            switch (op) {
+            case 0: return x.key.empty();
+            case 1: return g_faction_texture_suffixes.empty();
+            case 2: x.suffix = g_faction_texture_suffixes.begin(); x.end = g_faction_texture_suffixes.end(); return 0;
+            case 3: return x.suffix != x.end;
+            case 4: return x.suffix->size();
+            case 5: return x.key.size();
+            case 6: return x.key.compare(x.key.size() - static_cast<std::size_t>(arg), static_cast<std::size_t>(arg), *x.suffix) == 0;
+            case 7: ++x.suffix; return 0;
+            case 8: x.output = x.key.substr(0, x.key.size() - static_cast<std::size_t>(arg)); return 0;
+            default: return 0;
             }
-            const std::size_t offset = live_key.size() - suffix.size();
-            if (live_key.compare(offset, suffix.size(), suffix) == 0) {
-                best_length = suffix.size();
-            }
-        }
-        return best_length == 0
-            ? std::string{}
-            : live_key.substr(0, live_key.size() - best_length);
-    } catch (...) {
-        return {};
-    }
+        });
+        return std::move(c.output);
+    } catch (...) { return {}; }
 }
 
 std::uint32_t current_craft_cloak_state(void* craft) noexcept {
@@ -1620,20 +1663,23 @@ std::uint32_t current_craft_cloak_state(void* craft) noexcept {
 }
 
 bool fast_nonbump_requested_for_draw() noexcept {
-    // Promoted, genuinely unmapped meshes always need geometric lighting,
-    // independently of the global bump option and their owner's cloak state.
-    if (g_fast_unmapped_draw_depth != 0) return true;
-    const bool global_flat_normal = InterlockedCompareExchange(
-        &g_fast_nonbump_enabled, 0, 0) != 0;
-    if (global_flat_normal) return true;
-    if (!g_neutral_bump_when_cloaked || !g_dxvk_backend_active ||
-        g_craft_render_overflow != 0 ||
-        InterlockedCompareExchange(&g_runtime_enabled, 0, 0) == 0) {
-        return false;
-    }
-    void* craft = current_render_craft();
-    return craft && a2fo::renderer_flat_normal_for_draw(
-        false, g_neutral_bump_when_cloaked, current_craft_cloak_state(craft));
+    void* craft = nullptr;
+    return nebula_policy(5, craft, [](void*& current, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        switch (op) {
+        case 0: return g_m3d_active_render_mesh != nullptr;
+        case 1: return g_fast_unmapped_draw_depth;
+        case 2: return static_cast<std::uint32_t>(InterlockedCompareExchange(&g_fast_nonbump_enabled, 0, 0));
+        case 3: return g_neutral_bump_when_cloaked;
+        case 4: return g_dxvk_backend_active;
+        case 5: return g_craft_render_overflow;
+        case 6: return static_cast<std::uint32_t>(InterlockedCompareExchange(&g_runtime_enabled, 0, 0));
+        case 7: current = current_render_craft(); return reinterpret_cast<std::uintptr_t>(current);
+        case 8: return [](bool neutral, std::uint32_t state) -> std::uint64_t {
+            return static_cast<std::uint64_t>(state) | (static_cast<std::uint64_t>(neutral) << 32);
+        }(g_neutral_bump_when_cloaked, current_craft_cloak_state(current));
+        default: return 0;
+        }
+    }) != 0;
 }
 
 bool claim_mapped_texture_cloak_diagnostic(std::uint32_t bit) noexcept {
@@ -1880,6 +1926,36 @@ SpecularMaterialPolicy* select_current_specular_material(
     return nullptr;
 }
 
+}  // namespace
+
+namespace a2fo {
+bool nebula_specular_map_path(const char* diffuse_name, std::string& path) noexcept {
+    try {
+        path.clear();
+        if (!diffuse_name || !*diffuse_name) return false;
+        void* craft = current_render_craft();
+        void* object_class = read_at<void*>(craft, kCraftClassOffset, nullptr);
+        if (!craft || !object_class) return false;
+        const auto found = g_specular_policies.find(object_class);
+        if (found == g_specular_policies.end() || !found->second) return false;
+        const std::string key = a2fo::nebula::normalize_texture_key(diffuse_name);
+        if (key.empty()) return false;
+        for (const auto& material : found->second->materials)
+            if (material && material->diffuse_key == key) { path = material->path; return true; }
+        const std::string base = faction_base_texture_key(key);
+        if (base.empty()) return false;
+        for (const auto& material : found->second->materials)
+            if (material && material->diffuse_key == base) { path = material->path; return true; }
+        return false;
+    } catch (...) {
+        path.clear();
+        return false;
+    }
+}
+}  // namespace a2fo
+
+namespace {
+
 IDirect3DTexture8* load_specular_texture(
     SpecularMaterialPolicy& material,
     IDirect3DDevice8* device) noexcept {
@@ -1898,7 +1974,8 @@ IDirect3DTexture8* load_specular_texture(
 
     material.load_attempted = true;
     IDirect3DTexture8* texture = nullptr;
-    const HRESULT result = g_create_texture_from_file(
+    HRESULT result=a2fo::renderer::game::load_texture_file(device,material.path.c_str(),&texture);
+    if(result==S_FALSE)result=g_create_texture_from_file(
         device, material.path.c_str(), kD3dxDefault, kD3dxDefault,
         kD3dxDefault, 0, D3DFMT_UNKNOWN, D3DPOOL_MANAGED,
         kD3dxDefault, kD3dxDefault, 0, nullptr, nullptr, &texture);
@@ -1950,8 +2027,9 @@ bool validate_module(HMODULE module, std::uint32_t timestamp,
     if (!readable_range(nt, sizeof(*nt)) ||
         nt->Signature != IMAGE_NT_SIGNATURE ||
         nt->FileHeader.Machine != IMAGE_FILE_MACHINE_I386 ||
-        nt->FileHeader.TimeDateStamp != timestamp ||
-        nt->OptionalHeader.SizeOfImage != image_size) {
+        !((nt->FileHeader.TimeDateStamp == timestamp &&
+           nt->OptionalHeader.SizeOfImage == image_size) ||
+          a2fo::supported_fleetops::approved_profile(module))) {
         char message[224]{};
         std::snprintf(message, sizeof(message),
                       "%s is not the supported Fleet Operations build",
@@ -2004,42 +2082,33 @@ Function imported_function(HMODULE module, const char* name) noexcept {
 }
 
 bool command_line_requests_dx9() {
-    const wchar_t* command_line = GetCommandLineW();
-    if (!command_line) return false;
-    std::wstring token;
-    bool quoted = false;
-    const auto inspect = [&token]() {
-        if (token.size() != 5) return false;
-        std::wstring normalized = token;
-        for (wchar_t& character : normalized) {
-            if (character >= L'A' && character <= L'Z') {
-                character = static_cast<wchar_t>(character - L'A' + L'a');
-            }
-        }
-        return normalized == L"/d3d9" || normalized == L"-d3d9";
+    const wchar_t* command_line=GetCommandLineW();
+    if(!command_line)return false;
+    struct Context {const wchar_t* input;std::wstring token;std::exception_ptr error{};};
+    Context context{command_line,{},{}};
+    const auto step=+[](void* opaque,std::uint32_t operation,std::uintptr_t arg) noexcept -> std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(operation){
+        case 0:return static_cast<std::uint16_t>(c.input[arg]);
+        case 1:return !c.token.empty();
+        case 2:{if(c.token.size()!=5)return 0;std::wstring normalized=c.token;
+            static_assert(sizeof(wchar_t)==sizeof(std::uint16_t),"Windows UTF16");
+            a2fo_rs_stage10_core_render_lower16(reinterpret_cast<std::uint16_t*>(normalized.data()),normalized.size());
+            return normalized==L"/d3d9" || normalized==L"-d3d9";}
+        case 3:c.token.clear();return 0;
+        case 4:c.token.push_back(static_cast<wchar_t>(arg));return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINTPTR_MAX;}
     };
-    for (const wchar_t* cursor = command_line;; ++cursor) {
-        const wchar_t character = *cursor;
-        if (character == L'\"') {
-            quoted = !quoted;
-        } else if (character == L'\0' ||
-                   (!quoted && (character == L' ' || character == L'\t'))) {
-            if (!token.empty() && inspect()) return true;
-            token.clear();
-            if (character == L'\0') break;
-        } else {
-            token.push_back(character);
-        }
-    }
-    return false;
+    const bool result=a2fo_rs_stage10_core_render_flow(3,&context,step,0)!=0;
+    if(context.error)std::rethrow_exception(context.error);
+    return result;
 }
 
-std::string join_path(const char* left, const char* right) {
-    std::string result = left ? left : "";
-    if (!result.empty() && result.back() != '\\' && result.back() != '/') {
-        result.push_back('\\');
-    }
-    result += right ? right : "";
+std::string join_path(const char* left,const char* right) {
+    std::string result=left?left:"";
+    if(a2fo_rs_stage10_core_render_separator(result.empty(),result.empty()?0:static_cast<std::uint8_t>(result.back())))result.push_back('\\');
+    result+=right?right:"";
     return result;
 }
 
@@ -2058,9 +2127,16 @@ bool shader_assets_available() {
 }
 
 bool controller_is_installed() {
-    const std::string controller = join_path(
-        g_root_directory.c_str(), "modules\\A2FONebulaRenderer.dll");
-    return GetFileAttributesA(controller.c_str()) != INVALID_FILE_ATTRIBUTES;
+    // The first DOT3 call can precede deferred module preparation. Read the
+    // same root policy here, outside loader lock. The fixed startup selection
+    // takes precedence once known; saved menu choices wait for a new process.
+    try {
+        return a2fo::startup_builtin_selected(a2fo::BuiltinFeature::nebula_renderer,
+                                        g_root_directory, GetCommandLineA());
+    } catch (...) {
+        log_line("Could not read the Nebula controller startup selection; native renderer retained");
+        return false;
+    }
 }
 
 bool load_d3dx() noexcept {
@@ -2183,7 +2259,7 @@ bool install_get_shader_route() noexcept {
     void* route = at(g_fleet_ops, kGetShaderHandleRouteRva);
     void* expected = g_get_shader_handle_original;
     void* replacement = function_address(&a2fo_nebula_set_pixel_shader_hook);
-    if (!a2fo::patch_bytes(
+    if (!a2fo_rs_windows_patch_bytes(
             route,
             reinterpret_cast<const std::uint8_t*>(&replacement),
             reinterpret_cast<const std::uint8_t*>(&expected),
@@ -2807,16 +2883,16 @@ bool apply_system_dot3_compatibility() noexcept {
         return false;
     }
 
-    if (!a2fo::patch_bytes(
+    if (!a2fo_rs_windows_patch_bytes(
             declaration, remapped_declaration,
             stock_declaration, declaration_size)) {
         log_line("AMD native DOT3 declaration remap could not be installed; "
                  "native shader retained");
         return false;
     }
-    if (!a2fo::patch_bytes(
+    if (!a2fo_rs_windows_patch_bytes(
             shader_path, remapped_path, stock_path, path_size)) {
-        const bool rolled_back = a2fo::patch_bytes(
+        const bool rolled_back = a2fo_rs_windows_patch_bytes(
             declaration, stock_declaration,
             remapped_declaration, declaration_size);
         log_line(rolled_back
@@ -2845,10 +2921,10 @@ void restore_system_dot3_compatibility() noexcept {
         a2fo::amd_dot3::kStockShaderPath);
     const auto* remapped_path = reinterpret_cast<const std::uint8_t*>(
         a2fo::amd_dot3::kRemappedShaderPath);
-    const bool path_restored = a2fo::patch_bytes(
+    const bool path_restored = a2fo_rs_windows_patch_bytes(
         at(g_armada, kDot3ShaderPathRva), stock_path,
         remapped_path, sizeof(a2fo::amd_dot3::kStockShaderPath));
-    const bool declaration_restored = a2fo::patch_bytes(
+    const bool declaration_restored = a2fo_rs_windows_patch_bytes(
         at(g_armada, kDot3DeclarationRva), stock_declaration,
         remapped_declaration,
         sizeof(a2fo::amd_dot3::kStockDeclaration));
@@ -2865,6 +2941,8 @@ void release_damage_decal_textures() noexcept {
 }
 
 void invalidate_device_resources(IDirect3DDevice8* device) noexcept {
+    release_ingame_shadows();
+    release_refit_cloak_pass();
     release_cloak_composite_shaders(device);
     release_bloom_resources();
     if (device) {
@@ -3866,8 +3944,10 @@ IDirect3DTexture8* damage_decal_texture(
         return nullptr;
     }
     IDirect3DTexture8* texture = nullptr;
-    const HRESULT result = g_create_texture_from_file(
-        device, path.c_str(), kD3dxDefault, kD3dxDefault, 0, 0,
+    const std::string legacy_source=use_colour_key?a2fo::renderer::game::legacy_source_path(device,path.c_str()):std::string{};
+    HRESULT result=use_colour_key?S_FALSE:a2fo::renderer::game::load_texture_file(device,path.c_str(),&texture);
+    if(result==S_FALSE)result=g_create_texture_from_file(
+        device, legacy_source.empty()?path.c_str():legacy_source.c_str(), kD3dxDefault, kD3dxDefault, 0, 0,
         D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, kD3dxDefault, kD3dxDefault,
         use_colour_key ? colour_key : 0, nullptr, nullptr, &texture);
     if (FAILED(result) || !texture) {
@@ -3956,8 +4036,9 @@ bool draw_decal_quad(
     }};
     std::array<DamageDecalVertex, 4> vertices{};
     for (std::size_t index = 0; index < vertices.size(); ++index) {
-        auto local = a2fo::decal::rotate_xyz(
-            corners[index], rotation_degrees);
+        std::array<float,3> local{};
+        a2fo_rs_geometry_rotate_xyz(corners[index].data(),
+                                   rotation_degrees.data(),local.data());
         for (std::size_t axis = 0; axis < 3; ++axis) {
             local[axis] += offset[axis];
         }
@@ -5163,7 +5244,7 @@ void* __cdecl compile_dot3_mesh_hook(const void* mesh) noexcept {
     if (state == 0) {
         bool activated = false;
         if (!controller_is_installed()) {
-            log_line("Controller DLL is absent; early renderer remains native");
+            log_line("Nebula controller is not selected; early renderer remains native");
         } else if (command_line_requests_dx9()) {
             log_line("/d3d9 detected; the initial Nebula integration supports "
                      "DX8 only and remains inactive");
@@ -5214,12 +5295,11 @@ bool install_direct_d3d9_dot3_compat_hook() noexcept {
         return false;
     }
 
-    const bool installed = a2fo::install_inline_hook(
+    const bool installed = a2fo_rs_windows_hook_install(
         at(g_fleet_ops, kDirectD3d9Dot3CreateRva),
         function_address(&create_direct_d3d9_dot3_shader_hook),
         kExpectedDirectD3d9Dot3Create.size(),
-        kExpectedDirectD3d9Dot3Create.data(),
-        g_direct_d3d9_dot3_create_hook);
+        kExpectedDirectD3d9Dot3Create.data(), &(g_direct_d3d9_dot3_create_hook));
     if (installed) {
         g_direct_d3d9_dot3_create_original =
             g_direct_d3d9_dot3_create_hook.gateway;
@@ -5247,18 +5327,17 @@ bool install_system_dot3_compat_hooks() noexcept {
         return false;
     }
 
-    bool installed = a2fo::install_inline_hook(
+    bool installed = a2fo_rs_windows_hook_install(
         at(g_armada, kCompileDot3MeshRva),
         function_address(&compile_dot3_mesh_hook),
-        kExpectedCompileDot3Mesh.size(), kExpectedCompileDot3Mesh.data(),
-        g_compile_hook);
+        kExpectedCompileDot3Mesh.size(), kExpectedCompileDot3Mesh.data(), &(g_compile_hook));
     if (installed) g_compile_original = g_compile_hook.gateway;
 
-    installed = installed && a2fo::install_inline_hook(
+    installed = installed && a2fo_rs_windows_hook_install(
         at(g_armada, kEnsureDot3ShaderRva),
         function_address(&ensure_dot3_shader_hook),
         kExpectedEnsureDot3Shader.size(),
-        kExpectedEnsureDot3Shader.data(), g_ensure_dot3_shader_hook);
+        kExpectedEnsureDot3Shader.data(), &(g_ensure_dot3_shader_hook));
     if (installed) {
         g_ensure_dot3_shader_original = g_ensure_dot3_shader_hook.gateway;
         g_system_dot3_compat_armed = true;
@@ -5279,7 +5358,7 @@ bool install_hooks_early() noexcept {
         at(g_armada, kMeshRenderSelectorFastRva);
     g_a2fo_nebula_mesh_selector_legacy =
         at(g_armada, kMeshRenderSelectorLegacyRva);
-    if (!a2fo::patch_jump(
+    if (!a2fo_rs_windows_patch_jump(
             at(g_armada, kMeshRenderSelectorRva),
             function_address(&a2fo_nebula_mesh_selector_hook),
             kExpectedMeshRenderSelector.data(),
@@ -5295,38 +5374,34 @@ bool install_hooks_early() noexcept {
     // These replacements are installed under process attach but remain pure
     // pass-throughs. The compile hook performs all file/D3DX work later at the
     // first DOT3 mesh, before calling its original gateway.
-    bool installed = a2fo::install_inline_hook(
+    bool installed = a2fo_rs_windows_hook_install(
         at(g_armada, kCompileDot3MeshRva),
         function_address(&compile_dot3_mesh_hook),
-        kExpectedCompileDot3Mesh.size(), kExpectedCompileDot3Mesh.data(),
-        g_compile_hook);
+        kExpectedCompileDot3Mesh.size(), kExpectedCompileDot3Mesh.data(), &(g_compile_hook));
     if (installed) g_compile_original = g_compile_hook.gateway;
 
-    installed = installed && a2fo::install_inline_hook(
+    installed = installed && a2fo_rs_windows_hook_install(
         at(g_fleet_ops, kFleetOpsDeviceDestroyCallbackRva),
         function_address(&a2fo_nebula_device_destroy_hook),
         kExpectedFleetOpsDeviceDestroyCallback.size(),
-        kExpectedFleetOpsDeviceDestroyCallback.data(),
-        g_device_destroy_hook);
+        kExpectedFleetOpsDeviceDestroyCallback.data(), &(g_device_destroy_hook));
     if (installed) {
         g_a2fo_nebula_device_destroy_gateway =
             g_device_destroy_hook.gateway;
     }
 
-    installed = installed && a2fo::install_inline_hook(
+    installed = installed && a2fo_rs_windows_hook_install(
         at(g_fleet_ops, kAlphaTransitionRva),
         function_address(&a2fo_nebula_alpha_hook),
-        kExpectedAlphaTransition.size(), kExpectedAlphaTransition.data(),
-        g_alpha_hook);
+        kExpectedAlphaTransition.size(), kExpectedAlphaTransition.data(), &(g_alpha_hook));
     if (installed) g_a2fo_nebula_alpha_gateway = g_alpha_hook.gateway;
 
     if (g_dxvk_backend_active) {
-        installed = installed && a2fo::install_inline_hook(
+        installed = installed && a2fo_rs_windows_hook_install(
             at(g_fleet_ops, kFleetOpsDot3LightDrawRva),
             function_address(&a2fo_nebula_fleetops_dot3_light_draw_hook),
             kExpectedFleetOpsDot3LightDraw.size(),
-            kExpectedFleetOpsDot3LightDraw.data(),
-            g_fleetops_dot3_light_draw_hook);
+            kExpectedFleetOpsDot3LightDraw.data(), &(g_fleetops_dot3_light_draw_hook));
         if (installed) {
             g_a2fo_nebula_fleetops_dot3_light_draw_return =
                 at(g_fleet_ops,
@@ -5334,11 +5409,11 @@ bool install_hooks_early() noexcept {
                        kExpectedFleetOpsDot3LightDraw.size());
         }
 
-        installed = installed && a2fo::install_inline_hook(
+        installed = installed && a2fo_rs_windows_hook_install(
             at(g_fleet_ops, kFleetOpsDot3DrawRva),
             function_address(&a2fo_nebula_fleetops_dot3_draw_hook),
             kExpectedFleetOpsDot3Draw.size(),
-            kExpectedFleetOpsDot3Draw.data(), g_fleetops_dot3_draw_hook);
+            kExpectedFleetOpsDot3Draw.data(), &(g_fleetops_dot3_draw_hook));
         if (installed) {
             g_a2fo_nebula_fleetops_dot3_draw_return =
                 at(g_fleet_ops,
@@ -5347,20 +5422,20 @@ bool install_hooks_early() noexcept {
         }
     }
 
-    installed = installed && a2fo::install_inline_hook(
+    installed = installed && a2fo_rs_windows_hook_install(
         at(g_armada, kStandardMeshPreDrawRva),
         function_address(&a2fo_nebula_standard_pre_hook),
         kExpectedStandardMeshPreDraw.size(),
-        kExpectedStandardMeshPreDraw.data(), g_standard_pre_hook);
+        kExpectedStandardMeshPreDraw.data(), &(g_standard_pre_hook));
     if (installed) {
         g_a2fo_nebula_standard_pre_gateway = g_standard_pre_hook.gateway;
     }
 
-    installed = installed && a2fo::install_inline_hook(
+    installed = installed && a2fo_rs_windows_hook_install(
         at(g_armada, kStandardMeshPostDrawRva),
         function_address(&a2fo_nebula_standard_post_hook),
         kExpectedStandardMeshPostDraw.size(),
-        kExpectedStandardMeshPostDraw.data(), g_standard_post_hook);
+        kExpectedStandardMeshPostDraw.data(), &(g_standard_post_hook));
     if (installed) {
         g_a2fo_nebula_standard_post_gateway = g_standard_post_hook.gateway;
     }
@@ -5369,28 +5444,26 @@ bool install_hooks_early() noexcept {
     // pass-loop hooks for material diagnostics and the optional mask replay;
     // the visible emissive stage is scoped at WorkspaceDirectX8's exact draw
     // below, after Submit has finished changing device state.
-    installed = installed && a2fo::install_inline_hook(
+    installed = installed && a2fo_rs_windows_hook_install(
         at(g_armada, kNonVbPreDrawRva),
         function_address(&a2fo_nebula_nonvb_pre_hook),
-        kExpectedNonVbPreDraw.size(), kExpectedNonVbPreDraw.data(),
-        g_nonvb_pre_hook);
+        kExpectedNonVbPreDraw.size(), kExpectedNonVbPreDraw.data(), &(g_nonvb_pre_hook));
     if (installed) {
         g_a2fo_nebula_nonvb_pre_gateway = g_nonvb_pre_hook.gateway;
     }
-    installed = installed && a2fo::install_inline_hook(
+    installed = installed && a2fo_rs_windows_hook_install(
         at(g_armada, kNonVbPostDrawRva),
         function_address(&a2fo_nebula_nonvb_post_hook),
-        kExpectedNonVbPostDraw.size(), kExpectedNonVbPostDraw.data(),
-        g_nonvb_post_hook);
+        kExpectedNonVbPostDraw.size(), kExpectedNonVbPostDraw.data(), &(g_nonvb_post_hook));
     if (installed) {
         g_a2fo_nebula_nonvb_post_gateway = g_nonvb_post_hook.gateway;
     }
 
-    installed = installed && a2fo::install_inline_hook(
+    installed = installed && a2fo_rs_windows_hook_install(
         at(g_armada, kWorkspaceDx8DrawRva),
         function_address(&a2fo_nebula_workspace_dx8_draw_hook),
         kExpectedWorkspaceDx8Draw.size(),
-        kExpectedWorkspaceDx8Draw.data(), g_workspace_dx8_draw_hook);
+        kExpectedWorkspaceDx8Draw.data(), &(g_workspace_dx8_draw_hook));
     if (installed) {
         g_a2fo_nebula_workspace_dx8_draw_gateway =
             g_workspace_dx8_draw_hook.gateway;
@@ -5408,11 +5481,10 @@ bool install_hooks_early() noexcept {
     // extension emissive/specular work on bumped materials is unavailable on
     // that backend.
     if (g_dxvk_backend_active) {
-        installed = installed && a2fo::install_inline_hook(
+        installed = installed && a2fo_rs_windows_hook_install(
             at(g_armada, kDot3DrawRva),
             function_address(&a2fo_nebula_dot3_draw_hook),
-            kExpectedDot3Draw.size(), kExpectedDot3Draw.data(),
-            g_dot3_draw_hook);
+            kExpectedDot3Draw.size(), kExpectedDot3Draw.data(), &(g_dot3_draw_hook));
         if (installed) {
             g_a2fo_nebula_dot3_draw_gateway = g_dot3_draw_hook.gateway;
             g_a2fo_nebula_dot3_draw_return =
@@ -5424,21 +5496,19 @@ bool install_hooks_early() noexcept {
     }
 
     if (g_native_framebuffer_bloom_enabled) {
-        installed = installed && a2fo::install_inline_hook(
+        installed = installed && a2fo_rs_windows_hook_install(
             at(g_armada, kFrameBeginRva),
             function_address(&a2fo_nebula_frame_begin_hook),
-            kExpectedFrameBegin.size(), kExpectedFrameBegin.data(),
-            g_frame_begin_hook);
+            kExpectedFrameBegin.size(), kExpectedFrameBegin.data(), &(g_frame_begin_hook));
         if (installed) {
             g_a2fo_nebula_frame_begin_gateway =
                 g_frame_begin_hook.gateway;
         }
 
-        installed = installed && a2fo::install_inline_hook(
+        installed = installed && a2fo_rs_windows_hook_install(
             at(g_armada, kFrameBloomRva),
             function_address(&a2fo_nebula_frame_bloom_hook),
-            kExpectedFrameBloom.size(), kExpectedFrameBloom.data(),
-            g_frame_bloom_hook);
+            kExpectedFrameBloom.size(), kExpectedFrameBloom.data(), &(g_frame_bloom_hook));
         if (installed) {
             g_a2fo_nebula_frame_bloom_gateway =
                 g_frame_bloom_hook.gateway;
@@ -5451,11 +5521,10 @@ bool install_hooks_early() noexcept {
 
     // Device ownership and cache invalidation apply to every DX8 backend, not
     // only DXVK's optional framebuffer-bloom path.
-    installed = installed && a2fo::install_inline_hook(
+    installed = installed && a2fo_rs_windows_hook_install(
         at(g_armada, kDeviceResetRva),
         function_address(&a2fo_nebula_device_reset_hook),
-        kExpectedDeviceReset.size(), kExpectedDeviceReset.data(),
-        g_device_reset_hook);
+        kExpectedDeviceReset.size(), kExpectedDeviceReset.data(), &(g_device_reset_hook));
     if (installed) {
         g_a2fo_nebula_device_reset_gateway =
             g_device_reset_hook.gateway;
@@ -5607,6 +5676,113 @@ extern "C" void __cdecl a2fo_nebula_fast_nonbump_light_post() {
     fast_nonbump_light_post_draw();
 }
 
+namespace {
+
+struct M3DFixedDrawState {
+    IDirect3DDevice8* device = nullptr;
+    DWORD pixel_shader = 0;
+    IDirect3DBaseTexture8* textures[2]{};
+    DWORD colour_op[2]{};
+    DWORD colour_arg1[2]{};
+    DWORD colour_arg2[2]{};
+    DWORD alpha_op[2]{};
+    DWORD alpha_arg1[2]{};
+    DWORD alpha_arg2[2]{};
+    bool active = false;
+};
+
+thread_local std::array<M3DFixedDrawState, 8> g_m3d_fixed_draw_stack{};
+thread_local std::size_t g_m3d_fixed_draw_depth = 0;
+thread_local std::size_t g_m3d_fixed_draw_overflow = 0;
+
+IDirect3DBaseTexture8* m3d_mesh_diffuse_device_texture(const void* mesh) noexcept {
+    if (!mesh || !g_armada) return nullptr;
+    const auto* texture_vector = static_cast<const unsigned char*>(mesh) + 0x114;
+    const int count = read_at<int>(texture_vector, 8, 0);
+    const void* data = read_at<const void*>(texture_vector, 0, nullptr);
+    if (count < 1 || !readable_range(data, sizeof(void*))) return nullptr;
+    void* texture = read_at<void*>(data, 0, nullptr);
+    if (!texture) return nullptr;
+    void* renderer = read_at<void*>(at(g_armada, kGraphicsEnginePointerRva), 0, nullptr);
+    const std::uint32_t device_index = read_at<std::uint32_t>(
+        renderer, kCurrentDeviceIndexOffset, kMaximumStormDeviceCount);
+    if (device_index >= kMaximumStormDeviceCount) return nullptr;
+    void* device_texture = read_at<void*>(
+        texture, kStorm3DTextureDeviceArrayOffset + device_index * sizeof(void*),
+        nullptr);
+    return read_at<IDirect3DBaseTexture8*>(
+        device_texture, kStorm3DDeviceTextureNativeOffset, nullptr);
+}
+
+void m3d_fixed_diffuse_pre_draw(IDirect3DDevice8* device) noexcept {
+    if (!g_m3d_active_render_mesh || !device) return;
+    if (g_m3d_fixed_draw_depth >= g_m3d_fixed_draw_stack.size()) {
+        ++g_m3d_fixed_draw_overflow;
+        return;
+    }
+    IDirect3DBaseTexture8* diffuse =
+        m3d_mesh_diffuse_device_texture(g_m3d_active_render_mesh);
+    if (!diffuse) return;
+    M3DFixedDrawState& state =
+        g_m3d_fixed_draw_stack[g_m3d_fixed_draw_depth++];
+    state = M3DFixedDrawState{};
+    state.device = device;
+    device->GetPixelShader(&state.pixel_shader);
+    for (DWORD stage = 0; stage < 2; ++stage) {
+        device->GetTexture(stage, &state.textures[stage]);
+        device->GetTextureStageState(stage, D3DTSS_COLOROP, &state.colour_op[stage]);
+        device->GetTextureStageState(stage, D3DTSS_COLORARG1, &state.colour_arg1[stage]);
+        device->GetTextureStageState(stage, D3DTSS_COLORARG2, &state.colour_arg2[stage]);
+        device->GetTextureStageState(stage, D3DTSS_ALPHAOP, &state.alpha_op[stage]);
+        device->GetTextureStageState(stage, D3DTSS_ALPHAARG1, &state.alpha_arg1[stage]);
+        device->GetTextureStageState(stage, D3DTSS_ALPHAARG2, &state.alpha_arg2[stage]);
+    }
+    device->SetPixelShader(0);
+    device->SetTexture(0, diffuse);
+    device->SetTexture(1, nullptr);
+    device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+    device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+    device->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
+    device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
+    device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+    device->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_DIFFUSE);
+    device->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+    device->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+    state.active = true;
+    if (InterlockedCompareExchange(&g_logged_m3d_fixed_draw, 1, 0) == 0) {
+        log_line("M3D fixed-function diffuse draw active; Fleet Ops DOT3 texture-stage swap bypassed only for registered M3D meshes");
+    }
+}
+
+void m3d_fixed_diffuse_post_draw() noexcept {
+    if (g_m3d_fixed_draw_overflow != 0) {
+        --g_m3d_fixed_draw_overflow;
+        return;
+    }
+    if (g_m3d_fixed_draw_depth == 0) return;
+    M3DFixedDrawState& state =
+        g_m3d_fixed_draw_stack[--g_m3d_fixed_draw_depth];
+    if (!state.active || !state.device) {
+        state = M3DFixedDrawState{};
+        return;
+    }
+    IDirect3DDevice8* device = state.device;
+    device->SetPixelShader(state.pixel_shader);
+    for (DWORD stage = 0; stage < 2; ++stage) {
+        device->SetTexture(stage, state.textures[stage]);
+        device->SetTextureStageState(stage, D3DTSS_COLOROP, state.colour_op[stage]);
+        device->SetTextureStageState(stage, D3DTSS_COLORARG1, state.colour_arg1[stage]);
+        device->SetTextureStageState(stage, D3DTSS_COLORARG2, state.colour_arg2[stage]);
+        device->SetTextureStageState(stage, D3DTSS_ALPHAOP, state.alpha_op[stage]);
+        device->SetTextureStageState(stage, D3DTSS_ALPHAARG1, state.alpha_arg1[stage]);
+        device->SetTextureStageState(stage, D3DTSS_ALPHAARG2, state.alpha_arg2[stage]);
+        if (state.textures[stage]) state.textures[stage]->Release();
+    }
+    state = M3DFixedDrawState{};
+}
+
+}  // namespace
+
 extern "C" void __cdecl a2fo_nebula_fleetops_dot3_draw(
     IDirect3DDevice8* device, UINT vertex_count, UINT primitive_count) {
     if (g_renderer_route_diagnostics_enabled) {
@@ -5623,9 +5799,11 @@ extern "C" void __cdecl a2fo_nebula_fleetops_dot3_draw(
             device, vertex_count, primitive_count);
     }
     fast_nonbump_final_alpha_pre_draw(device);
+    m3d_fixed_diffuse_pre_draw(device);
 }
 
 extern "C" void __cdecl a2fo_nebula_fleetops_dot3_post() {
+    m3d_fixed_diffuse_post_draw();
     fast_nonbump_final_alpha_post_draw();
     dot3_emissive_post_draw();
 }
@@ -5745,7 +5923,16 @@ namespace a2fo {
 #include "renderer_phong_meshvb.inl"
 #include "renderer_cloak_composite.inl"
 #include "renderer_general_meshvb.inl"
+#include "renderer_ingame_shadows.inl"
+#include "renderer_cloak_refraction.inl"
 #include "renderer_transparent_indices.inl"
+
+void initialize_refit_scene_sources() noexcept {
+    if(!a2fo::refit::reserves_graphics_route()||!g_armada)return;
+    install_ingame_shadow_hook(true);
+    a2fo::refit_scene::initialize(g_armada,g_root_directory,log_line);
+    a2fo::refit_scene_test::initialize(g_armada,g_root_directory,log_line);
+}
 
 bool install_nebula_renderer_early(HMODULE armada, HMODULE fleet_ops,
                                    const std::string& root_directory,
@@ -5754,6 +5941,11 @@ bool install_nebula_renderer_early(HMODULE armada, HMODULE fleet_ops,
     g_fleet_ops = fleet_ops;
     g_root_directory = root_directory;
     g_log = log;
+    g_refit_cloak_enabled = false;
+    g_refit_cloak_blocked = false;
+    reset_refit_cloak_scope();
+    InterlockedExchange(&g_refit_cloak_logged, 0);
+    InterlockedExchange(&g_refit_cloak_fallback_logged, 0);
     InterlockedExchange(&g_logged_cloak_flat_normal, 0);
     InterlockedExchange(&g_fast_nonbump_enabled, 0);
     InterlockedExchange(&g_fast_nonbump_shader_rejected, 0);
@@ -5776,6 +5968,27 @@ bool install_nebula_renderer_early(HMODULE armada, HMODULE fleet_ops,
     InterlockedExchange(&g_direct_d3d9_adapter_logged, 0);
     InterlockedExchange(&g_direct_d3d9_dot3_compat_logged, 0);
     InterlockedExchange(&g_direct_d3d9_dot3_native_logged, 0);
+    // The child compatibility renderer implements the game's D3D8 API. The
+    // extension's DXVK-specific bloom/material shader path still needs its
+    // own D3D11 port; do not infer that path from installed wrapper files.
+    if (a2fo::refit::reserves_graphics_route()) {
+        g_dxvk_backend_active = false;
+        g_native_framebuffer_bloom_enabled = false;
+        g_hooks_ready = false;
+        InterlockedExchange(&g_runtime_enabled, 0);
+        InterlockedExchange(&g_activation_state, -1);
+        log_line("Refit native child test: legacy DXVK-only material/draw hooks suspended for this attempt; startup fallback uses base FO rendering; normal-backend restart restores A2FO effects");
+        return true;
+    }
+    if (a2fo::renderer::d3d11_game_test_requested()) {
+        g_dxvk_backend_active = false;
+        g_native_framebuffer_bloom_enabled = false;
+        g_hooks_ready = false;
+        InterlockedExchange(&g_runtime_enabled, 0);
+        InterlockedExchange(&g_activation_state, -1);
+        log_line("Experimental D3D11 child: legacy DXVK-specific material and bloom hooks suspended; normal mods unchanged");
+        return true;
+    }
     g_dxvk_backend_active = load_dxvk_backend_policy();
     if (g_dxvk_backend_payload_detected) {
         log_line(g_dxvk_backend_ini_claimed
@@ -5818,6 +6031,12 @@ bool install_nebula_renderer_early(HMODULE armada, HMODULE fleet_ops,
         return true;
     }
     g_fast_alpha_meshvb_mode = load_fast_alpha_meshvb_policy();
+    g_refit_cloak_enabled = GetPrivateProfileIntA(
+        "Cloak", "RefitPrototype", 0, renderer_ini_path().c_str()) != 0;
+    if (g_refit_cloak_enabled)
+        log_line("Refit cloak prototype build=20261022-activation-audit enabled on managed DXVK; named per-ODF status reporting active");
+    else
+        log_line("Refit cloak prototype build=20261022-activation-audit disabled (Cloak/RefitPrototype=0)");
     install_unmapped_meshvb_policy();
     g_neutral_bump_when_cloaked = load_neutral_bump_cloak_policy();
     log_line(g_neutral_bump_when_cloaked
@@ -5875,10 +6094,17 @@ bool install_nebula_renderer_early(HMODULE armada, HMODULE fleet_ops,
         return false;
     }
     log_line("Early DX8 renderer hooks armed before DOT3 shader creation");
+    install_ingame_shadow_hook();
     return true;
 }
 
 void shutdown_nebula_renderer() noexcept {
+    native11_capture::disable();
+    native11_world_lights::disable();
+    native11_nodes::disable();
+    native11_materials::disable();
+    native11_light_classes::disable();
+    native11_world_pipeline::shutdown();
     InterlockedExchange(&g_fast_nonbump_enabled, 0);
     g_faction_texture_suffixes.clear();
     g_faction_texture_suffixes.insert("_b");
@@ -5944,18 +6170,21 @@ bool register_nebula_faction_texture_suffix(const char* suffix) noexcept {
     if (!suffix) return false;
     try {
         std::string normalized;
-        for (const char* cursor = suffix; *cursor; ++cursor) {
-            const unsigned char value =
-                static_cast<unsigned char>(*cursor);
-            if (normalized.size() >= 32 ||
-                (!std::isalnum(value) && *cursor != '_' && *cursor != '-')) {
-                return false;
-            }
-            normalized.push_back(static_cast<char>(std::tolower(value)));
-        }
-        if (normalized.empty()) return false;
-        g_faction_texture_suffixes.insert(std::move(normalized));
-        return true;
+        struct Context {const char* source;std::string& normalized;std::exception_ptr error{};};
+        Context context{suffix,normalized,{}};
+        const auto step=+[](void* opaque,std::uint32_t operation,std::uintptr_t arg) noexcept -> std::uintptr_t {
+            auto& c=*static_cast<Context*>(opaque);
+            try {switch(operation){
+            case 0:return static_cast<unsigned char>(c.source[arg]);
+            case 1:return std::isalnum(static_cast<unsigned char>(arg))!=0;
+            case 2:c.normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(arg))));return 0;
+            case 3:g_faction_texture_suffixes.insert(std::move(c.normalized));return 0;
+            default:return 0;
+            }}catch(...){c.error=std::current_exception();return UINTPTR_MAX;}
+        };
+        const bool result=a2fo_rs_stage10_core_render_flow(7,&context,step,0)!=0;
+        if(context.error){auto error=std::exchange(context.error,std::exception_ptr{});std::rethrow_exception(error);}
+        return result;
     } catch (...) {
         return false;
     }
@@ -6167,6 +6396,11 @@ bool register_logo_decal_class(
 }
 
 void nebula_begin_craft_render(void* craft) noexcept {
+    reset_refit_cloak_scope();
+    if (g_refit_cloak_enabled) {
+        const RefitCloakLock lock;
+        report_refit_cloak_ship(craft, 0, "seen", "engine-submitted hull; awaiting draw route");
+    }
     if (g_craft_render_depth < g_craft_render_stack.size()) {
         g_craft_render_stack[g_craft_render_depth++] = craft;
     } else {
@@ -6201,6 +6435,7 @@ void nebula_begin_craft_render(void* craft) noexcept {
 }
 
 void nebula_end_craft_render(void* craft) noexcept {
+    reset_refit_cloak_scope();
     render_logo_decals(craft);
     render_damage_decals(craft);
     if (g_craft_render_overflow != 0) {
@@ -6214,6 +6449,17 @@ void nebula_end_craft_render(void* craft) noexcept {
 }
 
 }  // namespace a2fo
+
+extern "C" __declspec(dllexport)
+void __cdecl A2FO_NebulaRegisterM3DMesh(void* mesh) {
+    if (mesh) g_m3d_runtime_meshes.insert(mesh);
+}
+
+extern "C" __declspec(dllexport)
+void __cdecl A2FO_NebulaClearM3DMeshes() {
+    g_m3d_runtime_meshes.clear();
+    g_m3d_active_render_mesh = nullptr;
+}
 
 extern "C" __declspec(dllexport)
 int __cdecl A2FO_NebulaRendererStatus() {

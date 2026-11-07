@@ -1,5 +1,9 @@
 # A2FONormalWeaponTech
 
+This feature is now built into `A2FOExtensions.dll`. Keep using `A2FONormalWeaponTech`
+in the Modules menu and `info.ini`; its standalone DLL is unnecessary and is
+ignored by the new core. See [built-in module behaviour](../../docs/builtin-modules-stage1.md).
+
 `A2FONormalWeaponTech.dll` makes ordinary weapons obey the owning team's
 active Fleet Operations technology tree.
 

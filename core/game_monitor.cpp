@@ -1,236 +1,38 @@
-/*
- * File: core/game_monitor.cpp
- * Module: A2FOHookExtensions (main-hook)
- * Purpose: Win32 monitor discovery, persistence, and position-only placement.
- */
-
+// Win32 structure/call adapters; enumeration and placement policy is Rust.
 #include "game_monitor.hpp"
-
-#include <algorithm>
+#include "../rust/monitor_ffi.h"
 #include <cstring>
-#include <utility>
-
-namespace a2fo {
-namespace {
-
-constexpr char kDisplaySection[] = "Display";
-constexpr char kGameMonitorKey[] = "GameMonitorDevice";
-constexpr char kUnsetMonitor[] = "<A2FO-unset>";
-
-std::string join_path(const std::string& left, const std::string& right) {
-    if (left.empty()) return right;
-    if (right.empty()) return left;
-    if (left.back() == '\\' || left.back() == '/') return left + right;
-    return left + "\\" + right;
+#include <exception>
+namespace a2fo { namespace {
+struct Context{std::vector<GameMonitorDescriptor>* monitors{};std::string* value{};std::exception_ptr failure;};
+void info(A2foRsMonitor& o,HMONITOR h,const MONITORINFOEXA& i){o.handle=reinterpret_cast<uintptr_t>(h);std::memcpy(o.name,i.szDevice,sizeof(i.szDevice));o.flags=i.dwFlags;o.left=i.rcMonitor.left;o.top=i.rcMonitor.top;o.width=i.rcMonitor.right-i.rcMonitor.left;o.height=i.rcMonitor.bottom-i.rcMonitor.top;o.work_left=i.rcWork.left;o.work_top=i.rcWork.top;o.work_right=i.rcWork.right;o.work_bottom=i.rcWork.bottom;}
+int32_t action(void* p,uint32_t op,uintptr_t a,uintptr_t b,A2foRsMonitor* out,const char* s,const char* t){auto& c=*static_cast<Context*>(p);try{switch(op){
+case 0:return c.failure?1:0;
+case 1:case 2:{DISPLAY_DEVICEA d{};d.cb=sizeof(d);if(!EnumDisplayDevicesA(op==1?nullptr:s,static_cast<DWORD>(a),&d,0))return 0;std::memcpy(out->name,d.DeviceName,sizeof(d.DeviceName));std::memcpy(out->label,d.DeviceString,sizeof(d.DeviceString));out->flags=d.StateFlags;return 1;}
+case 3:{MONITORINFOEXA i{};i.cbSize=sizeof(i);if(!GetMonitorInfoA(reinterpret_cast<HMONITOR>(a),&i))return 0;info(*out,reinterpret_cast<HMONITOR>(a),i);return 1;}
+case 4:{DEVMODEA m{};m.dmSize=sizeof(m);if(!EnumDisplaySettingsExA(s,ENUM_CURRENT_SETTINGS,&m,0))return 0;out->left=m.dmPosition.x;out->top=m.dmPosition.y;out->width=static_cast<int>(m.dmPelsWidth);out->height=static_cast<int>(m.dmPelsHeight);return 1;}
+case 5:{GameMonitorDescriptor m;m.device_name=out->name;m.friendly_name=out->label;m.adapter_index=out->index;m.left=out->left;m.top=out->top;m.width=out->width;m.height=out->height;m.primary=out->flags!=0;c.monitors->push_back(std::move(m));return 1;}
+case 6:{char value[128]{};GetPrivateProfileStringA("Display","GameMonitorDevice","<A2FO-unset>",value,sizeof(value),s);std::memcpy(out->name,value,sizeof(value));return 1;}
+case 7:*c.value=s;return 1;
+case 8:return WritePrivateProfileStringA("Display","GameMonitorDevice",t,s)!=FALSE;
+case 9:return IsWindow(reinterpret_cast<HWND>(a))!=FALSE;
+case 10:{RECT q{};if(!GetWindowRect(reinterpret_cast<HWND>(a),&q))return 0;out->left=q.left;out->top=q.top;out->width=q.right-q.left;out->height=q.bottom-q.top;return 1;}
+case 11:out->flags=(GetWindowLongPtrA(reinterpret_cast<HWND>(a),GWL_STYLE)&(WS_CAPTION|WS_THICKFRAME))!=0;return 1;
+case 12:return SetWindowPos(reinterpret_cast<HWND>(a),nullptr,out->left,out->top,0,0,SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOOWNERZORDER|SWP_NOZORDER)!=FALSE;
+case 13:return MonitorFromWindow(reinterpret_cast<HWND>(a),MONITOR_DEFAULTTONULL)==reinterpret_cast<HMONITOR>(b);
+case 14:return _stricmp(s,t)==0;
+}}catch(...){c.failure=std::current_exception();}return 0;}
+struct Visit{A2foRsMonitorVisit callback;void* context;};
+BOOL CALLBACK visit(HMONITOR h,HDC,LPRECT,LPARAM p){auto& v=*reinterpret_cast<Visit*>(p);return v.callback(v.context,reinterpret_cast<uintptr_t>(h));}
+void enumerate(void*,A2foRsMonitorVisit callback,void* context){Visit v{callback,context};EnumDisplayMonitors(nullptr,nullptr,visit,reinterpret_cast<LPARAM>(&v));}
+A2foRsMonitorApi bridge(Context& c){return {&c,action,enumerate};}
+const uint8_t* data(const std::string& s){return reinterpret_cast<const uint8_t*>(s.data());}
+void checked(Context& c){if(c.failure)std::rethrow_exception(c.failure);}
 }
-
-std::string renderer_ini_path(const std::string& data_root) {
-    return join_path(data_root, "A2FORenderer.ini");
+std::vector<GameMonitorDescriptor> enumerate_game_monitors(){std::vector<GameMonitorDescriptor> out;Context c;c.monitors=&out;const auto a=bridge(c);a2fo_rs_monitor_list(&a);checked(c);return out;}
+bool read_configured_game_monitor(const std::string& root,std::string& value){value.clear();Context c;c.value=&value;const auto a=bridge(c);const bool ok=a2fo_rs_monitor_read(&a,data(root),root.size())!=0;checked(c);return ok;}
+bool write_configured_game_monitor(const std::string& root,const std::string& name){Context c;const auto a=bridge(c);return a2fo_rs_monitor_write(&a,data(root),root.size(),data(name),name.size())!=0;}
+GameMonitorResolution resolve_configured_game_monitor(const std::string& root,const std::vector<GameMonitorDescriptor>& monitors,int fallback,std::string* configured){std::string name;read_configured_game_monitor(root,name);if(configured)*configured=name;return resolve_game_monitor(monitors,name,fallback);}
+bool position_window_on_game_monitor(HWND window,const GameMonitorDescriptor& monitor){Context c;const auto a=bridge(c);return a2fo_rs_monitor_window(&a,reinterpret_cast<uintptr_t>(window),data(monitor.device_name),monitor.device_name.size(),0)!=0;}
+bool is_window_on_game_monitor(HWND window,const GameMonitorDescriptor& monitor){Context c;const auto a=bridge(c);return a2fo_rs_monitor_window(&a,reinterpret_cast<uintptr_t>(window),data(monitor.device_name),monitor.device_name.size(),1)!=0;}
 }
-
-struct MonitorInfoSearch {
-    std::string device_name;
-    HMONITOR handle = nullptr;
-    MONITORINFOEXA info{};
-};
-
-BOOL CALLBACK find_monitor_info(HMONITOR handle, HDC, LPRECT,
-                                LPARAM parameter) {
-    auto* search = reinterpret_cast<MonitorInfoSearch*>(parameter);
-    if (!search) return FALSE;
-    MONITORINFOEXA info{};
-    info.cbSize = sizeof(info);
-    if (!GetMonitorInfoA(handle, &info)) return TRUE;
-    if (_stricmp(info.szDevice, search->device_name.c_str()) != 0) {
-        return TRUE;
-    }
-    search->handle = handle;
-    search->info = info;
-    return FALSE;
-}
-
-bool get_monitor_info(const std::string& device_name,
-                      HMONITOR& handle, MONITORINFOEXA& info) {
-    MonitorInfoSearch search;
-    search.device_name = device_name;
-    EnumDisplayMonitors(nullptr, nullptr, find_monitor_info,
-                        reinterpret_cast<LPARAM>(&search));
-    if (!search.handle) return false;
-    handle = search.handle;
-    info = search.info;
-    return true;
-}
-
-std::string friendly_monitor_name(const DISPLAY_DEVICEA& adapter) {
-    DISPLAY_DEVICEA monitor{};
-    monitor.cb = sizeof(monitor);
-    for (DWORD index = 0;
-         EnumDisplayDevicesA(adapter.DeviceName, index, &monitor, 0);
-         ++index) {
-        if (monitor.DeviceString[0] != '\0' &&
-            (monitor.StateFlags & DISPLAY_DEVICE_MIRRORING_DRIVER) == 0) {
-            return monitor.DeviceString;
-        }
-        monitor = DISPLAY_DEVICEA{};
-        monitor.cb = sizeof(monitor);
-    }
-    return adapter.DeviceString;
-}
-
-BOOL CALLBACK collect_monitor_fallback(HMONITOR handle, HDC, LPRECT,
-                                       LPARAM parameter) {
-    auto* monitors = reinterpret_cast<std::vector<GameMonitorDescriptor>*>(
-        parameter);
-    if (!monitors) return FALSE;
-    MONITORINFOEXA info{};
-    info.cbSize = sizeof(info);
-    if (!GetMonitorInfoA(handle, &info)) return TRUE;
-
-    GameMonitorDescriptor monitor;
-    monitor.device_name = info.szDevice;
-    monitor.friendly_name = info.szDevice;
-    monitor.adapter_index = static_cast<int>(monitors->size());
-    monitor.left = info.rcMonitor.left;
-    monitor.top = info.rcMonitor.top;
-    monitor.width = info.rcMonitor.right - info.rcMonitor.left;
-    monitor.height = info.rcMonitor.bottom - info.rcMonitor.top;
-    monitor.primary = (info.dwFlags & MONITORINFOF_PRIMARY) != 0;
-    monitors->push_back(std::move(monitor));
-    return TRUE;
-}
-
-}  // namespace
-
-std::vector<GameMonitorDescriptor> enumerate_game_monitors() {
-    std::vector<GameMonitorDescriptor> monitors;
-    int adapter_index = 0;
-    for (DWORD device_index = 0; device_index < 64; ++device_index) {
-        DISPLAY_DEVICEA adapter{};
-        adapter.cb = sizeof(adapter);
-        if (!EnumDisplayDevicesA(nullptr, device_index, &adapter, 0)) break;
-        if ((adapter.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) == 0 ||
-            (adapter.StateFlags & DISPLAY_DEVICE_MIRRORING_DRIVER) != 0 ||
-            adapter.DeviceName[0] == '\0') {
-            continue;
-        }
-
-        GameMonitorDescriptor monitor;
-        monitor.device_name = adapter.DeviceName;
-        monitor.friendly_name = friendly_monitor_name(adapter);
-        monitor.adapter_index = adapter_index++;
-        monitor.primary =
-            (adapter.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE) != 0;
-
-        HMONITOR handle = nullptr;
-        MONITORINFOEXA info{};
-        if (get_monitor_info(monitor.device_name, handle, info)) {
-            monitor.left = info.rcMonitor.left;
-            monitor.top = info.rcMonitor.top;
-            monitor.width = info.rcMonitor.right - info.rcMonitor.left;
-            monitor.height = info.rcMonitor.bottom - info.rcMonitor.top;
-            monitor.primary = monitor.primary ||
-                (info.dwFlags & MONITORINFOF_PRIMARY) != 0;
-        } else {
-            DEVMODEA mode{};
-            mode.dmSize = sizeof(mode);
-            if (EnumDisplaySettingsExA(
-                    monitor.device_name.c_str(), ENUM_CURRENT_SETTINGS,
-                    &mode, 0)) {
-                monitor.left = mode.dmPosition.x;
-                monitor.top = mode.dmPosition.y;
-                monitor.width = static_cast<int>(mode.dmPelsWidth);
-                monitor.height = static_cast<int>(mode.dmPelsHeight);
-            }
-        }
-        monitors.push_back(std::move(monitor));
-    }
-
-    // Wine and unusual virtual-display drivers can expose monitors without
-    // useful EnumDisplayDevices flags. Retain a conservative Win32 fallback.
-    if (monitors.empty()) {
-        EnumDisplayMonitors(
-            nullptr, nullptr, collect_monitor_fallback,
-            reinterpret_cast<LPARAM>(&monitors));
-    }
-    return monitors;
-}
-
-bool read_configured_game_monitor(
-    const std::string& data_root, std::string& device_name) {
-    device_name.clear();
-    if (data_root.empty()) return false;
-    char value[128]{};
-    GetPrivateProfileStringA(
-        kDisplaySection, kGameMonitorKey, kUnsetMonitor,
-        value, sizeof(value), renderer_ini_path(data_root).c_str());
-    if (std::strcmp(value, kUnsetMonitor) == 0 || value[0] == '\0') {
-        return false;
-    }
-    device_name = value;
-    return true;
-}
-
-bool write_configured_game_monitor(
-    const std::string& data_root, const std::string& device_name) {
-    if (data_root.empty() || device_name.empty()) return false;
-    return WritePrivateProfileStringA(
-               kDisplaySection, kGameMonitorKey, device_name.c_str(),
-               renderer_ini_path(data_root).c_str()) != FALSE;
-}
-
-GameMonitorResolution resolve_configured_game_monitor(
-    const std::string& data_root,
-    const std::vector<GameMonitorDescriptor>& monitors,
-    int native_adapter_fallback,
-    std::string* configured_device) {
-    std::string device_name;
-    read_configured_game_monitor(data_root, device_name);
-    if (configured_device) *configured_device = device_name;
-    return resolve_game_monitor(
-        monitors, device_name, native_adapter_fallback);
-}
-
-bool position_window_on_game_monitor(
-    HWND window, const GameMonitorDescriptor& monitor) {
-    if (!window || !IsWindow(window)) return false;
-
-    HMONITOR handle = nullptr;
-    MONITORINFOEXA info{};
-    if (!get_monitor_info(monitor.device_name, handle, info)) return false;
-
-    RECT window_rect{};
-    if (!GetWindowRect(window, &window_rect)) return false;
-    const int width = window_rect.right - window_rect.left;
-    const int height = window_rect.bottom - window_rect.top;
-    if (width <= 0 || height <= 0) return false;
-
-    const LONG_PTR style = GetWindowLongPtrA(window, GWL_STYLE);
-    const bool framed = (style & (WS_CAPTION | WS_THICKFRAME)) != 0;
-    const RECT& target = framed ? info.rcWork : info.rcMonitor;
-    int left = target.left;
-    int top = target.top;
-    if (framed) {
-        const int horizontal_space =
-            static_cast<int>(target.right - target.left) - width;
-        const int vertical_space =
-            static_cast<int>(target.bottom - target.top) - height;
-        left += std::max(0, horizontal_space / 2);
-        top += std::max(0, vertical_space / 2);
-    }
-
-    return SetWindowPos(
-               window, nullptr, left, top, 0, 0,
-               SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOOWNERZORDER |
-                   SWP_NOZORDER) != FALSE;
-}
-
-bool is_window_on_game_monitor(
-    HWND window, const GameMonitorDescriptor& monitor) {
-    if (!window || !IsWindow(window)) return false;
-    HMONITOR target = nullptr;
-    MONITORINFOEXA info{};
-    if (!get_monitor_info(monitor.device_name, target, info)) return false;
-    return MonitorFromWindow(window, MONITOR_DEFAULTTONULL) == target;
-}
-
-}  // namespace a2fo

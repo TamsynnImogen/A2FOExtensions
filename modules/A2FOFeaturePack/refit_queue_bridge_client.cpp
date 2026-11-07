@@ -1,86 +1,57 @@
-/*
- * RefitYards callback registration and fail-open dispatch wrappers. The
- * FeaturePack remains the sole owner of Producer and synchronized-command
- * hooks; the optional refit module owns policy and per-Craft state.
- */
-
+// Native callback ABI adapter; Rust owns validation, publication and dispatch.
 #include "refit_queue_bridge_client.hpp"
-
 #include "refit_queue_bridge_api.hpp"
-
+#include "../../rust/queue_bridges_ffi.h"
 #include <windows.h>
-
+#include <array>
 #include <cstring>
-
 namespace {
-
-A2FO_RefitQueueBridge g_bridge{};
-volatile LONG g_bridge_ready = 0;
-
-bool valid_bridge(const A2FO_RefitQueueBridge* bridge) noexcept {
-    return bridge && bridge->version == A2FO_REFIT_QUEUE_BRIDGE_VERSION &&
-        bridge->struct_size >= sizeof(A2FO_RefitQueueBridge) &&
-        bridge->consume_synchronized_command &&
-        bridge->cancel_synchronized_command && bridge->has_waiting_job &&
-        bridge->job_finished && bridge->job_removed;
+template<class T> std::uintptr_t address(T callback) noexcept {
+    static_assert(sizeof(callback) == sizeof(std::uintptr_t));
+    std::uintptr_t out{}; std::memcpy(&out, &callback, sizeof(out)); return out;
 }
-
-const A2FO_RefitQueueBridge* bridge() noexcept {
-    return InterlockedCompareExchange(&g_bridge_ready, 0, 0) != 0
-        ? &g_bridge : nullptr;
+template<class T> T function(std::uintptr_t value) noexcept {
+    static_assert(sizeof(T) == sizeof(value));
+    T out{}; std::memcpy(&out, &value, sizeof(out)); return out;
 }
-
-}  // namespace
-
-extern "C" __declspec(dllexport)
-bool __cdecl A2FO_RegisterRefitQueueBridge(
-    const A2FO_RefitQueueBridge* value) {
-    if (!valid_bridge(value) ||
-        InterlockedCompareExchange(&g_bridge_ready, 0, 0) != 0) {
-        return false;
+std::uintptr_t invoke(std::uintptr_t callback, std::uint32_t op, void* source,
+    void* target, void* result, std::uint32_t queue, std::uint32_t value) noexcept {
+    (void)source; (void)target; (void)result; (void)queue; (void)value;
+    switch(op) {
+    case 0: return function<decltype(A2FO_RefitQueueBridge::consume_synchronized_command)>(callback)(source, target);
+    case 1: return function<decltype(A2FO_RefitQueueBridge::cancel_synchronized_command)>(callback)(source);
+    case 2: return function<decltype(A2FO_RefitQueueBridge::has_waiting_job)>(callback)(source);
+    case 3: function<decltype(A2FO_RefitQueueBridge::job_finished)>(callback)(source, queue, target, result); return 0;
+    case 4: function<decltype(A2FO_RefitQueueBridge::job_removed)>(callback)(source, queue, target, value); return 0;
+    default: return 0;
     }
-    std::memcpy(&g_bridge, value, sizeof(g_bridge));
-    InterlockedExchange(&g_bridge_ready, 1);
-    return true;
 }
-
+}
+extern "C" __declspec(dllexport) bool __cdecl A2FO_RegisterRefitQueueBridge(const A2FO_RefitQueueBridge* value) {
+    if (!value || !a2fo_rs_queue_bridge_valid_header(0, value->version, value->struct_size)) return false;
+    const std::array<std::uintptr_t,5> callbacks{{
+        address(value->consume_synchronized_command),
+        address(value->cancel_synchronized_command),
+        address(value->has_waiting_job),
+        address(value->job_finished),
+        address(value->job_removed)
+    }};
+    return a2fo_rs_queue_bridge_register(0,value->version,value->struct_size,callbacks.data()) != 0;
+}
 namespace a2fo {
-
-bool consume_refit_synchronized_command(
-    void* source, void* target_class) noexcept {
-    const auto* callbacks = bridge();
-    return callbacks && callbacks->consume_synchronized_command(
-        source, target_class);
+bool consume_refit_synchronized_command(void* source, void* target_class) noexcept {
+    return a2fo_rs_queue_bridge_dispatch(0,0,&invoke,source,target_class,nullptr,0,0) != 0;
 }
-
 bool cancel_refit_synchronized_command(void* source) noexcept {
-    const auto* callbacks = bridge();
-    return callbacks && callbacks->cancel_synchronized_command(source);
+    return a2fo_rs_queue_bridge_dispatch(0,1,&invoke,source,nullptr,nullptr,0,0) != 0;
 }
-
 bool refit_has_waiting_job(void* producer) noexcept {
-    const auto* callbacks = bridge();
-    return callbacks && callbacks->has_waiting_job(producer);
+    return a2fo_rs_queue_bridge_dispatch(0,2,&invoke,producer,nullptr,nullptr,0,0) != 0;
 }
-
-void notify_refit_job_finished(
-    void* producer, std::uint32_t queue_id,
-    void* target_class, void* result) noexcept {
-    const auto* callbacks = bridge();
-    if (callbacks) {
-        callbacks->job_finished(
-            producer, queue_id, target_class, result);
-    }
+void notify_refit_job_finished(void* producer, std::uint32_t queue_id, void* target_class, void* result) noexcept {
+    a2fo_rs_queue_bridge_dispatch(0,3,&invoke,producer,target_class,result,queue_id,0);
 }
-
-void notify_refit_job_removed(
-    void* producer, std::uint32_t queue_id, void* target_class,
-    std::uint32_t removal_kind) noexcept {
-    const auto* callbacks = bridge();
-    if (callbacks) {
-        callbacks->job_removed(
-            producer, queue_id, target_class, removal_kind);
-    }
+void notify_refit_job_removed(void* producer, std::uint32_t queue_id, void* target_class, std::uint32_t removal_kind) noexcept {
+    a2fo_rs_queue_bridge_dispatch(0,4,&invoke,producer,target_class,nullptr,queue_id,removal_kind);
 }
-
-}  // namespace a2fo
+}

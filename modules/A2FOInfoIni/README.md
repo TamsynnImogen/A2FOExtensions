@@ -1,15 +1,19 @@
-# A2FOInfoIni native module
+# A2FOInfoIni
 
-`A2FOInfoIni.dll` owns the optional Fleet Ops `[mod]` defaults previously
-embedded in the core hook DLL:
+This feature is built into `A2FOExtensions.dll`. Keep using `A2FOInfoIni` in
+the Modules menu and `info.ini`; its standalone DLL remains available for
+compatibility testing and is not a release dependency. See
+[built-in module behaviour](../../docs/builtin-modules-stage2.md).
+
+`A2FOInfoIni` supplies the optional Fleet Ops `[mod]` defaults:
 
 - `SettingsDirectory`
 - `DefaultGameSpeed`
 
-The core retains only the timing-critical, signature-checked dispatch hooks.
-It waits for deferred module registration before the first settings lookup and
-then copies values supplied by this module. Removing this DLL therefore keeps
-Fleet Ops' native settings paths and game-speed defaults unchanged.
+When enabled, the provider supplies these values to the core's existing
+settings and game-speed dispatch hooks. When disabled, it returns no defaults,
+so native behavior applies to future lookups. Settings, profile speeds, or
+paths already loaded are not undone; the timing-critical hooks remain installed.
 
 Data-level `SettingsDirectory` remains the shared root for a selected mod's
 bare directory name. The active mod's `info.ini` supplies its own defaults;

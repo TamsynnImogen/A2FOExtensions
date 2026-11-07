@@ -118,3 +118,14 @@ craft and retries once on that replacement's first `SIMULATE_POST`. This keeps
 final-suffix auxiliary maps such as `ship_emissive_warp_b` and
 `ship_specular_b` available after an ODF swap without changing the normal
 startup registration path.
+
+## Built-in availability
+
+`A2FOExtensions.dll` provides this feature under the original
+`A2FOODFVariants` selection name, with independent menu policy. Race, base-ODF,
+and last-variant metadata remain available while inactive; activation changes
+drop pending renderer refresh work while cleanup and post-load handling
+continue. Swaps occur on future active simulations, and first observation uses
+the canonical base to avoid suffix stacking. The standalone SDK target remains
+available, but normal releases do not require its DLL and stale copies are
+ignored during discovery.

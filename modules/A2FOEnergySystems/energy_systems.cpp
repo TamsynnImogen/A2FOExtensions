@@ -1,82 +1,34 @@
+// Value adapters for the Rust store policy; engine hooks remain in module.cpp.
 #include "energy_systems.hpp"
-
-#include <algorithm>
-#include <cmath>
+#include "../../rust/energy_ffi.h"
 
 namespace a2fo::energy_systems {
-
+namespace {
+A2foEnergyPolicy view(const StorePolicy& p) noexcept {
+    return {p.maximum, p.recharge_per_second, static_cast<std::uint32_t>(p.mode)};
+}
+}
 StorePolicy normalize_policy(StorePolicy policy) noexcept {
-    if (!std::isfinite(policy.maximum) || policy.maximum < 0.0f) {
-        policy.maximum = 0.0f;
-    }
-    if (!std::isfinite(policy.recharge_per_second) ||
-        policy.recharge_per_second < 0.0f) {
-        policy.recharge_per_second = 0.0f;
-    }
-    if (policy.mode != RechargeMode::none &&
-        policy.mode != RechargeMode::automatic &&
-        policy.mode != RechargeMode::resupply_only) {
-        policy.mode = RechargeMode::automatic;
-    }
-    return policy;
+    const auto input = view(policy);
+    A2foEnergyPolicy result{};
+    a2fo_rs_energy_normalize(&input, &result);
+    return {result.maximum, result.recharge_per_second, static_cast<RechargeMode>(result.mode)};
 }
-
 bool store_enabled(const StorePolicy& policy) noexcept {
-    return std::isfinite(policy.maximum) && policy.maximum > 0.0f;
+    const auto p = view(policy); return a2fo_rs_energy_enabled(&p) != 0;
 }
-
 bool requires_resupply(const StorePolicy& policy) noexcept {
-    return store_enabled(policy) &&
-        policy.mode == RechargeMode::resupply_only;
+    const auto p = view(policy); return a2fo_rs_energy_requires_resupply(&p) != 0;
 }
-
-float clamp_amount(float amount, const StorePolicy& unnormalized) noexcept {
-    const StorePolicy policy = normalize_policy(unnormalized);
-    if (!std::isfinite(amount)) return 0.0f;
-    return std::clamp(amount, 0.0f, policy.maximum);
+float clamp_amount(float amount, const StorePolicy& policy) noexcept {
+    const auto p = view(policy); return a2fo_rs_energy_clamp(amount, &p);
 }
-
-bool can_consume(float amount, float cost) noexcept {
-    if (!std::isfinite(amount) || !std::isfinite(cost) || cost < 0.0f) {
-        return false;
-    }
-    return amount + 0.0001f >= cost;
+bool can_consume(float amount, float cost) noexcept { return a2fo_rs_energy_can_consume(amount, cost) != 0; }
+float consume(float amount, float cost) noexcept { return a2fo_rs_energy_consume(amount, cost); }
+float recharge(float amount, const StorePolicy& policy, float elapsed, bool in_range) noexcept {
+    const auto p = view(policy); return a2fo_rs_energy_recharge(amount, &p, elapsed, in_range);
 }
-
-float consume(float amount, float cost) noexcept {
-    if (!std::isfinite(amount)) return 0.0f;
-    if (!can_consume(amount, cost)) return std::max(0.0f, amount);
-    return std::max(0.0f, amount - cost);
+float reload_seconds(float amount, const StorePolicy& policy, bool in_range) noexcept {
+    const auto p = view(policy); return a2fo_rs_energy_reload(amount, &p, in_range);
 }
-
-float recharge(float amount, const StorePolicy& unnormalized,
-               float elapsed_seconds, bool in_resupply_range) noexcept {
-    const StorePolicy policy = normalize_policy(unnormalized);
-    amount = clamp_amount(amount, policy);
-    if (!std::isfinite(elapsed_seconds) || elapsed_seconds <= 0.0f ||
-        policy.recharge_per_second <= 0.0f ||
-        policy.mode == RechargeMode::none ||
-        (policy.mode == RechargeMode::resupply_only &&
-         !in_resupply_range)) {
-        return amount;
-    }
-    return std::min(
-        policy.maximum,
-        amount + policy.recharge_per_second * elapsed_seconds);
-}
-
-float reload_seconds(float amount, const StorePolicy& unnormalized,
-                     bool in_resupply_range) noexcept {
-    const StorePolicy policy = normalize_policy(unnormalized);
-    amount = clamp_amount(amount, policy);
-    if (amount + 0.0001f >= policy.maximum) return 0.0f;
-    if (policy.recharge_per_second <= 0.0f ||
-        policy.mode == RechargeMode::none ||
-        (policy.mode == RechargeMode::resupply_only &&
-         !in_resupply_range)) {
-        return -1.0f;
-    }
-    return (policy.maximum - amount) / policy.recharge_per_second;
-}
-
-}  // namespace a2fo::energy_systems
+} // namespace a2fo::energy_systems

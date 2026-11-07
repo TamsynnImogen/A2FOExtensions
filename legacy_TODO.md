@@ -16,6 +16,35 @@ Every simulation-affecting addition must be deterministic in multiplayer,
 survive save/load, validate inherited ODF values, and remain inactive for mods
 which do not use it.
 
+## Static ODF comparison — 2026-09-30
+
+The supplied STL ODFs have been compared with the STA1 Classic Mod, STA2 Classic
+Mod and Fleet Ops 4.0 ODF trees, with the shared `Data/odf` tree reported
+separately. Start at the [audit report](docs/stl-odf-audit-2026-09-30/README.md).
+It provides a complete command matrix, candidate commands with file/line and
+value provenance, commented definitions, class-label differences, source
+hashes, parser anomalies, and verified packed-archive coverage.
+
+This completes the **static corpus inventory** only. Local A2FO test commands
+are identified as research pointers; absence from the baseline files does not
+establish that a command is unsupported. The parser/consumer and runtime
+compatibility matrix below remains open.
+
+## Initial command meanings — 2026-09-30
+
+The cleaned STL corpus now has an [intended-meaning reference](docs/stl-odf-semantics-2026-09-30/README.md)
+covering all 538 current keys retained in the user-edited candidate list,
+grouped into 413 families. It records 213 families described by authored ODF
+comments, 191 inferred from usage, and nine unresolved. Each entry carries
+file/line evidence, value examples, confidence, uncertainty and a next research
+step. The original comparison remains available; the new reference includes a
+fresh input audit after removal of the A2FO extension entries.
+
+* [x] Complete the initial intended-meaning pass for the retained current scope.
+* [ ] Recover parser/consumer behaviour, units, formulas and live effects for
+  selected features before implementation. Comment evidence and executable
+  strings do not establish runtime support.
+
 ## Current Decisions
 
 * [x] Defer native M3D and SOL support. Their likely benefit does not currently

@@ -198,35 +198,34 @@ extern "C" void release_cloak_composite_shaders(IDirect3DDevice8* device) noexce
 
 extern "C" bool prepare_cloak_composite(void* material) noexcept {
     clear_cloak_composite_selection();
-    if (!a2fo_nebula_general_mesh_enabled()) return true;
-    if (!g_device || g_cloak_composite_rejected || !material) return false;
-    const void* sentinel = read_at<const void*>(phong_engine(), 0x60, nullptr);
-    if (!readable_range(sentinel, 12)) return false;
-    const void* node = read_at<const void*>(sentinel, 0, nullptr);
-    std::size_t lights = 0;
-    while (node != sentinel) {
-        if (!readable_range(node, 12) || lights == kCloakCompositeLights) {
-            if (InterlockedCompareExchange(&g_cloak_composite_fallback_logged, 1, 0) == 0)
-                log_line("General compositor unavailable: invalid light list or more than eight scene lights; native route retained");
-            return false;
+    struct Context {void* material;const void* sentinel=nullptr;const void* node=nullptr;DWORD shader=0;};
+    Context context{material};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t count) noexcept -> std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(op){
+        case 0:return a2fo_nebula_general_mesh_enabled();
+        case 1:return g_device!=nullptr;
+        case 2:return g_cloak_composite_rejected;
+        case 3:return c.material!=nullptr;
+        case 4:c.sentinel=read_at<const void*>(phong_engine(),0x60,nullptr);return 0;
+        case 5:return readable_range(c.sentinel,12);
+        case 6:c.node=read_at<const void*>(c.sentinel,0,nullptr);return 0;
+        case 7:return c.node!=c.sentinel;
+        case 8:return readable_range(c.node,12);
+        case 9:{if(InterlockedCompareExchange(&g_cloak_composite_fallback_logged,1,0)==0) {
+            log_line("General compositor unavailable: invalid light list or more than eight scene lights; native route retained");}return 0;}
+        case 10:c.node=read_at<const void*>(c.node,0,nullptr);return 0;
+        case 11:c.shader=create_cloak_composite_shader(g_device,count);return c.shader!=0;
+        case 12:g_cloak_composite_rejected=true;
+            if(InterlockedCompareExchange(&g_cloak_composite_fallback_logged,1,0)==0) {
+                log_line("General compositor shader unavailable; native route retained");}return 0;
+        case 13:g_cloak_composite.material=c.material;g_cloak_composite.craft=current_render_craft();
+            g_cloak_composite.device=g_device;g_cloak_composite.shader=c.shader;
+            g_cloak_composite.capacity=count;g_cloak_composite.selected=true;return 0;
+        default:return 0;
         }
-        ++lights;
-        node = read_at<const void*>(node, 0, nullptr);
-    }
-    const DWORD shader = create_cloak_composite_shader(g_device, lights);
-    if (!shader) {
-        g_cloak_composite_rejected = true;
-        if (InterlockedCompareExchange(&g_cloak_composite_fallback_logged, 1, 0) == 0)
-            log_line("General compositor shader unavailable; native route retained");
-        return false;
-    }
-    g_cloak_composite.material = material;
-    g_cloak_composite.craft = current_render_craft();
-    g_cloak_composite.device = g_device;
-    g_cloak_composite.shader = shader;
-    g_cloak_composite.capacity = lights;
-    g_cloak_composite.selected = true;
-    return true;
+    };
+    return a2fo_rs_stage10_core_render_flow(2,&context,step,kCloakCompositeLights)!=0;
 }
 
 bool cloak_composite_selected(IDirect3DDevice8* device) noexcept {

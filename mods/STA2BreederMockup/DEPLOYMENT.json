@@ -1,0 +1,100 @@
+{
+  "target": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test",
+  "backup": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/.deployment-backups/breeder-mockup-20260924T151456Z",
+  "utc": "2026-09-24T15:14:56.784067+00:00",
+  "module_entry": "active33",
+  "module_sha256": "b33f6deb125d1266a44861e367d42492cc2b301d265af232ac9ea62a854ef401",
+  "files": [
+    {
+      "path": "BREEDER_MOCKUP.md",
+      "before_sha256": null,
+      "after_sha256": "042b2c6bf4c1855cb2607315c66525e3be45314132ec5028ec810bbe8750c6e8"
+    },
+    {
+      "path": "Sprites/gui_global.spr",
+      "before_sha256": "d34da8a7db92b2a6dc259c19c5b941e8184d3c5cdde4cd6858d209487bdb2625",
+      "after_sha256": "e4090a73c6dd5c5784cb0945c8328fe5099796522b9b3bd4d93a8e4a11a3e1d6"
+    },
+    {
+      "path": "info.ini",
+      "before_sha256": "5909dd4952d1e0189f59bf68da69d62132c69647b8c3fb5faeab08d18a9f5dad",
+      "after_sha256": "cb8687636940cf20865e226d2638ce2e0b9c6b4f6b6ef3c9884690cdcfac22d7"
+    },
+    {
+      "path": "odf/other/species8472.odf",
+      "before_sha256": null,
+      "after_sha256": "0c16f9bf956cf37ca1b34c48f48ff5f47b21a2d8bb0b27ece3dee428538322a1"
+    },
+    {
+      "path": "odf/ships/8472_mothership.odf",
+      "before_sha256": null,
+      "after_sha256": "39edbbf8d7140b290d29ff05162e82e371438dec9b1530d1d7084382b4f5a1e3"
+    },
+    {
+      "path": "odf/ships/8472_passive.odf",
+      "before_sha256": null,
+      "after_sha256": "3da05f1575531d6a825174ef7e0ba335ebb065a615879d1ba84f4c68ea3cf2f5"
+    },
+    {
+      "path": "odf/ships/nox_destroy.odf",
+      "before_sha256": null,
+      "after_sha256": "abb9ac9a57b43996bfd08e4f406281a6cc2b9bde7a51dcc644cdc0a9dbc16352"
+    },
+    {
+      "path": "odf/ships/nox_scout.odf",
+      "before_sha256": null,
+      "after_sha256": "85b396bac23e293ca7a83588a3af619b73f8fef56d00b18079ca3684bf894075"
+    },
+    {
+      "path": "odf/ships/nox_seed_base.odf",
+      "before_sha256": null,
+      "after_sha256": "b720d223890a3e3fac0b66a09bce53824aef8d7e306c69ddd04bab3e20ee1f55"
+    },
+    {
+      "path": "odf/ships/nox_seed_destroy.odf",
+      "before_sha256": null,
+      "after_sha256": "3c9a1b378be7fb4a8465a306d73fad84f4f03dcacc056ccb19b574edee19fcf4"
+    },
+    {
+      "path": "odf/ships/nox_seed_scout.odf",
+      "before_sha256": null,
+      "after_sha256": "de3bf3f02fe72c254b78b2ac8f0da2e4f15f358cb5af02ee9b2dd46b3ecf115d"
+    },
+    {
+      "path": "odf/stations/nox_breeder.odf",
+      "before_sha256": null,
+      "after_sha256": "27fcdd070922e2dd0d5bc97b189d33cf00f18195cf122487d56a784e40710801"
+    },
+    {
+      "path": "odf/stations/nox_breeder_base.odf",
+      "before_sha256": null,
+      "after_sha256": "fb0842e6e4747dfea717d0c63c956b8a33b77744b49a92ea5218c5d5331fe498"
+    },
+    {
+      "path": "odf/stations/nox_breeder_destroy.odf",
+      "before_sha256": null,
+      "after_sha256": "3ea9e461e3783c6fd4546643aea2322c9f85f10933d04f16f6acc82db757b537"
+    },
+    {
+      "path": "odf/stations/nox_breeder_scout.odf",
+      "before_sha256": null,
+      "after_sha256": "f7e1cea3877429527b0a34383bd5e2bfabdfa91c268c14b54d434d70dc6e5353"
+    },
+    {
+      "path": "techtree/tech1.tt",
+      "before_sha256": "b98599a3b0066adac9440ad5e0e46159d9aa36380ff8605880ed62ae2f4486ae",
+      "after_sha256": "2714c02bc1dc068692be1a8e914a1448b7c0082a578882035b75923de2417051"
+    }
+  ],
+  "validation": {
+    "odf_includes_and_chains": "passed (19 effective ODFs)",
+    "models_physics_wormhole_sprite_textures": "passed",
+    "offspring_costs_times_weapons": "match inherited Scout/Destroyer",
+    "committed_builditem_absence": "passed",
+    "runtime_signature_preflight": "8 of 8 matched installed PE bytes",
+    "module_build": "make reports up to date; installed DLL byte-identical",
+    "in_game": "NOT RUN; manual acceptance required",
+    "installed_hashes": "passed (16 files)",
+    "independent_review": "passed static include/chain/assets review; dynamic preload and automatic production require in-game verification"
+  }
+}

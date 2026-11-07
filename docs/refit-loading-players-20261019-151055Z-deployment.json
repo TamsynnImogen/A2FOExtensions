@@ -1,0 +1,462 @@
+{
+  "status": "Loading player/minimap/faction UI deployed; in-game acceptance pending full restart",
+  "timestamp_utc": "20261019-151055Z",
+  "target": "/home/tamsynn/NVMeData/Fleet Ops Roots",
+  "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/refit-loading-players-20261019-151055Z",
+  "previous_module_sha256": "b2f5a9e6139e66a5c7031a29c014426defbbc747b5e1e5c8ac7afaf5e81e1c3b",
+  "installed": {
+    "Data/modules/A2FORefitMenus.dll": "81069a212581cd988297615acb2cc87b106b64a8285198c71fb34c111ef2b8ed",
+    "Data/RefitScene/Loading/themes.ini": "c0634bd750e31652640ba184a8036a61b6e27ed5423d79bc674742b2741e4236"
+  },
+  "verification": {
+    "candidate_sha256": "81069a212581cd988297615acb2cc87b106b64a8285198c71fb34c111ef2b8ed",
+    "results": [
+      {
+        "name": "refit_loading_presentation_test",
+        "command": [
+          "/home/tamsynn/A2FOHookExtensions/build/refit_loading_presentation_test"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "refit_loading_content_test",
+        "command": [
+          "/home/tamsynn/A2FOHookExtensions/build/refit_loading_content_test"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "refit_loading_theme_test",
+        "command": [
+          "/home/tamsynn/A2FOHookExtensions/build/refit_loading_theme_test"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "refit_setup_layout_test",
+        "command": [
+          "/home/tamsynn/A2FOHookExtensions/build/refit_setup_layout_test"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "refit_menu_presentation_test",
+        "command": [
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_presentation_test"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "refit_menu_model_test",
+        "command": [
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_model_test"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "refit_menu_skin_test",
+        "command": [
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_skin_test"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "refit_scene_composition_test",
+        "command": [
+          "/home/tamsynn/A2FOHookExtensions/build/refit_scene_composition_test"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "refit_scene_budget_test",
+        "command": [
+          "/home/tamsynn/A2FOHookExtensions/build/refit_scene_budget_test"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "refit_scene_mailbox_test",
+        "command": [
+          "/home/tamsynn/A2FOHookExtensions/build/refit_scene_mailbox_test"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "refit_scene_settings_test",
+        "command": [
+          "/home/tamsynn/A2FOHookExtensions/build/refit_scene_settings_test"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "binding-success",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_loading_native.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "success"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "binding-refuse",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_loading_native.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "refuse"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "binding-changed",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_loading_native.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "changed"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "binding-players-changed",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_loading_native.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "players-changed"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "binding-status-changed",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_loading_native.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "status-changed"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "render",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_loading_render.exe",
+          "/home/tamsynn/A2FOHookExtensions/build/refit-loading-players/loading-800.bmp",
+          "/home/tamsynn/A2FOHookExtensions/build/refit-loading-players/loading-1920.bmp"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "setup-render",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_setup_render.exe",
+          "/home/tamsynn/A2FOHookExtensions/build/refit-loading-players/setup-1920.bmp",
+          "/home/tamsynn/A2FOHookExtensions/build/refit-loading-players/setup-1280.bmp"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "dll-missing",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_native.exe",
+          "/home/tamsynn/A2FOHookExtensions/build/modules/A2FORefitMenus.dll",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "missing"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "dll-disabled",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_native.exe",
+          "/home/tamsynn/A2FOHookExtensions/build/modules/A2FORefitMenus.dll",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "disabled"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "dll-invalid",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_native.exe",
+          "/home/tamsynn/A2FOHookExtensions/build/modules/A2FORefitMenus.dll",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "invalid"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "dll-api",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_native.exe",
+          "/home/tamsynn/A2FOHookExtensions/build/modules/A2FORefitMenus.dll",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "api"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "dll-identity",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_native.exe",
+          "/home/tamsynn/A2FOHookExtensions/build/modules/A2FORefitMenus.dll",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "identity"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "dll-armada",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_native.exe",
+          "/home/tamsynn/A2FOHookExtensions/build/modules/A2FORefitMenus.dll",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "armada"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "dll-profile",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_native.exe",
+          "/home/tamsynn/A2FOHookExtensions/build/modules/A2FORefitMenus.dll",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "profile"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "dll-foreign",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_native.exe",
+          "/home/tamsynn/A2FOHookExtensions/build/modules/A2FORefitMenus.dll",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "foreign"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "dll-action",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_native.exe",
+          "/home/tamsynn/A2FOHookExtensions/build/modules/A2FORefitMenus.dll",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "action"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "dll-patch-fail",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_native.exe",
+          "/home/tamsynn/A2FOHookExtensions/build/modules/A2FORefitMenus.dll",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "patch-fail"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "dll-skin-signature",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_native.exe",
+          "/home/tamsynn/A2FOHookExtensions/build/modules/A2FORefitMenus.dll",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "skin-signature"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "dll-skin-patch-fail",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_native.exe",
+          "/home/tamsynn/A2FOHookExtensions/build/modules/A2FORefitMenus.dll",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "skin-patch-fail"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "dll-success",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_native.exe",
+          "/home/tamsynn/A2FOHookExtensions/build/modules/A2FORefitMenus.dll",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "success"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "dll-loading",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_native.exe",
+          "/home/tamsynn/A2FOHookExtensions/build/modules/A2FORefitMenus.dll",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "loading"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "dll-loading-signature",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_native.exe",
+          "/home/tamsynn/A2FOHookExtensions/build/modules/A2FORefitMenus.dll",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "loading-signature"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "dll-mission",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_native.exe",
+          "/home/tamsynn/A2FOHookExtensions/build/modules/A2FORefitMenus.dll",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "mission"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "dll-mission-signature",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_native.exe",
+          "/home/tamsynn/A2FOHookExtensions/build/modules/A2FORefitMenus.dll",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "mission-signature"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "dll-mission-fo",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_native.exe",
+          "/home/tamsynn/A2FOHookExtensions/build/modules/A2FORefitMenus.dll",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "mission-fo"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "dll-mission-fo-gateway",
+        "command": [
+          "wine",
+          "/home/tamsynn/A2FOHookExtensions/build/refit_menu_native.exe",
+          "/home/tamsynn/A2FOHookExtensions/build/modules/A2FORefitMenus.dll",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll",
+          "mission-fo-gateway"
+        ],
+        "exit_code": 0
+      }
+    ],
+    "native_game_acceptance": false
+  },
+  "review": "Independent read-only review; 1200x900 crop corrected and portable regression added. No further concrete ABI/lifecycle blockers identified. Native game loop and actual MSVCP string getter/destructor remain live acceptance.",
+  "behavior": [
+    "Native setup player names/teams/local/resolved races; skip observers/vacant",
+    "Local faction palette and panel shape from arbitrary-name theme registry, stock six plus Dominion",
+    "Original-resolution loose BMP, or copied native setup minimap keyed by map name for FPQ-only previews",
+    "Original FO ODF bar fill, orientation, colour, tips and SPR art; modern track follows configured extent",
+    "Native status text observer with exact original forwarding; real global percent unchanged"
+  ],
+  "limits": [
+    "Headless evidence only; no game launched",
+    "Direct campaign/save/archive-only map without a captured setup preview still needs a loose BMP",
+    "Animated departure/warp loading not added in this UI update",
+    "Unknown factions use neutral shell until registry entry supplied"
+  ],
+  "protected_unchanged": {
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOArmadaProfiles.txt": "08ffa42a487354a7959fa5d4b184eb8120b331d2bca62284ac59f0da1cb52dac",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.dll": "45be55e79afe53365dc26f1e4238bfcd9d74120299215b52bca6458f072d4b05",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.ini": "8830d04dbcd3d5c45671748cc8a3999cbb5e52f5ff19636d3f01a42c8bb9abdd",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe": "817b1ddb9876cfb9c5d781b42d2513de48fef9cbdbc408aa43c878c573581a18",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/STA2 Classic Mod/info.ini": "9f599f3f5217d0219d80ef0dd8a01990a72e9995b51a0b5cc372ff709cf77976",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/info.ini": "68cef7963cf436691dc775dae6efc07d9ed4a9545d1b71f596b1d3b8a76061ac",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/RefitScene/Menu/map.ini": "cc370d017744facc01eecb91dca2b9d1f02461de9794fab60149c46b1dde7b2d",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/RefitScene/Render3D.ini": "66ac89a0f313f8b0f8a85e25fcab25929cba7d4f454146bc30e3a81d1f98ef2f",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/info.ini": "d40efd9f80bc8e07d95186ede2ddd2a44277c758f45ac58171712f8eaa9a7192",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/A2FORefitScene.dll": "f817596a3e7205cf7d2acb2b36055015b5cc58a52ed5fba04218051dd1261562",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/licenses/armada2-refit.txt": "35a427baddf84b00c8925cb5604fb20a93d667dabd952a105ceefe62a23465b7",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/licenses/libm-0.2.16.txt": "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/licenses/noto-sans-condensed-OFL.txt": "cee9892f9f0cc8fe882c9e9537ee6a89621d86ee7ceaf70b02e2b2b1c25c061a",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/licenses/noto-sans-condensed-SOURCE.txt": "2449c7043de655fe9faaa36ef115d9a1c85dd5d07768440bfa6c772d60da8ac9",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/settings_saves_logs/Settings.xml": "71b25b86c867398e4aa12b5676e58faed6809e67d8aacf380f4b329e027add77",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll": "3fd18eeee4201a9a1297ac26b3eb88f78c5f72e8c55a62c25179f1d4932e4c11",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/STA2 Classic Mod/odf/other/loadscreen.odf": "ebc063bf3bf67715f379f29bfd47326c80b0cd73b1311ddfb7f40e543b2dc537",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/dxwrapper.ini": "afa66517a2b7980ee10dc005afd0bcadb9eebb81a601fa97647aaa5ed0ab3c36",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/d3d8.dll": "ec6d494fbdcef42908e86f01f4f54342619f8d442519b4ab751c3b298c5a8437",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/d3d9.dll": "00bc142e98ddad1e334a4d88fa630038e092b0758b3d79e295172b181a4c772d",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/dxwrapper.dll": "bd5948e583d213176c21197433b1e6ce48a9730fae45863085bde33464b232fa",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FORefitMenus.ini": "1f89a024b235963548a7c9b6cc12a2f28f11d4d8811099689bbf5dccda9d74f9",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOShellDisplay.dll": "506ae54e9ea852c1b07e2daeea0a060ec28894bd62dbb302843a8f29b4add85b"
+  },
+  "source_sha256": {
+    "Makefile": "0394a700409a603a0812f4c1fbd8f745fcd1eb9ba70f141152523f702dea8f73",
+    "modules/A2FORefitMenus/loading_bindings.hpp": "1ed2acdab458d53aa450b28ba103633a3160f01e59b42461cefc5e02c21b7265",
+    "modules/A2FORefitMenus/loading_native.cpp": "088d9a45797c5e095b0617db3c6a13752d1bb344af98a46218abb0f71b6371b6",
+    "modules/A2FORefitMenus/loading_native.hpp": "a33ebb6155a162d6cb914cd309443a97abb6f34e69b759ca733ab897ccdf14ee",
+    "modules/A2FORefitMenus/loading_content.cpp": "efefad8492c1219dffec6a08c3521a6a826507c30541f0473cde33b53c91b574",
+    "modules/A2FORefitMenus/loading_content.hpp": "9828f6d666aa3a202682a906794ab5a881a0d1ad4ccd7d604025715324d9c2b1",
+    "modules/A2FORefitMenus/loading_presentation.cpp": "1ac5f93b5ec75ebe83f5087d4b7945c9059724f58f214647d3635e1789fb0093",
+    "modules/A2FORefitMenus/loading_presentation.hpp": "0435be1b3e20bf18175e504279ddec9e2478b3dd93f6a73b112c2fa8d8521186",
+    "modules/A2FORefitMenus/setup_native.cpp": "5c8c0de602d61c47705ba3843a26239203906a10c3d99012c21e434ff8b08511",
+    "modules/A2FORefitMenus/setup_presentation.cpp": "25369d4e4f3f056f9c569acf235ad57a04c80c785dce601eafd752e730d1f806",
+    "modules/A2FORefitMenus/setup_presentation.hpp": "9dd70b8b58ecdebf5bd6f26c9c9878d01811cb066b3c75884ebd3cacff8536f5",
+    "tests/refit_loading_native.cpp": "77216f7291ef1f9f4b7fb99d07cc8799215d433b1f8e7f7303d3693bf1bdef49",
+    "tests/refit_loading_content_test.cpp": "149faefa02f972fd3fa7ce43245b3b1cc6c0eb61a8ccd6b62d4f1e77863a55ec",
+    "tests/refit_loading_theme_test.cpp": "e1da51d686c114c6cb2205966ab8ba1e223fe309796c4cf174d528a508c975f9",
+    "tests/refit_loading_render.cpp": "c806936f484f83e9cb200e006d56668d963c9155561ec1e01f382d63789a116c",
+    "tests/refit_menu_native.cpp": "f4f5fec7b2bcfab25d4cd5f7872d07dd3c2668e1c2ad3046028d471c17eb0301",
+    "tests/refit_setup_native.cpp": "0b06f2a6984705f8ee5f64bf6cc57b96c5970f6dec799b17fefd26d5db96a589",
+    "tests/refit_setup_layout_test.cpp": "81edcb997aa0b1ef5d4f17f9333f5d58f24ee899f5615c2c3a50583e4ac1b1c7",
+    "assets/refit-menus/loading/themes.ini": "c0634bd750e31652640ba184a8036a61b6e27ed5423d79bc674742b2741e4236",
+    "third_party/armada2-refit/SOURCE.md": "a42c2f7c87bf71d962e65d669f78169bc1259645219e64b4d076f05a3cd7c82f",
+    "modules/A2FORefitMenus/README.md": "b1d6850adf7f52332da39118929e912f026c273ae1fbf5a4df4104b458bb596a",
+    "docs/refit-loading-screen-2026-10-19.md": "af30333b62abb89a45c9a0142cdb77c0ee399c5088e8e3354e2e7aef44234719"
+  },
+  "tests_directory": "build/refit-loading-players",
+  "rollback": "Close game, restore backup Data/modules/A2FORefitMenus.dll and remove only newly added Data/RefitScene/Loading/themes.ini; preserve current config."
+}

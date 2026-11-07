@@ -210,21 +210,13 @@ void install_unmapped_meshvb_policy() noexcept {
     g_a2fo_unmapped_standard_create_return = at(g_armada, 0x00231d83);
     g_a2fo_unmapped_create_done_return = at(g_armada, 0x00231d91);
 
-    std::uint8_t patch[5] = {0xe9, 0, 0, 0, 0};
-    const auto relative = static_cast<std::uint32_t>(
-        reinterpret_cast<std::uintptr_t>(&a2fo_nebula_unmapped_meshvb_create_hook) -
-        reinterpret_cast<std::uintptr_t>(site) - sizeof(patch));
-    std::memcpy(patch + 1, &relative, sizeof(relative));
-    DWORD previous_protection = 0;
-    if (!VirtualProtect(site, sizeof(patch), PAGE_EXECUTE_READWRITE,
-                        &previous_protection)) {
+    A2foRsPatchReport patch{};
+    if (!a2fo_rs_windows_jump_report(site,
+            reinterpret_cast<const void*>(&a2fo_nebula_unmapped_meshvb_create_hook), &patch)) {
         log_line("Automatic non-bump MeshVB hook could not obtain write access");
         return;
     }
-    std::memcpy(site, patch, sizeof(patch));
-    FlushInstructionCache(GetCurrentProcess(), site, sizeof(patch));
-    DWORD ignored = 0;
-    if (!VirtualProtect(site, sizeof(patch), previous_protection, &ignored)) {
+    if (!patch.restored) {
         log_line("Automatic non-bump MeshVB hook installed; page-protection restore failed");
     }
     g_unmapped_meshvb_installed = true;

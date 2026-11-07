@@ -1,0 +1,23 @@
+{
+  "installed_version": "0.1.1",
+  "candidate_version": "0.2.0 withdrawn",
+  "result": "Restored0.1.1 gameplay and Mediterranean identity confirmed by manual DEBUG run; originalstartupcause unresolved",
+  "rollback_receipt": "/home/tamsynn/A2FOHookExtensions/mods/FO4Nexus/rollback-20261101T193707Z.json",
+  "module_selection_preserved": true,
+  "protected_inputs_unchanged": 196,
+  "new_ui_files_quarantined": 5,
+  "diagnostics": "diagnostics/load-crash-20261101T193531Z",
+  "evidence": [
+    "Global extension log last modified19:02:29, before0.2deployment19:02:58",
+    "No fresh native crash reports in scoped install",
+    "PortProton.desktop points at intended Data/ArmadaL.exe",
+    "Read-only current PortProton process inventory showed settings dialog without Wine or Armada process",
+    "Successful manual PortProtonDEBUG run reachedgameplay; screenshot showsMediterraneanidentities",
+    "Fresh extensionlog records firstsinglepanelidentitydraw atcaptain470,14 registry470,33",
+    "Failedstart and successfulretry differ in bothUIversion andlaunchmode; cannotassigncause"
+  ],
+  "next_manual_step": "Open Mods -> Fleet Operations: Nexus UI Probe, then new Federation skirmish via PortProtonDEBUG; tests sprite registration only",
+  "working_baseline_evidence": "diagnostics/restored-ui-working-20261101T201139Z",
+  "probe_installed": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/FO4 Nexus UI Probe",
+  "working_baseline_files_unchanged": 192
+}

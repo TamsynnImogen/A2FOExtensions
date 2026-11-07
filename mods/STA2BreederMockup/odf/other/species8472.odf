@@ -1,0 +1,161 @@
+// Name used to refer to the race in the code and scripts.
+name = "species8472"
+
+// Name displayed in the interface for this race.
+displayKey = "GUI_RD_8472"
+
+// Instant action slot, negative means not playable
+instantActionSlot = 5
+
+// 8472 cannot play in colonize planets OR collect latinum games OR CTF games
+canPlayColonizePlanets = 0
+canPlayCollectLatinum = 0
+canPlayCaptureTheFlag = 0
+
+
+// Label for officers in interface.
+officerRes = "GUI_CP_8472_OFF_RES"
+officerTooltip = "GUI_RD_8472_OFF_TOOLTIP"
+officerVerboseTooltip = "GUI_RD_8472_OFF_VTOOLTIP"
+
+// Label for admirals log creation
+creationLabel = "ADM_CREATED"
+recycledLabel = "ADM_DECOMMISSIONED"
+
+
+// Name of the interface configuration and sprite files.
+interfaceConfiguration = "gui_species8472.cfg"
+interfaceSprites = "gui_species8472.spr"
+
+// Music play list.
+singlePlayerMusic = ""
+multiPlayerMusic = "mspecmp300.wav"
+
+// Music play list.
+track0 = "mbor300.wav"
+track1 = "mbor115.wav"
+track2 = "mbor100.wav"
+
+// How quickly this race repairs. Bigger is slower
+repairStrength = 0.2f
+
+// How strong this race is when fighting as a boarding party or
+// against a boarding party.
+boardingStrength = 0.0f
+
+// Multiplier for max officers
+maxOfficerMultiplier = 0.24f
+
+// It's a bit odd to have these crew and planet colonization parameters here,
+// since they're totally irrelevant for 8472; but they shouldn't do any harm...
+
+// When this race will retreat from battle
+retreatStrength = 0.0f	//shield percentage
+crewRetreatRatio = 0.2f //crew percentage
+
+//number of crew added to the team per second per starbase
+crewAccumulationRate = 10.0
+
+//the modifier for the crewAccumulationRate for a starbase if it is close to a planet
+planetCrewAccumulationModifier = 1.5
+
+// Name of the city texture
+cityTextureName = "ECFR"
+
+//**********************************************************************
+//CREW STATUS MULTIPLIERS
+//The percentage at which the crew enters yellow status (ex. 0.75f)
+crewYellowStatus = 0.5f
+
+//The percentage at which the crew enters red status (ex. 0.25f)
+crewRedStatus = 0.25f
+
+//The multiplier for the repair time while in yellow status
+repairYellow = 1.0f
+
+//The multiplier for the repair time while in red status
+repairRed = 1.0f
+
+//The multiplier for the delay between shots for weapons while in yellow status
+weaponYellow = 1.5f
+
+//The multiplier for the delay between shots for weapons while in red status
+weaponRed = 5.0f
+//**********************************************************************
+
+//ODF for officer upgrade for starbases
+officerUpgradeODF = "borgoff"
+
+// the things you get when you ask for minimal default units (instead of the map units)
+minimalUnits1 = "8472_mothership.odf"	// construction ship
+
+// the things you get when you ask for standard default units (instead of the map units)
+standardUnits1 = "8472_mothership.odf"	// construction ship
+standardUnits2 = "8472_active.odf"	// construction ship
+standardUnits3 = "8472_passive.odf"	// starbase
+standardUnits4 = "8472_scout.odf"	// scout
+
+// the things you get when you ask for superside units (instead of the map units)
+superUnits1 = "bconst.odf"	// borg construction ship
+superUnits2 = "fconst.odf"	// federation construction ship
+superUnits3 = "kconst.odf"	// klingon construction ship
+superUnits4 = "rconst.odf"	// romulan construction ship
+
+
+// for the computer voice
+computerShipConstructionBegin1 = "bc25.wav"
+computerShipConstructionBegin2 = "bc26.wav"
+computerShipConstructionComplete1 = "bc27.wav"
+computerFacilityConstructionBegin1 = "bc25.wav"
+computerFacilityConstructionBegin2 = "bc26.wav"
+computerFacilityConstructionComplete1 = "bc27.wav"
+computerWeaponsOffline1 = "bc14.wav"
+computerEnginesOffline1 = "bc15.wav"
+computerShieldGeneratorOffline1 = "bc17.wav"
+computerLifeSupportOffline1 = "bc19.wav"
+computerSensorsOffline1 = "bc16.wav"
+computerUnderAttack1 = ""
+
+// Multiplayer AI behavior
+// Do we transport to help our friends when not on easy
+transportToFriendsOnNotEasy = 0
+transportToEnemyOnHard = 0
+
+// Do we commandeer or be commandeered
+canCommandeer = 0
+canBeCommandeered = 0
+
+// 8472 not affected by psionic insanity
+affectedByPsionicInsanity = 0
+
+
+// Recycling efficiency
+// 8472 says waste not want not
+recycleDilithiumFraction = 1
+recycleMetalFraction = 1
+
+// How relatively fast we mine any resource
+miningRateModifier = 2.0
+
+// what event should we use when we run out of officers?
+insufficientOfficersEvent = "InsufficientSpeciesOfficers"
+
+// for normal and lots of resource games, we need to specify how much
+// of each resource this race should get
+
+// NORMAL
+normalBiomatter = 7200
+
+// LOTS
+lotsBiomatter = 120000
+
+// Noxter breeder mock-up: quick access and explicit dynamic-class preloads.
+standardUnits5 = "nox_breeder.odf"
+minimalUnits2 = "nox_breeder.odf"
+preloadUnits0 = "nox_breeder"
+preloadUnits1 = "nox_seed_scout"
+preloadUnits2 = "nox_seed_destroy"
+preloadUnits3 = "nox_breeder_scout"
+preloadUnits4 = "nox_breeder_destroy"
+preloadUnits5 = "nox_scout"
+preloadUnits6 = "nox_destroy"

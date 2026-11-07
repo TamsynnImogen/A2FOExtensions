@@ -1,0 +1,1363 @@
+sprite_table									
+@include tex_anim_gui.spr									
+@include miniimages.spr									
+@include systembackgrounds.spr									
+@include systemimages.spr									
+@include nx_ui.spr
+@skip=off									
+									
+#########################################################									
+#########################################################									
+######  Fleet Operations Golbal Sprite Definitions  #####									
+#########################################################									
+#########################################################									
+									
+##########################									
+######  Buff Icons  ######									
+##########################									
+@reference=128									
+@tmaterial=interface									
+flag_icon	ui_bufficons	64	0	32	32				
+@referenceWidth=1024									
+@referenceHeight=256									
+@tmaterial=interface									
+#backup	all_interface2	771	221	69	34				
+gravmine_icon	all_interface2	993	32	28	28				
+gravmine_icon_si	all_interface2	71	221	34	34				
+romspy_icon	all_interface2	993	1	28	28				
+romspy_icon_si	all_interface2	71	186	34	34
+
+@reference=256
+@tmaterial=alpha			
+cardassian_icon			allrace		0	84	84	84
+npc_breen_icon			allrace		84	168	84	84
+ferengi_icon			allrace		0	168	84	84
+species8472_icon			allrace		168	84	84	84		
+npc_species8472_icon			allrace		168	84	84	84			
+									
+############################									
+######  Race Symbols  ######									
+############################									
+@referenceWidth=1024									
+@referenceHeight=256									
+@tmaterial=interface									
+borg_icon	all_interface	908	1	28	28				
+unitedfederation_icon	all_interface	995	1	28	28				
+klingonempire_icon	all_interface	966	1	28	28				
+romulanempire_icon	all_interface	937	1	28	28				
+dominion_icon	all_interface	879	1	28	28				
+npc_holdtheline_icon	all_interface	995	30	28	28				
+npc_wreckage_icon	all_interface	966	30	28	28				
+npc_bajoran_icon	all_interface	995	30	28	28				
+#npc_breen_icon	all_interface	995	30	28	28				
+#npc_species8472_icon	all_interface	995	30	28	28				
+npc_tholian_icon	all_interface	995	30	28	28				
+#npc_cardassian_icon	all_interface	995	30	28	28				
+#ferengi_icon	all_interface	995	30	28	28				
+									
+#################################									
+######  Mini Race Symbols  ######									
+#################################									
+@reference=64									
+@tmaterial=alpha									
+borg_icon_small	all_interface_races	40	0	17	17				
+unitedfederation_icon_small	all_interface_races	20	20	17	17				
+klingonempire_icon_small	all_interface_races	0	0	17	17				
+romulanempire_icon_small	all_interface_races	20	0	17	17				
+dominion_icon_small	all_interface_races	0	20	17	17				
+									
+############################									
+######  Rank Symbols  ######									
+############################									
+@animation veteraniconanimation									
+offset 64 5.0 step									
+@auto=square									
+@keyframes									
+									
+@reference=64									
+@tmaterial=alpha									
+select_rank_1	all_interface_ranks	0	0	17	17				
+select_rank_2	all_interface_ranks	20	0	17	17				
+select_rank_3	all_interface_ranks	40	0	17	17				
+select_rank_4	all_interface_ranks	0	20	17	17				
+select_rank_5	all_interface_ranks	20	20	17	17				
+@reference=256									
+@tmaterial=alpha									
+select_rank_6	all_interface_ranks2	0	0	17	17	@anim=veteraniconanimation			
+									
+##############################									
+######  Avatar Buttons  ######									
+##############################									
+@reference=256									
+@tmaterial=interface									
+b_avatar_fed_risner	avatars_risner	0	0	256	256				
+b_avatar_fed_mayson	avatars_mayson	0	0	256	256				
+b_avatar_rom_mijural	avatars_mijural	0	0	256	256				
+b_avatar_rom_helev	avatars_helev	0	0	256	256				
+b_avatar_kli_taqroja	avatars_taqroja	0	0	256	256				
+b_avatar_kli_martok	avatars_martok	0	0	256	256				
+b_avatar_dom_breen	avatars_breen	0	0	256	256				
+b_avatar_dom_pure	avatars_puretech	0	0	256	256				
+b_avatar_bor_optimize	avatars_optimize	0	0	256	256				
+b_avatar_bor_assimilate	avatars_assimilate	0	0	256	256				
+@reference=256									
+@tmaterial=interface									
+b_avatar_fed_risnerS	avatars_small	128	0	64	64				
+b_avatar_fed_maysonS	avatars_small	192	0	64	64				
+b_avatar_rom_mijuralS	avatars_small	64	64	64	64				
+b_avatar_rom_helevS	avatars_small	0	64	64	64				
+b_avatar_kli_taqrojaS	avatars_small	0	0	64	64				
+b_avatar_kli_martokS	avatars_small	64	0	64	64				
+b_avatar_dom_breenS	avatars_small	192	64	64	64				
+b_avatar_dom_pureS	avatars_small	128	64	64	64				
+b_avatar_bor_optimizeS	avatars_small	0	128	64	64				
+b_avatar_bor_assimilateS	avatars_small	64	128	64	64				
+b_avatar_ferengiS	avatars_small	192	192	64	64				
+@reference=32									
+@tmaterial=additive									
+b_avatar_none	empty	0	0	32	32				
+									
+###############################									
+######  Command Buttons  ######									
+###############################									
+@reference=512									
+@tmaterial=interface									
+b_attack	all_interface_buttons01	0	0	96	96		#	1	1
+b_move	all_interface_buttons01	104	0	96	96		#	2	1
+b_cancel	all_interface_buttons01	208	0	96	96		#	3	1
+b_transport	all_interface_buttons01	312	0	96	96		#	4	1
+b_all_halt	all_interface_buttons01	416	0	96	96		#	5	1
+b_standdown	all_interface_buttons01	0	104	96	96		#	1	2
+b_stop	all_interface_buttons01	0	104	96	96		#	1	2
+b_order	all_interface_buttons01	104	104	96	96		#	2	2
+b_aiMenu	all_interface_buttons01	208	104	96	96		#	3	2
+b_rally	all_interface_buttons01	312	104	96	96		#	4	2
+b_harvest	all_interface_buttons01	416	104	96	96		#	5	2
+b_patrol	all_interface_buttons01	0	208	96	96		#	1	3
+b_scout	all_interface_buttons01	104	208	96	96		#	2	3
+b_sandd	all_interface_buttons01	208	208	96	96		#	3	3
+b_guard	all_interface_buttons01	312	208	96	96		#	4	3
+b_form	all_interface_buttons01	416	208	96	96		#	5	3
+#	all_interface_buttons01	0	312	96	96		#	1	4
+#	all_interface_buttons01	104	312	96	96		#	2	4
+b_form1	all_interface_buttons01	208	312	96	96		#	3	4
+#	all_interface_buttons01	312	312	96	96		#	4	4
+b_form3	all_interface_buttons01	416	312	96	96		#	5	4
+b_form2	all_interface_buttons01	0	416	96	96		#	1	5
+b_research	all_interface_buttons01	104	416	96	96		#	2	5
+b_repair	all_interface_buttons01	208	416	96	96		#	3	5
+b_superRepair	all_interface_buttons01	312	416	96	96		#	4	5
+b_back	all_interface_buttons01	416	416	96	96		#	5	5
+b_bor_order_D	all_interface_buttons02	0	0	96	96		#	1	1
+b_bor_order_DD	all_interface_buttons02	0	0	96	96		#	1	1
+b_bor_order_DDD	all_interface_buttons02	0	0	96	96		#	1	1
+b_decom	all_interface_buttons02	104	0	96	96		#	2	1
+b_all_mixedtechB	all_interface_buttons02	208	0	96	96		#	3	1
+b_all_mixed_tech	all_interface_buttons02	208	0	96	96		#	3	1
+b_all_veteran2	all_interface_buttons02	312	0	96	96		#	4	1
+b_all_veteran3	all_interface_buttons02	312	0	96	96		#	4	1
+b_all_veteran4	all_interface_buttons02	312	0	96	96		#	4	1
+b_all_veteran5	all_interface_buttons02	312	0	96	96		#	4	1
+b_all_veteran6	all_interface_buttons02	312	0	96	96		#	4	1
+b_all_veteran7	all_interface_buttons02	312	0	96	96		#	4	1
+b_all_veteran8	all_interface_buttons02	312	0	96	96		#	4	1
+b_all_veteran9	all_interface_buttons02	312	0	96	96		#	4	1
+b_all_veteran10	all_interface_buttons02	312	0	96	96		#	4	1
+b_all_veteran11	all_interface_buttons02	312	0	96	96		#	4	1
+b_all_veteran23	all_interface_buttons02	312	0	96	96		#	4	1
+b_all_veteran_phalanx	all_interface_buttons02	312	0	96	96		#	4	1
+b_all_veteran_defender	all_interface_buttons02	312	0	96	96		#	4	1
+b_all_veteran_tavara	all_interface_buttons02	312	0	96	96		#	4	1
+b_all_alliedrepair	all_interface_buttons02	416	0	96	96		#	5	1
+b_galert	all_interface_buttons02	0	104	96	96		#	1	2
+b_yalert	all_interface_buttons02	104	104	96	96		#	2	2
+b_ralert	all_interface_buttons02	208	104	96	96		#	3	2
+b_capture	all_interface_buttons02	312	104	96	96		#	4	2
+#	all_interface_buttons02	416	104	96	96		#	5	2
+b_moveLow	all_interface_buttons02	0	208	96	96		#	1	3
+b_moveMed	all_interface_buttons02	104	208	96	96		#	2	3
+b_moveHigh	all_interface_buttons02	208	208	96	96		#	3	3
+#	all_interface_buttons02	312	208	96	96		#	4	3
+#	all_interface_buttons02	416	208	96	96		#	5	3
+b_swNone	all_interface_buttons02	0	312	96	96		#	1	4
+b_swMed	all_interface_buttons02	104	312	96	96		#	2	4
+b_swHigh	all_interface_buttons02	208	312	96	96		#	3	4
+#	all_interface_buttons02	312	312	96	96		#	4	4
+#	all_interface_buttons02	416	312	96	96		#	5	4
+#	all_interface_buttons02	0	416	96	96		#	1	5
+#	all_interface_buttons02	104	416	96	96		#	2	5
+#	all_interface_buttons02	208	416	96	96		#	3	5
+#	all_interface_buttons02	312	416	96	96		#	4	5
+#	all_interface_buttons02	416	416	96	96		#	5	5
+#	all_interface_buttons03	0	0	96	96		#	1	1
+#	all_interface_buttons03	104	0	96	96		#	2	1
+#	all_interface_buttons03	208	0	96	96		#	3	1
+#	all_interface_buttons03	312	0	96	96		#	4	1
+#	all_interface_buttons03	416	0	96	96		#	5	1
+#	all_interface_buttons03	0	104	96	96		#	1	2
+#	all_interface_buttons03	104	104	96	96		#	2	2
+#	all_interface_buttons03	208	104	96	96		#	3	2
+#	all_interface_buttons03	312	104	96	96		#	4	2
+#	all_interface_buttons03	416	104	96	96		#	5	2
+#	all_interface_buttons03	0	208	96	96		#	1	3
+b_all_tachion_scan	all_interface_buttons03	104	208	96	96		#	2	3
+b_fedR_impulse	all_interface_buttons03	208	208	96	96		#	3	3
+b_fed_impulse	all_interface_buttons03	208	208	96	96		#	3	3
+b_fed_impulseA	all_interface_buttons03	208	208	96	96		#	3	3
+b_fed_warpin	all_interface_buttons03	312	208	96	96		#	4	3
+b_fedR_adv_magnan	all_interface_buttons03	416	208	96	96		#	5	3
+b_fed_advmagnan	all_interface_buttons03	416	208	96	96		#	5	3
+b_fed_advmagnanA	all_interface_buttons03	416	208	96	96		#	5	3
+#	all_interface_buttons03	0	312	96	96		#	1	4
+b_fedR_proximity	all_interface_buttons03	104	312	96	96		#	2	4
+b_fed_proximity	all_interface_buttons03	104	312	96	96		#	2	4
+b_fed_proximity_kli	all_interface_buttons03	104	312	96	96		#	2	4
+#	all_interface_buttons03	208	312	96	96		#	3	4
+b_fed_probe	all_interface_buttons03	312	312	96	96		#	4	4
+b_fed_probe_rom	all_interface_buttons03	312	312	96	96		#	4	4
+b_fed_blockadebreaker	all_interface_buttons03	416	312	96	96		#	5	4
+b_fedR_distortion	all_interface_buttons03	0	416	96	96		#	1	5
+b_fed_distortion	all_interface_buttons03	0	416	96	96		#	1	5
+b_kliR_polaron	all_interface_buttons03	104	416	96	96		#	2	5
+b_kli_polaron	all_interface_buttons03	104	416	96	96		#	2	5
+b_kli_polaronZ	all_interface_buttons03	104	416	96	96		#	2	5
+b_fedR_critical	all_interface_buttons03	208	416	96	96		#	3	5
+b_fed_critical	all_interface_buttons03	208	416	96	96		#	3	5
+b_rom_critical	all_interface_buttons03	208	416	96	96		#	3	5
+b_fedR_defpatterns	all_interface_buttons03	312	416	96	96		#	4	5
+b_fed_defense_patterns	all_interface_buttons03	312	416	96	96		#	4	5
+b_debug_pdlaser	all_interface_buttons03	312	416	96	96		#	4	5
+b_fedR_tricobalt	all_interface_buttons03	416	416	96	96		#	5	5
+b_fed_tricobalt	all_interface_buttons03	416	416	96	96		#	5	5
+b_romR_multipurpose	all_interface_buttons04	0	0	96	96		#	1	1
+b_rom_multipurpose	all_interface_buttons04	0	0	96	96		#	1	1
+b_rom_multipurposer4	all_interface_buttons04	0	0	96	96		#	1	1
+b_rom_multipurposer5	all_interface_buttons04	0	0	96	96		#	1	1
+b_rom_multipurposeA	all_interface_buttons04	0	0	96	96		#	1	1
+b_rom_concave	all_interface_buttons04	104	0	96	96		#	2	1
+b_rom_concaver6	all_interface_buttons04	104	0	96	96		#	2	1
+b_fedR_acs_torpedo	all_interface_buttons04	208	0	96	96		#	3	1
+b_fed_acs_torpedo	all_interface_buttons04	208	0	96	96		#	3	1
+b_borR_transwarp	all_interface_buttons04	312	0	96	96		#	4	1
+b_bor_transwarp_detector	all_interface_buttons04	312	0	96	96		#	4	1
+b_bor_transwarp_probe	all_interface_buttons04	312	0	96	96		#	4	1
+b_bor_transwarp_scube	all_interface_buttons04	312	0	96	96		#	4	1
+b_rom_transwarp	all_interface_buttons04	312	0	96	96		#	4	1
+b_bor_refresh	all_interface_buttons04	416	0	96	96		#	5	1
+b_bor_refresh2	all_interface_buttons04	416	0	96	96		#	5	1
+b_fedR_remoore1	all_interface_buttons04	0	104	96	96		#	1	2
+b_fedR_canaveral1	all_interface_buttons04	104	104	96	96		#	2	2
+b_fedR_norway1	all_interface_buttons04	208	104	96	96		#	3	2
+#	all_interface_buttons04	312	104	96	96		#	4	2
+b_fedU_sensors1	all_interface_buttons04	416	104	96	96		#	5	2
+b_romU_sensors1	all_interface_buttons04	416	104	96	96		#	5	2
+b_fedR_remoore2	all_interface_buttons04	0	208	96	96		#	1	3
+b_fedR_canaveral2	all_interface_buttons04	104	208	96	96		#	2	3
+b_fedR_norway2	all_interface_buttons04	208	208	96	96		#	3	3
+#	all_interface_buttons04	312	208	96	96		#	4	3
+b_fedU_sensors2	all_interface_buttons04	416	208	96	96		#	5	3
+b_romU_sensors2	all_interface_buttons04	416	208	96	96		#	5	3
+b_fedU_weapons1	all_interface_buttons04	0	312	96	96		#	1	4
+b_domU_weapons1	all_interface_buttons04	0	312	96	96		#	1	4
+b_romU_weapons1	all_interface_buttons04	0	312	96	96		#	1	4
+b_kliU_weapons1	all_interface_buttons04	0	312	96	96		#	1	4
+b_fedU_shields1	all_interface_buttons04	104	312	96	96		#	2	4
+b_domU_shields1	all_interface_buttons04	104	312	96	96		#	2	4
+b_romU_shields1	all_interface_buttons04	104	312	96	96		#	2	4
+b_kliU_shields1	all_interface_buttons04	104	312	96	96		#	2	4
+b_domU_engines1	all_interface_buttons04	208	312	96	96		#	3	4
+b_kliU_engines1	all_interface_buttons04	208	312	96	96		#	3	4
+b_domU_life1	all_interface_buttons04	312	312	96	96		#	4	4
+b_fed_warpin_special	all_interface_buttons04	416	312	96	96		#	5	4
+b_fed_warpin_specialY	all_interface_buttons04	416	312	96	96		#	5	4
+b_fedU_weapons2	all_interface_buttons04	0	416	96	96		#	1	5
+b_domU_weapons2	all_interface_buttons04	0	416	96	96		#	1	5
+b_romU_weapons2	all_interface_buttons04	0	416	96	96		#	1	5
+b_kliU_weapons2	all_interface_buttons04	0	416	96	96		#	1	5
+b_fedU_shields2	all_interface_buttons04	104	416	96	96		#	2	5
+b_domU_shields2	all_interface_buttons04	104	416	96	96		#	2	5
+b_romU_shields2	all_interface_buttons04	104	416	96	96		#	2	5
+b_kliU_shields2	all_interface_buttons04	104	416	96	96		#	2	5
+b_domU_engines2	all_interface_buttons04	208	416	96	96		#	3	5
+b_kliU_engines2	all_interface_buttons04	208	416	96	96		#	3	5
+b_domU_life2	all_interface_buttons04	312	416	96	96		#	4	5
+b_romR_multi_targeting	all_interface_buttons04	416	416	96	96		#	5	5
+b_rom_multi_targeting	all_interface_buttons04	416	416	96	96		#	5	5
+b_romR_vector	all_interface_buttons05	0	0	96	96		#	1	1
+b_rom_vector	all_interface_buttons05	0	0	96	96		#	1	1
+b_fed_vector	all_interface_buttons05	0	0	96	96		#	1	1
+b_rom_talshiar_agent	all_interface_buttons05	104	0	96	96		#	2	1
+b_dom_collision	all_interface_buttons05	208	0	96	96		#	3	1
+b_dom_collisionr2	all_interface_buttons05	208	0	96	96		#	3	1
+b_dom_collisionr3	all_interface_buttons05	208	0	96	96		#	3	1
+b_dom_collisionr4	all_interface_buttons05	208	0	96	96		#	3	1
+b_dom_collisionr5	all_interface_buttons05	208	0	96	96		#	3	1
+b_dom_collisionr6	all_interface_buttons05	208	0	96	96		#	3	1
+#	all_interface_buttons05	312	0	96	96		#	4	1
+b_rom_cloak	all_interface_buttons05	416	0	96	96		#	5	1
+b_rom_cloak_generix	all_interface_buttons05	416	0	96	96		#	5	1
+b_rom_cloak_tavara	all_interface_buttons05	416	0	96	96		#	5	1
+b_rom_cloak_leahvalM	all_interface_buttons05	416	0	96	96		#	5	1
+b_rom_cloak_supreme	all_interface_buttons05	416	0	96	96		#	5	1
+b_kli_cloak	all_interface_buttons05	0	104	96	96		#	1	2
+b_kli_cloak_bortas	all_interface_buttons05	0	104	96	96		#	1	2
+b_kli_cloak_rom	all_interface_buttons05	0	104	96	96		#	1	2
+b_kli_cloak_large	all_interface_buttons05	0	104	96	96		#	1	2
+b_fed_cloak	all_interface_buttons05	104	104	96	96		#	2	2
+b_nbreR_cloak	all_interface_buttons05	208	104	96	96		#	3	2
+b_nbre_cloak	all_interface_buttons05	208	104	96	96		#	3	2
+b_dom_cloak	all_interface_buttons05	208	104	96	96		#	3	2
+b_rom_cloak_station	all_interface_buttons05	312	104	96	96		#	4	2
+b_rom_cloak_station2	all_interface_buttons05	312	104	96	96		#	4	2
+b_kli_dispatch	all_interface_buttons05	416	104	96	96		#	5	2
+b_kli_dispatchZ	all_interface_buttons05	416	104	96	96		#	5	2
+b_romR_sensor_jammer	all_interface_buttons05	0	208	96	96		#	1	3
+b_rom_sensorjammer	all_interface_buttons05	0	208	96	96		#	1	3
+b_rom_sensorjammerr4	all_interface_buttons05	0	208	96	96		#	1	3
+b_rom_sensorjammerr5	all_interface_buttons05	0	208	96	96		#	1	3
+b_fed_type3torpedoes	all_interface_buttons05	104	208	96	96		#	2	3
+b_fed_type3torpedoesA	all_interface_buttons05	104	208	96	96		#	2	3
+b_kliR_calltoarms	all_interface_buttons05	208	208	96	96		#	3	3
+b_kli_scramblingprobe	all_interface_buttons05	312	208	96	96		#	4	3
+b_kli_ion_storm	all_interface_buttons05	416	208	96	96		#	5	3
+b_kli_ion_stormr4	all_interface_buttons05	416	208	96	96		#	5	3
+b_kli_ion_stormr5	all_interface_buttons05	416	208	96	96		#	5	3
+b_kli_ion_stormr6	all_interface_buttons05	416	208	96	96		#	5	3
+b_romR_leahval1	all_interface_buttons05	0	312	96	96		#	1	4
+b_kliR_bortas1	all_interface_buttons05	104	312	96	96		#	2	4
+b_kliR_qawduj1	all_interface_buttons05	208	312	96	96		#	3	4
+b_rom_energy_reeling	all_interface_buttons05	312	312	96	96		#	4	4
+b_fedU_chassis2	all_interface_buttons05	416	312	96	96		#	5	4
+b_romR_leahval2	all_interface_buttons05	0	416	96	96		#	1	5
+b_kliR_bortas2	all_interface_buttons05	104	416	96	96		#	2	5
+b_kliR_qawduj2	all_interface_buttons05	208	416	96	96		#	3	5
+b_fedU_chassis3	all_interface_buttons05	312	416	96	96		#	4	5
+b_fedU_chassis1	all_interface_buttons05	416	416	96	96		#	5	5
+b_fed_gravitonloaded	all_interface_buttons06	0	0	96	96		#	1	1
+b_fed_antimattermine	all_interface_buttons06	104	0	96	96		#	2	1
+b_fed_fullscan	all_interface_buttons06	208	0	96	96		#	3	1
+b_fed_vectorcalc	all_interface_buttons06	312	0	96	96		#	4	1
+b_fed_defensefocus	all_interface_buttons06	416	0	96	96		#	5	1
+b_fed_shieldreset	all_interface_buttons06	0	104	96	96		#	1	2
+b_fed_blackout	all_interface_buttons06	104	104	96	96		#	2	2
+b_fed_blackoutr4	all_interface_buttons06	104	104	96	96		#	2	2
+b_fed_blackoutr5	all_interface_buttons06	104	104	96	96		#	2	2
+b_fed_blackoutM	all_interface_buttons06	104	104	96	96		#	2	2
+b_fed_blackoutMr4	all_interface_buttons06	104	104	96	96		#	2	2
+b_fed_blackoutMr5	all_interface_buttons06	104	104	96	96		#	2	2
+b_fed_energy	all_interface_buttons06	208	104	96	96		#	3	2
+b_fed_precise	all_interface_buttons06	312	104	96	96		#	4	2
+b_fed_precise_nebula	all_interface_buttons06	312	104	96	96		#	4	2
+b_fed_assaultmode	all_interface_buttons06	416	104	96	96		#	5	2
+b_fed_tricharger	all_interface_buttons06	0	208	96	96		#	1	3
+b_fed_ecm	all_interface_buttons06	104	208	96	96		#	2	3
+b_romR_marines	all_interface_buttons06	208	208	96	96		#	3	3
+b_rom_covert-ops	all_interface_buttons06	208	208	96	96		#	3	3
+b_kli_battleplan	all_interface_buttons06	312	208	96	96		#	4	3
+b_rom_spy	all_interface_buttons06	416	208	96	96		#	5	3
+b_rom_spyr5	all_interface_buttons06	416	208	96	96		#	5	3
+b_kli_imperial_stance	all_interface_buttons06	0	312	96	96		#	1	4
+b_rom_sabotage	all_interface_buttons06	104	312	96	96		#	2	4
+b_rom_sabotager2	all_interface_buttons06	104	312	96	96		#	2	4
+b_rom_sabotager3	all_interface_buttons06	104	312	96	96		#	2	4
+b_rom_sabotager4	all_interface_buttons06	104	312	96	96		#	2	4
+b_rom_sabotager5	all_interface_buttons06	104	312	96	96		#	2	4
+b_domR_alpha	all_interface_buttons06	208	312	96	96		#	3	4
+b_dom_alphawhite	all_interface_buttons06	208	312	96	96		#	3	4
+b_dom_alphawhite_bor	all_interface_buttons06	208	312	96	96		#	3	4
+b_kli_ion_torpedo	all_interface_buttons06	312	312	96	96		#	4	4
+b_kli_ion_torpedo_bor	all_interface_buttons06	312	312	96	96		#	4	4
+b_domR_excessive	all_interface_buttons06	416	312	96	96		#	5	4
+b_dom_excessive	all_interface_buttons06	416	312	96	96		#	5	4
+b_dom_excessiver6	all_interface_buttons06	416	312	96	96		#	5	4
+b_kliR_fieldoffire	all_interface_buttons06	0	416	96	96		#	1	5
+b_kli_fieldoffire	all_interface_buttons06	0	416	96	96		#	1	5
+b_kli_fieldoffirer2	all_interface_buttons06	0	416	96	96		#	1	5
+b_kli_fieldoffirer3	all_interface_buttons06	0	416	96	96		#	1	5
+b_kli_fieldoffirer4	all_interface_buttons06	0	416	96	96		#	1	5
+b_kli_fieldoffirer5	all_interface_buttons06	0	416	96	96		#	1	5
+b_kli_fieldoffirer6	all_interface_buttons06	0	416	96	96		#	1	5
+b_kliR_compound	all_interface_buttons06	104	416	96	96		#	2	5
+b_kli_compound	all_interface_buttons06	104	416	96	96		#	2	5
+b_kli_compound_rom	all_interface_buttons06	104	416	96	96		#	2	5
+b_kliR_alt_armament	all_interface_buttons06	208	416	96	96		#	3	5
+b_kli_alt_armament	all_interface_buttons06	208	416	96	96		#	3	5
+b_kli_alt_armamentA	all_interface_buttons06	208	416	96	96		#	3	5
+b_kliR_energybuffer	all_interface_buttons06	312	416	96	96		#	4	5
+b_kli_energybuffer	all_interface_buttons06	312	416	96	96		#	4	5
+b_kli_energybufferA	all_interface_buttons06	312	416	96	96		#	4	5
+b_kliR_overload	all_interface_buttons06	416	416	96	96		#	5	5
+b_kli_overload	all_interface_buttons06	416	416	96	96		#	5	5
+b_kli_graviton_marker	all_interface_buttons07	0	0	96	96		#	1	1
+b_rom_graviton_marker	all_interface_buttons07	0	0	96	96		#	1	1
+b_kliR_lastditch	all_interface_buttons07	104	0	96	96		#	2	1
+b_kli_lastditch	all_interface_buttons07	104	0	96	96		#	2	1
+b_nfer_disblast	all_interface_buttons07	208	0	96	96		#	3	1
+b_kliR_heavy_disruptor	all_interface_buttons07	312	0	96	96		#	4	1
+b_kli_heavy_disruptor	all_interface_buttons07	312	0	96	96		#	4	1
+b_kliR_torpedo_drone	all_interface_buttons07	416	0	96	96		#	5	1
+b_kli_homing	all_interface_buttons07	416	0	96	96		#	5	1
+b_domR_interception1	all_interface_buttons07	0	104	96	96		#	1	2
+b_domR_siege1	all_interface_buttons07	104	104	96	96		#	2	2
+b_kliR_sbtorp	all_interface_buttons07	208	104	96	96		#	3	2
+b_kli_sb_torpedo	all_interface_buttons07	208	104	96	96		#	3	2
+b_kliR_ctractor	all_interface_buttons07	312	104	96	96		#	4	2
+b_kli_combat_tractor	all_interface_buttons07	312	104	96	96		#	4	2
+b_fed_combat_tractor	all_interface_buttons07	312	104	96	96		#	4	2
+b_rom_shield_recharge	all_interface_buttons07	416	104	96	96		#	5	2
+b_dom_shield_recharge	all_interface_buttons07	416	104	96	96		#	5	2
+b_domR_interception2	all_interface_buttons07	0	208	96	96		#	1	3
+b_domR_siege2	all_interface_buttons07	104	208	96	96		#	2	3
+b_rom_plasmabolt	all_interface_buttons07	208	208	96	96		#	3	3
+b_rom_plasmaboltr4	all_interface_buttons07	208	208	96	96		#	3	3
+b_rom_plasmaboltr5	all_interface_buttons07	208	208	96	96		#	3	3
+b_rom_plasmaboltr6	all_interface_buttons07	208	208	96	96		#	3	3
+b_fed_plasmabolt	all_interface_buttons07	208	208	96	96		#	3	3
+b_fed_plasmaboltr4	all_interface_buttons07	208	208	96	96		#	3	3
+b_fed_plasmaboltr5	all_interface_buttons07	208	208	96	96		#	3	3
+b_nbreR_dampening	all_interface_buttons07	312	208	96	96		#	4	3
+b_nbre_dampening	all_interface_buttons07	312	208	96	96		#	4	3
+b_dom_dampening	all_interface_buttons07	312	208	96	96		#	4	3
+b_borR_datamining	all_interface_buttons07	416	208	96	96		#	5	3
+b_borR_connections1	all_interface_buttons07	0	312	96	96		#	1	4
+b_borR_connections2	all_interface_buttons07	104	312	96	96		#	2	4
+b_borR_connections3	all_interface_buttons07	208	312	96	96		#	3	4
+b_borR_connections4	all_interface_buttons07	312	312	96	96		#	4	4
+b_borR_connections5	all_interface_buttons07	416	312	96	96		#	5	4
+b_kliR_largescalecloak	all_interface_buttons07	0	416	96	96		#	1	5
+b_rom_sleeperagent	all_interface_buttons07	104	416	96	96		#	2	5
+b_dom_rangeboost	all_interface_buttons07	208	416	96	96		#	3	5
+b_dom_cascade	all_interface_buttons07	312	416	96	96		#	4	5
+b_rom_cascade	all_interface_buttons07	312	416	96	96		#	4	5
+b_dom_emblast	all_interface_buttons07	416	416	96	96		#	5	5
+b_dom_emblast_fed	all_interface_buttons07	416	416	96	96		#	5	5
+b_dom_opresence	all_interface_buttons08	0	0	96	96		#	1	1
+b_dom_opresencer4	all_interface_buttons08	0	0	96	96		#	1	1
+b_dom_opresencer5	all_interface_buttons08	0	0	96	96		#	1	1
+b_domR_coreblast	all_interface_buttons08	104	0	96	96		#	2	1
+b_dom_coreblast	all_interface_buttons08	104	0	96	96		#	2	1
+b_dom_deepscan	all_interface_buttons08	208	0	96	96		#	3	1
+b_dom_ebeacon	all_interface_buttons08	312	0	96	96		#	4	1
+b_domR_isbomb	all_interface_buttons08	416	0	96	96		#	5	1
+b_dom_isbomb	all_interface_buttons08	416	0	96	96		#	5	1
+b_dom_phaseshield	all_interface_buttons08	0	104	96	96		#	1	2
+b_dom_tetrion_disruptor	all_interface_buttons08	104	104	96	96		#	2	2
+b_dom_tetrion_disruptorr4	all_interface_buttons08	104	104	96	96		#	2	2
+b_dom_tetrion_disruptorr5	all_interface_buttons08	104	104	96	96		#	2	2
+b_romR_refit_rhiennA	all_interface_buttons08	208	104	96	96		#	3	2
+b_romR_refit_rhiennB	all_interface_buttons08	312	104	96	96		#	4	2
+b_domR_tetphoton	all_interface_buttons08	416	104	96	96		#	5	2
+b_dom_tetrion_photon	all_interface_buttons08	416	104	96	96		#	5	2
+b_dom_tetrion_compound	all_interface_buttons08	0	208	96	96		#	1	3
+b_rom_auto_repair	all_interface_buttons08	104	208	96	96		#	2	3
+b_rom_auto_repairM	all_interface_buttons08	104	208	96	96		#	2	3
+b_kli_polaronfield	all_interface_buttons08	208	208	96	96		#	3	3
+b_kli_polaronfield_rom	all_interface_buttons08	208	208	96	96		#	3	3
+b_romR_stealth	all_interface_buttons08	312	208	96	96		#	4	3
+b_rom_stealth_field	all_interface_buttons08	312	208	96	96		#	4	3
+b_romR_radiation	all_interface_buttons08	416	208	96	96		#	5	3
+b_rom_radiation	all_interface_buttons08	416	208	96	96		#	5	3
+b_rom_radiationr4	all_interface_buttons08	416	208	96	96		#	5	3
+b_rom_radiationr5	all_interface_buttons08	416	208	96	96		#	5	3
+b_romR_generix1	all_interface_buttons08	0	312	96	96		#	1	4
+b_romR_refit_dread	all_interface_buttons08	104	312	96	96		#	2	4
+b_romR_refit_frigate	all_interface_buttons08	208	312	96	96		#	3	4
+b_romR_refit_support	all_interface_buttons08	312	312	96	96		#	4	4
+b_fed_plasmacoil	all_interface_buttons08	416	312	96	96		#	5	4
+b_romR_generix2	all_interface_buttons08	0	416	96	96		#	1	5
+b_rom_plasmamine	all_interface_buttons08	104	416	96	96		#	2	5
+b_rom_plasmaminer4	all_interface_buttons08	104	416	96	96		#	2	5
+b_rom_plasmaminer5	all_interface_buttons08	104	416	96	96		#	2	5
+b_rom_plasmaminer6	all_interface_buttons08	104	416	96	96		#	2	5
+b_rom_aldovh_cloak	all_interface_buttons08	208	416	96	96		#	3	5
+b_rom_metaphasic	all_interface_buttons08	312	416	96	96		#	4	5
+b_rom_metaphasicM	all_interface_buttons08	312	416	96	96		#	4	5
+#	all_interface_buttons08	416	416	96	96		#	5	5
+b_romR_prefine	all_interface_buttons09	0	0	96	96		#	1	1
+b_romR_silentresolve	all_interface_buttons09	104	0	96	96		#	2	1
+b_rom_silentresolve	all_interface_buttons09	104	0	96	96		#	2	1
+b_rom_silentresolver6	all_interface_buttons09	104	0	96	96		#	2	1
+b_dom_tetrionsingularity	all_interface_buttons09	208	0	96	96		#	3	1
+#	all_interface_buttons09	312	0	96	96		#	4	1
+b_dom_work_to_mine	all_interface_buttons09	416	0	96	96		#	5	1
+b_dom_work_to_mineA	all_interface_buttons09	416	0	96	96		#	5	1
+b_dom_work_supply	all_interface_buttons09	0	104	96	96		#	1	2
+b_dom_work_supplyA	all_interface_buttons09	0	104	96	96		#	1	2
+b_borR_partadapt	all_interface_buttons09	104	104	96	96		#	2	2
+b_borR_logistics	all_interface_buttons09	208	104	96	96		#	3	2
+b_bor_sphere_BBRR_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_sphere_BRRH_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_sphere_BRRR_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_sphere_BRRT_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_sphere_RRHT_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_sphere_RRRH_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_sphere_RRRT_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_sphereY_BBRR_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_sphereY_BRRH_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_sphereY_BRRR_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_sphereY_BRRT_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_sphereY_RRHT_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_sphereY_RRRH_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_sphereY_RRRT_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_sphereY_BRRS_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_sphereY_RRHS_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_sphereY_RRRS_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_sphereY_RRSS_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_sphereY_RRTS_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_pyramid_RRHH_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_pyramid_RRHT_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_pyramid_RRHN_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_pyramid_RRTN_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_bor_scoutcube_reg	all_interface_buttons09	312	104	96	96		#	4	2
+b_kli_regeneration	all_interface_buttons09	312	104	96	96		#	4	2
+b_borR_board	all_interface_buttons09	416	104	96	96		#	5	2
+b_bor_board_probe	all_interface_buttons09	416	104	96	96		#	5	2
+b_bor_board_scube	all_interface_buttons09	416	104	96	96		#	5	2
+b_bor_board_adap	all_interface_buttons09	416	104	96	96		#	5	2
+b_bor_board_assi	all_interface_buttons09	416	104	96	96		#	5	2
+b_bor_board_sphere	all_interface_buttons09	416	104	96	96		#	5	2
+b_bor_board_diamond	all_interface_buttons09	416	104	96	96		#	5	2
+b_bor_board_cube	all_interface_buttons09	416	104	96	96		#	5	2
+b_bor_sphere_BBBH_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphere_BBHT_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphere_BBRH_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphere_BRHT_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphere_BRRH_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphere_RRHT_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphere_RRRH_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphereY_BBBH_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphereY_BBHT_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphereY_BBRH_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphereY_BRHT_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphereY_BRRH_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphereY_RRHT_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphereY_RRRH_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphereY_BBHS_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphereY_BHSS_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphereY_BHTS_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphereY_BRHS_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphereY_HSSS_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphereY_HTSS_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphereY_RHSS_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphereY_RHTS_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_sphereY_RRHS_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_diamond_BHDD_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_diamond_BRHD_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_diamond_BRTH_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_diamond_BTHD_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_diamond_HDDD_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_diamond_RHDD_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_diamond_RTHD_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_diamond_THDD_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_BHHHMM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_BRHHHM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_BRHHMM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_BTHHHM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_BTHHMM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_BTRHHH_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_BTRHHM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_BTRHMM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_BTTHHH_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_BTTHHM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_BTTHMM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_BTTRHH_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_BTTRHM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_BTTTHH_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_BTTTHM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_BTTTRH_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_RHHHMM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_THHHMM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_TRHHHM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_TRHHMM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_TTHHHM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_TTHHMM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_TTRHHH_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_TTRHHM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_TTRHMM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_TTTHHH_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_TTTHHM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_TTTHMM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_TTTRHH_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_cube_TTTRHM_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_pyramid_HHHH_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_pyramid_HHHN_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_pyramid_HHHT_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_pyramid_HHTN_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_pyramid_RHHH_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_pyramid_RHHN_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_pyramid_RHHT_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_pyramid_RHTN_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_pyramid_RRHH_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_pyramid_RRHN_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_pyramid_RRHT_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_stations_hol	all_interface_buttons09	0	208	96	96		#	1	3
+b_bor_assimilator_AAA_ass	all_interface_buttons09	104	208	96	96		#	2	3
+b_bor_assimilator_BAA_ass	all_interface_buttons09	104	208	96	96		#	2	3
+b_bor_assimilator_BRA_ass	all_interface_buttons09	104	208	96	96		#	2	3
+b_bor_assimilator_BTA_ass	all_interface_buttons09	104	208	96	96		#	2	3
+b_bor_assimilator_RAA_ass	all_interface_buttons09	104	208	96	96		#	2	3
+b_bor_assimilator_TAA_ass	all_interface_buttons09	104	208	96	96		#	2	3
+b_bor_assimilator_TRA_ass	all_interface_buttons09	104	208	96	96		#	2	3
+b_bor_assimilator_TTA_ass	all_interface_buttons09	104	208	96	96		#	2	3
+b_bor_assimilatorZ_BRZ_ass	all_interface_buttons09	104	208	96	96		#	2	3
+b_bor_assimilatorZ_BTZ_ass	all_interface_buttons09	104	208	96	96		#	2	3
+b_bor_assimilatorZ_BZN_ass	all_interface_buttons09	104	208	96	96		#	2	3
+b_bor_assimilatorZ_BZZ_ass	all_interface_buttons09	104	208	96	96		#	2	3
+b_bor_assimilatorZ_RZN_ass	all_interface_buttons09	104	208	96	96		#	2	3
+b_bor_assimilatorZ_RZZ_ass	all_interface_buttons09	104	208	96	96		#	2	3
+b_bor_assimilatorZ_TRZ_ass	all_interface_buttons09	104	208	96	96		#	2	3
+b_bor_assimilatorZ_TTZ_ass	all_interface_buttons09	104	208	96	96		#	2	3
+b_bor_assimilatorZ_TZN_ass	all_interface_buttons09	104	208	96	96		#	2	3
+b_bor_assimilatorZ_TZZ_ass	all_interface_buttons09	104	208	96	96		#	2	3
+b_bor_assimilatorZ_ZZN_ass	all_interface_buttons09	104	208	96	96		#	2	3
+b_borR_devestating	all_interface_buttons09	208	208	96	96		#	3	3
+b_bor_devestating_probe	all_interface_buttons09	208	208	96	96		#	3	3
+b_bor_devestating_scube	all_interface_buttons09	208	208	96	96		#	3	3
+b_bor_devestating_adap	all_interface_buttons09	208	208	96	96		#	3	3
+b_bor_devestating_assi	all_interface_buttons09	208	208	96	96		#	3	3
+b_bor_devestating_sphere	all_interface_buttons09	208	208	96	96		#	3	3
+b_bor_devestating_diamond	all_interface_buttons09	208	208	96	96		#	3	3
+b_bor_devestating_cube	all_interface_buttons09	208	208	96	96		#	3	3
+b_borR_sensor_relay	all_interface_buttons09	312	208	96	96		#	4	3
+b_borR_nanites	all_interface_buttons09	416	208	96	96		#	5	3
+b_bor_nanites_diamond	all_interface_buttons09	416	208	96	96		#	5	3
+b_bor_nanites_cube	all_interface_buttons09	416	208	96	96		#	5	3
+b_romR_bombardment	all_interface_buttons09	0	312	96	96		#	1	4
+b_rom_bombardment	all_interface_buttons09	0	312	96	96		#	1	4
+b_bor_nanitefactory	all_interface_buttons09	104	312	96	96		#	2	4
+b_bor_matrixteleport	all_interface_buttons09	208	312	96	96		#	3	4
+b_dom_artillery	all_interface_buttons09	312	312	96	96		#	4	4
+b_borR_slizer	all_interface_buttons09	416	312	96	96		#	5	4
+b_bor_slizer_probe	all_interface_buttons09	416	312	96	96		#	5	4
+b_bor_slizer_adap	all_interface_buttons09	416	312	96	96		#	5	4
+b_bor_slizer_scube	all_interface_buttons09	416	312	96	96		#	5	4
+b_bor_slizer_sphere	all_interface_buttons09	416	312	96	96		#	5	4
+b_bor_slizer_assi	all_interface_buttons09	416	312	96	96		#	5	4
+b_bor_slizer_diamond	all_interface_buttons09	416	312	96	96		#	5	4
+b_bor_slizer_cube	all_interface_buttons09	416	312	96	96		#	5	4
+b_romR_phase_cloak	all_interface_buttons09	0	416	96	96		#	1	5
+b_rom_phase_cloak	all_interface_buttons09	0	416	96	96		#	1	5
+b_borR_baseholding	all_interface_buttons09	104	416	96	96		#	2	5
+b_dom_counterweaponry	all_interface_buttons09	208	416	96	96		#	3	5
+b_npc_tractorbeam	all_interface_buttons09	312	416	96	96		#	4	5
+b_fed_temp_stasis	all_interface_buttons09	416	416	96	96		#	5	5
+b_rom_phaseplates	all_interface_buttons10	0	0	96	96		#	1	1
+b_romR_phaseplates	all_interface_buttons10	0	0	96	96		#	1	1
+b_fed_progscan	all_interface_buttons10	104	0	96	96		#	2	1
+b_fedR_progscan	all_interface_buttons10	104	0	96	96		#	2	1
+b_rom_singularityimp	all_interface_buttons10	208	0	96	96		#	3	1
+b_romR_singularityimp	all_interface_buttons10	208	0	96	96		#	3	1
+b_fed_ecccm	all_interface_buttons10	312	0	96	96		#	4	1
+b_fed_ecccmA	all_interface_buttons10	312	0	96	96		#	4	1
+b_fed_sensorsynergy	all_interface_buttons10	416	0	96	96		#	5	1
+b_fed_sensorsynergyr4	all_interface_buttons10	416	0	96	96		#	5	1
+b_fed_sensorsynergyr5	all_interface_buttons10	416	0	96	96		#	5	1
+b_fed_guidedquantums	all_interface_buttons10	0	104	96	96		#	1	2
+b_fed_guidedquantumsA	all_interface_buttons10	0	104	96	96		#	1	2
+b_fed_guidedquantumsB	all_interface_buttons10	0	104	96	96		#	1	2
+b_fedR_guidedquantums	all_interface_buttons10	0	104	96	96		#	1	2
+b_rom_turretmode	all_interface_buttons10	104	104	96	96		#	2	2
+b_rom_turretmodeA	all_interface_buttons10	104	104	96	96		#	2	2
+b_romR_turretmode	all_interface_buttons10	104	104	96	96		#	2	2
+b_domR_passiveprobe	all_interface_buttons10	208	104	96	96		#	3	2
+b_fed_fleetsupply	all_interface_buttons10	312	104	96	96		#	4	2
+b_fedR_fleetsupply	all_interface_buttons10	312	104	96	96		#	4	2
+b_dom_remotebeacon	all_interface_buttons10	416	104	96	96		#	5	2
+b_domR_remotebeacon	all_interface_buttons10	416	104	96	96		#	5	2
+b_bor_vinculum	all_interface_buttons10	0	208	96	96		#	1	3
+b_bor_neuraltransceiver	all_interface_buttons10	104	208	96	96		#	2	3
+b_kli_missilestorm	all_interface_buttons10	208	208	96	96		#	3	3
+b_kliR_missilestorm	all_interface_buttons10	208	208	96	96		#	3	3
+b_kli_gravseekmissile	all_interface_buttons10	312	208	96	96		#	4	3
+b_kliR_gravseekmissile	all_interface_buttons10	312	208	96	96		#	4	3
+b_kli_fatigue	all_interface_buttons10	416	208	96	96		#	5	3
+b_kliR_fatigue	all_interface_buttons10	416	208	96	96		#	5	3
+b_fed_torpmodule	all_interface_buttons10	0	312	96	96		#	1	4
+b_fed_torpmoduleA	all_interface_buttons10	0	312	96	96		#	1	4
+b_fed_torpmoduleB	all_interface_buttons10	0	312	96	96		#	1	4
+b_fed_torpmoduleC	all_interface_buttons10	0	312	96	96		#	1	4
+b_rom_unstable	all_interface_buttons10	104	312	96	96		#	2	4
+b_romR_unstable	all_interface_buttons10	104	312	96	96		#	2	4
+b_rom_arlterium	all_interface_buttons10	208	312	96	96		#	3	4
+b_rom_arlteriumr4	all_interface_buttons10	208	312	96	96		#	3	4
+b_rom_arlteriumr5	all_interface_buttons10	208	312	96	96		#	3	4
+b_rom_arlteriumr6	all_interface_buttons10	208	312	96	96		#	3	4
+b_romR_arlterium	all_interface_buttons10	208	312	96	96		#	3	4
+b_fed_warpin_nebula	all_interface_buttons10	312	312	96	96		#	4	4
+b_fed_myotronscan	all_interface_buttons10	416	312	96	96		#	5	4
+b_fed_shieldovercharge	all_interface_buttons10	0	416	96	96		#	1	5
+b_dom_biowarheads	all_interface_buttons10	104	416	96	96		#	2	5
+b_domR_biowarheads	all_interface_buttons10	104	416	96	96		#	2	5
+b_fed_pointdefense	all_interface_buttons10	208	416	96	96		#	3	5
+b_fed_pointdefenser6	all_interface_buttons10	208	416	96	96		#	3	5
+b_fed_pointdefenseY	all_interface_buttons10	208	416	96	96		#	3	5
+b_fed_pointdefenseYr6	all_interface_buttons10	208	416	96	96		#	3	5
+b_fed_remoteshields	all_interface_buttons10	312	416	96	96		#	4	5
+b_fed_warpin_strat	all_interface_buttons10	416	416	96	96		#	5	5
+b_fed_surgical	all_interface_buttons11	0	0	96	96		#	1	1
+b_fed_tricobaltvolley	all_interface_buttons11	104	0	96	96		#	2	1
+b_fed_tricobaltvolleyr6	all_interface_buttons11	208	0	96	96		#	3	1
+b_rom_refractive	all_interface_buttons11	312	0	96	96		#	4	1
+b_rom_refractiver6	all_interface_buttons11	312	0	96	96		#	4	1
+b_romR_refractive	all_interface_buttons11	312	0	96	96		#	4	1
+b_romR_generix_spc	all_interface_buttons11	416	0	96	96		#	5	1
+b_bor_remodulate	all_interface_buttons11	0	104	96	96		#	1	2
+b_bor_emdome	all_interface_buttons11	104	104	96	96		#	2	2
+b_fed_platform_replicator	all_interface_buttons11	208	104	96	96		#	3	2
+b_fed_platform_replicatorr6	all_interface_buttons11	208	104	96	96		#	3	2
+b_fed_fleetsupplyRh	all_interface_buttons11	312	104	96	96		#	4	2
+b_fed_fleetsupplyRhr6	all_interface_buttons11	312	104	96	96		#	4	2
+b_rom_harmonicimpl	all_interface_buttons11	416	104	96	96		#	5	2
+b_romR_harmonicimpl	all_interface_buttons11	416	104	96	96		#	5	2
+b_bor_axial	all_interface_buttons11	0	208	96	96		#	1	3
+#	all_interface_buttons11	104	208	96	96		#	2	3
+#	all_interface_buttons11	208	208	96	96		#	3	3
+#	all_interface_buttons11	312	208	96	96		#	4	3
+#	all_interface_buttons11	416	208	96	96		#	5	3
+#	all_interface_buttons11	0	312	96	96		#	1	4
+#	all_interface_buttons11	104	312	96	96		#	2	4
+#	all_interface_buttons11	208	312	96	96		#	3	4
+#	all_interface_buttons11	312	312	96	96		#	4	4
+#	all_interface_buttons11	416	312	96	96		#	5	4
+#	all_interface_buttons11	0	416	96	96		#	1	5
+#	all_interface_buttons11	104	416	96	96		#	2	5
+#	all_interface_buttons11	208	416	96	96		#	3	5
+#	all_interface_buttons11	312	416	96	96		#	4	5
+#	all_interface_buttons11	416	416	96	96		#	5	5
+									
+#############################									
+######  Build Buttons  ######									
+#############################									
+@reference=512									
+@tmaterial=interface									
+b_fed_sovereign	all_interface_buildbuttons01	0	0	96	96		#	1	1
+b_fed_remoore	all_interface_buildbuttons01	104	0	96	96		#	2	1
+b_fed_excelsiorii	all_interface_buildbuttons01	208	0	96	96		#	3	1
+b_fed_defiant	all_interface_buildbuttons01	312	0	96	96		#	4	1
+b_fed_akira	all_interface_buildbuttons01	416	0	96	96		#	5	1
+b_fed_venture	all_interface_buildbuttons01	0	104	96	96		#	1	2
+b_fed_saber	all_interface_buildbuttons01	104	104	96	96		#	2	2
+b_fed_saberM	all_interface_buildbuttons01	104	104	96	96		#	2	2
+b_fed_saberr6	all_interface_buildbuttons01	104	104	96	96		#	2	2
+b_fed_saberMr6	all_interface_buildbuttons01	104	104	96	96		#	2	2
+b_fed_newton	all_interface_buildbuttons01	208	104	96	96		#	3	2
+b_fed_monsoon	all_interface_buildbuttons01	312	104	96	96		#	4	2
+b_fed_mediterranean	all_interface_buildbuttons01	416	104	96	96		#	5	2
+b_fed_mandril	all_interface_buildbuttons01	0	208	96	96		#	1	3
+b_fed_ambassador	all_interface_buildbuttons01	104	208	96	96		#	2	3
+b_fed_avalon	all_interface_buildbuttons01	208	208	96	96		#	3	3
+b_fed_steamrunner	all_interface_buildbuttons01	312	208	96	96		#	4	3
+b_fed_outpost	all_interface_buildbuttons01	416	208	96	96		#	5	3
+b_fed_antares_yard	all_interface_buildbuttons01	0	312	96	96		#	1	4
+b_fed_eraudi_yard	all_interface_buildbuttons01	104	312	96	96		#	2	4
+b_fed_sf_science	all_interface_buildbuttons01	208	312	96	96		#	3	4
+b_fed_sf_engineering	all_interface_buildbuttons01	312	312	96	96		#	4	4
+b_fed_storage_dock	all_interface_buildbuttons01	416	312	96	96		#	5	4
+b_fed_outpost_upgradeD	all_interface_buildbuttons01	0	416	96	96		#	1	5
+b_bor_assi_matrix_upgradeD	all_interface_buildbuttons01	0	416	96	96		#	1	5
+b_dom_perimeter_upgradeD	all_interface_buildbuttons01	0	416	96	96		#	1	5
+b_dom_cloning_fac_upgradeD	all_interface_buildbuttons01	0	416	96	96		#	1	5
+b_kli_kahless_upgradeD	all_interface_buildbuttons01	0	416	96	96		#	1	5
+b_rom_starbase_upgradeD	all_interface_buildbuttons01	0	416	96	96		#	1	5
+b_rom_tavara_upgradeD	all_interface_buildbuttons01	0	416	96	96		#	1	5
+b_rom_tavara_upgradeD2	all_interface_buildbuttons01	0	416	96	96		#	1	5
+b_fed_outpost_upgradeW	all_interface_buildbuttons01	104	416	96	96		#	2	5
+b_bor_assi_matrix_upgradeW	all_interface_buildbuttons01	104	416	96	96		#	2	5
+b_dom_perimeter_upgradeW	all_interface_buildbuttons01	104	416	96	96		#	2	5
+b_dom_cloning_fac_upgradeW	all_interface_buildbuttons01	104	416	96	96		#	2	5
+b_kli_kahless_upgradeW	all_interface_buildbuttons01	104	416	96	96		#	2	5
+b_rom_starbase_upgradeW	all_interface_buildbuttons01	104	416	96	96		#	2	5
+b_rom_tavara_upgradeW	all_interface_buildbuttons01	104	416	96	96		#	2	5
+b_rom_tavara_upgradeW2	all_interface_buildbuttons01	104	416	96	96		#	2	5
+b_rom_tavara_upgradeC	all_interface_buildbuttons01	208	416	96	96		#	3	5
+b_rom_tavara_upgradeC2	all_interface_buildbuttons01	208	416	96	96		#	3	5
+b_fed_excelsior	all_interface_buildbuttons01	312	416	96	96		#	4	5
+b_fed_mirandaii	all_interface_buildbuttons01	416	416	96	96		#	5	5
+b_fed_platform	all_interface_buildbuttons02	0	0	96	96		#	1	1
+b_fed_platform_torpedo	all_interface_buildbuttons02	104	0	96	96		#	2	1
+b_fed_platform_torpedoYR	all_interface_buildbuttons02	104	0	96	96		#	2	1
+b_fed_platform_torpedoZR	all_interface_buildbuttons02	104	0	96	96		#	2	1
+b_fed_platform_phaser	all_interface_buildbuttons02	208	0	96	96		#	3	1
+b_fed_platform_phaserYR	all_interface_buildbuttons02	208	0	96	96		#	3	1
+b_fed_platform_phaserZR	all_interface_buildbuttons02	208	0	96	96		#	3	1
+b_fed_platform_pulse	all_interface_buildbuttons02	312	0	96	96		#	4	1
+b_fed_platform_pulseR	all_interface_buildbuttons02	312	0	96	96		#	4	1
+b_fed_platform_pulseZR	all_interface_buildbuttons02	312	0	96	96		#	4	1
+b_fed_platform_sensor	all_interface_buildbuttons02	416	0	96	96		#	5	1
+b_fed_platform_sensorYR	all_interface_buildbuttons02	416	0	96	96		#	5	1
+b_fed_platform_sensorZR	all_interface_buildbuttons02	416	0	96	96		#	5	1
+b_fed_canaveral	all_interface_buildbuttons02	0	104	96	96		#	1	2
+b_fed_norway	all_interface_buildbuttons02	104	104	96	96		#	2	2
+b_fed_intrepid	all_interface_buildbuttons02	208	104	96	96		#	3	2
+b_fed_sf_command	all_interface_buildbuttons02	312	104	96	96		#	4	2
+b_fed_descent	all_interface_buildbuttons02	416	104	96	96		#	5	2
+b_fed_galaxy	all_interface_buildbuttons02	0	208	96	96		#	1	3
+b_fed_galaxyr4	all_interface_buildbuttons02	0	208	96	96		#	1	3
+b_fed_nebula_torp	all_interface_buildbuttons02	104	208	96	96		#	2	3
+b_fed_phalanx	all_interface_buildbuttons02	208	208	96	96		#	3	3
+b_fed_mixedtech_yard_kli	all_interface_buildbuttons02	312	208	96	96		#	4	3
+b_fed_mixedtech_yard_dom	all_interface_buildbuttons02	312	208	96	96		#	4	3
+b_fed_mixedtech_yard_rom	all_interface_buildbuttons02	312	208	96	96		#	4	3
+b_fed_mixedtech_yard_bor	all_interface_buildbuttons02	312	208	96	96		#	4	3
+b_dom_perimeter_upgradeA	all_interface_buildbuttons02	416	208	96	96		#	5	3
+b_rom_shrike	all_interface_buildbuttons02	0	312	96	96		#	1	4
+b_rom_griffin	all_interface_buildbuttons02	104	312	96	96		#	2	4
+b_rom_dderidex	all_interface_buildbuttons02	208	312	96	96		#	3	4
+b_rom_cehlaer	all_interface_buildbuttons02	312	312	96	96		#	4	4
+b_rom_saeihr	all_interface_buildbuttons02	416	312	96	96		#	5	4
+#	all_interface_buildbuttons02	0	416	96	96		#	1	5
+#	all_interface_buildbuttons02	104	416	96	96		#	2	5
+#	all_interface_buildbuttons02	208	416	96	96		#	3	5
+b_rom_rhienn	all_interface_buildbuttons02	312	416	96	96		#	4	5
+b_rom_norexan	all_interface_buildbuttons02	416	416	96	96		#	5	5
+b_rom_eresis	all_interface_buildbuttons03	0	0	96	96		#	1	1
+b_rom_starbase	all_interface_buildbuttons03	104	0	96	96		#	2	1
+b_rom_staryard	all_interface_buildbuttons03	208	0	96	96		#	3	1
+b_rom_mining_colony	all_interface_buildbuttons03	312	0	96	96		#	4	1
+b_rom_research_institute	all_interface_buildbuttons03	416	0	96	96		#	5	1
+b_rom_intelligen_center	all_interface_buildbuttons03	0	104	96	96		#	1	2
+b_rom_cloaking_generator	all_interface_buildbuttons03	104	104	96	96		#	2	2
+b_rom_upgrade_facility	all_interface_buildbuttons03	208	104	96	96		#	3	2
+b_rom_talshiar_academy	all_interface_buildbuttons03	312	104	96	96		#	4	2
+b_rom_warbird_yard	all_interface_buildbuttons03	416	104	96	96		#	5	2
+b_rom_disruptor_turret	all_interface_buildbuttons03	0	208	96	96		#	1	3
+b_rom_spy_satellite	all_interface_buildbuttons03	104	208	96	96		#	2	3
+b_rom_mixedtech_yard_fed	all_interface_buildbuttons03	208	208	96	96		#	3	3
+b_rom_mixedtech_yard_kli	all_interface_buildbuttons03	208	208	96	96		#	3	3
+b_rom_mixedtech_yard_dom	all_interface_buildbuttons03	208	208	96	96		#	3	3
+b_rom_mixedtech_yard_bor	all_interface_buildbuttons03	208	208	96	96		#	3	3
+b_rom_serkas	all_interface_buildbuttons03	312	208	96	96		#	4	3
+b_rom_mogai	all_interface_buildbuttons03	416	208	96	96		#	5	3
+b_rom_fakairu	all_interface_buildbuttons03	0	312	96	96		#	1	4
+b_rom_talon	all_interface_buildbuttons03	104	312	96	96		#	2	4
+b_rom_talon_detect	all_interface_buildbuttons03	208	312	96	96		#	3	4
+b_rom_talon_detectR	all_interface_buildbuttons03	208	312	96	96		#	3	4
+b_rom_talon_repair_fed	all_interface_buildbuttons03	208	312	96	96		#	3	4
+b_rom_tavara	all_interface_buildbuttons03	312	312	96	96		#	4	4
+b_rom_leahval	all_interface_buildbuttons03	416	312	96	96		#	5	4
+b_fed_newtonUR	all_interface_buildbuttons03	0	416	96	96		#	1	5
+b_fed_newtonUUR	all_interface_buildbuttons03	0	416	96	96		#	1	5
+b_fed_newtonUUUR	all_interface_buildbuttons03	0	416	96	96		#	1	5
+b_kli_calltoarms	all_interface_buildbuttons03	104	416	96	96		#	2	5
+b_kli_noqduj	all_interface_buildbuttons03	208	416	96	96		#	3	5
+b_kli_armory	all_interface_buildbuttons03	312	416	96	96		#	4	5
+b_kli_field_research	all_interface_buildbuttons03	416	416	96	96		#	5	5
+b_kli_battle_yard	all_interface_buildbuttons04	0	0	96	96		#	1	1
+b_kli_bortas	all_interface_buildbuttons04	104	0	96	96		#	2	1
+b_kli_brel	all_interface_buildbuttons04	208	0	96	96		#	3	1
+b_kli_chargh	all_interface_buildbuttons04	312	0	96	96		#	4	1
+b_kli_chonaq	all_interface_buildbuttons04	416	0	96	96		#	5	1
+b_kli_chor	all_interface_buildbuttons04	0	104	96	96		#	1	2
+b_kli_edjen	all_interface_buildbuttons04	104	104	96	96		#	2	2
+b_kli_field_yard	all_interface_buildbuttons04	208	104	96	96		#	3	2
+#	all_interface_buildbuttons04	208	104	96	96		#	3	2
+#	all_interface_buildbuttons04	312	104	96	96		#	4	2
+b_kli_platform	all_interface_buildbuttons04	416	104	96	96		#	5	2
+b_kli_imperial_research	all_interface_buildbuttons04	0	208	96	96		#	1	3
+b_kli_imperial_yard	all_interface_buildbuttons04	104	208	96	96		#	2	3
+b_kli_kahless_station	all_interface_buildbuttons04	208	208	96	96		#	3	3
+b_kli_kbeajq	all_interface_buildbuttons04	312	208	96	96		#	4	3
+b_kli_ktinga	all_interface_buildbuttons04	416	208	96	96		#	5	3
+b_kli_kvort	all_interface_buildbuttons04	0	312	96	96		#	1	4
+b_kli_luspet	all_interface_buildbuttons04	104	312	96	96		#	2	4
+b_kli_mining_station	all_interface_buildbuttons04	208	312	96	96		#	3	4
+b_kli_moqbara_station	all_interface_buildbuttons04	312	312	96	96		#	4	4
+b_kli_neghvar	all_interface_buildbuttons04	416	312	96	96		#	5	4
+b_kli_ordnance_depot	all_interface_buildbuttons04	0	416	96	96		#	1	5
+b_kli_qawduj	all_interface_buildbuttons04	104	416	96	96		#	2	5
+b_kli_sang	all_interface_buildbuttons04	208	416	96	96		#	3	5
+b_kli_scout_station	all_interface_buildbuttons04	312	416	96	96		#	4	5
+b_kli_susa	all_interface_buildbuttons04	416	416	96	96		#	5	5
+b_kli_vutpa	all_interface_buildbuttons05	0	0	96	96		#	1	1
+b_kli_vorcha	all_interface_buildbuttons05	104	0	96	96		#	2	1
+b_kli_veqlaragh	all_interface_buildbuttons05	208	0	96	96		#	3	1
+b_kli_topmey	all_interface_buildbuttons05	312	0	96	96		#	4	1
+b_kli_attackprobe	all_interface_buildbuttons05	416	0	96	96		#	5	1
+b_kli_attackprober4	all_interface_buildbuttons05	416	0	96	96		#	5	1
+b_kli_attackprober5	all_interface_buildbuttons05	416	0	96	96		#	5	1
+b_kli_mini_platform	all_interface_buildbuttons05	416	0	96	96		#	5	1
+b_dom_destroyer	all_interface_buildbuttons05	0	104	96	96		#	1	2
+b_dom_battle_cruiser	all_interface_buildbuttons05	104	104	96	96		#	2	2
+b_dom_battle_cruiserP	all_interface_buildbuttons05	208	104	96	96		#	3	2
+b_dom_battleship	all_interface_buildbuttons05	312	104	96	96		#	4	2
+b_dom_battleshipP	all_interface_buildbuttons05	416	104	96	96		#	5	2
+b_dom_bomber	all_interface_buildbuttons05	0	208	96	96		#	1	3
+b_dom_bomberP	all_interface_buildbuttons05	104	208	96	96		#	2	3
+b_dom_cloning_fac	all_interface_buildbuttons05	208	208	96	96		#	3	3
+b_dom_defender	all_interface_buildbuttons05	312	208	96	96		#	4	3
+b_dom_defenderP	all_interface_buildbuttons05	416	208	96	96		#	5	3
+b_dom_dreadnought	all_interface_buildbuttons05	0	312	96	96		#	1	4
+#	all_interface_buildbuttons05	104	312	96	96		#	2	4
+b_dom_escort_cruiser	all_interface_buildbuttons05	208	312	96	96		#	3	4
+b_dom_escort_cruiserP	all_interface_buildbuttons05	312	312	96	96		#	4	4
+b_dom_mixedtech_yard_kli	all_interface_buildbuttons05	416	312	96	96		#	5	4
+b_dom_mixedtech_yard_rom	all_interface_buildbuttons05	416	312	96	96		#	5	4
+b_dom_mixedtech_yard_fed	all_interface_buildbuttons05	416	312	96	96		#	5	4
+b_dom_mixedtech_yard_bor	all_interface_buildbuttons05	416	312	96	96		#	5	4
+b_dom_heavy_cruiser	all_interface_buildbuttons05	0	416	96	96		#	1	5
+b_dom_hyper_artillery	all_interface_buildbuttons05	104	416	96	96		#	2	5
+b_dom_supersensor	all_interface_buildbuttons05	208	416	96	96		#	3	5
+b_dom_intercept_dest	all_interface_buildbuttons05	312	416	96	96		#	4	5
+b_dom_intercept_destP	all_interface_buildbuttons05	416	416	96	96		#	5	5
+b_dom_ketracel_synth	all_interface_buildbuttons06	0	0	96	96		#	1	1
+b_dom_ketracel_fac	all_interface_buildbuttons06	104	0	96	96		#	2	1
+b_dom_large_yard	all_interface_buildbuttons06	208	0	96	96		#	3	1
+b_dom_space_refinery	all_interface_buildbuttons06	312	0	96	96		#	4	1
+b_dom_perimeter	all_interface_buildbuttons06	416	0	96	96		#	5	1
+b_dom_phaser_sentry	all_interface_buildbuttons06	0	104	96	96		#	1	2
+b_dom_scout	all_interface_buildbuttons06	104	104	96	96		#	2	2
+b_dom_sensor	all_interface_buildbuttons06	208	104	96	96		#	3	2
+b_dom_siege_cruiser	all_interface_buildbuttons06	312	104	96	96		#	4	2
+b_dom_siege_cruiserP	all_interface_buildbuttons06	416	104	96	96		#	5	2
+b_dom_technology_lab	all_interface_buildbuttons06	0	208	96	96		#	1	3
+b_dom_warfrigate	all_interface_buildbuttons06	104	208	96	96		#	2	3
+b_dom_warfrigateP	all_interface_buildbuttons06	208	208	96	96		#	3	3
+b_dom_yard	all_interface_buildbuttons06	312	208	96	96		#	4	3
+b_nbre_cruiser	all_interface_buildbuttons06	416	208	96	96		#	5	3
+b_nbre_cruiserD	all_interface_buildbuttons06	416	208	96	96		#	5	3
+b_nbre_cruiserP	all_interface_buildbuttons06	0	312	96	96		#	1	4
+b_nbre_cruiserDP	all_interface_buildbuttons06	0	312	96	96		#	1	4
+b_nbre_battleship	all_interface_buildbuttons06	104	312	96	96		#	2	4
+b_nbre_battleshipD	all_interface_buildbuttons06	104	312	96	96		#	2	4
+b_nbre_battleshipP	all_interface_buildbuttons06	208	312	96	96		#	3	4
+b_nbre_battleshipDP	all_interface_buildbuttons06	208	312	96	96		#	3	4
+b_all_supply_routes	all_interface_buildbuttons06	312	312	96	96		#	4	4
+b_borR_futile	all_interface_buildbuttons06	416	312	96	96		#	5	4
+b_rom_rhienn_phaser	all_interface_buildbuttons06	0	416	96	96		#	1	5
+b_rom_rhienn_phaserR	all_interface_buildbuttons06	0	416	96	96		#	1	5
+b_rom_rhienn_phaserYR	all_interface_buildbuttons06	0	416	96	96		#	1	5
+b_rom_rhienn_phaser_borR	all_interface_buildbuttons06	0	416	96	96		#	1	5
+b_rom_rhienn_torpedo	all_interface_buildbuttons06	104	416	96	96		#	2	5
+b_rom_rhienn_torpedoR	all_interface_buildbuttons06	104	416	96	96		#	2	5
+b_rom_rhienn_torpedo_borR	all_interface_buildbuttons06	104	416	96	96		#	2	5
+b_dom_heavy_cruiser_r_romR	all_interface_buildbuttons06	208	416	96	96		#	3	5
+b_kli_mixedtech_yard_fed	all_interface_buildbuttons06	312	416	96	96		#	4	5
+b_kli_mixedtech_yard_dom	all_interface_buildbuttons06	312	416	96	96		#	4	5
+b_kli_mixedtech_yard_rom	all_interface_buildbuttons06	312	416	96	96		#	4	5
+b_kli_mixedtech_yard_bor	all_interface_buildbuttons06	312	416	96	96		#	4	5
+b_dom_worker_ship	all_interface_buildbuttons06	416	416	96	96		#	5	5
+b_rom_generix	all_interface_buildbuttons07	0	0	96	96		#	1	1
+b_rom_generix_spc	all_interface_buildbuttons07	104	0	96	96		#	2	1
+b_rom_generix_sin	all_interface_buildbuttons07	208	0	96	96		#	3	1
+#	all_interface_buildbuttons07	312	0	96	96		#	4	1
+b_bor_pyramid_nanite	all_interface_buildbuttons07	416	0	96	96		#	5	1
+b_bor_recycling_center	all_interface_buildbuttons07	0	104	96	96		#	1	2
+b_bor_resource_nodeR	all_interface_buildbuttons07	104	104	96	96		#	2	2
+b_bor_scoutcube	all_interface_buildbuttons07	208	104	96	96		#	3	2
+b_bor_scoutcubeR	all_interface_buildbuttons07	208	104	96	96		#	3	2
+b_bor_scoutcubeYR	all_interface_buildbuttons07	208	104	96	96		#	3	2
+b_bor_sphere	all_interface_buildbuttons07	312	104	96	96		#	4	2
+b_bor_sphereR	all_interface_buildbuttons07	312	104	96	96		#	4	2
+b_bor_sphereYR	all_interface_buildbuttons07	312	104	96	96		#	4	2
+b_bor_sphere_prime	all_interface_buildbuttons07	416	104	96	96		#	5	2
+b_bor_cube_tactical	all_interface_buildbuttons07	0	208	96	96		#	1	3
+b_bor_cube	all_interface_buildbuttons07	104	208	96	96		#	2	3
+b_bor_cubeR	all_interface_buildbuttons07	104	208	96	96		#	2	3
+b_bor_cubeYR	all_interface_buildbuttons07	104	208	96	96		#	2	3
+b_bor_turret	all_interface_buildbuttons07	208	208	96	96		#	3	3
+b_bor_uni_matrix	all_interface_buildbuttons07	312	208	96	96		#	4	3
+b_bor_uplink	all_interface_buildbuttons07	416	208	96	96		#	5	3
+b_bor_adap_matrix_fed	all_interface_buildbuttons07	0	312	96	96		#	1	4
+b_bor_adap_matrix_kli	all_interface_buildbuttons07	0	312	96	96		#	1	4
+b_bor_adap_matrix_rom	all_interface_buildbuttons07	0	312	96	96		#	1	4
+b_bor_adap_matrix_dom	all_interface_buildbuttons07	0	312	96	96		#	1	4
+b_bor_adaptor	all_interface_buildbuttons07	104	312	96	96		#	2	4
+b_bor_adaptorR	all_interface_buildbuttons07	104	312	96	96		#	2	4
+b_bor_adaptorYR	all_interface_buildbuttons07	104	312	96	96		#	2	4
+b_bor_adaptorZR	all_interface_buildbuttons07	104	312	96	96		#	2	4
+b_bor_assembler	all_interface_buildbuttons07	208	312	96	96		#	3	4
+b_bor_assi_matrix	all_interface_buildbuttons07	312	312	96	96		#	4	4
+b_bor_pyramid	all_interface_buildbuttons07	416	312	96	96		#	5	4
+b_bor_pyramidR	all_interface_buildbuttons07	416	312	96	96		#	5	4
+b_bor_assimilator	all_interface_buildbuttons07	0	416	96	96		#	1	5
+b_bor_assimilatorR	all_interface_buildbuttons07	0	416	96	96		#	1	5
+b_bor_assimilatorYR	all_interface_buildbuttons07	0	416	96	96		#	1	5
+b_bor_assimilatorZR	all_interface_buildbuttons07	0	416	96	96		#	1	5
+b_bor_assimilator_nanite	all_interface_buildbuttons07	104	416	96	96		#	2	5
+b_bor_col_matrix	all_interface_buildbuttons07	208	416	96	96		#	3	5
+b_bor_interceptor	all_interface_buildbuttons07	312	416	96	96		#	4	5
+b_bor_detector	all_interface_buildbuttons07	416	416	96	96		#	5	5
+b_bor_diamond	all_interface_buildbuttons08	0	0	96	96		#	1	1
+b_bor_diamondR	all_interface_buildbuttons08	0	0	96	96		#	1	1
+b_bor_diamondYR	all_interface_buildbuttons08	0	0	96	96		#	1	1
+b_bor_freighter	all_interface_buildbuttons08	104	0	96	96		#	2	1
+b_bor_incubation	all_interface_buildbuttons08	208	0	96	96		#	3	1
+b_bor_incubationUR	all_interface_buildbuttons08	312	0	96	96		#	4	1
+b_nfer_marauder	all_interface_buildbuttons08	416	0	96	96		#	5	1
+b_nfer_marauderA	all_interface_buildbuttons08	416	0	96	96		#	5	1
+b_bor_sensor_relay	all_interface_buildbuttons08	0	104	96	96		#	1	2
+b_bor_freighterUR	all_interface_buildbuttons08	104	104	96	96		#	2	2
+b_bor_recycle_tritanium	all_interface_buildbuttons08	208	104	96	96		#	3	2
+b_bor_recycle_dilithium	all_interface_buildbuttons08	312	104	96	96		#	4	2
+b_rom_rhienn_pulse	all_interface_buildbuttons08	416	104	96	96		#	5	2
+b_dom_worker_ship_m	all_interface_buildbuttons08	0	208	96	96		#	1	3
+b_dom_worker_ship_s	all_interface_buildbuttons08	104	208	96	96		#	2	3
+b_rom_detection	all_interface_buildbuttons08	208	208	96	96		#	3	3
+b_all_detection	all_interface_buildbuttons08	312	208	96	96		#	4	3
+b_rom_singularitytrans	all_interface_buildbuttons08	416	208	96	96		#	5	3
+b_dom_passiveprobe	all_interface_buildbuttons08	0	312	96	96		#	1	4
+b_dom_passivescan	all_interface_buildbuttons08	0	312	96	96		#	1	4
+b_fed_nova	all_interface_buildbuttons08	104	312	96	96		#	2	4
+b_bor_dodeca	all_interface_buildbuttons08	208	312	96	96		#	3	4
+b_bor_dodecaR	all_interface_buildbuttons08	208	312	96	96		#	3	4
+b_bor_dodecaYR	all_interface_buildbuttons08	208	312	96	96		#	3	4
+b_bor_dodeca_relay	all_interface_buildbuttons08	312	312	96	96		#	4	4
+b_bor_dodeca_relayT	all_interface_buildbuttons08	312	312	96	96		#	4	4
+b_fed_nebula	all_interface_buildbuttons08	416	312	96	96		#	5	4
+b_kli_field_yardP1	all_interface_buildbuttons08	0	416	96	96		#	1	5
+b_kli_field_yardP2	all_interface_buildbuttons08	104	416	96	96		#	2	5
+b_kli_field_yardP3Z	all_interface_buildbuttons08	208	416	96	96		#	3	5
+b_kli_field_yardP3Y	all_interface_buildbuttons08	312	416	96	96		#	4	5
+b_fed_excelsiorRom	all_interface_buildbuttons08	416	416	96	96		#	5	5
+b_fed_centaur	all_interface_buildbuttons09	0	0	96	96		#	1	1
+b_fed_centaurr6	all_interface_buildbuttons09	0	0	96	96		#	1	1
+b_fed_teutoburg	all_interface_buildbuttons09	104	0	96	96		#	2	1
+b_rom_generix_spcR	all_interface_buildbuttons09	208	0	96	96		#	3	1
+b_rom_generix_spcYR	all_interface_buildbuttons09	208	0	96	96		#	3	1
+b_bor_scoutcube_per	all_interface_buildbuttons09	312	0	96	96		#	4	1
+b_fed_nebula_eng	all_interface_buildbuttons09	416	0	96	96		#	5	1
+b_fed_rhodeisland	all_interface_buildbuttons09	0	104	96	96		#	1	2
+b_rom_generix_sinR	all_interface_buildbuttons09	104	104	96	96		#	2	2
+b_rom_generix_sinRr6	all_interface_buildbuttons09	104	104	96	96		#	2	2
+b_rom_generix_sinYR	all_interface_buildbuttons09	104	104	96	96		#	2	2
+b_rom_generix_sinYRr6	all_interface_buildbuttons09	104	104	96	96		#	2	2
+#	all_interface_buildbuttons09	208	104	96	96		#	3	2
+#	all_interface_buildbuttons09	312	104	96	96		#	4	2
+#	all_interface_buildbuttons09	416	104	96	96		#	5	2
+#	all_interface_buildbuttons09	0	208	96	96		#	1	3
+#	all_interface_buildbuttons09	104	208	96	96		#	2	3
+#	all_interface_buildbuttons09	208	208	96	96		#	3	3
+#	all_interface_buildbuttons09	312	208	96	96		#	4	3
+#	all_interface_buildbuttons09	416	208	96	96		#	5	3
+#	all_interface_buildbuttons09	0	312	96	96		#	1	4
+#	all_interface_buildbuttons09	104	312	96	96		#	2	4
+#	all_interface_buildbuttons09	208	312	96	96		#	3	4
+#	all_interface_buildbuttons09	312	312	96	96		#	4	4
+#	all_interface_buildbuttons09	416	312	96	96		#	5	4
+#	all_interface_buildbuttons09	0	416	96	96		#	1	5
+#	all_interface_buildbuttons09	104	416	96	96		#	2	5
+#	all_interface_buildbuttons09	208	416	96	96		#	3	5
+#	all_interface_buildbuttons09	312	416	96	96		#	4	5
+#	all_interface_buildbuttons09	416	416	96	96		#	5	5
+									
+@reference=512									
+@tmaterial=interface									
+b_bor_moduleB_Single	all_interface_modulebuttons01	2	2	64	64				
+b_bor_moduleB_Start	all_interface_modulebuttons01	68	2	64	64				
+b_bor_moduleB_Mid	all_interface_modulebuttons01	134	2	64	64				
+b_bor_moduleB_End	all_interface_modulebuttons01	200	2	64	64				
+b_bor_moduleT_Single	all_interface_modulebuttons01	2	68	64	64				
+b_bor_moduleT_Start	all_interface_modulebuttons01	68	68	64	64				
+b_bor_moduleT_Mid	all_interface_modulebuttons01	134	68	64	64				
+b_bor_moduleT_End	all_interface_modulebuttons01	200	68	64	64				
+b_bor_moduleR_Single	all_interface_modulebuttons01	2	134	64	64				
+b_bor_moduleR_Start	all_interface_modulebuttons01	68	134	64	64				
+b_bor_moduleR_Mid	all_interface_modulebuttons01	134	134	64	64				
+b_bor_moduleR_End	all_interface_modulebuttons01	200	134	64	64				
+b_bor_moduleI_Single	all_interface_modulebuttons01	2	200	64	64				
+b_bor_moduleI_Start	all_interface_modulebuttons01	68	200	64	64				
+b_bor_moduleI_Mid	all_interface_modulebuttons01	134	200	64	64				
+b_bor_moduleI_End	all_interface_modulebuttons01	200	200	64	64				
+b_bor_moduleH_Single	all_interface_modulebuttons01	2	266	64	64				
+b_bor_moduleH_Start	all_interface_modulebuttons01	68	266	64	64				
+b_bor_moduleH_Mid	all_interface_modulebuttons01	134	266	64	64				
+b_bor_moduleH_End	all_interface_modulebuttons01	200	266	64	64				
+b_bor_moduleA_Single	all_interface_modulebuttons01	2	332	64	64				
+b_bor_moduleA_Start	all_interface_modulebuttons01	68	332	64	64				
+b_bor_moduleA_Mid	all_interface_modulebuttons01	134	332	64	64				
+b_bor_moduleA_End	all_interface_modulebuttons01	200	332	64	64				
+b_bor_moduleZ_Single	all_interface_modulebuttons01	2	332	64	64				
+b_bor_moduleZ_Start	all_interface_modulebuttons01	68	332	64	64				
+b_bor_moduleZ_Mid	all_interface_modulebuttons01	134	332	64	64				
+b_bor_moduleZ_End	all_interface_modulebuttons01	200	332	64	64				
+b_bor_moduleD_Single	all_interface_modulebuttons01	2	398	64	64				
+b_bor_moduleD_Start	all_interface_modulebuttons01	68	398	64	64				
+b_bor_moduleD_Mid	all_interface_modulebuttons01	134	398	64	64				
+b_bor_moduleD_End	all_interface_modulebuttons01	200	398	64	64				
+b_bor_moduleM_Single	all_interface_modulebuttons01	332	398	64	64				
+b_bor_moduleM_Start	all_interface_modulebuttons01	266	266	64	64				
+b_bor_moduleM_Mid	all_interface_modulebuttons01	332	266	64	64				
+b_bor_moduleM_End	all_interface_modulebuttons01	398	266	64	64				
+b_bor_moduleN_Single	all_interface_modulebuttons01	266	398	64	64				
+b_bor_moduleN_Start	all_interface_modulebuttons01	266	200	64	64				
+b_bor_moduleN_Mid	all_interface_modulebuttons01	332	200	64	64				
+b_bor_moduleN_End	all_interface_modulebuttons01	398	200	64	64				
+b_bor_moduleS_Single	all_interface_modulebuttons01	266	332	64	64				
+b_bor_moduleS_Start	all_interface_modulebuttons01	266	134	64	64				
+b_bor_moduleS_Mid	all_interface_modulebuttons01	332	134	64	64				
+b_bor_moduleS_End	all_interface_modulebuttons01	398	134	64	64				
+b_bor_module1_Single	all_interface_modulebuttons01	332	332	64	64				
+b_bor_module1_Start	all_interface_modulebuttons01	266	68	64	64				
+b_bor_module1_Mid	all_interface_modulebuttons01	332	68	64	64				
+b_bor_module1_End	all_interface_modulebuttons01	398	68	64	64				
+b_bor_module0_Single	all_interface_modulebuttons01	398	332	64	64				
+b_bor_module0_Start	all_interface_modulebuttons01	266	2	64	64				
+b_bor_module0_Mid	all_interface_modulebuttons01	332	2	64	64				
+b_bor_module0_End	all_interface_modulebuttons01	398	2	64	64				
+b_bor_module2_Single	all_interface_modulebuttons02	2	2	64	64				
+b_bor_module2_Start	all_interface_modulebuttons02	68	2	64	64				
+b_bor_module2_Mid	all_interface_modulebuttons02	134	2	64	64				
+b_bor_module2_End	all_interface_modulebuttons02	200	2	64	64				
+b_bor_module3_Single	all_interface_modulebuttons02	2	68	64	64				
+b_bor_module3_Start	all_interface_modulebuttons02	68	68	64	64				
+b_bor_module3_Mid	all_interface_modulebuttons02	134	68	64	64				
+b_bor_module3_End	all_interface_modulebuttons02	200	68	64	64				
+b_bor_moduleV_Single	all_interface_modulebuttons02	2	134	64	64				
+b_bor_moduleV_Start	all_interface_modulebuttons02	68	134	64	64				
+b_bor_moduleV_Mid	all_interface_modulebuttons02	134	134	64	64				
+b_bor_moduleV_End	all_interface_modulebuttons02	200	134	64	64				
+b_bor_moduleL_Single	all_interface_modulebuttons02	2	200	64	64				
+b_bor_moduleL_Start	all_interface_modulebuttons02	68	200	64	64				
+b_bor_moduleL_Mid	all_interface_modulebuttons02	134	200	64	64				
+b_bor_moduleL_End	all_interface_modulebuttons02	200	200	64	64				
+b_bor_moduleE_Single	all_interface_modulebuttons02	2	266	64	64				
+b_bor_moduleE_Start	all_interface_modulebuttons02	68	266	64	64				
+b_bor_moduleE_Mid	all_interface_modulebuttons02	134	266	64	64				
+b_bor_moduleE_End	all_interface_modulebuttons02	200	266	64	64				
+b_bor_moduleP_Single	all_interface_modulebuttons02	2	332	64	64				
+b_bor_moduleP_Start	all_interface_modulebuttons02	68	332	64	64				
+b_bor_moduleP_Mid	all_interface_modulebuttons02	134	332	64	64				
+b_bor_moduleP_End	all_interface_modulebuttons02	200	332	64	64				
+b_bor_moduleO_Single	all_interface_modulebuttons02	2	398	64	64				
+b_bor_moduleO_Start	all_interface_modulebuttons02	68	398	64	64				
+b_bor_moduleO_Mid	all_interface_modulebuttons02	134	398	64	64				
+b_bor_moduleO_End	all_interface_modulebuttons02	200	398	64	64				
+									
+###########################									
+###########################									
+######  Ingame Menus  #####									
+###########################									
+###########################									
+									
+#################################									
+######  Drop Player Frame  ######									
+#################################									
+@reference=256									
+@tmaterial=interface									
+drop_player_panel.0	dropPlayer0	0	0	256	256				
+drop_player_panel.1	dropPlayer1	0	0	256	256				
+drop_player_panel.2	dropPlayer2	0	0	256	256				
+drop_player_panel.3	dropPlayer9	0	0	0	256				
+drop_player_panel.4	dropPlayer3	0	0	256	256				
+drop_player_panel.5	dropPlayer4	0	0	256	256				
+drop_player_panel.6	dropPlayer5	0	0	256	256				
+drop_player_panel.7	dropPlayer9	0	0	0	256				
+drop_player_panel.8	dropPlayer6	0	0	256	256				
+drop_player_panel.9	dropPlayer7	0	0	256	256				
+drop_player_panel.10	dropPlayer8	0	0	256	256				
+drop_player_panel.11	dropPlayer9	0	0	0	256				
+drop_player_panel.12	dropPlayer9	0	0	256	128				
+drop_player_panel.13	dropPlayer9	0	128	256	128				
+drop_player_panel.14	dropPlayer10	0	0	256	128				
+drop_player_panel.15	dropPlayer9	0	0	0	128				
+drop_drop_button	uiObjectives20	0	0	252	60				
+									
+#################################									
+######  Game Paused Frame  ######									
+#################################									
+@reference=256									
+@tmaterial=interface									
+pause_unpause_button	all_interface_pause	0	0	256	256				
+									
+################################									
+######  Objectives Frame  ######									
+################################									
+@reference=256									
+@tmaterial=interface									
+objectives_panel.0	uiObjectives0	0	0	256	256				
+objectives_panel.1	uiObjectives1	0	0	256	256				
+objectives_panel.2	uiObjectives2	0	0	256	256				
+objectives_panel.3	uiObjectives3	0	0	256	256				
+objectives_panel.4	uiObjectives4	0	0	256	256				
+objectives_panel.5	uiObjectives5	0	0	256	256				
+objectives_panel.6	uiObjectives6	0	0	256	256				
+objectives_panel.7	uiObjectives7	0	0	256	256				
+objectives_panel.8	uiObjectives8	0	0	256	256				
+objectives_panel.9	uiObjectives9	0	0	256	256				
+objectives_panel.10	uiObjectives10	0	0	256	256				
+objectives_panel.11	uiObjectives11	0	0	256	256				
+objectives_panel.12	uiObjectives12	0	0	256	256				
+objectives_panel.13	uiObjectives13	0	0	256	256				
+objectives_panel.14	uiObjectives14	0	0	256	256				
+objectives_panel.15	uiObjectives15	0	0	256	256				
+objectives_panel.16	uiObjectives16	0	0	256	256				
+objectives_panel.17	uiObjectives17	0	0	256	256				
+objectives_panel.18	uiObjectives18	0	0	256	256				
+objectives_panel.19	uiObjectives19	0	0	256	256				
+obj_okay_button	uiObjectives20	0	0	252	60				
+									
+####################################									
+######  Communications Frame  ######									
+####################################									
+@reference=256									
+@tmaterial=interface									
+comm_panel.0	commMenu0	0	0	256	256				
+comm_panel.1	commMenu1	0	0	256	256				
+comm_panel.2	commMenu2	0	0	256	256				
+comm_panel.3	commMenu3	0	0	256	256				
+comm_panel.4	commMenu4	0	0	256	256				
+comm_panel.5	commMenu10	0	0	0	256				
+comm_panel.6	commMenu5	0	0	256	256				
+comm_panel.7	commMenu6	0	0	256	256				
+comm_panel.8	commMenu7	0	0	256	256				
+comm_panel.9	commMenu8	0	0	256	256				
+comm_panel.10	commMenu9	0	0	256	256				
+comm_panel.11	commMenu10	0	0	0	256				
+comm_panel.12	commMenu10	0	0	256	128				
+comm_panel.13	commMenu10	0	128	256	128				
+comm_panel.14	commMenu11	0	0	256	128				
+comm_panel.15	commMenu11	0	128	256	128				
+comm_panel.16	commMenu12	0	0	256	128				
+comm_panel.17	commMenu10	0	0	0	128				
+comm_down_button	commMenu12	0	220	32	20				
+comm_up_button	commMenu12	32	220	32	20				
+comm_toggle_button	commMenu13	0	132	44	44				
+comm_toggle_check	commMenu13	176	88	44	44				
+comm_bar_player	commMenu12	0	176	256	44				
+comm_bar_team	commMenu13	0	44	140	44				
+comm_select_button	commMenu13	132	88	44	44				
+comm_resource_button	commMenu13	0	0	240	44				
+comm_alliance_red	commMenu13	0	88	44	44				
+comm_alliance_yellow	commMenu13	44	88	44	44				
+comm_alliance_green	commMenu13	88	88	44	44				
+comm_generic_button	commMenu12	0	128	236	48				
+comm_amount_display	commMenu13	140	44	108	44				
+comm_alliance_red_him	commMenu13	176	132	44	44				
+comm_alliance_yellow_him	commMenu13	88	132	44	44				
+comm_alliance_green_him	commMenu13	132	132	44	44				
+comm_select_check	commMenu13	44	132	44	44				
+comm_indicator	commMenu3	119	136	1	1				
+//comm_generic_button	CommMenu	52	95	98	20				
+//comm_toggle_button	CommMenu	205	165	19	19				
+//comm_toggle_check	CommMenu	110	120	19	19				
+//comm_okay_button	CommMenu	32	165	126	23				
+//comm_bar_player	CommMenu	32	146	173	19				
+//comm_bar_team	CommMenu	53	120	57	19				
+//comm_alliance_red	CommMenu	53	71	19	19				
+//comm_alliance_yellow	CommMenu	72	71	19	19				
+//comm_alliance_green	CommMenu	91	71	19	19				
+//comm_alliance_red_him	CommMenu	179	165	19	19				
+//comm_alliance_yellow_him	CommMenu	205	146	19	19				
+//comm_alliance_green_him	CommMenu	160	165	19	19				
+//comm_select_button	CommMenu	129	71	19	19				
+//comm_select_check	CommMenu	129	120	19	19				
+//comm_indicator	CommMenu	34	106	2	2				
+									
+############################									
+######  Replay Frame  ######									
+############################									
+@reference=256									
+@tmaterial=interface									
+repeat_button	replay0	38	0	38	40				
+#restart_button	replay0	0	160	38	40				
+restart_button	replay0	38	160	38	40				
+prev_button	replay0	152	120	38	40				
+prev_button_h	replay0	190	120	38	40				
+next_button	replay0	152	40	38	40				
+next_button_h	replay0	190	40	38	40				
+#pause_button	replay0	0	120	38	40				
+pause_button	replay0	38	120	38	40				
+#slow_button	replay0	190	160	38	40				
+slow_button	replay0	0	40	38	40				
+#normal_button	replay0	152	80	38	40				
+normal_button	replay0	190	80	38	40				
+#fast_button	replay0	38	200	38	40				
+fast_button	replay0	38	40	38	40				
+fogOn_button	replay0	152	160	38	40				
+fogOn_button_h	replay0	0	200	38	40				
+nextPlayer_button	replay0	0	80	38	40				
+nextPlayer_button_h	replay0	38	80	38	40				
+chapter_end_continue	replay0	0	0	38	40				
+chapter_end_loop	replay0	76	40	38	40				
+chapter_end_loop_h	replay0	114	40	38	40				
+chapter_end_once	replay0	76	120	38	40				
+chapter_end_once_h	replay0	114	120	38	40				
+player_show_all	replay0	76	80	38	40				
+player_show_all_h	replay0	114	80	38	40				
+player_show_fog	replay0	76	160	38	40				
+player_show_fog_h	replay0	114	160	38	40				
+									
+#################################									
+######  Interface Symbols  ######									
+#################################									
+@referenceWidth=1024									
+@referenceHeight=256									
+@tmaterial=interface									
+infosystem.0	all_interface	655	1	28	28		#	sensors	
+infosystem.1	all_interface	595	1	28	28		#	shields	
+infosystem.2	all_interface	625	31	28	28		#	weapons	
+infosystem.3	all_interface	595	31	28	28		#	engines	
+infosystem.4	all_interface	625	1	28	28		#	lifesupport	
+select_system.0	all_interface	595	1	28	28		#	shields	
+select_system.1	all_interface	595	31	28	28		#	engines	
+select_system.2	all_interface	625	31	28	28		#	weapons	
+select_system.3	all_interface	625	1	28	28		#	lifesupport	
+select_system.4	all_interface	655	1	28	28		#	sensors	
+shields	all_interface	685	1	28	28				
+hull	all_interface	715	1	28	28				
+crew_amt	all_interface	745	1	28	28				
+energy_amt	all_interface	775	1	28	28				
+infoBuildQueueSlot_0	all_interface2	1	1	96	96				
+infoBuildQueueSlot_1	all_interface2	98	1	64	64				
+infoBuildQueueSlot_2	all_interface2	163	1	64	64				
+infoBuildQueueSlot_3	all_interface2	228	1	64	64				
+infoBuildQueueSlot_4	all_interface2	293	1	64	64				
+infoBuildQueueSlot_5	all_interface2	358	1	64	64				
+infoBuildQueueSlot_6	all_interface2	423	1	64	64				
+infoBuildQueueSlot_7	all_interface2	488	1	64	64				
+infoBuildQueueSlot_8	all_interface2	553	1	64	64				
+infoBuildQueueSlot_9	all_interface2	618	1	64	64				
+									
+####################									
+######  Bars  ######									
+####################									
+@referenceWidth=1024									
+@referenceHeight=256									
+large_dilithium_bar	all_interface	1	1	592	32	@snap_to_pixel			
+large_construction_bar	all_interface	1	35	592	32	@snap_to_pixel			
+large_shield_bar	all_interface	1	70	103	7	@snap_to_pixel			
+large_hull_bar	all_interface	1	77	103	8	@snap_to_pixel			
+small_shield_bar	all_interface	1	87	72	7	@snap_to_pixel			
+small_hull_bar	all_interface	1	94	72	8	@snap_to_pixel			
+select_shield_bar	all_interface	131	70	245	7	@snap_to_pixel			
+select_hull_bar	all_interface	131	77	245	7	@snap_to_pixel			
+									
+#########################									
+######  Resources  ######									
+#########################									
+@referenceWidth=1024									
+@referenceHeight=256									
+@tmaterial=interface									
+resourcePanel.0	all_interface	895	127	48	48				
+resourcePanel.1	all_interface	959	127	48	48				
+resourcePanel.2	all_interface	895	191	48	48				
+resourcePanel.3	all_interface	959	191	48	48				
+									
+####################									
+######  Misc  ######									
+####################									
+@reference=128									
+@tmaterial=alpha									
+map_background	gminimap	0	0	128	128				
+map_shroud	gshroud	0	0	128	128	@chromakey			
+map_fog	gfog	0	0	128	128	@chromakey			
+@reference=64									
+@tmaterial=add_nomipf									
+selectionCircle	Gshadow	0	0	64	64				
+selectionBillboard	Gshadow	0	0	64	64				
+gridFXSprite	GgridFX	0	0	64	64				
+
+#########################################################
+######  A2FO Directional Shield Selection Graphic  ######
+#########################################################
+@reference=128
+@tmaterial=interface
+dsf	shield_forward	0	0	128	128
+dsb	shield_back	0	0	128	128
+dsl	shield_left	0	0	128	128
+dsr	shield_right	0	0	128	128
+
+@reference=8									
+@tmaterial=additive									
+group_background	empty	0	0	1	1				
+									

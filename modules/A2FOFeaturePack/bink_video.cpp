@@ -37,6 +37,14 @@ namespace a2fo {
         constexpr std::uintptr_t kArmadaBinkTextureRenderCallRva1 = 0x0e5da5;
         constexpr std::uintptr_t kArmadaBinkTextureRenderCallRva2 = 0x0e6153;
 
+        // The embedded Armada movie path allocates a fixed 256x128 texture even
+        // though A1 bridge movies such as F1DEM1/F1DEM2 are 400x200. The native
+        // UV scale is hard-coded for that 256x128 backing, so 400x200 frames
+        // wrap/tile. 512x256 is the smallest power-of-two backing that contains
+        // the stock A1 400x200 bridge movies (and the 320x240 Deming movie).
+        constexpr std::uintptr_t kArmadaBinkTextureSizeRva = 0x06406e;
+        constexpr std::uintptr_t kArmadaBinkTextureUvScaleRva = 0x2afb14;
+
         // This engine global points to the active viewport owner.  Its four-float
         // rectangle at +0x1b0 is also the source used by Armada's own UI transform at
         // 0x51b210, so it is the authoritative full render area for this movie path.
@@ -63,6 +71,22 @@ namespace a2fo {
         const std::uint8_t kExpectedArmadaBinkTextureRenderCall2[] =
         {0xe8, 0xf8, 0xe1, 0xf7, 0xff};
 
+        const std::uint8_t kExpectedArmadaBinkTextureSize[] =
+        {0x68, 0x80, 0x00, 0x00, 0x00,  // push 128 (height)
+         0x68, 0x00, 0x01, 0x00, 0x00}; // push 256 (width)
+        const std::uint8_t kReplacementArmadaBinkTextureSize[] =
+        {0x68, 0x00, 0x01, 0x00, 0x00,  // push 256 (height)
+         0x68, 0x00, 0x02, 0x00, 0x00}; // push 512 (width)
+
+        // Native scales are 1/128 and 1/256. Match the enlarged 256x512
+        // backing so U/V coordinates address only the decoded frame once.
+        const std::uint8_t kExpectedArmadaBinkTextureUvScale[] =
+        {0x00, 0x00, 0x00, 0x3c,  // 1/128
+         0x00, 0x00, 0x80, 0x3b}; // 1/256
+        const std::uint8_t kReplacementArmadaBinkTextureUvScale[] =
+        {0x00, 0x00, 0x80, 0x3b,  // 1/256
+         0x00, 0x00, 0x00, 0x3b}; // 1/512
+
         using BinkRenderFunction =
         void (__attribute__((regparm(1))) *)(void* bink_intro);
 
@@ -84,6 +108,7 @@ namespace a2fo {
         volatile LONG g_gdi_log_count = 0;
         volatile LONG g_texture_log_count = 0;
         volatile LONG g_shell_bypass_log_count = 0;
+        volatile LONG g_embedded_bypass_log_count = 0;
         volatile LONG g_last_shell_state = 0x7fffffffL;
 
         void* at(HMODULE module, std::uintptr_t rva) {
@@ -289,6 +314,29 @@ namespace a2fo {
                                      pixels, bitmap_info, color_use, SRCCOPY);
             }
 
+            bool preserve_embedded_bink(const ArmadaFloatRect& requested,
+                                        const ArmadaFloatRect& viewport) noexcept {
+                // Gameplay bridge/comms movies are intentionally drawn into an
+                // inset UI rectangle. Full-screen movie paths originate at the
+                // viewport origin; stretching an inset rectangle to the entire
+                // viewport tiles/crops the decoded Bink surface and needlessly
+                // multiplies render work. Preserve authored inset placement.
+                constexpr float kInsetEpsilon = 1.0f;
+                return std::fabs(requested.x - viewport.x) > kInsetEpsilon ||
+                       std::fabs(requested.y - viewport.y) > kInsetEpsilon;
+            }
+
+            void log_embedded_bypass_once(const ArmadaFloatRect& requested) noexcept {
+                if (InterlockedIncrement(&g_embedded_bypass_log_count) != 1) return;
+                char message[224]{};
+                std::snprintf(
+                    message, sizeof(message),
+                    "Armada Bink scaling bypassed for embedded gameplay movie: "
+                    "%.0fx%.0f at %.0f,%.0f",
+                    requested.width, requested.height, requested.x, requested.y);
+                log_message(message);
+            }
+
             bool is_sane_viewport(const ArmadaFloatRect& rectangle) noexcept {
                 return std::isfinite(rectangle.x) && std::isfinite(rectangle.y) &&
                 std::isfinite(rectangle.width) &&
@@ -317,7 +365,11 @@ namespace a2fo {
                                     viewport_owner + kArmadaViewportRectOffset,
                                     sizeof(full_viewport));
                         if (is_sane_viewport(full_viewport)) {
-                            render_rectangle = &full_viewport;
+                            if (preserve_embedded_bink(*requested_rectangle, full_viewport)) {
+                                log_embedded_bypass_once(*requested_rectangle);
+                            } else {
+                                render_rectangle = &full_viewport;
+                            }
                         }
                     }
 
@@ -342,7 +394,8 @@ namespace a2fo {
 
     bool initialize_bink_video_scaling(const A2FO_ModuleApi* api,
                                        HMODULE armada) noexcept {
-                                           if (!api || !armada || !api->patch_call || !api->log) {
+                                           if (!api || !armada || !api->patch_call ||
+                                               !api->patch_bytes || !api->log) {
                                                if (api && api->log) {
                                                    api->log(kModuleName,
                                                             "Bink viewport scaling unavailable in this core");
@@ -363,6 +416,10 @@ namespace a2fo {
                                            at(armada, kArmadaBinkTextureRenderCallRva1);
                                            void* armada_texture_call2 =
                                            at(armada, kArmadaBinkTextureRenderCallRva2);
+                                           void* armada_texture_size =
+                                           at(armada, kArmadaBinkTextureSizeRva);
+                                           void* armada_texture_uv_scale =
+                                           at(armada, kArmadaBinkTextureUvScaleRva);
                                            if (std::memcmp(render, kExpectedBinkRender,
                                                sizeof(kExpectedBinkRender)) != 0 ||
                                                std::memcmp(call_site, kExpectedBinkRenderCall,
@@ -377,7 +434,13 @@ namespace a2fo {
                                                                                                sizeof(kExpectedArmadaBinkTextureRenderCall1)) != 0 ||
                                                                                                std::memcmp(armada_texture_call2,
                                                                                                            kExpectedArmadaBinkTextureRenderCall2,
-                                                                                                           sizeof(kExpectedArmadaBinkTextureRenderCall2)) != 0) {
+                                                                                                           sizeof(kExpectedArmadaBinkTextureRenderCall2)) != 0 ||
+                                                                                                           std::memcmp(armada_texture_size,
+                                                                                                                       kExpectedArmadaBinkTextureSize,
+                                                                                                                       sizeof(kExpectedArmadaBinkTextureSize)) != 0 ||
+                                                                                                                       std::memcmp(armada_texture_uv_scale,
+                                                                                                                                   kExpectedArmadaBinkTextureUvScale,
+                                                                                                                                   sizeof(kExpectedArmadaBinkTextureUvScale)) != 0) {
                                                api->log(kModuleName,
                                                         "Bink renderer signatures mismatch; viewport fix disabled");
                                                return false;
@@ -389,6 +452,28 @@ namespace a2fo {
                                                                                                            g_armada_bink_texture_render =
                                                                                                            reinterpret_cast<ArmadaBinkTextureRenderFunction>(
                                                                                                                armada_texture_render);
+
+                                                                                                           if (!api->patch_bytes(
+                                                                                                                   armada_texture_size,
+                                                                                                                   kReplacementArmadaBinkTextureSize,
+                                                                                                                   kExpectedArmadaBinkTextureSize,
+                                                                                                                   sizeof(kExpectedArmadaBinkTextureSize)) ||
+                                                                                                               !api->patch_bytes(
+                                                                                                                   armada_texture_uv_scale,
+                                                                                                                   kReplacementArmadaBinkTextureUvScale,
+                                                                                                                   kExpectedArmadaBinkTextureUvScale,
+                                                                                                                   sizeof(kExpectedArmadaBinkTextureUvScale))) {
+                                                                                                               api->log(
+                                                                                                                   kModuleName,
+                                                                                                                   "Embedded Bink 512x256 backing patch failed; "
+                                                                                                                   "Bink renderer fix disabled");
+                                                                                                               return false;
+                                                                                                           }
+                                                                                                           api->log(
+                                                                                                               kModuleName,
+                                                                                                               "Armada embedded Bink backing enlarged from "
+                                                                                                               "256x128 to 512x256 with matching UV scales");
+
                                                                                                            if (!api->patch_call(call_site,
                                                                                                                reinterpret_cast<void*>(&bink_render_hook),
                                                                                                                                 kExpectedBinkRenderCall,
@@ -416,7 +501,7 @@ namespace a2fo {
                                                                                                                                                                                    api->log(
                                                                                                                                                                                        kModuleName,
                                                                                                                                                                                        "Fleet Ops D3D and Armada GDI/texture Bink scaling enabled; "
-                                                                                                                                                                                       "native nested shell screens bypass scaling");
+                                                                                                                                                                                       "embedded backing=512x256; native nested shell and embedded gameplay movies bypass scaling");
                                                                                                                                                                                    return true;
                                        }
 

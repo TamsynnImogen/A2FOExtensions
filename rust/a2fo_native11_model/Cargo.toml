@@ -1,0 +1,8 @@
+[package]
+name = "a2fo_native11_model"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+a2fmt = { path = "../../third_party/armada2-refit/menu-renderer/a2fmt" }

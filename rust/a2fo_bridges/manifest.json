@@ -1,0 +1,294 @@
+{
+  "schema": 1,
+  "target": "i686-pc-windows-gnu",
+  "bridges": [
+    {
+      "legacy": "core/builtin_camera_controls_bridge.S",
+      "rust": "rust/a2fo_bridges/core/builtin_camera_controls_bridge.rs",
+      "legacy_sha256": "f4762306f7ad7682734874aa76993d3c0dc78ce783e10d19cb51d731334a2a6e",
+      "coff_text_padding_bytes": 0
+    },
+    {
+      "legacy": "core/builtin_feature_pack_bridge.S",
+      "rust": "rust/a2fo_bridges/core/builtin_feature_pack_bridge.rs",
+      "legacy_sha256": "1f9d1cdbbee679b02fc5e3df3c8558a779e3a4958f8651d2e4865b61c585d1ed",
+      "coff_text_padding_bytes": 3
+    },
+    {
+      "legacy": "core/builtin_hybrid_bridge.S",
+      "rust": "rust/a2fo_bridges/core/builtin_hybrid_bridge.rs",
+      "legacy_sha256": "a25bb36fc026f7c012c7b1413d17fff29e5ce562b9ba6e24bbe6e919f2d5c653",
+      "coff_text_padding_bytes": 3
+    },
+    {
+      "legacy": "core/builtin_view_distance_bridge.S",
+      "rust": "rust/a2fo_bridges/core/builtin_view_distance_bridge.rs",
+      "legacy_sha256": "e41aac3df26dec9d6945aff4f2d7f0ae531b254092263164eae92ee47a3a0c63",
+      "coff_text_padding_bytes": 3
+    },
+    {
+      "legacy": "core/delphi_bridge.S",
+      "rust": "rust/a2fo_bridges/core/delphi_bridge.rs",
+      "legacy_sha256": "13b77bc2bcbd34d2f6a81c5306209bba94f517296792792030a6f5eecfc208d8",
+      "coff_text_padding_bytes": 2
+    },
+    {
+      "legacy": "core/nebula_renderer_bridge.S",
+      "rust": "rust/a2fo_bridges/core/nebula_renderer_bridge.rs",
+      "legacy_sha256": "07866e25473474698f677c3db4cb01fc742827b0c368586a154fdd739f8ab371",
+      "coff_text_padding_bytes": 0
+    },
+    {
+      "legacy": "modules/A1Compat/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A1Compat/thiscall_bridge.rs",
+      "legacy_sha256": "07e2365b496f44e90d78b498fb00cd27cf0ae8fc31c2468b51bcfa08ce5611eb",
+      "coff_text_padding_bytes": 1
+    },
+    {
+      "legacy": "modules/A1Fallbacks/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A1Fallbacks/thiscall_bridge.rs",
+      "legacy_sha256": "87360311bfe00f8db1923897c51e07576e936a69a38b85139b8987158d55f31b",
+      "coff_text_padding_bytes": 1
+    },
+    {
+      "legacy": "modules/A2FOAlwaysShowShields/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOAlwaysShowShields/thiscall_bridge.rs",
+      "legacy_sha256": "442f1cefb7cbdf41bb26c10b1e9bf174b807dbaa261c90c038a18638568909a4",
+      "coff_text_padding_bytes": 0
+    },
+    {
+      "legacy": "modules/A2FOAnimatedHardpoints/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOAnimatedHardpoints/thiscall_bridge.rs",
+      "legacy_sha256": "faadf9e11627315a01a21f5afad8b16a6a10548db9608d40f38f8a49b44f4575",
+      "coff_text_padding_bytes": 2
+    },
+    {
+      "legacy": "modules/A2FOBreeders/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOBreeders/thiscall_bridge.rs",
+      "legacy_sha256": "09949fdcc4338dc12d52c4439c52841a105583cec673e6a312d1a47bf5d9b743",
+      "coff_text_padding_bytes": 3
+    },
+    {
+      "legacy": "modules/A2FOBuildTooltips/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOBuildTooltips/thiscall_bridge.rs",
+      "legacy_sha256": "0073223eb25cf1f63f271b38d970490ea02dec73469a02c3680cac8b2303d133",
+      "coff_text_padding_bytes": 0
+    },
+    {
+      "legacy": "modules/A2FOCameraControls/native_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOCameraControls/native_bridge.rs",
+      "legacy_sha256": "55ea991d892dad45ae9abb97709fe5ace1c29991f2ece705bd100bf61ac4771e",
+      "coff_text_padding_bytes": 0
+    },
+    {
+      "legacy": "modules/A2FOCheats/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOCheats/thiscall_bridge.rs",
+      "legacy_sha256": "67ee01b270760028e57c6a8318e9ea39bd39d620c394ac02e85523cd52227c72",
+      "coff_text_padding_bytes": 1
+    },
+    {
+      "legacy": "modules/A2FOCollectiveXP/native_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOCollectiveXP/native_bridge.rs",
+      "legacy_sha256": "02a8f8e7261ccf12412afda59909977b681ddff269566db3c79002e3ffb77f8f",
+      "coff_text_padding_bytes": 0
+    },
+    {
+      "legacy": "modules/A2FOCraftIdentity/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOCraftIdentity/thiscall_bridge.rs",
+      "legacy_sha256": "580dde0055612c93648d4396afcd38003312cedaf5449e301fa9006076bdd669",
+      "coff_text_padding_bytes": 3
+    },
+    {
+      "legacy": "modules/A2FODirectionalShields/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FODirectionalShields/thiscall_bridge.rs",
+      "legacy_sha256": "94411e68b47ff23b985463913345224d8d65cc2491c33118870bd764f121a072",
+      "coff_text_padding_bytes": 1
+    },
+    {
+      "legacy": "modules/A2FOEditMenu/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOEditMenu/thiscall_bridge.rs",
+      "legacy_sha256": "acd1723dc8a7b9028182fcdfc62eb9223ec07e27163cf2da159ee0af1df9f04d",
+      "coff_text_padding_bytes": 1
+    },
+    {
+      "legacy": "modules/A2FOEnergySystems/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOEnergySystems/thiscall_bridge.rs",
+      "legacy_sha256": "cc236c6476b0fd48a782a7739e0c0e469419ac367920ca96b92b43d83e169096",
+      "coff_text_padding_bytes": 2
+    },
+    {
+      "legacy": "modules/A2FOFeaturePack/delphi_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOFeaturePack/delphi_bridge.rs",
+      "legacy_sha256": "2250c39d0dc484dc5b001b26e8ab9095d925469b855ccbb14fcb0d5e4bdbbfb9",
+      "coff_text_padding_bytes": 3
+    },
+    {
+      "legacy": "modules/A2FOFireArcs/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOFireArcs/thiscall_bridge.rs",
+      "legacy_sha256": "0f0c5c80173fdbd9e59231f46036afe019f1126b48df42152a751bd84835d879",
+      "coff_text_padding_bytes": 1
+    },
+    {
+      "legacy": "modules/A2FOHybridBuild/delphi_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOHybridBuild/delphi_bridge.rs",
+      "legacy_sha256": "acad4483b1d0f97ec15d59710cb67f664228d12e6aff068946fd149d694c6717",
+      "coff_text_padding_bytes": 3
+    },
+    {
+      "legacy": "modules/A2FOInfestation/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOInfestation/thiscall_bridge.rs",
+      "legacy_sha256": "17e803773c97c8942e51a796953674b93841c885e058f943b241887195a40799",
+      "coff_text_padding_bytes": 3
+    },
+    {
+      "legacy": "modules/A2FOInstantActionSettings/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOInstantActionSettings/thiscall_bridge.rs",
+      "legacy_sha256": "b7d79504d9de9c34af108bf323d88f3a29868f884fdb60c0166bbc3e7c3fedda",
+      "coff_text_padding_bytes": 0
+    },
+    {
+      "legacy": "modules/A2FOM3D/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOM3D/thiscall_bridge.rs",
+      "legacy_sha256": "8448572d875ac01a32254f5cd4121e8e45dfc62991515531516b055101cbe4e6",
+      "coff_text_padding_bytes": 1
+    },
+    {
+      "legacy": "modules/A2FOMissionSelector/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOMissionSelector/thiscall_bridge.rs",
+      "legacy_sha256": "bcd61fc61e6347208d595de66e7334894e4b2d0aa7a2768fcb03e009224560c8",
+      "coff_text_padding_bytes": 2
+    },
+    {
+      "legacy": "modules/A2FOMultiYardBuild/bridges.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOMultiYardBuild/bridges.rs",
+      "legacy_sha256": "4a2d8f62757a619d38c2727f712d80c08c3eb2c6217dd4a0d7dbabebc760965d",
+      "coff_text_padding_bytes": 2
+    },
+    {
+      "legacy": "modules/A2FOMuzzleFlashes/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOMuzzleFlashes/thiscall_bridge.rs",
+      "legacy_sha256": "8d4ebe96579b304075acdf7ed3c3b6ed4770118b0359a309f94ff2f645771d8c",
+      "coff_text_padding_bytes": 0
+    },
+    {
+      "legacy": "modules/A2FONebulaRenderer/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FONebulaRenderer/thiscall_bridge.rs",
+      "legacy_sha256": "2d84e2233b86000b51f7b8768fc7f3125127320f77afbebce5d7eabaf44d9345",
+      "coff_text_padding_bytes": 3
+    },
+    {
+      "legacy": "modules/A2FONormalWeaponTech/delphi_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FONormalWeaponTech/delphi_bridge.rs",
+      "legacy_sha256": "ef5e46509ebea109e8b6ba310a747ef7aae9a874a9f5dbc6960be3d3647d05d0",
+      "coff_text_padding_bytes": 3
+    },
+    {
+      "legacy": "modules/A2FOODFVariants/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOODFVariants/thiscall_bridge.rs",
+      "legacy_sha256": "3051d2f26b2e0f52793c285f5112ee3e80f7f80d24215c2a4604bc2827f07f83",
+      "coff_text_padding_bytes": 0
+    },
+    {
+      "legacy": "modules/A2FOPointDefenseCycles/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOPointDefenseCycles/thiscall_bridge.rs",
+      "legacy_sha256": "f617f7d77297eb23adf5c99086d3fdad5ceb0087ee1f0e93fa08d18256b98665",
+      "coff_text_padding_bytes": 1
+    },
+    {
+      "legacy": "modules/A2FORGBTextures/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FORGBTextures/thiscall_bridge.rs",
+      "legacy_sha256": "616c7436e4d7b758051501ac0a2e6fbdd66c46f19b2ccc6af2a15924891b9f94",
+      "coff_text_padding_bytes": 3
+    },
+    {
+      "legacy": "modules/A2FORecoveryTests/native_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FORecoveryTests/native_bridge.rs",
+      "legacy_sha256": "aa194076335b905a4a048a1af6d4fdad198914042a17df5eff0f89556716c181",
+      "coff_text_padding_bytes": 2
+    },
+    {
+      "legacy": "modules/A2FORefitMenus/native_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FORefitMenus/native_bridge.rs",
+      "legacy_sha256": "f5551bcc1ad527b1f4621e9823e5607bbb6babb41b2a15d46cb342b50312c250",
+      "coff_text_padding_bytes": 3
+    },
+    {
+      "legacy": "modules/A2FORefitYards/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FORefitYards/thiscall_bridge.rs",
+      "legacy_sha256": "917d07cd25cd3658ecb506014fd2797fa8046438d3f3a80d58fa2a623bd4b7bf",
+      "coff_text_padding_bytes": 2
+    },
+    {
+      "legacy": "modules/A2FOResources/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOResources/thiscall_bridge.rs",
+      "legacy_sha256": "9254dd6ca63671f4733580825c49e3d6be85bb8833b43d39681e986b6c1bed6e",
+      "coff_text_padding_bytes": 3
+    },
+    {
+      "legacy": "modules/A2FOSOLMaps/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOSOLMaps/thiscall_bridge.rs",
+      "legacy_sha256": "32941c4a177d16e0acb713abc754dbeaeaa3ac0825b22e79887b1c1d3d6526d8",
+      "coff_text_padding_bytes": 3
+    },
+    {
+      "legacy": "modules/A2FOShellDisplay/delphi_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOShellDisplay/delphi_bridge.rs",
+      "legacy_sha256": "5644d3ea0b504a8907eff0fae5fd8ea6fcb3eb6645ad44a227429a34283025e0",
+      "coff_text_padding_bytes": 3
+    },
+    {
+      "legacy": "modules/A2FOSquadrons/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOSquadrons/thiscall_bridge.rs",
+      "legacy_sha256": "be849d94a26f654e19bc0b4e5f7883021bbedd189d3ef39f59827aed9fc88d29",
+      "coff_text_padding_bytes": 3
+    },
+    {
+      "legacy": "modules/A2FOStationRotation/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOStationRotation/thiscall_bridge.rs",
+      "legacy_sha256": "78353226c157b2a301d57083bf40f6baf448056207a5eb70d961230c89c7be6f",
+      "coff_text_padding_bytes": 2
+    },
+    {
+      "legacy": "modules/A2FOSwarmSystem/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOSwarmSystem/thiscall_bridge.rs",
+      "legacy_sha256": "b7f162bb577cdd0d4488e8bcbdef3b6ab8b11098087ba91b3649dc878707bb5b",
+      "coff_text_padding_bytes": 3
+    },
+    {
+      "legacy": "modules/A2FOTeamChangeWeapons/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOTeamChangeWeapons/thiscall_bridge.rs",
+      "legacy_sha256": "523350c7250aae4de4ac38dd059d99472db486abc3f64e3d683aa74ccf0971bf",
+      "coff_text_padding_bytes": 1
+    },
+    {
+      "legacy": "modules/A2FOTextureVariants/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOTextureVariants/thiscall_bridge.rs",
+      "legacy_sha256": "4636b23285ab58ac23c6b4dd75a1efbc42dc7e1d96dff300bbdf606b15a4b3c6",
+      "coff_text_padding_bytes": 2
+    },
+    {
+      "legacy": "modules/A2FOTurrets/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOTurrets/thiscall_bridge.rs",
+      "legacy_sha256": "f799b7391b869f5ad05f7a2c417851fa0a5e4f5d5a64d15fbb68a8cd8a5f80a3",
+      "coff_text_padding_bytes": 3
+    },
+    {
+      "legacy": "modules/A2FOVideo/delphi_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOVideo/delphi_bridge.rs",
+      "legacy_sha256": "ac8c393786934603c8ccaaf43bb23fd114b50beb03f9d5d1cd2c96487faa64e1",
+      "coff_text_padding_bytes": 0
+    },
+    {
+      "legacy": "modules/A2FOViewDistance/native_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOViewDistance/native_bridge.rs",
+      "legacy_sha256": "c92fa56eb97cc66ef996535c966977b9fb729c6d2e4921b9387f03a02c4b073a",
+      "coff_text_padding_bytes": 3
+    },
+    {
+      "legacy": "modules/A2FOWeaponDamageControls/thiscall_bridge.S",
+      "rust": "rust/a2fo_bridges/modules/A2FOWeaponDamageControls/thiscall_bridge.rs",
+      "legacy_sha256": "c507d04e5e0ffa6abfa16f12b1053f9c06ca1875463abaa568ca88974099be1e",
+      "coff_text_padding_bytes": 3
+    }
+  ]
+}

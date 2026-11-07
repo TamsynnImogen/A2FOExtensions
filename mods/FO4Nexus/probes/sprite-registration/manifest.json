@@ -1,0 +1,19 @@
+{
+  "source_base_info": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/FO4 Nexus/info.ini",
+  "source_base_info_sha256": "4c3188fe7c81b6d994d3198b95dc3bea0a555050f44b58561b98107a9cf73a20",
+  "modules_section_sha256": "839e0e950bee91cd1e5a99fa3f463a7348876ed680edd68e1674adbfcc077d0c",
+  "probe_info_modules_section_sha256": "839e0e950bee91cd1e5a99fa3f463a7348876ed680edd68e1674adbfcc077d0c",
+  "parent_chain": [
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/Fleet Ops 4.0",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/FO4 Nexus",
+    "Fleet Operations: Nexus UI Probe"
+  ],
+  "scope": "isolated shield sprite registration and startup only; no base changes; ring rendering untested",
+  "payload": {
+    "Sprites/gui_global.spr": "050126945f7e9bb32d624d10ed94cd4a11a96ec9881bcbdcbc5b00b1c4c59f6c",
+    "Sprites/nx_ui.spr": "872f0aa3fd9824ae0769fb6c2060f0ab021936600749f445da0a4153643dcf5b",
+    "Textures/nx_ui_shield_quad.tga": "80454ea3b78cf7c4c13717c44dbb3afdf8dd050213850d339073dd94d579b58b",
+    "Textures/nx_ui_shield_quad_side.tga": "02f94126ad6b2e68d411bc6184ac0233ea9f6b178d0016a83295bf7b9f3bb374",
+    "info.ini": "05d197a415309dba685436804cc16d26476ad0b0b26b3513a74ecabe2d84cc80"
+  }
+}

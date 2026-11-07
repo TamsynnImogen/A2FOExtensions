@@ -1,0 +1,55 @@
+{
+  "created_utc": "2026-10-02T15:05:59.001680+00:00",
+  "module": "A2FOShellDisplay",
+  "version": "v14",
+  "status": "User reported Windows menu alignment working; broader manual matrix unverified",
+  "source_root": "/home/tamsynn/A2FOHookExtensions",
+  "artifact": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOShellDisplay.dll",
+  "package_dll": "/home/tamsynn/A2FOHookExtensions/dist/A2FOShellDisplay-20261002-v14/modules/A2FOShellDisplay.dll",
+  "archive": "/home/tamsynn/A2FOHookExtensions/dist/A2FOShellDisplay-20261002-v14.zip",
+  "sha256": "b3f31aa5b0f5787519651d881d56863c033ce3ebdd818e26a85311451abfe873",
+  "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/windows-dialog-v14-20261002T145134Z",
+  "deployment_performed": false,
+  "linux_installation": {
+    "path": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOShellDisplay.dll",
+    "version": "v13",
+    "sha256": "22f8817d7b534f6721f6973885f05a25f8f6b16aef4f41843de97e5f16f5a201"
+  },
+  "remote_log_version": "v12",
+  "remote_report": "Displaced interactive areas in Instant Action, Multiplayer and Admirals Log; changing desktop scaling to 100 percent did not resolve",
+  "correction": "Bridge verified game-owned DWLP_DLGPROC on registered #32770 windows; retain physical outer/default messages and logical custom game messages",
+  "source_sha256": {
+    "modules/A2FOShellDisplay/canvas.cpp": "423dd837c7de9936ae864d111a1861f1957bab06d2ad253b382dc4b10ea6cf6c",
+    "modules/A2FOShellDisplay/module.cpp": "fbd63bdf2dd54580f02a08aaaa31b018b5dc215a38aeb6bec003077721961f1b",
+    "modules/A2FOShellDisplay/README.md": "d5a3fa6fcd9137fa285ac9325524d3d023b42b1f8e0eae5af7180345ddbd9add",
+    "tests/shell_canvas_dialog_test.cpp": "b14878f5564b7c0eb4f4d9c218f60139ea786d6e33cb679989e5c44607e38726",
+    "Makefile": "d0fb005f221a99cc1c2ad609c4aeef21645324a8b6dbd1c5baa052ecfacde94a"
+  },
+  "supplied_log_sha256": {
+    "A2FOExtensions.log": "5a2a6fe32e5423d7fc2e718f2990e946aa27efba1a805e906f10db1dd143ea06",
+    "A2FOStartupProxy.log": "aa3fec847d3423a47f01c59e1a5c097c490788d34ae7e72d5126c649d0d1e475"
+  },
+  "validation": [
+    "env -u DISPLAY -u WAYLAND_DISPLAY make shell-display-test: exit 0; seven headless suites passed",
+    "New fake USER32 dialog fixture: physical outer/default coordinates; logical game points; active FALSE return; nested reentrant message and dispatch restoration; builtin Edit; foreign owner; install failure; conditional cleanup",
+    "Independent reviewer: headless dialog target exit 0, no confirmed production defect",
+    "Actual v14 DLL smoke with installed SHA-pinned ArmadaL and FleetOpsHook images mapped as data: exit 0",
+    "PE exports A2FO_ModuleInit/A2FO_ModuleShutdown present; imports standard Windows DLLs",
+    "Package DLL hash equals build artifact; ZIP CRC integrity and archived DLL hash verified"
+  ],
+  "validation_log": "/home/tamsynn/A2FOHookExtensions/docs/shell-windows-dialog-v14-2026-10-02-tests.log",
+  "limitations": [
+    "Synthetic tests do not establish actual Windows callback owner or live hit-test alignment",
+    "Opaque or unverified callback owners retain native path with diagnostic",
+    "Hot unloading is unsupported; fully restart to replace DLL",
+    "No GUI/input automation or original game startup was executed"
+  ],
+  "acceptance": {
+    "recorded_utc": "2026-10-02T15:21:02Z",
+    "user_report": "seems to be working now",
+    "scope": "Initial confirmation for reported Windows native menu interactive-area alignment",
+    "individual_menu_control_and_resolution_results": "not supplied",
+    "packaged_artifact_changed": false,
+    "archive_manifest": "Original build-time candidate status retained"
+  }
+}

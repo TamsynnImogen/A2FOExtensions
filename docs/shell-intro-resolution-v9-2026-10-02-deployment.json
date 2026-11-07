@@ -1,0 +1,38 @@
+{
+  "created_utc": "2026-10-02T12:06:12.878459+00:00",
+  "module": "A2FOShellDisplay",
+  "version": "v9",
+  "source_root": "/home/tamsynn/A2FOHookExtensions",
+  "artifact": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOShellDisplay.dll",
+  "installed": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOShellDisplay.dll",
+  "sha256": "1724fc28f4eabc8427b71aa492b14bba60ee31c180b71b91ce82c03e337438cb",
+  "installed_mtime_utc": "2026-10-02T12:03:07.049308+00:00",
+  "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/intro-resolution-20261002T115551Z",
+  "previous_dll_sha256": "f903b335f9f3f69b0c5a538eeff244a30e237d612118ff55eaf44cc4dcd40833",
+  "core_sha256": "74b3274a19f8ca1370b37ee2b8834b9634a638994e83507fd160387efc9bb035",
+  "armada_sha256": "470bf8f4b0196e22fe179d3845cab671e74d9af19cf90a7dafed0b0bbd394318",
+  "fleetops_sha256": "d2a0829e87aaa927e27146b90be61fc6359c6cbf3d81aed2c644019dd375b9b6",
+  "unchanged_settings": {
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/info.ini": "42639e533412cd47a27ab23bdcd16a3a7f3fc23d48c3bbd49f53ccf834bd3da6",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/info.ini": "09c1552037754797e05cf994a61f4b5145794302074de44c4edacb613f7a2211",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/settings_saves_logs/mods/A2FO Settings Test/Settings.xml": "c1251fe5f87df0550f52560dfd3e83fc7668669712c1b7eb93705dc9cda04051"
+  },
+  "target_mod": "STA2 Classic: Test (Mods/test)",
+  "parent_mod": "STA2 Classic Mod",
+  "inherited_intro": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/STA2 Classic Mod/animations/Intro.bik",
+  "validation": [
+    "make shell-display-test: four suites passed",
+    "shell_intro_test: installed Roots Armada/FleetOps pair mapped as data passed",
+    "shell_display_native_smoke: actual DLL and installed Roots pair mapped as data passed",
+    "reviewed new constructor getter and movie-start call ABIs in installed FleetOps disassembly",
+    "synthetic selected resolution, both renderer return paths, native size override, retry and nested bypass",
+    "synthetic call-install failure leaves backing unchanged; UV failure restores size"
+  ],
+  "live_acceptance": "Pending manual test: test mod intro at saved smaller windowed and borderless resolutions, then menu/Options/gameplay transition",
+  "limitations": [
+    "No real game/VCL/D3D methods or input automation used",
+    "Native engine existing video backbuffer is not recreated; visible video scaling and proportions remain unverified",
+    "Cache rechecks client dimensions and framed/popup style; native changes to position alone are not re-centred",
+    "If no Intro movie start diagnostic appears, trace the actual mod playback entry"
+  ]
+}

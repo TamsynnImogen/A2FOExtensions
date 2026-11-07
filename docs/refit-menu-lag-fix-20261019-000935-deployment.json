@@ -1,0 +1,51 @@
+{
+  "status": "deployed for next full restart; live GPU appearance/performance acceptance pending",
+  "timestamp": "20261019-000935",
+  "target": "/home/tamsynn/NVMeData/Fleet Ops Roots",
+  "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/refit-menu-lag-fix-20261019-000935",
+  "installed": {
+    "Data/modules/A2FORefitMenus.dll": "acda0f91b8f6458253cead3aadc4d346909dce7f273659a6de8a66c842b1df0d",
+    "Data/modules/refit/A2FORefitScene.dll": "21de74ba7f72b80ce9409f78f5ff6596f863425f15b0a4494c9e8871c49757dc",
+    "Data/RefitScene/Render3D.ini": "5329219c6489cf21698305aeef73cc3d0727437f8a5d8a2e7fca6b1a5d3134dd"
+  },
+  "previous_files": {
+    "Data/modules/A2FORefitMenus.dll": "3ce9dfb13ba406900a84b75c3bb605cd7f079fad40bfe96dcebaae4fa6c31db6",
+    "Data/modules/refit/A2FORefitScene.dll": "7d33a84545529d73e8901de199f0c3e52b17357b5d9404d4d8aa477300a6b89b",
+    "Data/RefitScene/Render3D.ini": "ed582e93be9a84ba92c2f9ee3463c7ce581940f786fb4989acc68e6f08450891"
+  },
+  "protected_unchanged": {
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOShellDisplay.dll": "c364fa31788d6c1a08769d93ed9db56c93c6a218e4bb626eb3ff25711dc5bd19",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe": "817b1ddb9876cfb9c5d781b42d2513de48fef9cbdbc408aa43c878c573581a18",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll": "3fd18eeee4201a9a1297ac26b3eb88f78c5f72e8c55a62c25179f1d4932e4c11",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.dll": "45be55e79afe53365dc26f1e4238bfcd9d74120299215b52bca6458f072d4b05",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.ini": "8830d04dbcd3d5c45671748cc8a3999cbb5e52f5ff19636d3f01a42c8bb9abdd",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/info.ini": "d40efd9f80bc8e07d95186ede2ddd2a44277c758f45ac58171712f8eaa9a7192",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/info.ini": "68cef7963cf436691dc775dae6efc07d9ed4a9545d1b71f596b1d3b8a76061ac",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/STA2 Classic Mod/info.ini": "9f599f3f5217d0219d80ef0dd8a01990a72e9995b51a0b5cc372ff709cf77976",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/settings_saves_logs/Settings.xml": "71b25b86c867398e4aa12b5676e58faed6809e67d8aacf380f4b329e027add77",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOArmadaProfiles.txt": "08ffa42a487354a7959fa5d4b184eb8120b331d2bca62284ac59f0da1cb52dac",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FORefitMenus.ini": "e83915c19036e31a7c3b42b35480b9eaa2a9b22ea0bc2e8513a0e433d0ed5ae7",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/RefitScene/Menu/map.ini": "cc370d017744facc01eecb91dca2b9d1f02461de9794fab60149c46b1dde7b2d",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/licenses/armada2-refit.txt": "35a427baddf84b00c8925cb5604fb20a93d667dabd952a105ceefe62a23465b7",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/licenses/libm-0.2.16.txt": "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7"
+  },
+  "pre_fix_logs": {
+    "Data/A2FOExtensions.log": "b6feba9e87790deeeb8e1fbbf64b2542df3cfd2dd849d536c097415441a0fbba",
+    "Data/RefitScene/A2FORefitScene.log": "4747465b98491337057e00cd52fe78795699c6b0941c4946fd0e3a0dac91914d"
+  },
+  "evidence": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/refit-menu-lag-fix-20261019-000935/evidence",
+  "upstream_commit": "37d60079169b086dba4216fe55e05cd6015d66c0",
+  "tests": {
+    "portable_cpp": "5 suites passed; -Werror module build",
+    "native_console": "52/52 passed after final module rebuild",
+    "bindings": "4 profiles x 30 checks passed",
+    "offscreen_gdi": "passed; memory DC, no game window",
+    "rust_provider": "i686 MSVC release build passed",
+    "provider_fixture": "Data-only init, null-device and thread guards passed; 16 ship entries resolve",
+    "resolver": "4 pure tests passed",
+    "installed_sods": "15 unique fallback roles parse with finite, nonempty geometry",
+    "actual_ui_and_gpu": "unverified; full restart/manual acceptance required"
+  },
+  "instant_action_layout": "native controls retained; full Refit control-layout port unfinished",
+  "input_automation": false
+}

@@ -1,8 +1,10 @@
 # Weapon ODF muzzle flashes
 
-`A2FOMuzzleFlashes.dll` adds optional attached sprite flashes to projectile
-weapons, including pulse cannons and torpedo launchers. Enable this module
-alongside the other extensions. It does not require an ammunition cost.
+`A2FOMuzzleFlashes` is built into `A2FOExtensions.dll` and adds optional
+attached sprite flashes to projectile weapons, including pulse cannons and
+torpedo launchers. Select it in the Modules menu or the mod's `[modules]`
+policy. It does not require an ammunition cost. See
+[built-in module behavior](builtin-modules-stage2.md) for live toggles.
 
 ## Weapon configuration
 
@@ -69,7 +71,8 @@ calling it, the module checks the sprite lookup at RVA `0x220750`, because
 the native particle renderer assumes the sprite exists. No render detour is
 installed. EnergySystems' selection, launch, and shot-timer hooks are untouched.
 
-Build target:
+The core release contains this feature. The standalone compatibility target
+remains available for SDK testing:
 
 ```sh
 make build/modules/A2FOMuzzleFlashes.dll
@@ -82,7 +85,7 @@ save/load. Check that unconfigured weapons retain their existing visuals.
 
 ## Event-animation notification
 
-The updated DLL also notifies [A2FOAnimations](../modules/A2FOAnimations/README.md)
+The feature also notifies [A2FOAnimations](../modules/A2FOAnimations/README.md)
 after a successful projectile build. This runs independently of configured flash
 sprites, so automatic weapons can trigger their ODF-name animation with
 `animation = 1` on the weapon. The optional bridge preserves the shot, ammunition

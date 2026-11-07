@@ -1,0 +1,61 @@
+Directional shield UI layout regression — 2026-10-02
+
+Evidence
+- Tester-supplied Downloads/gui_federation.cfg:6 includes gui_interface.cfg;
+  gui_interface.cfg:2 includes gui_glob16x12.cfg. The federation file declares
+  screenWidth1600/screenHeight1200 at lines14-15. gui_glob16x12.cfg:534
+  confirms graphic10 18 512 128. No per-facing directional Area overrides
+  occur in these three files. The supplied current GUI matches the geometry
+  used in the regression fixture.
+- Tester A2FOExtensions.log:4390-4394 resolves legacy shield exports/sprites
+  and submits the ring, but all four hover rectangles lie beyond virtual X1600.
+- Gameplay initialization: lines150-153 connect the shared Craft::Damage path;
+  340 directional class policies register with no logged rejections.
+- Local older mod archive Downloads/KA2AEJan.zip, JanPack/odf/Ships/Templates/
+  Craft.odf:111-114 specifies these native UI rectangles:
+    forward 360 120 20 140; aft 626 120 20 140;
+    port 380 260 245 16; starboard 380 104 245 16.
+  JanPack/misc/gui_glob16x12.cfg:534 specifies graphic 10 18 512 128.
+  The archive is an older snapshot, not proof of the tester's current files.
+  Its exact inputs reproduce every rounded segment rectangle in the live log.
+- Native rectangle endpoints make that graphic's drawable extent511x127.
+  Multiplication by511/128 and127/128 yields the logged off-screen positions.
+- Git6be943e (2026-08-24) used explicit ODF rectangles without this scaling.
+  Gitc2bfc4e (2026-09-23) added blanket graphic-area scaling to all rectangles.
+  The compatibility rebuild uses that later code; the tester's previously
+  working DLL hash/version is unavailable, so their exact upgrade path is
+  unconfirmed. This is a demonstrable extension placement regression.
+- Old/new local Armada hashes match the pinned September references. The
+  complete native DBRectangle getter0x5358f0..0x535acf is unchanged. Native
+  engine parser changes are not required to explain these observed numbers.
+
+Fix
+- Explicit ODF *ShieldPos rectangles retain native UI placement and size.
+- Only omitted/default segment rectangles scale from the128-unit canvas.
+- Authored/default provenance follows the ART compass remap.
+- Per-facing GUI Area overrides retain precedence; sprite selection occurs
+  before default scaling as in the existing path.
+- Only A2FOCraftIdentity.dll is rebuilt for this correction. Existing source
+  edits outside this fix were preserved; gameplay DLLs and mod data were not
+  changed. No game installation was modified by this task.
+- New init diagnostic:
+  Directional-shield ODF rectangles retain native UI placement; only built-in defaults scale
+
+Validation
+See the tester package README and manifest for final checks and SHA-256.
+The focused host regression exercises the exact logged scaling failure,
+restored ODF placement, defaults, partial overrides, remapping provenance,
+and invalid-mapping output preservation. The Windows DLL load check verifies
+loading and ModuleInit export presence, not in-game rendering or gameplay.
+Full legacy suites were not run: tracked test sources were already deleted.
+
+Manual tester acceptance
+1. Exit Roots completely; back up Data/modules/A2FOCraftIdentity.dll.
+2. Replace it with the package's modules/A2FOCraftIdentity.dll. Keep the
+   updated core/engine and existing ODF/GUI/ART files.
+3. Start KA2AE and select the same affected ship. Confirm all four arcs are
+   visible in their previous positions. Check the new init diagnostic.
+4. Check a station/producer panel and shield hover regions; attack from each
+   facing to verify displayed drain follows it. This remains manual acceptance.
+5. Copy A2FOExtensions.log before the next launch overwrites it.
+Rollback: after exiting Roots, restore the saved CraftIdentity DLL.

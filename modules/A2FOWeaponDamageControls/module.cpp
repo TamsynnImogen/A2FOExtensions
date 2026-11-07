@@ -9,7 +9,12 @@
 
 #include "../../sdk/include/a2fo_module_api.h"
 #include "../A2FODirectionalShields/api.hpp"
+#include "../../sdk/include/a2fo_module_provider.hpp"
 #include "damage_controls.hpp"
+#include "../../rust/module_runtime_b4_ffi.h"
+#ifdef A2FO_BUILTIN_FEATURE
+#include "../../core/builtin_modules.hpp"
+#endif
 
 #include <windows.h>
 
@@ -19,6 +24,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -265,98 +271,117 @@ bool read_optional_lookup(
     return (found & 0xffu) != 0;
 }
 
+struct RegisterContext {
+    void* weapon_class;
+    void* parent_class;
+    void* parameter_db;
+    std::unique_ptr<ClassPolicy> policy;
+    const ClassPolicy* inherited_policy = nullptr;
+    std::optional<NativeLookup> default_shield;
+    std::optional<NativeLookup> default_hull;
+    char message[320]{};
+};
+
+std::uint64_t register_class_op(void* opaque, std::uint32_t operation,
+                                std::uint32_t) noexcept {
+    auto& context = *static_cast<RegisterContext*>(opaque);
+    switch (operation) {
+        case 0:
+            try { context.policy = std::make_unique<ClassPolicy>(); }
+            catch (...) { log_line("Could not allocate a weapon damage policy"); return 0; }
+            if (!context.policy->shield_modifier.initialized() ||
+                !context.policy->hull_modifier.initialized()) {
+                log_line("Could not initialize Armada target-specific lookups");
+                return 0;
+            }
+            return 1;
+        case 1: {
+            EnterCriticalSection(&g_state_lock);
+            const auto inherited = g_class_policies.find(context.parent_class);
+            if (inherited != g_class_policies.end() && inherited->second) {
+                context.inherited_policy = inherited->second.get();
+                context.policy->damage.can_damage_shields =
+                    context.inherited_policy->damage.can_damage_shields;
+                context.policy->damage.can_damage_hull =
+                    context.inherited_policy->damage.can_damage_hull;
+            }
+            LeaveCriticalSection(&g_state_lock);
+            return context.inherited_policy != nullptr;
+        }
+        case 2:
+            return read_optional_bool(context.parameter_db, "canDamageShields",
+                                      &context.policy->damage.can_damage_shields);
+        case 3:
+            return read_optional_bool(context.parameter_db, "canDamageHull",
+                                      &context.policy->damage.can_damage_hull);
+        case 4: {
+            context.default_shield.emplace();
+            context.default_hull.emplace();
+            const NativeLookup& inherited = context.inherited_policy
+                ? context.inherited_policy->shield_modifier : *context.default_shield;
+            return read_optional_lookup(context.parameter_db, "shieldDamageModifier",
+                                        &context.policy->shield_modifier, inherited);
+        }
+        case 5: {
+            const NativeLookup& inherited = context.inherited_policy
+                ? context.inherited_policy->hull_modifier : *context.default_hull;
+            return read_optional_lookup(context.parameter_db, "hullDamageModifier",
+                                        &context.policy->hull_modifier, inherited);
+        }
+        case 6: return context.policy->shield_modifier.sanitize();
+        case 7:
+            log_line("shieldDamageModifier contains a non-finite or negative value; invalid entries use 1.0");
+            return 0;
+        case 8: return context.policy->hull_modifier.sanitize();
+        case 9:
+            log_line("hullDamageModifier contains a non-finite or negative value; invalid entries use 1.0");
+            return 0;
+        case 10:
+            context.policy->damage.shield_damage_modifier =
+                context.policy->shield_modifier.default_value();
+            context.policy->damage.hull_damage_modifier =
+                context.policy->hull_modifier.default_value();
+            std::snprintf(context.message, sizeof(context.message),
+                "Registered weapon damage policy: shields=%s x%.3g (%d target overrides), hull=%s x%.3g (%d target overrides)",
+                context.policy->damage.can_damage_shields ? "yes" : "no",
+                static_cast<double>(context.policy->damage.shield_damage_modifier),
+                context.policy->shield_modifier.entry_count(),
+                context.policy->damage.can_damage_hull ? "yes" : "no",
+                static_cast<double>(context.policy->damage.hull_damage_modifier),
+                context.policy->hull_modifier.entry_count());
+            return 0;
+        case 11:
+            try {
+                EnterCriticalSection(&g_state_lock);
+                g_class_policies[context.weapon_class] = std::move(context.policy);
+                LeaveCriticalSection(&g_state_lock);
+                return 1;
+            } catch (...) {
+                LeaveCriticalSection(&g_state_lock);
+                return 0;
+            }
+        case 12: log_line("Could not retain a weapon damage policy"); return 0;
+        case 13: log_line(context.message); return 0;
+    }
+    return 0;
+}
 void register_class_policy(void* weapon_class, void* parent_class,
                            void* parameter_db) noexcept {
-    if (!g_runtime_ready || !weapon_class || !parameter_db) return;
-
-    std::unique_ptr<ClassPolicy> policy;
-    try {
-        policy = std::make_unique<ClassPolicy>();
-    } catch (...) {
-        log_line("Could not allocate a weapon damage policy");
-        return;
-    }
-    if (!policy->shield_modifier.initialized() ||
-        !policy->hull_modifier.initialized()) {
-        log_line("Could not initialize Armada target-specific lookups");
-        return;
-    }
-
-    const ClassPolicy* inherited_policy = nullptr;
-    EnterCriticalSection(&g_state_lock);
-    const auto inherited = g_class_policies.find(parent_class);
-    if (inherited != g_class_policies.end() && inherited->second) {
-        inherited_policy = inherited->second.get();
-        policy->damage.can_damage_shields =
-            inherited_policy->damage.can_damage_shields;
-        policy->damage.can_damage_hull =
-            inherited_policy->damage.can_damage_hull;
-    }
-    LeaveCriticalSection(&g_state_lock);
-
-    const bool shield_command = read_optional_bool(
-        parameter_db, "canDamageShields",
-        &policy->damage.can_damage_shields);
-    const bool hull_command = read_optional_bool(
-        parameter_db, "canDamageHull", &policy->damage.can_damage_hull);
-
-    NativeLookup default_shield;
-    NativeLookup default_hull;
-    const NativeLookup& inherited_shield = inherited_policy
-        ? inherited_policy->shield_modifier : default_shield;
-    const NativeLookup& inherited_hull = inherited_policy
-        ? inherited_policy->hull_modifier : default_hull;
-    const bool shield_modifier_command = read_optional_lookup(
-        parameter_db, "shieldDamageModifier",
-        &policy->shield_modifier, inherited_shield);
-    const bool hull_modifier_command = read_optional_lookup(
-        parameter_db, "hullDamageModifier",
-        &policy->hull_modifier, inherited_hull);
-
-    if (!inherited_policy && !shield_command && !hull_command &&
-        !shield_modifier_command && !hull_modifier_command) {
-        return;
-    }
-
-    const int shield_values_sanitized = policy->shield_modifier.sanitize();
-    const int hull_values_sanitized = policy->hull_modifier.sanitize();
-    if (shield_values_sanitized != 0) {
-        log_line("shieldDamageModifier contains a non-finite or negative value; invalid entries use 1.0");
-    }
-    if (hull_values_sanitized != 0) {
-        log_line("hullDamageModifier contains a non-finite or negative value; invalid entries use 1.0");
-    }
-    policy->damage.shield_damage_modifier =
-        policy->shield_modifier.default_value();
-    policy->damage.hull_damage_modifier =
-        policy->hull_modifier.default_value();
-
-    char message[320]{};
-    std::snprintf(
-        message, sizeof(message),
-        "Registered weapon damage policy: shields=%s x%.3g (%d target overrides), hull=%s x%.3g (%d target overrides)",
-        policy->damage.can_damage_shields ? "yes" : "no",
-        static_cast<double>(policy->damage.shield_damage_modifier),
-        policy->shield_modifier.entry_count(),
-        policy->damage.can_damage_hull ? "yes" : "no",
-        static_cast<double>(policy->damage.hull_damage_modifier),
-        policy->hull_modifier.entry_count());
-
-    try {
-        EnterCriticalSection(&g_state_lock);
-        g_class_policies[weapon_class] = std::move(policy);
-        LeaveCriticalSection(&g_state_lock);
-    } catch (...) {
-        LeaveCriticalSection(&g_state_lock);
-        log_line("Could not retain a weapon damage policy");
-        return;
-    }
-
-    log_line(message);
+    RegisterContext context{};
+    context.weapon_class = weapon_class;
+    context.parent_class = parent_class;
+    context.parameter_db = parameter_db;
+    a2fo_rs_damage_register(g_runtime_ready && weapon_class && parameter_db,
+                            &context, &register_class_op);
 }
 
 bool policy_for_damage_info(const void* damage_info, const void* target_craft,
                             DamagePolicy* output) noexcept {
+#ifdef A2FO_BUILTIN_FEATURE
+    // The shared detour still routes directional shields while custom weapon
+    // modifiers are off. Retain class metadata for later menu activation.
+    if (!a2fo::builtin_module_enabled(A2FO_BUILTIN_FEATURE)) return false;
+#endif
     if (!damage_info || !target_craft || !output || !g_state_lock_ready) {
         return false;
     }
@@ -412,7 +437,11 @@ Function exported_function(HMODULE module, const char* name) noexcept {
 
 bool connect_directional_shields() noexcept {
     if (g_directional_begin_damage && g_directional_end_damage) return true;
-    HMODULE module = GetModuleHandleA("A2FODirectionalShields.dll");
+    HMODULE module = a2fo::module_provider(
+        "A2FODirectionalShields.dll",
+        {"A2FODirectionalShields_ConnectDamageBridge",
+         "A2FODirectionalShields_BeginDamage",
+         "A2FODirectionalShields_EndDamage"});
     if (!module) return false;
     const auto connect = exported_function<
         A2FO_DirectionalShieldsConnectDamageBridgeFn>(
@@ -429,69 +458,86 @@ bool connect_directional_shields() noexcept {
     return true;
 }
 
+struct DamageContext {
+    void* craft;
+    void* damage_info;
+    void* argument2;
+    void* argument3;
+    std::uintptr_t argument4;
+    A2FO_DirectionalShieldDamageScope directional_scope{};
+    DamagePolicy policy{};
+    std::array<std::uint8_t, kDamageInfoSize> local_damage{};
+    void* native_damage_info = nullptr;
+    bool previous_scale_active = false;
+    float previous_scale = 1.0f;
+};
+std::uint64_t damage_hit_op(void* opaque, std::uint32_t operation,
+                            std::uint32_t) noexcept {
+    auto& context = *static_cast<DamageContext*>(opaque);
+    switch (operation) {
+        case 0:
+            return g_runtime_ready && readable_range(context.damage_info,
+                                                       kDamageInfoSize);
+        case 1:
+            context.directional_scope.struct_size = sizeof(context.directional_scope);
+            return g_directional_begin_damage && g_directional_begin_damage(
+                context.craft, context.damage_info, &context.directional_scope);
+        case 2: {
+            const bool found = policy_for_damage_info(
+                context.damage_info, context.craft, &context.policy);
+            context.native_damage_info = context.damage_info;
+            context.previous_scale_active = g_hull_amount_scale_active;
+            context.previous_scale = g_hull_amount_scale;
+            return found;
+        }
+        case 3: {
+            std::memcpy(context.local_damage.data(), context.damage_info,
+                        context.local_damage.size());
+            std::uint32_t flags = 0;
+            std::memcpy(&flags, context.local_damage.data() + kDamageInfoFlagsOffset,
+                        sizeof(flags));
+            const float current_shields = read_at<float>(
+                context.craft, kCurrentShieldsOnCraftOffset, 0.0f);
+            const bool shields_up = current_shields > 0.0f;
+            flags = apply_policy_to_flags(flags, context.policy, shields_up);
+            std::memcpy(context.local_damage.data() + kDamageInfoFlagsOffset,
+                        &flags, sizeof(flags));
+            float damage = 0.0f;
+            std::memcpy(&damage, context.local_damage.data() + kDamageInfoDamageOffset,
+                        sizeof(damage));
+            damage *= damage_scale_for_hit(context.policy, shields_up);
+            std::memcpy(context.local_damage.data() + kDamageInfoDamageOffset,
+                        &damage, sizeof(damage));
+            context.native_damage_info = context.local_damage.data();
+            g_hull_amount_scale = hull_spillover_scale(context.policy, shields_up);
+            g_hull_amount_scale_active = true;
+            return 0;
+        }
+        case 5:
+            return a2fo_weapon_damage_call_thiscall_4(
+                g_craft_damage_hook.gateway, context.craft,
+                reinterpret_cast<std::uintptr_t>(context.native_damage_info
+                    ? context.native_damage_info : context.damage_info),
+                reinterpret_cast<std::uintptr_t>(context.argument2),
+                reinterpret_cast<std::uintptr_t>(context.argument3),
+                context.argument4);
+        case 6:
+            g_hull_amount_scale = context.previous_scale;
+            g_hull_amount_scale_active = context.previous_scale_active;
+            return 0;
+        case 7:
+            if (g_directional_end_damage) {
+                g_directional_end_damage(&context.directional_scope);
+            }
+            return 0;
+    }
+    return 0;
+}
 std::uintptr_t __attribute__((fastcall)) craft_damage_hook(
     void* craft, void*, void* damage_info, void* argument2,
     void* argument3, std::uintptr_t argument4) noexcept {
-    if (!g_runtime_ready ||
-        !readable_range(damage_info, kDamageInfoSize)) {
-        return a2fo_weapon_damage_call_thiscall_4(
-            g_craft_damage_hook.gateway, craft,
-            reinterpret_cast<std::uintptr_t>(damage_info),
-            reinterpret_cast<std::uintptr_t>(argument2),
-            reinterpret_cast<std::uintptr_t>(argument3), argument4);
-    }
-
-    A2FO_DirectionalShieldDamageScope directional_scope{};
-    directional_scope.struct_size = sizeof(directional_scope);
-    const bool directional_active = g_directional_begin_damage &&
-        g_directional_begin_damage(
-            craft, damage_info, &directional_scope);
-
-    DamagePolicy policy{};
-    const bool has_policy = policy_for_damage_info(
-        damage_info, craft, &policy);
-    std::array<std::uint8_t, kDamageInfoSize> local_damage{};
-    void* native_damage_info = damage_info;
-
-    const bool previous_scale_active = g_hull_amount_scale_active;
-    const float previous_scale = g_hull_amount_scale;
-    if (has_policy) {
-        std::memcpy(local_damage.data(), damage_info, local_damage.size());
-        std::uint32_t flags = 0;
-        std::memcpy(
-            &flags, local_damage.data() + kDamageInfoFlagsOffset,
-            sizeof(flags));
-        const float current_shields = read_at<float>(
-            craft, kCurrentShieldsOnCraftOffset, 0.0f);
-        const bool shields_up = current_shields > 0.0f;
-        flags = apply_policy_to_flags(flags, policy, shields_up);
-        std::memcpy(
-            local_damage.data() + kDamageInfoFlagsOffset, &flags,
-            sizeof(flags));
-
-        float damage = 0.0f;
-        std::memcpy(
-            &damage, local_damage.data() + kDamageInfoDamageOffset,
-            sizeof(damage));
-        damage *= damage_scale_for_hit(policy, shields_up);
-        std::memcpy(
-            local_damage.data() + kDamageInfoDamageOffset, &damage,
-            sizeof(damage));
-        native_damage_info = local_damage.data();
-        g_hull_amount_scale = hull_spillover_scale(policy, shields_up);
-        g_hull_amount_scale_active = true;
-    }
-    const std::uintptr_t result = a2fo_weapon_damage_call_thiscall_4(
-        g_craft_damage_hook.gateway, craft,
-        reinterpret_cast<std::uintptr_t>(native_damage_info),
-        reinterpret_cast<std::uintptr_t>(argument2),
-        reinterpret_cast<std::uintptr_t>(argument3), argument4);
-    g_hull_amount_scale = previous_scale;
-    g_hull_amount_scale_active = previous_scale_active;
-    if (directional_active && g_directional_end_damage) {
-        g_directional_end_damage(&directional_scope);
-    }
-    return result;
+    DamageContext context{craft, damage_info, argument2, argument3, argument4};
+    return a2fo_rs_damage_hit(&context, &damage_hit_op);
 }
 
 bool preflight_signatures() noexcept {
@@ -549,27 +595,59 @@ bool preflight_signatures() noexcept {
     return supported;
 }
 
-bool install_runtime_hooks(const A2FO_ModuleApi* api) noexcept {
-    if (!api || !api->install_inline_hook || !api->patch_jump ||
-        !g_armada || !preflight_signatures()) {
-        return false;
+std::uint64_t damage_init_op(void* opaque, std::uint32_t operation,
+                             std::uint32_t argument) noexcept {
+    const auto* api = static_cast<const A2FO_ModuleApi*>(opaque);
+    try {
+    switch (operation) {
+        case 0:
+            g_api = api;
+            g_armada = static_cast<HMODULE>(api->armada_module());
+            return g_armada != nullptr;
+        case 1:
+            InitializeCriticalSection(&g_state_lock);
+            g_state_lock_ready = true;
+            return 0;
+        case 2: return preflight_signatures();
+        case 3:
+            a2fo_weapon_damage_hull_amount_continue = at(
+                g_armada, kCraftDamageHullAmountResumeRva);
+            return 0;
+        case 4:
+            return api->patch_jump(
+                at(g_armada, kCraftDamageHullAmountRva),
+                reinterpret_cast<void*>(&a2fo_weapon_damage_hull_amount_bridge),
+                kExpectedCraftDamageHullAmount, sizeof(kExpectedCraftDamageHullAmount));
+        case 5:
+            return api->install_inline_hook(
+                at(g_armada, kCraftDamageRva),
+                reinterpret_cast<void*>(&craft_damage_hook),
+                sizeof(kExpectedCraftDamage), kExpectedCraftDamage,
+                &g_craft_damage_hook) && g_craft_damage_hook.gateway != nullptr;
+        case 6: {
+            constexpr const char* fields[]{
+                "canDamageShields", "canDamageHull",
+                "shieldDamageModifier", "hullDamageModifier"};
+            return api->register_weapon_class_loaded_handler(
+                kModuleName, fields, static_cast<std::uint32_t>(std::size(fields)),
+                &weapon_class_loaded_handler, nullptr);
+        }
+        case 7: g_runtime_ready = argument != 0; return 0;
+        case 8: return connect_directional_shields();
+        case 9:
+            log_line("Weapon damage controls initialized through the shared WeaponClass dispatcher");
+            return 0;
+        case 10:
+            log_line("Directional shields connected to the shared Craft::Damage hook");
+            return 0;
+        case 11:
+            log_line("Weapon damage controls loaded with runtime disabled");
+            return 0;
     }
-    a2fo_weapon_damage_hull_amount_continue = at(
-        g_armada, kCraftDamageHullAmountResumeRva);
-    if (!api->patch_jump(
-            at(g_armada, kCraftDamageHullAmountRva),
-            reinterpret_cast<void*>(
-                &a2fo_weapon_damage_hull_amount_bridge),
-            kExpectedCraftDamageHullAmount,
-            sizeof(kExpectedCraftDamageHullAmount))) {
-        return false;
+    return 0;
+    } catch (...) {
+        return 0;
     }
-    return api->install_inline_hook(
-            at(g_armada, kCraftDamageRva),
-            reinterpret_cast<void*>(&craft_damage_hook),
-            sizeof(kExpectedCraftDamage), kExpectedCraftDamage,
-            &g_craft_damage_hook) &&
-        g_craft_damage_hook.gateway != nullptr;
 }
 
 }  // namespace
@@ -595,35 +673,8 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
         (api->capabilities & A2FO_CAP_WEAPON_CLASS_LOADED) == 0) {
         return false;
     }
-    g_api = api;
-    g_armada = static_cast<HMODULE>(api->armada_module());
-    if (!g_armada) return false;
-
-    InitializeCriticalSection(&g_state_lock);
-    g_state_lock_ready = true;
-    g_runtime_ready = install_runtime_hooks(api);
-    constexpr const char* fields[]{
-        "canDamageShields", "canDamageHull",
-        "shieldDamageModifier", "hullDamageModifier"};
-    if (g_runtime_ready &&
-        !api->register_weapon_class_loaded_handler(
-            kModuleName, fields,
-            static_cast<std::uint32_t>(std::size(fields)),
-            &weapon_class_loaded_handler, nullptr)) {
-        g_runtime_ready = false;
-    }
-    if (g_runtime_ready) {
-        const bool directional_connected = connect_directional_shields();
-        log_line("Weapon damage controls initialized through the shared WeaponClass dispatcher");
-        if (directional_connected) {
-            log_line("Directional shields connected to the shared Craft::Damage hook");
-        }
-    } else {
-        log_line("Weapon damage controls loaded with runtime disabled");
-    }
-    // Inline hooks are process-lifetime patches.  Runtime failure is therefore
-    // a fail-closed/pass-through state rather than a DLL load failure.
-    return true;
+    return a2fo_rs_damage_init(true, const_cast<A2FO_ModuleApi*>(api),
+                               &damage_init_op) != 0;
 }
 
 extern "C" __declspec(dllexport)
@@ -637,5 +688,8 @@ void A2FO_CALL A2FO_ModuleShutdown() {
 extern "C" __declspec(dllexport)
 bool A2FO_CALL
 A2FOWeaponDamageControls_RefreshDirectionalShieldsBridge() {
-    return g_runtime_ready && connect_directional_shields();
+    return a2fo_rs_damage_refresh(g_runtime_ready, nullptr,
+        [](void*, std::uint32_t, std::uint32_t) noexcept -> std::uint64_t {
+            return connect_directional_shields();
+        }) != 0;
 }

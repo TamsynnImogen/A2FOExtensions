@@ -1,0 +1,125 @@
+#include "const.odf"
+
+classLabel = "evolver"
+
+//**********************************************************************
+//MAIN DESIGN PARAMETERS
+
+//Name of Ship class in Ship Display window & in edit mode & tooltip
+unitName = "Passive Embryo"
+
+//tooltips
+tooltip = "8472_PASSIVE"
+verboseTooltip = "8472_PASSIVE_V"
+
+//Can decommission itself anywhere
+recyclesInPlace = 1
+
+race="species8472"
+
+// This ship is built from another ship, not a starbase (used by AIP build lists)
+//NOT ANY MOREshipIsBuiltByShips = 1
+
+//Amount of time required to build ship
+buildTime = 12.0
+
+//Number of officers required to build this ship
+officerCost = 0
+
+// amount of biomatter needed to build this ship
+biomatterCost = 50
+
+//Max Shield Strength & Begining Shield Strength <500
+maxHealth = 350
+
+animation = 2
+
+// Hitpoints
+
+shieldGeneratorHitPoints = 100
+enginesHitPoints = 60
+weaponsHitPoints = 40
+lifeSupportHitPoints = 80
+sensorsHitPoints = 60
+
+//Rate at which shield recharges (points per second... we think)
+shieldRate = 3.5
+
+//**********************************************************************
+//Construction Parameters
+buildItem0 = "8472_transmuter"
+buildItem1 = "8472_BasicResearch"
+buildItem2 = "8472_AdvancedResearch"
+buildItem3 = "8472_ShipUpgradeResearch"
+buildItem4 = "8472_FluidicGate"
+buildItem5 = "8472_mothership"
+
+//**********************************************************************
+
+//**********************************************************************
+//Worker Bee Parameters
+
+// Name of the worker bee SOD.
+workerBeeName = "8472bee"
+weldingBeamWidth = 5.0
+
+
+//**********************************************************************
+//SHIP NAMES
+
+//Possible Craft Names
+possibleCraftNames = 
+	"Passive-E7E25" "Passive-E6B84" "Passive-E1Y14" "Passive-E6O96" 
+	"Passive-E2G66" "Passive-E1V84" "Passive-E8R83" "Passive-E3Q34" 
+	"Passive-E1F51" "Passive-E6M37" "Passive-E8N36" "Passive-E9D29" 
+	"Passive-E9G93" "Passive-E9N56" "Passive-E1M90" "Passive-E5F59" 
+	"Passive-E8H19" "Passive-E6M05" "Passive-E7H42" "Passive-E3S93" 
+	"Passive-E7Y57" "Passive-E8J24" "Passive-E9K28" "Passive-E0G28" 
+	"Passive-E0L08" "Passive-E0P85" "Passive-E8T60" "Passive-E1M56" 
+	"Passive-E1A83" "Passive-E2Z96" "Passive-E2F83" "Passive-E3X51" 
+
+
+//**********************************************************************
+//ART PARAMETERS & WEAPON NAMES
+
+// Towing Beam
+weapon1 = "gtracbm"
+weaponHardpoints1 = "hp04"
+
+// Hardpoints to hit for various systems and other locations.
+enginesTargetHardpoints = "hp01" "hp02" "hp03" "hp04" "hp05"
+lifeSupportTargetHardpoints = "hp02" "hp04" "hp06" "hp08" "hp10"
+weaponsTargetHardpoints = "hp01" "hp03" "hp05" "hp07" "hp09"
+shieldGeneratorTargetHardpoints = "hp06" "hp07" "hp08" "hp09" "hp10"
+sensorsTargetHardpoints =  "hp01" "hp02" "hp03" "hp04" "hp05"
+hullTargetHardpoints = "hp02" "hp04" "hp06" "hp08" "hp10"
+criticalTargetHardpoints =  "hp01" "hp03" "hp05" "hp07" "hp09"
+
+//**********************************************************************
+
+
+// For context sensitive menus
+evolve = 1
+
+
+physicsFile = "8472_passivePhys.odf"
+
+
+//**********************************************************************
+//MESSAGE & SOUND PARAMETERS
+
+eventSelect = "Species8472PassiveSelect"
+eventAcknowledge = "Species8472PassiveAcknowledge"
+eventDecommission = "Species8472PassiveDecommission"
+
+
+//**********************************************************************
+
+transporter = 0
+can_repair = 0
+canShipyardRepair = 0
+
+hotkeyLabel = "HOTKEY_F2"
+
+// Noxter breeder mock-up: evolve in place near a friendly Mother.
+buildItem6 = "nox_breeder"

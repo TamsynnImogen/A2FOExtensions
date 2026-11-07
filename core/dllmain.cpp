@@ -6,24 +6,51 @@
  */
 
 #include "extension_roots.hpp"
-#include "hook.hpp"
+#include "initialize_boundary.hpp"
+#include "../rust/runtime_globals_ffi.h"
+#include "runtime_handlers.hpp"
+#include "../rust/native_hooks_ffi.h"
 #include "module_loader.hpp"
 #include "module_menu.hpp"
+#include "builtin_modules.hpp"
 #include "nebula_renderer.hpp"
+#include "native11_light_classes.hpp"
+#include "class_load_context.hpp"
+#include "../renderer/native11/light_config.hpp"
+#include "renderer_options.hpp"
+#include "../rust/stage8_core_ffi.h"
+#include "../rust/stage8_core_events_ffi.h"
+#include "../rust/stage8_core_lifecycle_ffi.h"
+#include "../rust/stage8_core_settings_ffi.h"
+#include "../rust/stage8_core_cocoon_ffi.h"
+#include "../rust/stage8_core_classdefaults_ffi.h"
+#include "../rust/stage9_core_parameters_ffi.h"
+#include "../rust/stage9_core_shell_ffi.h"
+#include "../rust/stage9_core_config_ffi.h"
+#include "../rust/stage8_core_lookup_ffi.h"
+#include "../rust/stage8_core_classload_ffi.h"
+#include "../rust/stage8_core_odf_ffi.h"
+#include "../rust/stage8_core_dispatch_ffi.h"
+#include "../renderer/d3d8_compat/observer.hpp"
+#include "../renderer/refit/startup.hpp"
 #include "../sdk/include/a2fo_module_api.h"
 #include "../sdk/include/a2fo_supported_armada.hpp"
+#include "../sdk/include/a2fo_supported_fleetops.hpp"
 
 #include <windows.h>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -223,7 +250,8 @@ HMODULE g_fleet_ops = nullptr;
 extern "C" {
 void* g_a2fo_race_parameter_db_destructor = nullptr;
 }
-HANDLE g_log = INVALID_HANDLE_VALUE;
+A2foRuntimeGlobals* const g_runtime_globals = a2fo_rs_runtime_globals();
+HANDLE& g_log = g_runtime_globals->log;
 CRITICAL_SECTION g_state_lock;
 bool g_state_lock_ready = false;
 bool g_evolver_hooks_ready = false;
@@ -240,39 +268,40 @@ bool g_weapon_class_loaded_hook_ready = false;
 bool g_weapon_trigger_hook_ready = false;
 bool g_craft_event_hooks_ready = false;
 bool g_module_menu_hook_ready = false;
-a2fo::InlineHook g_build_class_hook;
-a2fo::InlineHook g_dtor_hook;
-a2fo::InlineHook g_parameter_db_get_string_hook;
-a2fo::InlineHook g_parameter_db_get_int_hook;
-a2fo::InlineHook g_parameter_db_get_int_alternative_hook;
-a2fo::InlineHook g_parameter_db_get_float_hook;
-a2fo::InlineHook g_parameter_db_get_bool_hook;
-a2fo::InlineHook g_parameter_db_get_owned_string_hook;
-a2fo::InlineHook g_parameter_db_get_string_vector_hook;
-a2fo::InlineHook g_craft_explode_hook;
-a2fo::InlineHook g_game_object_class_find_project_id_hook;
-a2fo::InlineHook g_weapon_class_constructor_hook;
-a2fo::InlineHook g_weapon_trigger_object_hook;
-a2fo::InlineHook g_craft_cleanup_hook;
-a2fo::InlineHook g_craft_post_load_hook;
-a2fo::InlineHook g_craft_simulate_hook;
+bool g_renderer_options_hook_ready = false;
+A2foRsInlineHook g_build_class_hook{};
+A2foRsInlineHook g_dtor_hook{};
+A2foRsInlineHook g_parameter_db_get_string_hook{};
+A2foRsInlineHook g_parameter_db_get_int_hook{};
+A2foRsInlineHook g_parameter_db_get_int_alternative_hook{};
+A2foRsInlineHook g_parameter_db_get_float_hook{};
+A2foRsInlineHook g_parameter_db_get_bool_hook{};
+A2foRsInlineHook g_parameter_db_get_owned_string_hook{};
+A2foRsInlineHook g_parameter_db_get_string_vector_hook{};
+A2foRsInlineHook g_craft_explode_hook{};
+A2foRsInlineHook g_game_object_class_find_project_id_hook{};
+A2foRsInlineHook g_weapon_class_constructor_hook{};
+A2foRsInlineHook g_weapon_trigger_object_hook{};
+A2foRsInlineHook g_craft_cleanup_hook{};
+A2foRsInlineHook g_craft_post_load_hook{};
+A2foRsInlineHook g_craft_simulate_hook{};
 void* g_weapon_class_constructor_original = nullptr;
 void* g_craft_simulate_original = nullptr;
-a2fo::InlineHook g_mod_user_directory_hook;
-a2fo::InlineHook g_fo_settings_get_instance_hook;
-a2fo::InlineHook g_game_configuration_new_hook;
-a2fo::InlineHook g_game_configuration_load_profile_hook;
+A2foRsInlineHook g_mod_user_directory_hook{};
+A2foRsInlineHook g_fo_settings_get_instance_hook{};
+A2foRsInlineHook g_game_configuration_new_hook{};
+A2foRsInlineHook g_game_configuration_load_profile_hook{};
 bool g_classlabel_alias_hook_ready = false;
 std::unordered_map<void*, std::string> g_class_cocoons;
 std::unordered_map<std::string, void*> g_loaded_cocoons;
 std::set<void*> g_logged_cocoon_classes;
 std::string g_root_directory;
 std::vector<std::string> g_extension_roots;
-std::vector<a2fo::LoadedModule> g_loaded_modules;
+a2fo::LoadedModules g_loaded_modules;
 A2FO_ModuleApi g_module_api{};
-volatile LONG g_initialize_state = 0;
-volatile LONG g_deferred_initialization_finished = 0;
-volatile DWORD g_initialize_thread_id = 0;
+volatile LONG& g_initialize_state = g_runtime_globals->initialize_state;
+volatile LONG& g_deferred_initialization_finished = g_runtime_globals->deferred_finished;
+volatile DWORD& g_initialize_thread_id = g_runtime_globals->initialize_thread_id;
 volatile LONG g_mod_defaults_state = 0;
 volatile LONG g_fo_settings_default_applied = 0;
 volatile LONG g_fo_settings_first_run = 0;
@@ -286,6 +315,18 @@ const char* g_delphi_settings_directory = nullptr;
 A2FO_FofsItemLookupHandler g_fofs_item_lookup_handler = nullptr;
 void* g_fofs_item_lookup_user_data = nullptr;
 std::string g_fofs_item_lookup_owner;
+
+// Module policy registration is startup-only. Once registration closes, publish
+// the final FOFS dispatcher into immutable process-lifetime storage so the
+// extremely hot FOFS_ItemGet path no longer needs g_state_lock for every file
+// lookup. A release/acquire flag provides the publication barrier; the fields
+// are never modified again while ready is non-zero.
+struct FofsItemLookupDispatch {
+    A2FO_FofsItemLookupHandler handler = nullptr;
+    void* user_data = nullptr;
+};
+FofsItemLookupDispatch g_fofs_item_lookup_dispatch;
+std::atomic<bool> g_fofs_item_lookup_dispatch_ready{false};
 A2FO_InfoIniDefaultsHandler g_info_ini_defaults_handler = nullptr;
 void* g_info_ini_defaults_user_data = nullptr;
 std::string g_info_ini_defaults_owner;
@@ -296,6 +337,11 @@ struct ClasslabelAliasPolicy {
 
 struct ClasslabelOdfDefaultsPolicy {
     std::unordered_map<std::string, std::string> defaults;
+    std::string owner;
+};
+
+struct RaceOdfDefaultPolicy {
+    std::string value;
     std::string owner;
 };
 
@@ -355,6 +401,7 @@ struct NativeCraftEventRegistration {
 std::unordered_map<std::string, ClasslabelAliasPolicy> g_classlabel_aliases;
 std::unordered_map<std::string, ClasslabelOdfDefaultsPolicy>
     g_classlabel_odf_defaults;
+std::unordered_map<std::string, RaceOdfDefaultPolicy> g_race_odf_defaults;
 std::vector<OdfOverlayDirectoryPolicy> g_odf_overlay_directories;
 std::unordered_map<void*, std::string> g_original_classlabels;
 std::unordered_map<std::string, OdfSnapshot> g_odf_snapshots;
@@ -369,16 +416,16 @@ thread_local GameObjectClassOdfLoadContext*
 
 std::string g_evolver_cocoon_command;
 std::string g_evolver_cocoon_owner;
-std::vector<NativeObjectDestroyedRegistration>
+a2fo::RustHandlerRegistry<NativeObjectDestroyedRegistration>
     g_object_destroyed_handlers;
-std::vector<NativeProducerEventRegistration> g_producer_event_handlers;
-std::vector<NativeGameObjectClassLoadedRegistration>
+a2fo::RustHandlerRegistry<NativeProducerEventRegistration> g_producer_event_handlers;
+a2fo::RustHandlerRegistry<NativeGameObjectClassLoadedRegistration>
     g_game_object_class_loaded_handlers;
-std::vector<NativeRaceLoadedRegistration> g_race_loaded_handlers;
-std::vector<NativeWeaponClassLoadedRegistration>
+a2fo::RustHandlerRegistry<NativeRaceLoadedRegistration> g_race_loaded_handlers;
+a2fo::RustHandlerRegistry<NativeWeaponClassLoadedRegistration>
     g_weapon_class_loaded_handlers;
-std::vector<NativeWeaponTriggerRegistration> g_weapon_trigger_handlers;
-std::vector<NativeCraftEventRegistration> g_craft_event_handlers;
+a2fo::RustHandlerRegistry<NativeWeaponTriggerRegistration> g_weapon_trigger_handlers;
+a2fo::RustHandlerRegistry<NativeCraftEventRegistration> g_craft_event_handlers;
 std::set<std::string> g_game_object_class_odf_fields{"basename"};
 std::set<std::string> g_race_odf_fields;
 std::set<std::string> g_weapon_class_odf_fields;
@@ -396,19 +443,20 @@ struct RegistrationTransaction {
     std::unordered_map<std::string, ClasslabelAliasPolicy> classlabel_aliases;
     std::unordered_map<std::string, ClasslabelOdfDefaultsPolicy>
         classlabel_odf_defaults;
+    std::unordered_map<std::string, RaceOdfDefaultPolicy> race_odf_defaults;
     std::vector<OdfOverlayDirectoryPolicy> odf_overlay_directories;
     std::string cocoon_command;
     std::string cocoon_owner;
-    std::vector<NativeObjectDestroyedRegistration>
+    a2fo::RustHandlerRegistry<NativeObjectDestroyedRegistration>
         object_destroyed_handlers;
-    std::vector<NativeProducerEventRegistration> producer_event_handlers;
-    std::vector<NativeGameObjectClassLoadedRegistration>
+    a2fo::RustHandlerRegistry<NativeProducerEventRegistration> producer_event_handlers;
+    a2fo::RustHandlerRegistry<NativeGameObjectClassLoadedRegistration>
         game_object_class_loaded_handlers;
-    std::vector<NativeRaceLoadedRegistration> race_loaded_handlers;
-    std::vector<NativeWeaponClassLoadedRegistration>
+    a2fo::RustHandlerRegistry<NativeRaceLoadedRegistration> race_loaded_handlers;
+    a2fo::RustHandlerRegistry<NativeWeaponClassLoadedRegistration>
         weapon_class_loaded_handlers;
-    std::vector<NativeWeaponTriggerRegistration> weapon_trigger_handlers;
-    std::vector<NativeCraftEventRegistration> craft_event_handlers;
+    a2fo::RustHandlerRegistry<NativeWeaponTriggerRegistration> weapon_trigger_handlers;
+    a2fo::RustHandlerRegistry<NativeCraftEventRegistration> craft_event_handlers;
     std::set<std::string> game_object_class_odf_fields;
     std::set<std::string> race_odf_fields;
     std::set<std::string> weapon_class_odf_fields;
@@ -425,32 +473,21 @@ public:
     StateLockGuard& operator=(const StateLockGuard&) = delete;
 };
 
+std::uint8_t core_policy_lower(std::uint8_t value,void*) noexcept {return static_cast<std::uint8_t>(std::tolower(value));}
 std::string lower_ascii(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
+    a2fo_rs_stage8_core_text(0,reinterpret_cast<std::uint8_t*>(value.data()),value.size(),0,&core_policy_lower,nullptr);
     return value;
 }
-
-void replace_slashes(std::string& value, char slash = '\\') {
-    for (char& ch : value) {
-        if (ch == '/' || ch == '\\') {
-            ch = slash;
-        }
-    }
+void replace_slashes(std::string& value,char slash='\\') {
+    a2fo_rs_stage8_core_text(1,reinterpret_cast<std::uint8_t*>(value.data()),value.size(),static_cast<std::uint8_t>(slash),&core_policy_lower,nullptr);
 }
-
-std::string join_path(const std::string& left, const std::string& right) {
-    if (left.empty()) {
-        return right;
+std::string join_path(const std::string& left,const std::string& right) {
+    switch(a2fo_rs_stage8_core_join(reinterpret_cast<const std::uint8_t*>(left.data()),left.size(),right.size())){
+    case 0:return right;
+    case 1:return left;
+    case 2:return left+right;
+    default:return left+"\\"+right;
     }
-    if (right.empty()) {
-        return left;
-    }
-    if (left.back() == '\\' || left.back() == '/') {
-        return left + right;
-    }
-    return left + "\\" + right;
 }
 
 std::string module_directory(HMODULE module) {
@@ -502,8 +539,9 @@ bool validate_module(HMODULE module, std::uint32_t timestamp,
         reinterpret_cast<const std::uint8_t*>(module) + dos->e_lfanew);
     if (nt->Signature != IMAGE_NT_SIGNATURE ||
         nt->FileHeader.Machine != IMAGE_FILE_MACHINE_I386 ||
-        nt->FileHeader.TimeDateStamp != timestamp ||
-        nt->OptionalHeader.SizeOfImage != image_size) {
+        !((nt->FileHeader.TimeDateStamp == timestamp &&
+           nt->OptionalHeader.SizeOfImage == image_size) ||
+          a2fo::supported_fleetops::approved_profile(module))) {
         char message[256]{};
         std::snprintf(message, sizeof(message),
                       "%s version mismatch (timestamp=%08lx, image=%08lx)",
@@ -523,7 +561,10 @@ bool validate_armada_module(HMODULE module) {
         return false;
     }
     const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
-    if (dos->e_magic != IMAGE_DOS_SIGNATURE) {
+    if (!a2fo::supported_armada::readable_header(module, 0, sizeof(*dos)) ||
+        dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0 ||
+        !a2fo::supported_armada::readable_header(
+            module, dos->e_lfanew, sizeof(IMAGE_NT_HEADERS32))) {
         log_line(std::string(label) + " has no DOS header");
         return false;
     }
@@ -552,10 +593,23 @@ bool validate_armada_module(HMODULE module) {
             "(supported on-disk code/read-only fingerprints matched)");
         return true;
     }
+    if (identity == a2fo::supported_armada::Identity::janb_20260930) {
+        log_line(
+            "ArmadaL.exe Jan_B September 30 2026 build accepted "
+            "(supported on-disk code/read-only/initialized-data fingerprints matched)");
+        return true;
+    }
+    if (identity == a2fo::supported_armada::Identity::roots_profile) {
+        log_line(
+            "ArmadaL.exe approved Roots compatibility profile accepted "
+            "(on-disk headers and all seven complete sections matched; native station rotation)");
+        return true;
+    }
 
     char message[256]{};
     std::snprintf(message, sizeof(message),
-                  "%s version mismatch (timestamp=%08lx, image=%08lx)",
+                  "%s version mismatch (timestamp=%08lx, image=%08lx); "
+                  "no built-in or approved A2FOArmadaProfiles.txt fingerprint matched",
                   label,
                   static_cast<unsigned long>(nt->FileHeader.TimeDateStamp),
                   static_cast<unsigned long>(nt->OptionalHeader.SizeOfImage));
@@ -568,188 +622,186 @@ T* at(HMODULE module, std::uintptr_t rva) {
     return reinterpret_cast<T*>(reinterpret_cast<std::uint8_t*>(module) + rva);
 }
 
+template<class Context, class Step>
+std::uint64_t config_policy(std::uint32_t kind, Context& context, Step step) {
+    struct Call { Context& context; Step& step; std::exception_ptr error; std::uint8_t failed = 0; };
+    Call call{context, step, {}, 0};
+    const auto bridge = +[](void* opaque, std::uint32_t op, std::uint64_t arg) -> std::uint64_t {
+        auto& c = *static_cast<Call*>(opaque);
+        try { return c.step(c.context, op, arg); }
+        catch (...) { c.error = std::current_exception(); c.failed = 1; return 0; }
+    };
+    const auto result = a2fo_rs_stage9_config_flow(kind, bridge, &call, &call.failed);
+    if (call.error) std::rethrow_exception(call.error);
+    return result;
+}
+
 void wait_for_deferred_initialization() {
-    if (InterlockedCompareExchange(
-            &g_deferred_initialization_finished, 0, 0) != 0 ||
-        GetCurrentThreadId() == g_initialize_thread_id) {
-        return;
-    }
-    for (unsigned attempt = 0; attempt < 10000; ++attempt) {
-        if (InterlockedCompareExchange(
-                &g_deferred_initialization_finished, 0, 0) != 0) {
-            return;
+    int context = 0;
+    config_policy(0, context, [](int&, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        switch (op) {
+        case 0: return static_cast<std::uint32_t>(InterlockedCompareExchange(&g_deferred_initialization_finished, 0, 0));
+        case 1: return GetCurrentThreadId();
+        case 2: return g_initialize_thread_id;
+        case 3: Sleep(1); return 0;
+        default: return 0;
         }
-        Sleep(1);
-    }
+    });
 }
 
-bool query_info_ini_defaults(const char* normal_directory,
-                             std::string* resolved_directory,
-                             bool& has_default_game_speed,
-                             int& default_game_speed) {
+bool query_info_ini_defaults(const char* normal_directory,std::string* resolved_directory,bool& has_default_game_speed,int& default_game_speed) {
     try {
-        wait_for_deferred_initialization();
-        A2FO_InfoIniDefaultsHandler handler = nullptr;
-        void* user_data = nullptr;
-        {
-            StateLockGuard lock;
-            handler = g_info_ini_defaults_handler;
-            user_data = g_info_ini_defaults_user_data;
-        }
-        if (!handler) return false;
-
-        std::vector<char> output;
-        if (resolved_directory) output.resize(kMaximumPathLength + 1);
-        std::uint32_t has_speed = 0;
-        std::int32_t speed = 0;
-        if (!handler(normal_directory,
-                     output.empty() ? nullptr : output.data(),
-                     static_cast<std::uint32_t>(output.size()),
-                     &has_speed, &speed, user_data)) {
-            return false;
-        }
-        if (!output.empty()) {
-            output.back() = '\0';
-            resolved_directory->assign(output.data());
-        }
-        has_default_game_speed = has_speed != 0 && speed >= 1 && speed <= 6;
-        default_game_speed = has_default_game_speed ? speed : 0;
-        return true;
-    } catch (...) {
-        log_line("Fleet Ops info.ini defaults provider failed");
-        return false;
-    }
+        struct Context {const char* normal;std::string* resolved;bool& has_result;int& speed_result;
+            A2FO_InfoIniDefaultsHandler handler=nullptr;void* user_data=nullptr;std::vector<char> output{};
+            std::uint32_t has_speed=0;std::int32_t speed=0;std::exception_ptr error{};
+        } context{normal_directory,resolved_directory,has_default_game_speed,default_game_speed};
+        const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t) noexcept ->std::uint64_t {
+            auto& c=*static_cast<Context*>(opaque);
+            try{switch(op){
+            case 0:wait_for_deferred_initialization();return 0;
+            case 1:{StateLockGuard lock;c.handler=g_info_ini_defaults_handler;c.user_data=g_info_ini_defaults_user_data;return 0;}
+            case 2:return c.handler!=nullptr;
+            case 3:return c.resolved!=nullptr;
+            case 4:c.output.resize(kMaximumPathLength+1);return 0;
+            case 5:return c.handler(c.normal,c.output.empty()?nullptr:c.output.data(),static_cast<std::uint32_t>(c.output.size()),&c.has_speed,&c.speed,c.user_data);
+            case 6:return !c.output.empty();
+            case 7:c.output.back()='\0';c.resolved->assign(c.output.data());return 0;
+            case 8:return c.has_speed;
+            case 9:return static_cast<std::uint32_t>(c.speed);
+            case 10:c.has_result=a!=0;return 0;
+            case 11:c.speed_result=a?c.speed:0;return 0;
+            default:return 0;
+            }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+        };
+        const auto result=a2fo_rs_stage8_core_query_defaults(step,&context);
+        if(context.error)std::rethrow_exception(context.error);
+        return result==1;
+    }catch(...){log_line("Fleet Ops info.ini defaults provider failed");return false;}
 }
 
-bool A2FO_CALL api_get_settings_directory(
-    char* output, std::uint32_t output_size) {
-    if (!output || output_size == 0) return false;
-    output[0] = '\0';
-    const char* directory = nullptr;
-    {
-        StateLockGuard lock;
-        directory = g_delphi_settings_directory;
-    }
-    if (!directory) return false;
-    const std::size_t length = std::strlen(directory);
-    if (length + 1 > output_size) return false;
-    std::memcpy(output, directory, length + 1);
-    return true;
+bool A2FO_CALL api_get_settings_directory(char* output, std::uint32_t output_size) {
+    struct Context { char* output; std::uint32_t size; const char* directory = nullptr; } c{output, output_size};
+    return config_policy(1, c, [](Context& x, std::uint32_t op, std::uint64_t arg) -> std::uint64_t {
+        switch (op) {
+        case 0: return x.output != nullptr;
+        case 1: return x.size;
+        case 2: x.output[0] = '\0'; return 0;
+        case 3: return a2fo::builtin_module_enabled(a2fo::BuiltinFeature::info_ini);
+        case 4: { StateLockGuard lock; x.directory = g_delphi_settings_directory; return 0; }
+        case 5: return x.directory != nullptr;
+        case 6: return std::strlen(x.directory);
+        case 7: std::memcpy(x.output, x.directory, static_cast<std::size_t>(arg)); return 0;
+        default: return 0;
+        }
+    }) != 0;
 }
 
 void ensure_fleet_ops_info_defaults() {
-    const LONG prior = InterlockedCompareExchange(&g_mod_defaults_state, 1, 0);
-    if (prior == 0) {
-        bool has_speed = false;
-        int speed = 0;
-        const bool loaded = query_info_ini_defaults(
-            nullptr, nullptr, has_speed, speed);
-        if (loaded) {
-            g_has_default_game_speed = has_speed;
-            g_default_game_speed = speed;
-        }
-        InterlockedExchange(&g_mod_defaults_state, loaded ? 2 : 0);
-        return;
-    }
-    while (InterlockedCompareExchange(&g_mod_defaults_state, 0, 0) == 1) {
-        Sleep(0);
-    }
+    struct Context {bool has_speed=false;int speed=0;std::exception_ptr error{};} context;
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:wait_for_deferred_initialization();return 0;
+        case 1:return a2fo::builtin_module_enabled(a2fo::BuiltinFeature::info_ini);
+        case 2:return static_cast<std::uint32_t>(InterlockedCompareExchange(&g_mod_defaults_state,1,0));
+        case 3:return query_info_ini_defaults(nullptr,nullptr,c.has_speed,c.speed);
+        case 4:g_has_default_game_speed=c.has_speed;g_default_game_speed=c.speed;return 0;
+        case 5:InterlockedExchange(&g_mod_defaults_state,a?2:0);return 0;
+        case 6:return static_cast<std::uint32_t>(InterlockedCompareExchange(&g_mod_defaults_state,0,0));
+        case 7:Sleep(0);return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    a2fo_rs_stage8_core_ensure_defaults(step,&context);
+    if(context.error)std::rethrow_exception(context.error);
 }
 
 const char* make_static_delphi_string(const std::string& value) {
-    if (value.empty() || value.size() > kMaximumPathLength) return nullptr;
-    const std::size_t allocation_size = 8 + value.size() + 1;
-    // Delphi treats a -1 reference count as an immortal string literal. The
-    // one allocation deliberately lives until process exit, allowing
-    // @LStrAsg to manage every returned destination without crossing heaps.
-    auto* allocation = static_cast<std::uint8_t*>(VirtualAlloc(
-        nullptr, allocation_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
-    if (!allocation) return nullptr;
-
-    const std::int32_t static_reference_count = -1;
-    const std::int32_t length = static_cast<std::int32_t>(value.size());
-    std::memcpy(allocation, &static_reference_count,
-                sizeof(static_reference_count));
-    std::memcpy(allocation + 4, &length, sizeof(length));
-    std::memcpy(allocation + 8, value.c_str(), value.size() + 1);
-    return reinterpret_cast<const char*>(allocation + 8);
+    struct Context { const std::string& value; std::uint8_t* allocation = nullptr; } c{value};
+    return reinterpret_cast<const char*>(static_cast<std::uintptr_t>(config_policy(2, c, [](Context& x, std::uint32_t op, std::uint64_t arg) -> std::uint64_t {
+        switch (op) {
+        case 0: return x.value.empty();
+        case 1: return x.value.size();
+        case 2: return kMaximumPathLength;
+        case 3: x.allocation = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, static_cast<std::size_t>(arg), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)); return x.allocation != nullptr;
+        case 4: {
+            // Immortal Delphi string, deliberately allocated on the native heap.
+            const std::int32_t reference_count = -1;
+            const auto length = static_cast<std::int32_t>(x.value.size());
+            std::memcpy(x.allocation, &reference_count, sizeof(reference_count));
+            std::memcpy(x.allocation + 4, &length, sizeof(length)); return 0;
+        }
+        case 5: std::memcpy(x.allocation + 8, x.value.c_str(), x.value.size() + 1); return 0;
+        case 6: return reinterpret_cast<std::uintptr_t>(x.allocation + 8);
+        default: return 0;
+        }
+    })));
 }
 
 const char* resolved_settings_directory(const char* normal_directory) {
-    ensure_fleet_ops_info_defaults();
-    {
-        StateLockGuard lock;
-        if (g_delphi_settings_directory) return g_delphi_settings_directory;
-    }
-
-    std::string resolved;
-    bool has_speed = false;
-    int speed = 0;
-    if (!query_info_ini_defaults(
-            normal_directory, &resolved, has_speed, speed) ||
-        resolved.empty()) {
-        return nullptr;
-    }
-    const char* replacement = make_static_delphi_string(resolved);
-    {
-        StateLockGuard lock;
-        if (!g_delphi_settings_directory) {
-            g_delphi_settings_directory = replacement;
-        }
-        replacement = g_delphi_settings_directory;
-    }
-    if (replacement) {
-        log_line("Fleet Ops settings directory: " + resolved);
-    } else {
-        log_line("Fleet Ops SettingsDirectory allocation failed");
-    }
-    return replacement;
+    struct Context {const char* normal;std::optional<std::string> resolved{};bool has_speed=false;int speed=0;
+        const char* replacement=nullptr;std::exception_ptr error{};
+    } context{normal_directory};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:ensure_fleet_ops_info_defaults();return 0;
+        case 1:return a2fo::builtin_module_enabled(a2fo::BuiltinFeature::info_ini);
+        case 2:{StateLockGuard lock;c.replacement=g_delphi_settings_directory;return c.replacement!=nullptr;}
+        case 3:c.resolved.emplace();return query_info_ini_defaults(c.normal,&*c.resolved,c.has_speed,c.speed);
+        case 4:return c.resolved->empty();
+        case 5:c.replacement=make_static_delphi_string(*c.resolved);return 0;
+        case 6:{StateLockGuard lock;if(!g_delphi_settings_directory)g_delphi_settings_directory=c.replacement;c.replacement=g_delphi_settings_directory;return 0;}
+        case 7:return c.replacement!=nullptr;
+        case 8:log_line("Fleet Ops settings directory: "+*c.resolved);return 0;
+        case 9:log_line("Fleet Ops SettingsDirectory allocation failed");return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    a2fo_rs_stage8_core_resolve_directory(step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return context.replacement;
 }
 
-void __attribute__((regparm(2))) mod_user_directory_hook(
-    void* modification_support, void* result_string) {
-    a2fo_call_delphi_two_registers(g_mod_user_directory_hook.gateway,
-                                    modification_support, result_string);
+void __attribute__((regparm(2))) mod_user_directory_hook(void* modification_support, void* result_string) {
+    a2fo_call_delphi_two_registers(g_mod_user_directory_hook.gateway, modification_support, result_string);
     try {
-        if (!result_string) return;
-        const auto* result = static_cast<const char* const*>(result_string);
-        const char* replacement = resolved_settings_directory(*result);
-        if (!replacement) return;
-        a2fo_call_delphi_two_registers(
-            at(g_fleet_ops, kDelphiLStrAsgRva), result_string,
-            const_cast<char*>(replacement));
-    } catch (...) {
-        log_line("Fleet Ops SettingsDirectory override was skipped");
-    }
+        struct Context { void* result; const char* replacement = nullptr; } c{result_string};
+        config_policy(3, c, [](Context& x, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+            switch (op) {
+            case 0: return x.result != nullptr;
+            case 1: x.replacement = resolved_settings_directory(*static_cast<const char* const*>(x.result)); return 0;
+            case 2: return x.replacement != nullptr;
+            case 3: a2fo_call_delphi_two_registers(at(g_fleet_ops, kDelphiLStrAsgRva), x.result, const_cast<char*>(x.replacement)); return 0;
+            default: return 0;
+            }
+        });
+    } catch (...) { log_line("Fleet Ops SettingsDirectory override was skipped"); }
 }
 
-void* __attribute__((regparm(1))) fo_settings_get_instance_hook(
-    void* settings_class) {
-    void* settings = a2fo_call_delphi_one_register(
-        g_fo_settings_get_instance_hook.gateway, settings_class);
-    if (settings) {
-        InterlockedExchangePointer(&g_fo_settings_instance, settings);
-    }
+void* __attribute__((regparm(1))) fo_settings_get_instance_hook(void* settings_class) {
+    void* settings = a2fo_call_delphi_one_register(g_fo_settings_get_instance_hook.gateway, settings_class);
+    config_policy(4, settings, [](void*& instance, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        if (op == 0) return instance != nullptr;
+        InterlockedExchangePointer(&g_fo_settings_instance, instance); return 0;
+    });
     try {
-        ensure_fleet_ops_info_defaults();
-        if (!g_has_default_game_speed || !settings) return settings;
-
-        auto* bytes = static_cast<std::uint8_t*>(settings);
-        const bool first_run = bytes[0x70] != 0;
-        InterlockedExchange(&g_fo_settings_first_run, first_run ? 1 : 0);
-        if (!first_run || InterlockedCompareExchange(
-                              &g_fo_settings_default_applied, 1, 0) != 0) {
-            return settings;
-        }
-
-        *reinterpret_cast<int*>(bytes + 0x08) = g_default_game_speed;
-        a2fo_call_delphi_one_register(
-            at(g_fleet_ops, kFoSettingsSaveRva), settings);
-        log_line("Fleet Ops first-run Settings.xml game speed saved: " +
-                 std::to_string(g_default_game_speed));
-    } catch (...) {
-        log_line("Fleet Ops first-run Settings.xml default was skipped");
-    }
+        config_policy(5, settings, [](void*& instance, std::uint32_t op, std::uint64_t arg) -> std::uint64_t {
+            switch (op) {
+            case 0: ensure_fleet_ops_info_defaults(); return 0;
+            case 1: return a2fo::builtin_module_enabled(a2fo::BuiltinFeature::info_ini);
+            case 2: return g_has_default_game_speed;
+            case 3: return instance != nullptr;
+            case 4: return static_cast<std::uint8_t*>(instance)[0x70] != 0;
+            case 5: InterlockedExchange(&g_fo_settings_first_run, static_cast<LONG>(arg)); return 0;
+            case 6: return static_cast<std::uint32_t>(InterlockedCompareExchange(&g_fo_settings_default_applied, 1, 0));
+            case 7: *reinterpret_cast<int*>(static_cast<std::uint8_t*>(instance) + 0x08) = g_default_game_speed; return 0;
+            case 8: a2fo_call_delphi_one_register(at(g_fleet_ops, kFoSettingsSaveRva), instance); return 0;
+            case 9: log_line("Fleet Ops first-run Settings.xml game speed saved: " + std::to_string(g_default_game_speed)); return 0;
+            default: return 0;
+            }
+        });
+    } catch (...) { log_line("Fleet Ops first-run Settings.xml default was skipped"); }
     return settings;
 }
 
@@ -784,96 +836,115 @@ struct ArmadaMonitorSearch {
     HMONITOR monitor = nullptr;
 };
 
+// Synchronous policy bridge: native callbacks retain every C++ exception until
+// Rust has returned. Full-width scores/coordinates use a separate failure byte.
+template<class Context, class Step>
+std::uint64_t shell_policy(std::uint32_t kind, Context& context, Step step) {
+    struct Call { Context& context; Step& step; std::exception_ptr error; std::uint8_t failed = 0; };
+    Call call{context, step, {}, 0};
+    const auto bridge = +[](void* opaque, std::uint32_t op, std::uint64_t arg) -> std::uint64_t {
+        auto& c = *static_cast<Call*>(opaque);
+        try { return c.step(c.context, op, arg); }
+        catch (...) { c.error = std::current_exception(); c.failed = 1; return 0; }
+    };
+    const auto result = a2fo_rs_stage9_shell_flow(kind, bridge, &call, &call.failed);
+    if (call.error) std::rethrow_exception(call.error);
+    return result;
+}
+
 bool is_armada_main_window(HWND window, DWORD process_id) {
-    if (!window || !IsWindowVisible(window)) return false;
-
-    DWORD window_process_id = 0;
-    GetWindowThreadProcessId(window, &window_process_id);
-    if (window_process_id != process_id) return false;
-
-    char class_name[64]{};
-    return GetClassNameA(window, class_name, sizeof(class_name)) > 0 &&
-           _stricmp(class_name, "TMainWindowForm") == 0;
+    struct Context { HWND window; DWORD expected; DWORD actual = 0; char name[64]{}; } c{window, process_id};
+    return shell_policy(0, c, [](Context& x, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        switch (op) {
+        case 0: return x.window != nullptr;
+        case 1: return IsWindowVisible(x.window);
+        case 2: GetWindowThreadProcessId(x.window, &x.actual); return x.actual;
+        case 3: return x.expected;
+        case 4: return static_cast<std::uint64_t>(static_cast<std::int64_t>(GetClassNameA(x.window, x.name, sizeof(x.name))));
+        case 5: return static_cast<std::uint64_t>(static_cast<std::int64_t>(_stricmp(x.name, "TMainWindowForm")));
+        default: return 0;
+        }
+    }) != 0;
 }
 
 bool same_shell_display_settings(const ShellDisplaySettings& left,
                                  const ShellDisplaySettings& right) {
-    return left.display == right.display &&
-           left.width == right.width &&
-           left.height == right.height &&
-           left.windowed == right.windowed;
+    const std::int32_t a[]{left.display, left.width, left.height, left.windowed};
+    const std::int32_t b[]{right.display, right.width, right.height, right.windowed};
+    return a2fo_rs_stage9_shell_rect_equal(a, b) != 0;
 }
 
 bool read_shell_display_settings(ShellDisplaySettings& settings) {
-    void* instance = InterlockedCompareExchangePointer(
-        &g_fo_settings_instance, nullptr, nullptr);
+    // Interlocked snapshot and fixed foreign offsets are the native layout boundary.
+    void* instance = InterlockedCompareExchangePointer(&g_fo_settings_instance, nullptr, nullptr);
     if (!instance) return false;
-
     const auto* bytes = static_cast<const std::uint8_t*>(instance);
     settings.display = *reinterpret_cast<const int*>(bytes + 0x30);
     settings.width = *reinterpret_cast<const int*>(bytes + 0x34);
     settings.height = *reinterpret_cast<const int*>(bytes + 0x38);
     settings.windowed = bytes[0x72] != 0;
-    if (settings.display < 0 || settings.display > 31 ||
-        settings.width < 0 || settings.width > 16384 ||
-        settings.height < 0 || settings.height > 16384) {
-        return false;
-    }
-    return true;
+    return a2fo_rs_stage9_shell_settings_valid(settings.display, settings.width, settings.height) != 0;
 }
 
 BOOL CALLBACK find_armada_window(HWND window, LPARAM parameter) {
-    auto* search = reinterpret_cast<ArmadaWindowSearch*>(parameter);
-    if (!search || !is_armada_main_window(window, search->process_id)) {
-        return TRUE;
-    }
-
-    RECT rect{};
-    if (!GetWindowRect(window, &rect)) return TRUE;
-    const int width = rect.right - rect.left;
-    const int height = rect.bottom - rect.top;
-    if (width <= 0 || height <= 0) return TRUE;
-
-    std::uint64_t score = static_cast<std::uint64_t>(width) *
-                          static_cast<std::uint64_t>(height);
-    if (!GetWindow(window, GW_OWNER)) score += (std::uint64_t{1} << 48);
-    if (window == GetForegroundWindow()) score += (std::uint64_t{1} << 52);
-    if (!search->window || score > search->score) {
-        search->window = window;
-        search->score = score;
-    }
-    return TRUE;
+    struct Context { HWND window; ArmadaWindowSearch* search; RECT rect{}; } c{window, reinterpret_cast<ArmadaWindowSearch*>(parameter)};
+    return static_cast<BOOL>(shell_policy(1, c, [](Context& x, std::uint32_t op, std::uint64_t arg) -> std::uint64_t {
+        switch (op) {
+        case 0: return x.search != nullptr;
+        case 1: return is_armada_main_window(x.window, x.search->process_id);
+        case 2: return GetWindowRect(x.window, &x.rect);
+        case 3: return static_cast<std::uint32_t>(x.rect.left);
+        case 4: return static_cast<std::uint32_t>(x.rect.right);
+        case 5: return static_cast<std::uint32_t>(x.rect.top);
+        case 6: return static_cast<std::uint32_t>(x.rect.bottom);
+        case 7: return reinterpret_cast<std::uintptr_t>(GetWindow(x.window, GW_OWNER));
+        case 8: return x.window == GetForegroundWindow();
+        case 9: return x.search->window != nullptr;
+        case 10: return x.search->score;
+        case 11: x.search->window = x.window; x.search->score = arg; return 0;
+        default: return 0;
+        }
+    }));
 }
 
 HWND get_armada_window() {
-    const DWORD process_id = GetCurrentProcessId();
-    const HWND foreground = GetForegroundWindow();
-    if (is_armada_main_window(foreground, process_id)) return foreground;
-
-    ArmadaWindowSearch search;
-    search.process_id = process_id;
-    EnumWindows(find_armada_window, reinterpret_cast<LPARAM>(&search));
-    return search.window;
+    struct Context { DWORD process_id = 0; HWND foreground = nullptr; ArmadaWindowSearch search; } c;
+    return reinterpret_cast<HWND>(static_cast<std::uintptr_t>(shell_policy(2, c, [](Context& x, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        switch (op) {
+        case 0: x.process_id = GetCurrentProcessId(); return 0;
+        case 1: x.foreground = GetForegroundWindow(); return 0;
+        case 2: return is_armada_main_window(x.foreground, x.process_id);
+        case 3: return reinterpret_cast<std::uintptr_t>(x.foreground);
+        case 4: x.search.process_id = x.process_id; EnumWindows(find_armada_window, reinterpret_cast<LPARAM>(&x.search)); return 0;
+        case 5: return reinterpret_cast<std::uintptr_t>(x.search.window);
+        default: return 0;
+        }
+    })));
 }
 
-BOOL CALLBACK find_armada_monitor(HMONITOR monitor, HDC, LPRECT,
-                                  LPARAM parameter) {
-    auto* search = reinterpret_cast<ArmadaMonitorSearch*>(parameter);
-    if (!search) return FALSE;
-    if (search->current_index++ == search->target_index) {
-        search->monitor = monitor;
-        return FALSE;
-    }
-    return TRUE;
+BOOL CALLBACK find_armada_monitor(HMONITOR monitor, HDC, LPRECT, LPARAM parameter) {
+    struct Context { HMONITOR monitor; ArmadaMonitorSearch* search; } c{monitor, reinterpret_cast<ArmadaMonitorSearch*>(parameter)};
+    return static_cast<BOOL>(shell_policy(3, c, [](Context& x, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        switch (op) {
+        case 0: return x.search != nullptr;
+        case 1: return static_cast<std::uint32_t>(x.search->current_index++);
+        case 2: return static_cast<std::uint32_t>(x.search->target_index);
+        case 3: x.search->monitor = x.monitor; return 0;
+        default: return 0;
+        }
+    }));
 }
 
 HMONITOR get_configured_monitor(HWND window, int display) {
-    ArmadaMonitorSearch search;
-    search.target_index = display;
-    EnumDisplayMonitors(nullptr, nullptr, find_armada_monitor,
-                        reinterpret_cast<LPARAM>(&search));
-    if (search.monitor) return search.monitor;
-    return MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+    struct Context { HWND window; ArmadaMonitorSearch search; } c{window, {display, 0, nullptr}};
+    return reinterpret_cast<HMONITOR>(static_cast<std::uintptr_t>(shell_policy(4, c, [](Context& x, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        switch (op) {
+        case 0: EnumDisplayMonitors(nullptr, nullptr, find_armada_monitor, reinterpret_cast<LPARAM>(&x.search)); return 0;
+        case 1: return reinterpret_cast<std::uintptr_t>(x.search.monitor);
+        case 2: return reinterpret_cast<std::uintptr_t>(MonitorFromWindow(x.window, MONITOR_DEFAULTTONEAREST));
+        default: return 0;
+        }
+    })));
 }
 
 void log_armada_window(const char* kind, HWND window) {
@@ -907,718 +978,572 @@ void log_armada_window(const char* kind, HWND window) {
 }
 
 BOOL CALLBACK log_armada_child_window(HWND window, LPARAM) {
-    log_armada_window("child", window);
-    return TRUE;
+    return static_cast<BOOL>(shell_policy(13, window, [](HWND& w, std::uint32_t, std::uint64_t) -> std::uint64_t {
+        log_armada_window("child", w); return 0;
+    }));
 }
 
 BOOL CALLBACK log_armada_top_window(HWND window, LPARAM parameter) {
-    const DWORD expected_process_id = static_cast<DWORD>(parameter);
-    DWORD process_id = 0;
-    GetWindowThreadProcessId(window, &process_id);
-    if (process_id != expected_process_id) return TRUE;
-    log_armada_window("top-level", window);
-    EnumChildWindows(window, log_armada_child_window, 0);
-    return TRUE;
+    struct Context { HWND window; DWORD expected; DWORD actual = 0; } c{window, static_cast<DWORD>(parameter)};
+    return static_cast<BOOL>(shell_policy(11, c, [](Context& x, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        switch (op) {
+        case 0: GetWindowThreadProcessId(x.window, &x.actual); return x.actual;
+        case 1: return x.expected;
+        case 2: log_armada_window("top-level", x.window); return 0;
+        case 3: EnumChildWindows(x.window, log_armada_child_window, 0); return 0;
+        default: return 0;
+        }
+    }));
 }
 
 void log_armada_window_tree() {
-    log_line("Shell display: current Armada window tree follows");
-    EnumWindows(log_armada_top_window,
-                static_cast<LPARAM>(GetCurrentProcessId()));
+    int context = 0;
+    shell_policy(12, context, [](int&, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        if (op == 0) log_line("Shell display: current Armada window tree follows");
+        else EnumWindows(log_armada_top_window, static_cast<LPARAM>(GetCurrentProcessId()));
+        return 0;
+    });
 }
 
 bool set_window_style(HWND window, int index, DWORD style) {
-    SetLastError(ERROR_SUCCESS);
-    const LONG previous = SetWindowLongA(window, index,
-                                         static_cast<LONG>(style));
-    return previous != 0 || GetLastError() == ERROR_SUCCESS;
+    struct Context { HWND window; int index; DWORD style; } c{window, index, style};
+    return shell_policy(10, c, [](Context& x, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        switch (op) {
+        case 0: SetLastError(ERROR_SUCCESS); return 0;
+        case 1: return static_cast<std::uint32_t>(SetWindowLongA(x.window, x.index, static_cast<LONG>(x.style)));
+        case 2: return GetLastError();
+        default: return 0;
+        }
+    }) != 0;
 }
 
 bool same_rect(const RECT& left, const RECT& right) {
-    return left.left == right.left && left.top == right.top &&
-           left.right == right.right && left.bottom == right.bottom;
+    const std::int32_t a[]{left.left, left.top, left.right, left.bottom};
+    const std::int32_t b[]{right.left, right.top, right.right, right.bottom};
+    return a2fo_rs_stage9_shell_rect_equal(a, b) != 0;
 }
 
 void capture_window_styles(ShellDisplayRuntime& runtime, HWND window) {
-    runtime.window = window;
-    runtime.windowed_style =
-        static_cast<DWORD>(GetWindowLongA(window, GWL_STYLE));
-    runtime.windowed_extended_style =
-        static_cast<DWORD>(GetWindowLongA(window, GWL_EXSTYLE));
-    runtime.window_styles_captured = true;
-    runtime.mode_applied = false;
-    runtime.apply_failure_logged = false;
-    log_line("Shell display: Armada window found through Win32");
+    struct Context { ShellDisplayRuntime& runtime; HWND window; } c{runtime, window};
+    shell_policy(5, c, [](Context& x, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        switch (op) {
+        case 0: x.runtime.window = x.window; break;
+        case 1: x.runtime.windowed_style = static_cast<DWORD>(GetWindowLongA(x.window, GWL_STYLE)); break;
+        case 2: x.runtime.windowed_extended_style = static_cast<DWORD>(GetWindowLongA(x.window, GWL_EXSTYLE)); break;
+        case 3: x.runtime.window_styles_captured = true; x.runtime.mode_applied = false; x.runtime.apply_failure_logged = false; break;
+        case 4: log_line("Shell display: Armada window found through Win32"); break;
+        }
+        return 0;
+    });
 }
 
-bool apply_shell_fullscreen(ShellDisplayRuntime& runtime, HWND window,
-                            const MONITORINFO& monitor) {
-    const DWORD style =
-        (runtime.windowed_style &
-         ~(WS_OVERLAPPEDWINDOW | WS_CHILD)) |
-        WS_POPUP | WS_VISIBLE;
-    const DWORD extended_style =
-        runtime.windowed_extended_style &
-        ~(WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE |
-          WS_EX_STATICEDGE);
-    if (static_cast<DWORD>(GetWindowLongA(window, GWL_STYLE)) != style &&
-        !set_window_style(window, GWL_STYLE, style)) {
-        return false;
-    }
-    if (static_cast<DWORD>(GetWindowLongA(window, GWL_EXSTYLE)) !=
-            extended_style &&
-        !set_window_style(window, GWL_EXSTYLE, extended_style)) {
-        return false;
-    }
-
-    RECT current{};
-    if (!GetWindowRect(window, &current)) return false;
-    if (!same_rect(current, monitor.rcMonitor) &&
-        !SetWindowPos(
-            window, HWND_TOP,
-            monitor.rcMonitor.left, monitor.rcMonitor.top,
-            monitor.rcMonitor.right - monitor.rcMonitor.left,
-            monitor.rcMonitor.bottom - monitor.rcMonitor.top,
-            SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_SHOWWINDOW)) {
-        return false;
-    }
-
-    if (!runtime.mode_applied) {
-        log_line("Shell display: borderless fullscreen applied: " +
-                 std::to_string(monitor.rcMonitor.right -
-                                monitor.rcMonitor.left) +
-                 "x" +
-                 std::to_string(monitor.rcMonitor.bottom -
-                                monitor.rcMonitor.top));
-    }
-    return true;
+std::uint64_t shell_window_styles(bool windowed, DWORD style, DWORD ex) {
+    const std::uint32_t masks[]{WS_OVERLAPPEDWINDOW, WS_CHILD, WS_POPUP, WS_VISIBLE, WS_CAPTION, 0, 0,
+        WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_STATICEDGE};
+    return a2fo_rs_stage9_shell_styles(windowed, style, ex, masks);
 }
 
-bool apply_shell_windowed_size(ShellDisplayRuntime& runtime, HWND window,
-                               const MONITORINFO& monitor,
-                               const ShellDisplaySettings& settings) {
-    const int target_client_width =
-        settings.width >= 640 ? settings.width : 1200;
-    const int target_client_height =
-        settings.height >= 480 ? settings.height : 900;
-    DWORD style = runtime.windowed_style;
-    if ((style & WS_CAPTION) == 0) {
-        style = (style & ~(WS_POPUP | WS_CHILD)) |
-                WS_OVERLAPPEDWINDOW | WS_VISIBLE;
-    }
-    const DWORD extended_style = runtime.windowed_extended_style;
-    if (static_cast<DWORD>(GetWindowLongA(window, GWL_STYLE)) != style &&
-        !set_window_style(window, GWL_STYLE, style)) {
-        return false;
-    }
-    if (static_cast<DWORD>(GetWindowLongA(window, GWL_EXSTYLE)) !=
-            extended_style &&
-        !set_window_style(window, GWL_EXSTYLE, extended_style)) {
-        return false;
-    }
+// The context owns native RECTs and cached style/size locals. Policy samples
+// callback-mutable runtime/monitor state at the same points as the original.
+bool apply_shell_mode(ShellDisplayRuntime& runtime, HWND window,
+                      const MONITORINFO& monitor, const ShellDisplaySettings* settings) {
+    struct Context {
+        ShellDisplayRuntime& runtime; HWND window; const MONITORINFO& monitor;
+        const ShellDisplaySettings* settings; bool windowed;
+        DWORD style = 0, ex = 0; int client_width = 0, client_height = 0;
+        RECT outer{}, current{}, target{}; int width = 0, height = 0;
+    } c{runtime, window, monitor, settings, settings != nullptr};
+    return shell_policy(c.windowed ? 7 : 6, c, [](Context& x, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        switch (op) {
+        case 0: {
+            if (x.windowed) {
+                const auto client = a2fo_rs_stage9_shell_client(x.settings->width, x.settings->height);
+                x.client_width = static_cast<int>(static_cast<std::uint32_t>(client));
+                x.client_height = static_cast<int>(static_cast<std::uint32_t>(client >> 32));
+            }
+            const auto packed = shell_window_styles(x.windowed, x.runtime.windowed_style, x.runtime.windowed_extended_style);
+            x.style = static_cast<DWORD>(packed); x.ex = static_cast<DWORD>(packed >> 32);
+            return 0;
+        }
+        case 1: return static_cast<DWORD>(GetWindowLongA(x.window, GWL_STYLE));
+        case 2: return x.style;
+        case 3: return set_window_style(x.window, GWL_STYLE, x.style);
+        case 4: return static_cast<DWORD>(GetWindowLongA(x.window, GWL_EXSTYLE));
+        case 5: return x.ex;
+        case 6: return set_window_style(x.window, GWL_EXSTYLE, x.ex);
+        case 7: x.outer = RECT{0, 0, x.client_width, x.client_height}; return AdjustWindowRectEx(&x.outer, x.style, FALSE, x.ex);
+        case 8: {
+            const std::int32_t outer[]{x.outer.left, x.outer.top, x.outer.right, x.outer.bottom};
+            const std::int32_t work[]{x.monitor.rcWork.left, x.monitor.rcWork.top, x.monitor.rcWork.right, x.monitor.rcWork.bottom};
+            std::int32_t target[6]{}; a2fo_rs_stage9_shell_center(outer, work, target);
+            x.target = RECT{target[0], target[1], target[2], target[3]}; x.width = target[4]; x.height = target[5]; return 0;
+        }
+        case 9: return GetWindowRect(x.window, &x.current);
+        case 10: return same_rect(x.current, x.windowed ? x.target : x.monitor.rcMonitor);
+        case 11:
+            if (x.windowed) return SetWindowPos(x.window, nullptr, x.target.left, x.target.top, x.width, x.height,
+                SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+            return SetWindowPos(x.window, HWND_TOP, x.monitor.rcMonitor.left, x.monitor.rcMonitor.top,
+                x.monitor.rcMonitor.right - x.monitor.rcMonitor.left, x.monitor.rcMonitor.bottom - x.monitor.rcMonitor.top,
+                SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        case 12: return x.runtime.mode_applied;
+        case 13:
+            if (x.windowed) log_line("Shell display: configured windowed size applied: " + std::to_string(x.client_width) + "x" + std::to_string(x.client_height));
+            else log_line("Shell display: borderless fullscreen applied: " + std::to_string(x.monitor.rcMonitor.right - x.monitor.rcMonitor.left) + "x" + std::to_string(x.monitor.rcMonitor.bottom - x.monitor.rcMonitor.top));
+            return 0;
+        default: return 0;
+        }
+    }) != 0;
+}
 
-    RECT outer{0, 0, target_client_width, target_client_height};
-    if (!AdjustWindowRectEx(&outer, style, FALSE, extended_style)) {
-        return false;
-    }
-
-    const int outer_width = outer.right - outer.left;
-    const int outer_height = outer.bottom - outer.top;
-    const int work_width = monitor.rcWork.right - monitor.rcWork.left;
-    const int work_height = monitor.rcWork.bottom - monitor.rcWork.top;
-    const int left = monitor.rcWork.left + (work_width - outer_width) / 2;
-    const int top = monitor.rcWork.top + (work_height - outer_height) / 2;
-    const RECT target{left, top, left + outer_width, top + outer_height};
-    RECT current{};
-    if (!GetWindowRect(window, &current)) return false;
-    if (!same_rect(current, target) &&
-        !SetWindowPos(window, nullptr, left, top, outer_width, outer_height,
-                      SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER |
-                          SWP_FRAMECHANGED | SWP_SHOWWINDOW)) {
-        return false;
-    }
-
-    if (!runtime.mode_applied) {
-        log_line("Shell display: configured windowed size applied: " +
-                 std::to_string(target_client_width) + "x" +
-                 std::to_string(target_client_height));
-    }
-    return true;
+bool apply_shell_fullscreen(ShellDisplayRuntime& runtime, HWND window, const MONITORINFO& monitor) {
+    return apply_shell_mode(runtime, window, monitor, nullptr);
+}
+bool apply_shell_windowed_size(ShellDisplayRuntime& runtime, HWND window, const MONITORINFO& monitor, const ShellDisplaySettings& settings) {
+    return apply_shell_mode(runtime, window, monitor, &settings);
 }
 
 void poll_shell_display(ShellDisplayRuntime& runtime) {
-    ShellDisplaySettings settings;
-    if (!read_shell_display_settings(settings)) return;
-    const bool settings_changed =
-        !runtime.settings_logged ||
-        !same_shell_display_settings(runtime.settings, settings);
-    if (settings_changed) {
-        runtime.settings = settings;
-        runtime.settings_logged = true;
-        runtime.mode_applied = false;
-        runtime.apply_failure_logged = false;
-        log_line("Shell display: graphics settings detected: display=" +
-                 std::to_string(settings.display) + ", resolution=" +
-                 std::to_string(settings.width) + "x" +
-                 std::to_string(settings.height) + ", mode=" +
-                 (settings.windowed ? "windowed" : "fullscreen"));
-    }
-
-    const HWND window = get_armada_window();
-    if (!window || !IsWindow(window)) return;
-    if (runtime.window != window || !runtime.window_styles_captured) {
-        capture_window_styles(runtime, window);
-        if (runtime.window_tree_logs++ < 4) log_armada_window_tree();
-    }
-
-    const HMONITOR monitor_handle =
-        get_configured_monitor(window, settings.display);
-    MONITORINFO monitor{};
-    monitor.cbSize = sizeof(monitor);
-    if (!monitor_handle || !GetMonitorInfoA(monitor_handle, &monitor)) return;
-
-    const bool applied = settings.windowed
-        ? apply_shell_windowed_size(runtime, window, monitor, settings)
-        : apply_shell_fullscreen(runtime, window, monitor);
-    if (applied) {
-        runtime.mode_applied = true;
-        runtime.apply_failure_logged = false;
-    } else if (!runtime.apply_failure_logged) {
-        runtime.apply_failure_logged = true;
-        log_line("Shell display: window mode application failed (error " +
-                 std::to_string(GetLastError()) + ")");
-    }
+    struct Context { ShellDisplayRuntime& runtime; ShellDisplaySettings settings; HWND window = nullptr; HMONITOR handle = nullptr; MONITORINFO monitor{}; } c{runtime, {}};
+    shell_policy(8, c, [](Context& x, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        switch (op) {
+        case 0: return read_shell_display_settings(x.settings);
+        case 1: return x.runtime.settings_logged;
+        case 2: return same_shell_display_settings(x.runtime.settings, x.settings);
+        case 3: x.runtime.settings = x.settings; x.runtime.settings_logged = true; x.runtime.mode_applied = false; x.runtime.apply_failure_logged = false; return 0;
+        case 4: log_line("Shell display: graphics settings detected: display=" + std::to_string(x.settings.display) + ", resolution=" + std::to_string(x.settings.width) + "x" + std::to_string(x.settings.height) + ", mode=" + (x.settings.windowed ? "windowed" : "fullscreen")); return 0;
+        case 5: x.window = get_armada_window(); return reinterpret_cast<std::uintptr_t>(x.window);
+        case 6: return IsWindow(x.window);
+        case 7: return x.runtime.window == x.window;
+        case 8: return x.runtime.window_styles_captured;
+        case 9: capture_window_styles(x.runtime, x.window); return 0;
+        case 10: return static_cast<std::uint32_t>(x.runtime.window_tree_logs++);
+        case 11: log_armada_window_tree(); return 0;
+        case 12: x.handle = get_configured_monitor(x.window, x.settings.display); x.monitor.cbSize = sizeof(x.monitor); return reinterpret_cast<std::uintptr_t>(x.handle);
+        case 13: return GetMonitorInfoA(x.handle, &x.monitor);
+        case 14: return x.settings.windowed;
+        case 15: return apply_shell_windowed_size(x.runtime, x.window, x.monitor, x.settings);
+        case 16: return apply_shell_fullscreen(x.runtime, x.window, x.monitor);
+        case 17: x.runtime.mode_applied = true; x.runtime.apply_failure_logged = false; return 0;
+        case 18: return x.runtime.apply_failure_logged;
+        case 19: x.runtime.apply_failure_logged = true; return 0;
+        case 20: log_line("Shell display: window mode application failed (error " + std::to_string(GetLastError()) + ")"); return 0;
+        default: return 0;
+        }
+    });
 }
 
 void run_shell_display_monitor() {
-    ShellDisplayRuntime runtime;
-    log_line("Shell display: graphics-settings monitor started");
-    for (;;) {
-        try {
-            poll_shell_display(runtime);
-        } catch (...) {
-            log_line("Shell display: update skipped after an unexpected C++ "
-                     "exception");
+    struct Context { ShellDisplayRuntime runtime; std::exception_ptr policy_error; } c;
+    shell_policy(9, c, [](Context& x, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+        switch (op) {
+        case 0: log_line("Shell display: graphics-settings monitor started"); return 0;
+        case 1: try { poll_shell_display(x.runtime); return 1; } catch (...) { x.policy_error = std::current_exception(); return 0; }
+        case 2: {
+            auto error = std::move(x.policy_error);
+            try { std::rethrow_exception(error); }
+            catch (...) { log_line("Shell display: update skipped after an unexpected C++ exception"); }
+            return 0;
         }
-        Sleep(100);
-    }
+        case 3: Sleep(100); return 0;
+        default: return 0;
+        }
+    });
 }
 
-void __attribute__((fastcall)) game_configuration_new_hook(
-    void* game_configuration, void*) {
-    a2fo_call_game_object_method(g_game_configuration_new_hook.gateway,
-                                 game_configuration);
+void __attribute__((fastcall)) game_configuration_new_hook(void* game_configuration, void*) {
+    a2fo_call_game_object_method(g_game_configuration_new_hook.gateway, game_configuration);
     try {
-        ensure_fleet_ops_info_defaults();
-        if (!g_has_default_game_speed || !game_configuration) return;
-        *reinterpret_cast<int*>(
-            static_cast<std::uint8_t*>(game_configuration) + 4) =
-            g_default_game_speed;
-        if (InterlockedCompareExchange(
-                &g_default_game_speed_logged, 1, 0) == 0) {
-            log_line("Fleet Ops first-run game speed default applied: " +
-                     std::to_string(g_default_game_speed));
-        }
-    } catch (...) {
-        log_line("Fleet Ops DefaultGameSpeed override was skipped");
-    }
-}
-
-bool __attribute__((fastcall)) game_configuration_load_profile_hook(
-    void* game_configuration, void*) {
-    const std::uintptr_t original_result = reinterpret_cast<std::uintptr_t>(
-        a2fo_call_game_object_method(
-            g_game_configuration_load_profile_hook.gateway,
-            game_configuration));
-    try {
-        ensure_fleet_ops_info_defaults();
-        if (g_has_default_game_speed && game_configuration &&
-            InterlockedCompareExchange(&g_fo_settings_first_run, 0, 0) != 0) {
-            auto* speed = reinterpret_cast<int*>(
-                static_cast<std::uint8_t*>(game_configuration) + 4);
-            const int previous = *speed;
-            *speed = g_default_game_speed;
-            if (InterlockedCompareExchange(
-                    &g_runtime_game_speed_logged, 1, 0) == 0) {
-                log_line("Fleet Ops first-run runtime game speed applied: " +
-                         std::to_string(g_default_game_speed) + " (was " +
-                         std::to_string(previous) + ")");
+        config_policy(6, game_configuration, [](void*& instance, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+            switch (op) {
+            case 0: ensure_fleet_ops_info_defaults(); return 0;
+            case 1: return a2fo::builtin_module_enabled(a2fo::BuiltinFeature::info_ini);
+            case 2: return g_has_default_game_speed;
+            case 3: return instance != nullptr;
+            case 4: *reinterpret_cast<int*>(static_cast<std::uint8_t*>(instance) + 4) = g_default_game_speed; return 0;
+            case 5: return static_cast<std::uint32_t>(InterlockedCompareExchange(&g_default_game_speed_logged, 1, 0));
+            case 6: log_line("Fleet Ops first-run game speed default applied: " + std::to_string(g_default_game_speed)); return 0;
+            default: return 0;
             }
-        }
-    } catch (...) {
-        log_line("Fleet Ops runtime DefaultGameSpeed override was skipped");
-    }
+        });
+    } catch (...) { log_line("Fleet Ops DefaultGameSpeed override was skipped"); }
+}
+
+bool __attribute__((fastcall)) game_configuration_load_profile_hook(void* game_configuration, void*) {
+    const auto original_result = reinterpret_cast<std::uintptr_t>(a2fo_call_game_object_method(g_game_configuration_load_profile_hook.gateway, game_configuration));
+    try {
+        struct Context { void* instance; int previous = 0; } c{game_configuration};
+        config_policy(7, c, [](Context& x, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+            switch (op) {
+            case 0: ensure_fleet_ops_info_defaults(); return 0;
+            case 1: return a2fo::builtin_module_enabled(a2fo::BuiltinFeature::info_ini);
+            case 2: return g_has_default_game_speed;
+            case 3: return x.instance != nullptr;
+            case 4: return static_cast<std::uint32_t>(InterlockedCompareExchange(&g_fo_settings_first_run, 0, 0));
+            case 5: { auto* speed = reinterpret_cast<int*>(static_cast<std::uint8_t*>(x.instance) + 4); x.previous = *speed; *speed = g_default_game_speed; return 0; }
+            case 6: return static_cast<std::uint32_t>(InterlockedCompareExchange(&g_runtime_game_speed_logged, 1, 0));
+            case 7: log_line("Fleet Ops first-run runtime game speed applied: " + std::to_string(g_default_game_speed) + " (was " + std::to_string(x.previous) + ")"); return 0;
+            default: return 0;
+            }
+        });
+    } catch (...) { log_line("Fleet Ops runtime DefaultGameSpeed override was skipped"); }
     return (original_result & 0xffu) != 0;
 }
 
 int default_user_profile_game_speed_hook() {
     try {
-        ensure_fleet_ops_info_defaults();
-        if (g_has_default_game_speed) {
-            if (InterlockedCompareExchange(
-                    &g_user_profile_game_speed_logged, 1, 0) == 0) {
-                log_line("Armada default user-profile game speed supplied: " +
-                         std::to_string(g_default_game_speed));
+        int context = 0;
+        return static_cast<int>(static_cast<std::uint32_t>(config_policy(8, context, [](int&, std::uint32_t op, std::uint64_t) -> std::uint64_t {
+            switch (op) {
+            case 0: ensure_fleet_ops_info_defaults(); return 0;
+            case 1: return a2fo::builtin_module_enabled(a2fo::BuiltinFeature::info_ini);
+            case 2: return g_has_default_game_speed;
+            case 3: return static_cast<std::uint32_t>(InterlockedCompareExchange(&g_user_profile_game_speed_logged, 1, 0));
+            case 4: log_line("Armada default user-profile game speed supplied: " + std::to_string(g_default_game_speed)); return 0;
+            case 5: return static_cast<std::uint32_t>(g_default_game_speed);
+            default: return 0;
             }
-            return g_default_game_speed;
-        }
-    } catch (...) {
-        log_line("Armada default user-profile game-speed override was "
-                 "skipped");
-    }
-
-    // The supported Fleet Ops ArmadaL.exe returns 5 from the original leaf
-    // function. Preserve that behavior when info.ini has no override.
+        })));
+    } catch (...) { log_line("Armada default user-profile game-speed override was skipped"); }
     return 5;
 }
 
-bool valid_policy_identifier(const char* value) {
-    if (!value || !*value) return false;
-    std::size_t length = 0;
-    for (const unsigned char* cursor =
-             reinterpret_cast<const unsigned char*>(value);
-         *cursor; ++cursor) {
-        if (++length > 63 ||
-            (!std::isalnum(*cursor) && *cursor != '_' && *cursor != '-')) {
-            return false;
-        }
-    }
-    return true;
+std::uint8_t core_policy_alnum(std::uint8_t value,void*) noexcept {return std::isalnum(value)!=0;}
+bool valid_policy_identifier(const char* value) {return a2fo_rs_stage8_core_validate(0,reinterpret_cast<const std::uint8_t*>(value),0,&core_policy_alnum,nullptr)!=0;}
+
+bool valid_odf_field_name(const char* value) {return a2fo_rs_stage8_core_validate(1,reinterpret_cast<const std::uint8_t*>(value),0,&core_policy_alnum,nullptr)!=0;}
+
+bool valid_odf_default_value(const char* value) {return a2fo_rs_stage8_core_validate(2,reinterpret_cast<const std::uint8_t*>(value),0,&core_policy_alnum,nullptr)!=0;}
+
+bool normalize_relative_directory(const char* value,std::string& output) {
+    struct Context {const char* value;std::string& output;std::string component{};std::exception_ptr error{};} context{value,output};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:c.output.clear();return 0;
+        case 1:return c.value&&*c.value;
+        case 2:return static_cast<unsigned char>(c.value[a]);
+        case 3:return c.output.size();
+        case 4:return c.component.size();
+        case 5:return static_cast<unsigned char>(c.component[a]);
+        case 7:c.output.push_back('\\');return 0;
+        case 8:c.output+=c.component;return 0;
+        case 9:c.component.clear();return 0;
+        case 10:c.component.push_back(static_cast<char>(a));return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const bool result=a2fo_rs_stage8_core_relative(step,&context)!=0;
+    if(context.error)std::rethrow_exception(context.error);
+    return result;
 }
 
-bool valid_odf_field_name(const char* value) {
-    if (!value || !*value) return false;
-    std::size_t length = 0;
-    for (const unsigned char* cursor =
-             reinterpret_cast<const unsigned char*>(value);
-         *cursor; ++cursor) {
-        if (++length > 127 ||
-            (!std::isalnum(*cursor) && *cursor != '_' && *cursor != '-' &&
-             *cursor != '.')) {
-            return false;
-        }
-    }
-    return true;
-}
+bool valid_replacement_odf_name(const char* value,std::size_t length) {return a2fo_rs_stage8_core_validate(3,reinterpret_cast<const std::uint8_t*>(value),length,&core_policy_alnum,nullptr)!=0;}
 
-bool valid_odf_default_value(const char* value) {
-    if (!value || !*value) return false;
-    std::size_t length = 0;
-    for (const unsigned char* cursor =
-             reinterpret_cast<const unsigned char*>(value);
-         *cursor; ++cursor) {
-        if (++length > 255 || *cursor < 0x20 || *cursor == 0x7f) {
-            return false;
-        }
-    }
-    return true;
-}
+std::string policy_owner(const char* value) {return reinterpret_cast<const char*>(a2fo_rs_stage8_core_owner(reinterpret_cast<const std::uint8_t*>(value)));}
 
-bool normalize_relative_directory(const char* value, std::string& output) {
-    output.clear();
-    if (!value || !*value) return false;
-    std::string component;
-    for (const unsigned char* cursor =
-             reinterpret_cast<const unsigned char*>(value);
-         *cursor; ++cursor) {
-        if (output.size() + component.size() >= 255 || *cursor < 0x20 ||
-            *cursor == ':' || *cursor == '*' || *cursor == '?' ||
-            *cursor == '"' || *cursor == '<' || *cursor == '>' ||
-            *cursor == '|') {
-            output.clear();
-            return false;
-        }
-        if (*cursor == '/' || *cursor == '\\') {
-            if (component.empty() || component == "." || component == ".." ||
-                component.back() == '.' || component.back() == ' ') {
-                output.clear();
-                return false;
-            }
-            if (!output.empty()) output.push_back('\\');
-            output += component;
-            component.clear();
-        } else {
-            component.push_back(static_cast<char>(*cursor));
-        }
-    }
-    if (component.empty() || component == "." || component == ".." ||
-        component.back() == '.' || component.back() == ' ') {
-        output.clear();
-        return false;
-    }
-    if (!output.empty()) output.push_back('\\');
-    output += component;
-    return !output.empty() && output.size() <= 255;
-}
-
-bool valid_replacement_odf_name(const char* value, std::size_t length) {
-    if (!value || length == 0 || length > 255) return false;
-    for (std::size_t index = 0; index < length; ++index) {
-        const unsigned char ch = static_cast<unsigned char>(value[index]);
-        if (!std::isalnum(ch) && ch != '_' && ch != '-' && ch != '.') {
-            return false;
-        }
-    }
-    return true;
-}
-
-std::string policy_owner(const char* value) {
-    return value && *value ? value : "unnamed extension";
-}
-
-bool register_classlabel_alias_policy(const char* owner_value,
-                                      const char* source_value,
-                                      const char* target_value) {
-    const std::string owner = policy_owner(owner_value);
-    if (!valid_policy_identifier(source_value) ||
-        !valid_policy_identifier(target_value)) {
-        log_line("Classlabel alias policy rejected for " + owner +
-                 "; source and target must be 1-63 character identifiers");
-        return false;
-    }
-
-    const std::string source = lower_ascii(source_value);
-    ClasslabelAliasPolicy policy{lower_ascii(target_value), owner};
-    bool registered = false;
-    bool registration_open = false;
-    std::string existing_owner;
-    {
-        StateLockGuard lock;
-        registration_open = g_policy_registration_open &&
-                            g_registration_transaction.active;
-        if (registration_open) {
-            const auto existing = g_classlabel_aliases.find(source);
-            if (existing == g_classlabel_aliases.end()) {
-                g_classlabel_aliases.emplace(source, std::move(policy));
-                registered = true;
-            } else {
-                existing_owner = existing->second.owner;
-            }
-        }
-    }
-
-    if (registered) {
-        log_line("Classlabel alias policy registered by " + owner + ": " +
-                 source + " -> " + lower_ascii(target_value));
-    } else if (!registration_open) {
-        log_line("Classlabel alias policy rejected for " + owner +
-                 "; startup registration is closed");
-    } else {
-        log_line("Classlabel alias policy rejected for " + owner +
-                 "; " + source + " is already owned by " + existing_owner);
-    }
-    return registered;
+bool register_classlabel_alias_policy(const char* owner_value,const char* source_value,const char* target_value) {
+    struct Context {
+        const char* source;const char* target;std::string owner;
+        std::string key{},existing_owner{};ClasslabelAliasPolicy policy{};
+        decltype(g_classlabel_aliases)::iterator existing{};
+        std::exception_ptr error{};std::optional<StateLockGuard> guard{};
+    } context{source_value,target_value,policy_owner(owner_value)};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:return valid_policy_identifier(c.source);
+        case 1:return valid_policy_identifier(c.target);
+        case 2:log_line("Classlabel alias policy rejected for "+c.owner+"; source and target must be 1-63 character identifiers");return 0;
+        case 3:c.key=lower_ascii(c.source);c.policy={lower_ascii(c.target),c.owner};return 0;
+        case 4:c.guard.emplace();return 0;
+        case 5:return g_policy_registration_open;
+        case 6:return g_registration_transaction.active;
+        case 7:c.existing=g_classlabel_aliases.find(c.key);return c.existing!=g_classlabel_aliases.end();
+        case 8:g_classlabel_aliases.emplace(c.key,std::move(c.policy));return 0;
+        case 9:c.guard.reset();return 0;
+        case 10:log_line("Classlabel alias policy registered by "+c.owner+": "+c.key+" -> "+lower_ascii(c.target));return 0;
+        case 11:log_line("Classlabel alias policy rejected for "+c.owner+"; startup registration is closed");return 0;
+        case 12:log_line("Classlabel alias policy rejected for "+c.owner+"; "+c.key+" is already owned by "+c.existing_owner);return 0;
+        case 13:c.existing_owner=c.existing->second.owner;return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_core_registration(0,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result==1;
 }
 
 bool register_classlabel_odf_defaults_policy(
-    const char* owner_value, const char* classlabel_value,
-    const A2FO_ClasslabelOdfDefault* defaults,
-    std::uint32_t default_count) {
-    const std::string owner = policy_owner(owner_value);
-    if (!valid_policy_identifier(classlabel_value) || !defaults ||
-        default_count == 0 || default_count > 64) {
-        log_line("Classlabel ODF defaults rejected for " + owner +
-                 "; invalid classlabel or default list");
-        return false;
-    }
-
-    ClasslabelOdfDefaultsPolicy policy;
-    policy.owner = owner;
-    try {
-        for (std::uint32_t index = 0; index < default_count; ++index) {
-            const A2FO_ClasslabelOdfDefault& item = defaults[index];
-            if (!valid_odf_field_name(item.command) ||
-                !valid_odf_default_value(item.value)) {
-                log_line("Classlabel ODF defaults rejected for " + owner +
-                         "; commands and values must be bounded text");
-                return false;
-            }
-            const std::string command = lower_ascii(item.command);
-            if (!policy.defaults.emplace(command, item.value).second) {
-                log_line("Classlabel ODF defaults rejected for " + owner +
-                         "; duplicate command " + command);
-                return false;
-            }
-        }
-    } catch (...) {
-        log_line("Classlabel ODF defaults rejected for " + owner +
-                 "; could not copy registration data");
-        return false;
-    }
-
-    const std::string classlabel = lower_ascii(classlabel_value);
-    bool registered = false;
-    bool registration_open = false;
-    std::string existing_owner;
-    {
-        StateLockGuard lock;
-        registration_open = g_policy_registration_open &&
-                            g_registration_transaction.active;
-        if (registration_open) {
-            const auto existing = g_classlabel_odf_defaults.find(classlabel);
-            if (existing == g_classlabel_odf_defaults.end()) {
-                g_classlabel_odf_defaults.emplace(
-                    classlabel, std::move(policy));
-                registered = true;
-            } else {
-                existing_owner = existing->second.owner;
-            }
-        }
-    }
-
-    if (registered) {
-        log_line("Classlabel ODF defaults registered by " + owner + ": " +
-                 classlabel + " (" + std::to_string(default_count) +
-                 " commands)");
-    } else if (!registration_open) {
-        log_line("Classlabel ODF defaults rejected for " + owner +
-                 "; startup registration is closed");
-    } else {
-        log_line("Classlabel ODF defaults rejected for " + owner + "; " +
-                 classlabel + " is already owned by " + existing_owner);
-    }
-    return registered;
+    const char* owner_value,const char* classlabel_value,
+    const A2FO_ClasslabelOdfDefault* defaults,std::uint32_t default_count) {
+    const std::string owner=policy_owner(owner_value);
+    struct Context {
+        const std::string& owner;const char* label;const A2FO_ClasslabelOdfDefault* defaults;
+        ClasslabelOdfDefaultsPolicy policy{};std::optional<std::string> command{};std::string key{},existing_owner{};
+        decltype(g_classlabel_odf_defaults)::iterator existing{};
+        std::exception_ptr error{};std::optional<StateLockGuard> guard{};
+    } context{owner,classlabel_value,defaults};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return valid_policy_identifier(c.label);
+        case 1:return c.defaults!=nullptr;
+        case 2:log_line("Classlabel ODF defaults rejected for "+c.owner+"; invalid classlabel or default list");return 0;
+        case 3:c.policy.owner=c.owner;return 0;
+        case 4:return valid_odf_field_name(c.defaults[a].command);
+        case 5:return valid_odf_default_value(c.defaults[a].value);
+        case 6:log_line("Classlabel ODF defaults rejected for "+c.owner+"; commands and values must be bounded text");return 0;
+        case 7:c.command.emplace(lower_ascii(c.defaults[a].command));return c.policy.defaults.emplace(*c.command,c.defaults[a].value).second;
+        case 8:log_line("Classlabel ODF defaults rejected for "+c.owner+"; duplicate command "+*c.command);return 0;
+        case 9:c.command.reset();c.error=nullptr;log_line("Classlabel ODF defaults rejected for "+c.owner+"; could not copy registration data");return 0;
+        case 10:c.key=lower_ascii(c.label);return 0;
+        case 11:c.guard.emplace();return 0;
+        case 12:return g_policy_registration_open;
+        case 13:return g_registration_transaction.active;
+        case 14:c.existing=g_classlabel_odf_defaults.find(c.key);return c.existing!=g_classlabel_odf_defaults.end();
+        case 15:g_classlabel_odf_defaults.emplace(c.key,std::move(c.policy));return 0;
+        case 16:c.existing_owner=c.existing->second.owner;return 0;
+        case 17:c.guard.reset();return 0;
+        case 18:log_line("Classlabel ODF defaults registered by "+c.owner+": "+c.key+" ("+std::to_string(a)+" commands)");return 0;
+        case 19:log_line("Classlabel ODF defaults rejected for "+c.owner+"; startup registration is closed");return 0;
+        case 20:log_line("Classlabel ODF defaults rejected for "+c.owner+"; "+c.key+" is already owned by "+c.existing_owner);return 0;
+        case 32:c.command.reset();return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_core_defaults(0,default_count,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result==1;
 }
 
-bool register_evolver_cocoon_policy(const char* owner_value,
-                                    const char* command_value) {
-    const std::string owner = policy_owner(owner_value);
-    if (!valid_policy_identifier(command_value)) {
-        log_line("Evolver cocoon policy rejected for " + owner +
-                 "; command must be a 1-63 character identifier");
-        return false;
-    }
-
-    std::string command = lower_ascii(command_value);
-    bool registered = false;
-    bool registration_open = false;
-    std::string existing_owner;
-    {
-        StateLockGuard lock;
-        registration_open = g_policy_registration_open &&
-                            g_registration_transaction.active;
-        if (registration_open && g_evolver_cocoon_command.empty()) {
-            g_evolver_cocoon_command = std::move(command);
-            g_evolver_cocoon_owner = owner;
-            registered = true;
-        } else if (registration_open) {
-            existing_owner = g_evolver_cocoon_owner;
-        }
-    }
-
-    if (registered) {
-        log_line("Evolver cocoon policy registered by " + owner + ": " +
-                 lower_ascii(command_value));
-    } else if (!registration_open) {
-        log_line("Evolver cocoon policy rejected for " + owner +
-                 "; startup registration is closed");
-    } else {
-        log_line("Evolver cocoon policy rejected for " + owner +
-                 "; already owned by " + existing_owner);
-    }
-    return registered;
+bool register_race_odf_defaults_policy(const char* owner_value,
+    const A2FO_RaceOdfDefault* defaults,std::uint32_t default_count) {
+    const std::string owner=policy_owner(owner_value);
+    struct Context {
+        const std::string& owner;const A2FO_RaceOdfDefault* defaults;
+        std::unordered_map<std::string,std::string> pending{};
+        std::optional<std::string> command{};std::string conflict{},existing_owner{};
+        decltype(pending)::const_iterator item{};
+        std::optional<decltype(g_race_odf_defaults)> updated_defaults{};std::optional<decltype(g_race_odf_fields)> updated_fields{};
+        std::exception_ptr error{};std::optional<StateLockGuard> guard{};
+    } context{owner,defaults};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 1:return c.defaults!=nullptr;
+        case 2:log_line("Race ODF defaults rejected for "+c.owner+"; invalid default list");return 0;
+        case 4:return valid_odf_field_name(c.defaults[a].command);
+        case 5:return valid_odf_default_value(c.defaults[a].value);
+        case 6:log_line("Race ODF defaults rejected for "+c.owner+"; commands and values must be bounded text");return 0;
+        case 7:c.command.emplace(lower_ascii(c.defaults[a].command));return c.pending.emplace(*c.command,c.defaults[a].value).second;
+        case 8:log_line("Race ODF defaults rejected for "+c.owner+"; duplicate command "+*c.command);return 0;
+        case 9:c.command.reset();c.error=nullptr;log_line("Race ODF defaults rejected for "+c.owner+"; could not copy registration data");return 0;
+        case 11:c.guard.emplace();return 0;
+        case 12:return g_policy_registration_open;
+        case 13:return g_registration_transaction.active;
+        case 17:c.guard.reset();return 0;
+        case 18:log_line("Race ODF defaults registered by "+c.owner+" ("+std::to_string(a)+" commands)");return 0;
+        case 19:log_line("Race ODF defaults rejected for "+c.owner+"; startup registration is closed");return 0;
+        case 20:log_line("Race ODF defaults rejected for "+c.owner+"; "+c.conflict+" is already owned by "+c.existing_owner);return 0;
+        case 21:c.item=c.pending.begin();return 0;
+        case 22:return c.item!=c.pending.end();
+        case 23:{const auto existing=g_race_odf_defaults.find(c.item->first);if(existing==g_race_odf_defaults.end())return 0;
+            c.conflict=c.item->first;c.existing_owner=existing->second.owner;return 1;}
+        case 24:++c.item;return 0;
+        case 25:c.updated_defaults.emplace(g_race_odf_defaults);return 0;
+        case 26:c.updated_fields.emplace(g_race_odf_fields);return 0;
+        case 27:c.updated_defaults->emplace(c.item->first,RaceOdfDefaultPolicy{c.item->second,c.owner});return 0;
+        case 28:c.updated_fields->insert(c.item->first);return 0;
+        case 29:g_race_odf_defaults.swap(*c.updated_defaults);g_race_odf_fields.swap(*c.updated_fields);return 0;
+        case 30:c.updated_fields.reset();c.updated_defaults.reset();c.guard.reset();return 0;
+        case 31:c.error=nullptr;log_line("Race ODF defaults rejected for "+c.owner+"; could not commit registration data");return 0;
+        case 32:c.command.reset();return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_core_defaults(1,default_count,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result==1;
 }
 
-bool register_odf_overlay_directory_policy(
-    const char* owner_value, const char* directory_value,
-    std::uint32_t precedence) {
-    const std::string owner = policy_owner(owner_value);
-    std::string directory;
-    if (!normalize_relative_directory(directory_value, directory) ||
-        precedence > A2FO_ODF_OVERLAY_OVERRIDE) {
-        log_line("ODF overlay directory rejected for " + owner +
-                 "; expected a safe relative path and known precedence");
-        return false;
-    }
+bool register_evolver_cocoon_policy(const char* owner_value,const char* command_value) {
+    struct Context {const char* input;std::string owner;std::string command{},existing_owner{};
+        std::exception_ptr error{};std::optional<StateLockGuard> guard{};
+    } context{command_value,policy_owner(owner_value)};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:return valid_policy_identifier(c.input);
+        case 2:log_line("Evolver cocoon policy rejected for "+c.owner+"; command must be a 1-63 character identifier");return 0;
+        case 3:c.command=lower_ascii(c.input);return 0;
+        case 4:c.guard.emplace();return 0;
+        case 5:return g_policy_registration_open;
+        case 6:return g_registration_transaction.active;
+        case 7:return g_evolver_cocoon_command.empty();
+        case 8:g_evolver_cocoon_command=std::move(c.command);g_evolver_cocoon_owner=c.owner;return 0;
+        case 9:c.guard.reset();return 0;
+        case 10:log_line("Evolver cocoon policy registered by "+c.owner+": "+lower_ascii(c.input));return 0;
+        case 11:log_line("Evolver cocoon policy rejected for "+c.owner+"; startup registration is closed");return 0;
+        case 12:log_line("Evolver cocoon policy rejected for "+c.owner+"; already owned by "+c.existing_owner);return 0;
+        case 13:c.existing_owner=g_evolver_cocoon_owner;return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_core_registration(1,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result==1;
+}
 
-    bool registered = false;
-    bool registration_open = false;
-    std::string existing_owner;
-    {
-        StateLockGuard lock;
-        registration_open = g_policy_registration_open &&
-                            g_registration_transaction.active;
-        if (registration_open) {
-            const std::string key = lower_ascii(directory);
-            const auto existing = std::find_if(
-                g_odf_overlay_directories.begin(),
-                g_odf_overlay_directories.end(),
-                [&](const OdfOverlayDirectoryPolicy& policy) {
-                    return lower_ascii(policy.directory) == key;
-                });
-            if (existing == g_odf_overlay_directories.end() &&
-                g_odf_overlay_directories.size() < 64) {
-                g_odf_overlay_directories.push_back(
-                    OdfOverlayDirectoryPolicy{directory, owner, precedence});
-                registered = true;
-            } else if (existing != g_odf_overlay_directories.end()) {
-                existing_owner = existing->owner;
-            }
-        }
-    }
-
-    if (registered) {
-        log_line("ODF overlay directory registered by " + owner + ": " +
-                 directory + " (precedence=" +
-                 std::to_string(precedence) + ")");
-    } else if (!registration_open) {
-        log_line("ODF overlay directory rejected for " + owner +
-                 "; startup registration is closed");
-    } else if (!existing_owner.empty()) {
-        log_line("ODF overlay directory rejected for " + owner + "; " +
-                 directory + " is already owned by " + existing_owner);
-    } else {
-        log_line("ODF overlay directory rejected for " + owner +
-                 "; the directory limit was reached");
-    }
-    return registered;
+bool register_odf_overlay_directory_policy(const char* owner_value,const char* directory_value,std::uint32_t precedence) {
+    const std::string owner=policy_owner(owner_value);
+    struct Context {const std::string& owner;const char* input;std::uint32_t precedence;
+        std::string directory{},existing_owner{};std::optional<std::string> key{};
+        decltype(g_odf_overlay_directories)::const_iterator item{};
+        std::exception_ptr error{};std::optional<StateLockGuard> guard{};
+    } context{owner,directory_value,precedence};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return normalize_relative_directory(c.input,c.directory);
+        case 1:log_line("ODF overlay directory rejected for "+c.owner+"; expected a safe relative path and known precedence");return 0;
+        case 2:c.guard.emplace();return 0;
+        case 3:return g_policy_registration_open;
+        case 4:return g_registration_transaction.active;
+        case 5:c.key.emplace(lower_ascii(c.directory));c.item=g_odf_overlay_directories.begin();return 0;
+        case 6:return c.item!=g_odf_overlay_directories.end();
+        case 7:return lower_ascii(c.item->directory)==*c.key;
+        case 8:++c.item;return 0;
+        case 9:return g_odf_overlay_directories.size();
+        case 10:g_odf_overlay_directories.push_back(OdfOverlayDirectoryPolicy{c.directory,c.owner,c.precedence});return 0;
+        case 11:c.existing_owner=c.item->owner;return 0;
+        case 12:c.key.reset();c.guard.reset();return 0;
+        case 13:log_line("ODF overlay directory registered by "+c.owner+": "+c.directory+" (precedence="+std::to_string(c.precedence)+")");return 0;
+        case 14:log_line("ODF overlay directory rejected for "+c.owner+"; startup registration is closed");return 0;
+        case 15:return !c.existing_owner.empty();
+        case 16:log_line("ODF overlay directory rejected for "+c.owner+"; "+c.directory+" is already owned by "+c.existing_owner);return 0;
+        case 17:log_line("ODF overlay directory rejected for "+c.owner+"; the directory limit was reached");return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_core_overlay(precedence,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result==1;
 }
 
 void begin_module_registration(const std::string& path) {
-    try {
-        StateLockGuard lock;
-        RegistrationTransaction snapshot;
-        snapshot.active = true;
-        snapshot.path = path;
-        snapshot.fofs_handler = g_fofs_item_lookup_handler;
-        snapshot.fofs_user_data = g_fofs_item_lookup_user_data;
-        snapshot.fofs_owner = g_fofs_item_lookup_owner;
-        snapshot.info_ini_defaults_handler = g_info_ini_defaults_handler;
-        snapshot.info_ini_defaults_user_data =
-            g_info_ini_defaults_user_data;
-        snapshot.info_ini_defaults_owner = g_info_ini_defaults_owner;
-        snapshot.classlabel_aliases = g_classlabel_aliases;
-        snapshot.classlabel_odf_defaults = g_classlabel_odf_defaults;
-        snapshot.odf_overlay_directories = g_odf_overlay_directories;
-        snapshot.cocoon_command = g_evolver_cocoon_command;
-        snapshot.cocoon_owner = g_evolver_cocoon_owner;
-        snapshot.object_destroyed_handlers = g_object_destroyed_handlers;
-        snapshot.producer_event_handlers = g_producer_event_handlers;
-        snapshot.game_object_class_loaded_handlers =
-            g_game_object_class_loaded_handlers;
-        snapshot.race_loaded_handlers = g_race_loaded_handlers;
-        snapshot.weapon_class_loaded_handlers =
-            g_weapon_class_loaded_handlers;
-        snapshot.weapon_trigger_handlers = g_weapon_trigger_handlers;
-        snapshot.craft_event_handlers = g_craft_event_handlers;
-        snapshot.game_object_class_odf_fields =
-            g_game_object_class_odf_fields;
-        snapshot.race_odf_fields = g_race_odf_fields;
-        snapshot.weapon_class_odf_fields = g_weapon_class_odf_fields;
-        g_registration_transaction = std::move(snapshot);
-    } catch (...) {
-        // An empty/inactive transaction still lets the loader fail the module
-        // cleanly if one of its registrations is rejected.
-        g_registration_transaction = RegistrationTransaction{};
-        log_line("Module registration transaction could not start: " + path);
-    }
+    struct Context {const std::string& path;std::optional<RegistrationTransaction> snapshot{};
+        std::exception_ptr error{};std::optional<StateLockGuard> guard{};
+    } context{path};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:c.guard.emplace();return 0;
+        case 1:c.snapshot.emplace();return 0;
+        case 2:g_registration_transaction=std::move(*c.snapshot);return 0;
+        case 3:c.snapshot.reset();c.guard.reset();return 0;
+        case 4:c.error=nullptr;g_registration_transaction=RegistrationTransaction{};log_line("Module registration transaction could not start: "+c.path);return 0;
+        case 10:c.snapshot->active = true;return 0;
+        case 11:c.snapshot->path = c.path;return 0;
+        case 12:c.snapshot->fofs_handler = g_fofs_item_lookup_handler;return 0;
+        case 13:c.snapshot->fofs_user_data = g_fofs_item_lookup_user_data;return 0;
+        case 14:c.snapshot->fofs_owner = g_fofs_item_lookup_owner;return 0;
+        case 15:c.snapshot->info_ini_defaults_handler = g_info_ini_defaults_handler;return 0;
+        case 16:c.snapshot->info_ini_defaults_user_data = g_info_ini_defaults_user_data;return 0;
+        case 17:c.snapshot->info_ini_defaults_owner = g_info_ini_defaults_owner;return 0;
+        case 18:c.snapshot->classlabel_aliases = g_classlabel_aliases;return 0;
+        case 19:c.snapshot->classlabel_odf_defaults = g_classlabel_odf_defaults;return 0;
+        case 20:c.snapshot->race_odf_defaults = g_race_odf_defaults;return 0;
+        case 21:c.snapshot->odf_overlay_directories = g_odf_overlay_directories;return 0;
+        case 22:c.snapshot->cocoon_command = g_evolver_cocoon_command;return 0;
+        case 23:c.snapshot->cocoon_owner = g_evolver_cocoon_owner;return 0;
+        case 24:c.snapshot->object_destroyed_handlers = g_object_destroyed_handlers;return 0;
+        case 25:c.snapshot->producer_event_handlers = g_producer_event_handlers;return 0;
+        case 26:c.snapshot->game_object_class_loaded_handlers = g_game_object_class_loaded_handlers;return 0;
+        case 27:c.snapshot->race_loaded_handlers = g_race_loaded_handlers;return 0;
+        case 28:c.snapshot->weapon_class_loaded_handlers = g_weapon_class_loaded_handlers;return 0;
+        case 29:c.snapshot->weapon_trigger_handlers = g_weapon_trigger_handlers;return 0;
+        case 30:c.snapshot->craft_event_handlers = g_craft_event_handlers;return 0;
+        case 31:c.snapshot->game_object_class_odf_fields = g_game_object_class_odf_fields;return 0;
+        case 32:c.snapshot->race_odf_fields = g_race_odf_fields;return 0;
+        case 33:c.snapshot->weapon_class_odf_fields = g_weapon_class_odf_fields;return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    a2fo_rs_stage8_core_transaction(0,0,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+}
+void finish_module_registration(const std::string& path,bool initialized) {
+    struct Context {const std::string& path;std::exception_ptr error{};std::optional<StateLockGuard> guard{};} context{path};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:c.guard.emplace();return 0;
+        case 1:return g_registration_transaction.active;
+        case 2:return g_registration_transaction.path==c.path;
+        case 3:g_registration_transaction=RegistrationTransaction{};return 0;
+        case 4:c.guard.reset();return 0;
+        case 5:log_line("Module loader: rolled back registrations from "+c.path);return 0;
+        case 10:g_fofs_item_lookup_handler = g_registration_transaction.fofs_handler;return 0;
+        case 11:g_fofs_item_lookup_user_data = g_registration_transaction.fofs_user_data;return 0;
+        case 12:g_fofs_item_lookup_owner = std::move(g_registration_transaction.fofs_owner);return 0;
+        case 13:g_info_ini_defaults_handler = g_registration_transaction.info_ini_defaults_handler;return 0;
+        case 14:g_info_ini_defaults_user_data = g_registration_transaction.info_ini_defaults_user_data;return 0;
+        case 15:g_info_ini_defaults_owner = std::move( g_registration_transaction.info_ini_defaults_owner);return 0;
+        case 16:g_classlabel_aliases = std::move(g_registration_transaction.classlabel_aliases);return 0;
+        case 17:g_classlabel_odf_defaults = std::move( g_registration_transaction.classlabel_odf_defaults);return 0;
+        case 18:g_race_odf_defaults = std::move( g_registration_transaction.race_odf_defaults);return 0;
+        case 19:g_odf_overlay_directories = std::move( g_registration_transaction.odf_overlay_directories);return 0;
+        case 20:g_evolver_cocoon_command = std::move(g_registration_transaction.cocoon_command);return 0;
+        case 21:g_evolver_cocoon_owner = std::move(g_registration_transaction.cocoon_owner);return 0;
+        case 22:g_object_destroyed_handlers = std::move( g_registration_transaction.object_destroyed_handlers);return 0;
+        case 23:g_producer_event_handlers = std::move( g_registration_transaction.producer_event_handlers);return 0;
+        case 24:g_game_object_class_loaded_handlers = std::move( g_registration_transaction.game_object_class_loaded_handlers);return 0;
+        case 25:g_race_loaded_handlers = std::move( g_registration_transaction.race_loaded_handlers);return 0;
+        case 26:g_weapon_class_loaded_handlers = std::move( g_registration_transaction.weapon_class_loaded_handlers);return 0;
+        case 27:g_weapon_trigger_handlers = std::move( g_registration_transaction.weapon_trigger_handlers);return 0;
+        case 28:g_craft_event_handlers = std::move( g_registration_transaction.craft_event_handlers);return 0;
+        case 29:g_game_object_class_odf_fields = std::move( g_registration_transaction.game_object_class_odf_fields);return 0;
+        case 30:g_race_odf_fields = std::move( g_registration_transaction.race_odf_fields);return 0;
+        case 31:g_weapon_class_odf_fields = std::move( g_registration_transaction.weapon_class_odf_fields);return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    a2fo_rs_stage8_core_transaction(1,initialized,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
 }
 
-void finish_module_registration(const std::string& path, bool initialized) {
-    bool rolled_back = false;
-    {
-        StateLockGuard lock;
-        if (!g_registration_transaction.active ||
-            g_registration_transaction.path != path) {
-            return;
-        }
-        if (!initialized) {
-            g_fofs_item_lookup_handler =
-                g_registration_transaction.fofs_handler;
-            g_fofs_item_lookup_user_data =
-                g_registration_transaction.fofs_user_data;
-            g_fofs_item_lookup_owner =
-                std::move(g_registration_transaction.fofs_owner);
-            g_info_ini_defaults_handler =
-                g_registration_transaction.info_ini_defaults_handler;
-            g_info_ini_defaults_user_data =
-                g_registration_transaction.info_ini_defaults_user_data;
-            g_info_ini_defaults_owner = std::move(
-                g_registration_transaction.info_ini_defaults_owner);
-            g_classlabel_aliases =
-                std::move(g_registration_transaction.classlabel_aliases);
-            g_classlabel_odf_defaults = std::move(
-                g_registration_transaction.classlabel_odf_defaults);
-            g_odf_overlay_directories = std::move(
-                g_registration_transaction.odf_overlay_directories);
-            g_evolver_cocoon_command =
-                std::move(g_registration_transaction.cocoon_command);
-            g_evolver_cocoon_owner =
-                std::move(g_registration_transaction.cocoon_owner);
-            g_object_destroyed_handlers = std::move(
-                g_registration_transaction.object_destroyed_handlers);
-            g_producer_event_handlers = std::move(
-                g_registration_transaction.producer_event_handlers);
-            g_game_object_class_loaded_handlers = std::move(
-                g_registration_transaction.game_object_class_loaded_handlers);
-            g_race_loaded_handlers = std::move(
-                g_registration_transaction.race_loaded_handlers);
-            g_weapon_class_loaded_handlers = std::move(
-                g_registration_transaction.weapon_class_loaded_handlers);
-            g_weapon_trigger_handlers = std::move(
-                g_registration_transaction.weapon_trigger_handlers);
-            g_craft_event_handlers = std::move(
-                g_registration_transaction.craft_event_handlers);
-            g_game_object_class_odf_fields = std::move(
-                g_registration_transaction.game_object_class_odf_fields);
-            g_race_odf_fields = std::move(
-                g_registration_transaction.race_odf_fields);
-            g_weapon_class_odf_fields = std::move(
-                g_registration_transaction.weapon_class_odf_fields);
-            rolled_back = true;
-        }
-        g_registration_transaction = RegistrationTransaction{};
-    }
-    if (rolled_back) {
-        log_line("Module loader: rolled back registrations from " + path);
-    }
-}
-
-void* __attribute__((regparm(3))) fofs_item_get_hash_lookup_hook(
-    void* file_system, void* delphi_name, std::uintptr_t flags) {
-    // Patched into the one GetFileFromHashTable call inside FOFS_ItemGet. At
-    // this point EAX=file_system, EDX=Delphi filename, and CL=lookup flags.
-    // Wait briefly for the post-attach worker so a native module can claim the
-    // semantic dispatcher before the first ODF lookup races past it.
-    wait_for_deferred_initialization();
-
-    A2FO_FofsItemLookupHandler external_handler = nullptr;
-    void* external_user_data = nullptr;
-    EnterCriticalSection(&g_state_lock);
-    external_handler = g_fofs_item_lookup_handler;
-    external_user_data = g_fofs_item_lookup_user_data;
-    LeaveCriticalSection(&g_state_lock);
-    if (external_handler) {
-        void* external_result = nullptr;
-        if (external_handler(file_system, delphi_name,
-                             static_cast<std::uint32_t>(flags & 0xffu),
-                             &external_result, external_user_data)) {
-            return external_result;
-        }
-    }
-    return a2fo_call_get_file_from_hash(
-        at(g_fleet_ops, kGetFileFromHashTableRva), file_system, delphi_name,
-        static_cast<std::uint32_t>(flags & 0xffu));
+void* __attribute__((regparm(3))) fofs_item_get_hash_lookup_hook(void* file_system,void* delphi_name,std::uintptr_t flags) {
+    struct Context {void* file_system;void* delphi_name;std::uintptr_t flags;A2FO_FofsItemLookupHandler handler=nullptr;void* user_data=nullptr;void* external_result=nullptr;std::exception_ptr error{};} context{file_system,delphi_name,flags};
+    const auto step=+[](void* opaque,std::uint32_t op) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return g_fofs_item_lookup_dispatch_ready.load(std::memory_order_acquire);
+        case 1:wait_for_deferred_initialization();return 0;
+        case 2:return g_fofs_item_lookup_dispatch_ready.load(std::memory_order_acquire);
+        case 3:c.handler=g_fofs_item_lookup_dispatch.handler;c.user_data=g_fofs_item_lookup_dispatch.user_data;return 0;
+        case 4:EnterCriticalSection(&g_state_lock);c.handler=g_fofs_item_lookup_handler;c.user_data=g_fofs_item_lookup_user_data;LeaveCriticalSection(&g_state_lock);return 0;
+        case 5:return c.handler!=nullptr;
+        case 6:return c.handler(c.file_system,c.delphi_name,static_cast<std::uint32_t>(c.flags&0xffu),&c.external_result,c.user_data);
+        case 7:return reinterpret_cast<std::uintptr_t>(c.external_result);
+        case 8:return reinterpret_cast<std::uintptr_t>(a2fo_call_get_file_from_hash(at(g_fleet_ops,kGetFileFromHashTableRva),c.file_system,c.delphi_name,static_cast<std::uint32_t>(c.flags&0xffu)));
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_core_lookup(0,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return reinterpret_cast<void*>(static_cast<std::uintptr_t>(result));
 }
 
 std::string normalize_cocoon_name(const char* value) {
-    // ODF authors may omit .sod and add surrounding whitespace. Empty values
-    // deliberately mean "use the original Fleet Ops selection".
-    if (!value) {
-        return {};
-    }
-    std::string name(value);
-    const auto first = name.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) {
-        return {};
-    }
-    const auto last = name.find_last_not_of(" \t\r\n");
-    name = name.substr(first, last - first + 1);
+    if(!value)return {};
+    std::string name(value);std::size_t first=0,last=0;
+    a2fo_rs_stage8_core_trim(reinterpret_cast<const std::uint8_t*>(name.data()),name.size(),&first,&last);
+    if(first==name.size())return {};
+    name=name.substr(first,last-first);
     replace_slashes(name);
-    const std::string lower = lower_ascii(name);
-    if (lower.size() < 4 || lower.compare(lower.size() - 4, 4, ".sod") != 0) {
-        name += ".sod";
-    }
+    const std::string lower=lower_ascii(name);
+    if(!a2fo_rs_stage8_core_suffix(reinterpret_cast<const std::uint8_t*>(lower.data()),lower.size(),0))name+=".sod";
     return name;
 }
 
@@ -1630,20 +1555,26 @@ void* original_parameter_db_get_string() {
     return at(g_armada, kParameterDbGetStringRva);
 }
 
-bool classlabel_odf_default(void* parameter_db, const char* key,
-                            std::string& value,
-                            std::string& classlabel) {
-    if (!parameter_db || !key || !*key) return false;
-    StateLockGuard lock;
-    const auto source = g_original_classlabels.find(parameter_db);
-    if (source == g_original_classlabels.end()) return false;
-    const auto policy = g_classlabel_odf_defaults.find(source->second);
-    if (policy == g_classlabel_odf_defaults.end()) return false;
-    const auto item = policy->second.defaults.find(lower_ascii(key));
-    if (item == policy->second.defaults.end()) return false;
-    classlabel = source->second;
-    value = item->second;
-    return true;
+bool classlabel_odf_default(void* parameter_db,const char* key,std::string& value,std::string& classlabel) {
+    struct Context {void* db;const char* key;std::string& value;std::string& classlabel;std::optional<StateLockGuard> lock{};decltype(g_original_classlabels)::iterator source{};decltype(g_classlabel_odf_defaults)::iterator policy{};decltype(ClasslabelOdfDefaultsPolicy::defaults)::iterator item{};std::exception_ptr error{};} context{parameter_db,key,value,classlabel};
+    const auto step=+[](void* opaque,std::uint32_t op) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return c.db!=nullptr;
+        case 1:return c.key!=nullptr;
+        case 2:return *c.key!=0;
+        case 3:c.lock.emplace();return 0;
+        case 4:c.source=g_original_classlabels.find(c.db);return c.source!=g_original_classlabels.end();
+        case 5:c.policy=g_classlabel_odf_defaults.find(c.source->second);return c.policy!=g_classlabel_odf_defaults.end();
+        case 6:c.item=c.policy->second.defaults.find(lower_ascii(c.key));return c.item!=c.policy->second.defaults.end();
+        case 7:c.classlabel=c.source->second;return 0;
+        case 8:c.value=c.item->second;return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_core_classdefault(0,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
 }
 
 void log_classlabel_odf_default(const std::string& classlabel,
@@ -1653,168 +1584,189 @@ void log_classlabel_odf_default(const std::string& classlabel,
              (key ? key : "<null>") + " = " + value);
 }
 
-bool apply_integer_classlabel_default(void* parameter_db, const char* key,
-                                      int* output) {
-    if (!output) return false;
-    std::string value;
-    std::string classlabel;
-    if (!classlabel_odf_default(
-            parameter_db, key, value, classlabel)) return false;
-    *output = std::atoi(value.c_str());
-    log_classlabel_odf_default(classlabel, key, value);
-    return true;
+bool apply_integer_classlabel_default(void* parameter_db,const char* key,int* output) {
+    struct Context {void* db;const char* key;int* output;std::string value{};std::string classlabel{};std::exception_ptr error{};} context{parameter_db,key,output};
+    const auto step=+[](void* opaque,std::uint32_t op) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return c.output!=nullptr;
+        case 2:return classlabel_odf_default(c.db,c.key,c.value,c.classlabel);
+        case 11:log_classlabel_odf_default(c.classlabel,c.key,c.value);return 0;
+        case 4:*c.output=std::atoi(c.value.c_str());return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_core_classdefault(1,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
 }
 
-bool apply_float_classlabel_default(void* parameter_db, const char* key,
-                                    float* output) {
-    if (!output) return false;
-    std::string value;
-    std::string classlabel;
-    if (!classlabel_odf_default(
-            parameter_db, key, value, classlabel)) return false;
-    *output = std::strtof(value.c_str(), nullptr);
-    log_classlabel_odf_default(classlabel, key, value);
-    return true;
+bool apply_float_classlabel_default(void* parameter_db,const char* key,float* output) {
+    struct Context {void* db;const char* key;float* output;std::string value{};std::string classlabel{};std::exception_ptr error{};} context{parameter_db,key,output};
+    const auto step=+[](void* opaque,std::uint32_t op) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return c.output!=nullptr;
+        case 2:return classlabel_odf_default(c.db,c.key,c.value,c.classlabel);
+        case 11:log_classlabel_odf_default(c.classlabel,c.key,c.value);return 0;
+        case 4:*c.output=std::strtof(c.value.c_str(),nullptr);return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_core_classdefault(2,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
 }
 
-bool apply_bool_classlabel_default(void* parameter_db, const char* key,
-                                   std::uint8_t* output) {
-    if (!output) return false;
-    std::string value;
-    std::string classlabel;
-    if (!classlabel_odf_default(
-            parameter_db, key, value, classlabel)) return false;
-    const std::string normalized = lower_ascii(value);
-    *output = static_cast<std::uint8_t>(
-        normalized == "true" || normalized == "yes" ||
-        normalized == "on" || std::atoi(normalized.c_str()) != 0);
-    log_classlabel_odf_default(classlabel, key, value);
-    return true;
+bool apply_bool_classlabel_default(void* parameter_db,const char* key,std::uint8_t* output) {
+    struct Context {void* db;const char* key;std::uint8_t* output;std::string value{};std::string classlabel{};std::string normalized{};std::exception_ptr error{};} context{parameter_db,key,output};
+    const auto step=+[](void* opaque,std::uint32_t op) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return c.output!=nullptr;
+        case 2:return classlabel_odf_default(c.db,c.key,c.value,c.classlabel);
+        case 11:log_classlabel_odf_default(c.classlabel,c.key,c.value);return 0;
+        case 4:c.normalized=lower_ascii(c.value);return 0;
+        case 5:return c.normalized=="true";
+        case 6:return c.normalized=="yes";
+        case 7:return c.normalized=="on";
+        case 8:return std::atoi(c.normalized.c_str())!=0;
+        case 9:*c.output=1;return 0;
+        case 10:*c.output=0;return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_core_classdefault(3,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
 }
 
-bool apply_string_classlabel_default(void* parameter_db, const char* key,
-                                     char* output,
-                                     std::uint32_t output_size) {
-    if (!output || output_size == 0) return false;
-    std::string value;
-    std::string classlabel;
-    if (!classlabel_odf_default(
-            parameter_db, key, value, classlabel) ||
-        value.size() + 1 > output_size) {
-        return false;
-    }
-    std::memcpy(output, value.c_str(), value.size() + 1);
-    log_classlabel_odf_default(classlabel, key, value);
-    return true;
+bool apply_string_classlabel_default(void* parameter_db,const char* key,char* output,std::uint32_t output_size) {
+    struct Context {void* db;const char* key;char* output;std::uint32_t size;std::string value{};std::string classlabel{};std::exception_ptr error{};} context{parameter_db,key,output,output_size};
+    const auto step=+[](void* opaque,std::uint32_t op) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return c.output!=nullptr;
+        case 2:return classlabel_odf_default(c.db,c.key,c.value,c.classlabel);
+        case 11:log_classlabel_odf_default(c.classlabel,c.key,c.value);return 0;
+        case 1:return c.size!=0;
+        case 3:return c.value.size()+1<=c.size;
+        case 4:std::memcpy(c.output,c.value.c_str(),c.value.size()+1);return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_core_classdefault(4,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
+}
+
+// Native calling conventions, pointer-sized defaults and output ownership stay
+// here; Rust owns which probe/policy/fallback steps run and in what order.
+bool parameter_db_scalar_fallback(std::uint32_t kind, void* self,
+                                  const char* key, void* output,
+                                  std::uint32_t default_bits) {
+    struct Context {
+        std::uint32_t kind;
+        void* self;
+        const char* key;
+        void* output;
+        std::uint32_t bits;
+        std::exception_ptr policy_error{};
+        std::exception_ptr fatal{};
+    } context{kind, self, key, output, default_bits};
+    const auto step = +[](void* opaque, std::uint32_t operation) noexcept
+        -> std::uint64_t {
+        auto& c = *static_cast<Context*>(opaque);
+        try {
+            switch (operation) {
+            case 0: {
+                void* gateway = nullptr;
+                switch (c.kind) {
+                case 0: gateway = g_parameter_db_get_int_hook.gateway; break;
+                case 1: gateway = g_parameter_db_get_int_alternative_hook.gateway; break;
+                case 2: gateway = g_parameter_db_get_float_hook.gateway; break;
+                default: gateway = g_parameter_db_get_bool_hook.gateway; break;
+                }
+                return a2fo_parameter_db_get_scalar(
+                    gateway, c.self, c.key, c.output, c.bits);
+            }
+            case 1:
+                switch (c.kind) {
+                case 0:
+                case 1:
+                    return apply_integer_classlabel_default(
+                        c.self, c.key, static_cast<int*>(c.output));
+                case 2:
+                    return apply_float_classlabel_default(
+                        c.self, c.key, static_cast<float*>(c.output));
+                default:
+                    return apply_bool_classlabel_default(
+                        c.self, c.key, static_cast<std::uint8_t*>(c.output));
+                }
+            case 5: {
+                // The original exception remains alive through its catch log,
+                // then dies before the hook returns to its caller.
+                auto original = std::move(c.policy_error);
+                try {
+                    std::rethrow_exception(original);
+                } catch (...) {
+                    constexpr const char* messages[] = {
+                        "ParameterDB integer default skipped after an unexpected C++ exception",
+                        "ParameterDB alternative integer default skipped after an unexpected C++ exception",
+                        "ParameterDB float default skipped after an unexpected C++ exception",
+                        "ParameterDB boolean default skipped after an unexpected C++ exception",
+                    };
+                    log_line(messages[c.kind]);
+                }
+                return 0;
+            }
+            default: return 0;
+            }
+        } catch (...) {
+            if (operation == 1) c.policy_error = std::current_exception();
+            else c.fatal = std::current_exception();
+            return UINT64_MAX;
+        }
+    };
+    const bool result = a2fo_rs_stage9_parameter_get(0, step, &context) != 0;
+    if (context.fatal) std::rethrow_exception(context.fatal);
+    return result;
 }
 
 bool __attribute__((fastcall)) parameter_db_get_int_hook(
     void* self, void*, const char* key, int* output, int default_value) {
-    const bool found = a2fo_parameter_db_get_scalar(
-        g_parameter_db_get_int_hook.gateway, self, key, output,
-        static_cast<std::uint32_t>(default_value));
-    if (found) return true;
-    try {
-        return apply_integer_classlabel_default(self, key, output);
-    } catch (...) {
-        log_line("ParameterDB integer default skipped after an unexpected "
-                 "C++ exception");
-        return false;
-    }
+    return parameter_db_scalar_fallback(
+        0, self, key, output, static_cast<std::uint32_t>(default_value));
 }
 
 bool __attribute__((fastcall)) parameter_db_get_int_alternative_hook(
     void* self, void*, const char* key, int* output, int default_value) {
-    const bool found = a2fo_parameter_db_get_scalar(
-        g_parameter_db_get_int_alternative_hook.gateway, self, key, output,
-        static_cast<std::uint32_t>(default_value));
-    if (found) return true;
-    try {
-        return apply_integer_classlabel_default(self, key, output);
-    } catch (...) {
-        log_line("ParameterDB alternative integer default skipped after an "
-                 "unexpected C++ exception");
-        return false;
-    }
+    return parameter_db_scalar_fallback(
+        1, self, key, output, static_cast<std::uint32_t>(default_value));
 }
 
 bool __attribute__((fastcall)) parameter_db_get_float_hook(
     void* self, void*, const char* key, float* output, float default_value) {
-    std::uint32_t default_value_bits = 0;
-    static_assert(sizeof(default_value_bits) == sizeof(default_value),
+    std::uint32_t bits = 0;
+    static_assert(sizeof(bits) == sizeof(default_value),
                   "ParameterDB float default must occupy four bytes");
-    std::memcpy(&default_value_bits, &default_value,
-                sizeof(default_value_bits));
-    const bool found = a2fo_parameter_db_get_scalar(
-        g_parameter_db_get_float_hook.gateway, self, key, output,
-        default_value_bits);
-    if (found) return true;
-    try {
-        return apply_float_classlabel_default(self, key, output);
-    } catch (...) {
-        log_line("ParameterDB float default skipped after an unexpected "
-                 "C++ exception");
-        return false;
-    }
+    std::memcpy(&bits, &default_value, sizeof(bits));
+    return parameter_db_scalar_fallback(2, self, key, output, bits);
 }
 
 bool __attribute__((fastcall)) parameter_db_get_bool_hook(
     void* self, void*, const char* key, std::uint8_t* output,
     std::uint32_t default_value) {
-    const bool found = a2fo_parameter_db_get_scalar(
-        g_parameter_db_get_bool_hook.gateway, self, key, output,
-        default_value);
-    if (found) return true;
-    try {
-        return apply_bool_classlabel_default(self, key, output);
-    } catch (...) {
-        log_line("ParameterDB boolean default skipped after an unexpected "
-                 "C++ exception");
-        return false;
-    }
+    return parameter_db_scalar_fallback(3, self, key, output, default_value);
 }
 
 std::uint32_t parameter_db_pointer_bits(const void* value) {
     static_assert(sizeof(void*) == sizeof(std::uint32_t),
                   "Armada ParameterDB pointers must occupy four bytes");
-    return static_cast<std::uint32_t>(
-        reinterpret_cast<std::uintptr_t>(value));
+    return static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(value));
 }
 
-bool __attribute__((fastcall)) parameter_db_get_owned_string_hook(
-    void* self, void*, const char* key, char** output,
-    const char* default_value) {
-    // This overload allocates the returned text. Probe with a null native
-    // default first so a missing entry does not allocate the caller's fallback
-    // before a more-specific classlabel policy gets a chance to supply one.
-    const bool found = a2fo_parameter_db_get_scalar(
-        g_parameter_db_get_owned_string_hook.gateway, self, key, output, 0);
-    if (found) return true;
-
-    try {
-        std::string value;
-        std::string classlabel;
-        if (classlabel_odf_default(
-                self, key, value, classlabel)) {
-            a2fo_parameter_db_get_scalar(
-                g_parameter_db_get_owned_string_hook.gateway, self, key,
-                output, parameter_db_pointer_bits(value.c_str()));
-            log_classlabel_odf_default(classlabel, key, value);
-            return true;
-        }
-    } catch (...) {
-        log_line("ParameterDB owned-string default skipped after an "
-                 "unexpected C++ exception");
-    }
-
-    return a2fo_parameter_db_get_scalar(
-        g_parameter_db_get_owned_string_hook.gateway, self, key, output,
-        parameter_db_pointer_bits(default_value));
-}
-
-// MSVC 6's std::vector<char*> stores a one-byte allocator base followed by
-// three aligned pointers. ParameterDB's vector overload only reads begin/end
-// from a default vector and copies each string into its own engine allocation.
+// MSVC 6's std::vector<char*> has an allocator word and three native pointers.
 struct ParameterDbStringVectorAbi {
     std::uint32_t allocator = 0;
     char** begin = nullptr;
@@ -1824,313 +1776,333 @@ struct ParameterDbStringVectorAbi {
 static_assert(sizeof(ParameterDbStringVectorAbi) == 16,
               "Armada string-vector ABI must occupy sixteen bytes");
 
+bool parameter_db_policy_fallback(bool vector, void* self, const char* key,
+                                  void* output, const void* default_value) {
+    struct NativeVectorDefault {
+        char* item;
+        ParameterDbStringVectorAbi abi;
+        explicit NativeVectorDefault(const char* value)
+            : item(const_cast<char*>(value)) {
+            abi.begin = &item;
+            abi.end = &item + 1;
+            abi.capacity = abi.end;
+        }
+    };
+    struct Policy {
+        std::string value;
+        std::string classlabel;
+        std::optional<NativeVectorDefault> vector;
+    };
+    struct Context {
+        bool vector;
+        void* self;
+        const char* key;
+        void* output;
+        const void* fallback;
+        std::optional<Policy> policy{};
+        std::exception_ptr policy_error{};
+        std::exception_ptr fatal{};
+    } context{vector, self, key, output, default_value};
+    const auto step = +[](void* opaque, std::uint32_t operation) noexcept
+        -> std::uint64_t {
+        auto& c = *static_cast<Context*>(opaque);
+        const auto gateway = [&c]() {
+            return c.vector ? g_parameter_db_get_string_vector_hook.gateway
+                            : g_parameter_db_get_owned_string_hook.gateway;
+        };
+        try {
+            switch (operation) {
+            case 0:
+                return a2fo_parameter_db_get_scalar(
+                    gateway(), c.self, c.key, c.output, 0);
+            case 1:
+                c.policy.emplace();
+                return classlabel_odf_default(
+                    c.self, c.key, c.policy->value, c.policy->classlabel);
+            case 2: {
+                const void* native_default = c.policy->value.c_str();
+                if (c.vector) {
+                    c.policy->vector.emplace(c.policy->value.c_str());
+                    native_default = &c.policy->vector->abi;
+                }
+                // Keep native policy storage live through the subsequent log;
+                // engine callbacks can inspect the borrowed vector until then.
+                a2fo_parameter_db_get_scalar(
+                    gateway(), c.self, c.key, c.output,
+                    parameter_db_pointer_bits(native_default));
+                return 0; // Original code intentionally ignored this bool.
+            }
+            case 3:
+                log_classlabel_odf_default(
+                    c.policy->classlabel, c.key, c.policy->value);
+                return 0;
+            case 4:
+                c.policy.reset();
+                return 0;
+            case 5: {
+                auto original = std::move(c.policy_error);
+                try {
+                    std::rethrow_exception(original);
+                } catch (...) {
+                    log_line(c.vector
+                        ? "ParameterDB string-vector default skipped after an unexpected C++ exception"
+                        : "ParameterDB owned-string default skipped after an unexpected C++ exception");
+                }
+                return 0;
+            }
+            case 6:
+                return a2fo_parameter_db_get_scalar(
+                    gateway(), c.self, c.key, c.output,
+                    parameter_db_pointer_bits(c.fallback));
+            default: return 0;
+            }
+        } catch (...) {
+            if (operation >= 1 && operation <= 3)
+                c.policy_error = std::current_exception();
+            else c.fatal = std::current_exception();
+            return UINT64_MAX;
+        }
+    };
+    const bool result = a2fo_rs_stage9_parameter_get(1, step, &context) != 0;
+    if (context.fatal) std::rethrow_exception(context.fatal);
+    return result;
+}
+
+bool __attribute__((fastcall)) parameter_db_get_owned_string_hook(
+    void* self, void*, const char* key, char** output,
+    const char* default_value) {
+    return parameter_db_policy_fallback(false, self, key, output, default_value);
+}
+
 bool __attribute__((fastcall)) parameter_db_get_string_vector_hook(
     void* self, void*, const char* key, void* output,
     const void* default_value) {
-    // As with the owned-string overload, defer the caller's native default
-    // until after the registered classlabel policy has been considered.
-    const bool found = a2fo_parameter_db_get_scalar(
-        g_parameter_db_get_string_vector_hook.gateway, self, key, output, 0);
-    if (found) return true;
-
-    try {
-        std::string value;
-        std::string classlabel;
-        if (classlabel_odf_default(
-                self, key, value, classlabel)) {
-            char* item = const_cast<char*>(value.c_str());
-            ParameterDbStringVectorAbi policy_default;
-            policy_default.begin = &item;
-            policy_default.end = &item + 1;
-            policy_default.capacity = policy_default.end;
-            a2fo_parameter_db_get_scalar(
-                g_parameter_db_get_string_vector_hook.gateway, self, key,
-                output, parameter_db_pointer_bits(&policy_default));
-            log_classlabel_odf_default(classlabel, key, value);
-            return true;
-        }
-    } catch (...) {
-        log_line("ParameterDB string-vector default skipped after an "
-                 "unexpected C++ exception");
-    }
-
-    return a2fo_parameter_db_get_scalar(
-        g_parameter_db_get_string_vector_hook.gateway, self, key, output,
-        parameter_db_pointer_bits(default_value));
+    return parameter_db_policy_fallback(true, self, key, output, default_value);
 }
 
 std::string normalize_odf_basename(std::string value) {
-    const std::size_t first = value.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return {};
-    const std::size_t last = value.find_last_not_of(" \t\r\n");
-    value = value.substr(first, last - first + 1);
+    std::size_t first=0,last=0;
+    a2fo_rs_stage8_core_trim(reinterpret_cast<const std::uint8_t*>(value.data()),value.size(),&first,&last);
+    if(first==value.size())return {};
+    value=value.substr(first,last-first);
     replace_slashes(value);
-    const std::size_t slash = value.find_last_of('\\');
-    if (slash != std::string::npos) value.erase(0, slash + 1);
-    value = lower_ascii(std::move(value));
-    if (value.size() > 4 &&
-        value.compare(value.size() - 4, 4, ".odf") == 0) {
-        value.resize(value.size() - 4);
-    }
+    const auto begin=a2fo_rs_stage8_core_basename(reinterpret_cast<const std::uint8_t*>(value.data()),value.size());
+    if(begin)value.erase(0,begin);
+    value=lower_ascii(std::move(value));
+    if(a2fo_rs_stage8_core_suffix(reinterpret_cast<const std::uint8_t*>(value.data()),value.size(),1))value.resize(value.size()-4);
     return value;
 }
 
 bool read_odf_snapshot_value(void* parameter_db, const char* key,
                              std::string& value) {
-    std::array<char, 4096> output{};
-    const bool string_found = a2fo_parameter_db_get_string(
-        original_parameter_db_get_string(), parameter_db, key,
-        output.data(), static_cast<std::uint32_t>(output.size()), "");
-    output.back() = '\0';
-    const char* end = static_cast<const char*>(
-        std::memchr(output.data(), '\0', output.size()));
-    if (!end) return false;
-    if (string_found) {
-        value.assign(output.data(),
-                     static_cast<std::size_t>(end - output.data()));
-        return true;
-    }
-
-    // ParameterDB keeps numeric ODF entries in a separate typed store; its
-    // string overload deliberately reports those entries as absent. Revision
-    // 13 callbacks still expose field values as text, so query the native
-    // float overload before the integer fallback. Querying only Get(int)
-    // silently truncated fractional commands such as a recharge rate of 0.25
-    // to zero. Nine significant digits preserve every finite IEEE-754 float
-    // while still producing text accepted by module parsers.
-    float float_value = 0.0f;
-    if (g_parameter_db_get_float_hook.gateway &&
-        a2fo_parameter_db_get_scalar(
-            g_parameter_db_get_float_hook.gateway, parameter_db, key,
-            &float_value, 0)) {
-        std::array<char, 48> numeric{};
-        const int length = std::snprintf(
-            numeric.data(), numeric.size(), "%.9g",
-            static_cast<double>(float_value));
-        if (length > 0 &&
-            static_cast<std::size_t>(length) < numeric.size()) {
-            value.assign(numeric.data(), static_cast<std::size_t>(length));
-            return true;
-        }
-    }
-
-    // Retain the integer lookup for commands the native float overload does
-    // not accept (including integral policy fields and boolean-like values).
-    int integer_value = 0;
-    if (g_parameter_db_get_int_hook.gateway &&
-        a2fo_parameter_db_get_scalar(
-            g_parameter_db_get_int_hook.gateway, parameter_db, key,
-            &integer_value, 0)) {
-        value = std::to_string(integer_value);
-        return true;
-    }
-    return false;
-}
-
-void capture_game_object_class_odf_fields(void* parameter_db) {
-    if (!parameter_db || !g_game_object_class_odf_load_context) return;
-    g_game_object_class_odf_load_context->parameter_db_observed = true;
-
-    // `basename` is not an ODF command. Capture only the fields requested by
-    // active handlers here; the surrounding GameObjectClass load hook supplies
-    // the real basename once Armada has built the class.
-    std::vector<std::string> fields;
-    {
-        StateLockGuard lock;
-        fields.assign(g_game_object_class_odf_fields.begin(),
-                      g_game_object_class_odf_fields.end());
-    }
-    for (const std::string& command : fields) {
-        if (command == "basename") continue;
-        std::string value;
-        if (read_odf_snapshot_value(parameter_db, command.c_str(), value)) {
-            g_game_object_class_odf_load_context->fields[command] =
-                std::move(value);
-        }
-    }
-}
-
-bool __attribute__((fastcall)) parameter_db_get_string_hook(
-    void* self,
-    void*,
-    const char* key,
-    char* output,
-    std::uint32_t output_size,
-    const char* default_value) {
-
-    const bool found = a2fo_parameter_db_get_string(
-        original_parameter_db_get_string(),
-        self,
-        key,
-        output,
-        output_size,
-        default_value);
-
-    if (!key || !output || output_size == 0) {
-        return found;
-    }
-
-    wait_for_deferred_initialization();
-    try {
-        if (_stricmp(key, "classlabel") != 0) {
-            return !found && apply_string_classlabel_default(
-                                 self, key, output, output_size)
-                ? true
-                : found;
-        }
-        capture_game_object_class_odf_fields(self);
-        const char* output_end = static_cast<const char*>(
-            std::memchr(output, '\0', output_size));
-        if (!output_end) return found;
-
-        const std::string source = lower_ascii(
-            std::string(output, static_cast<std::size_t>(output_end - output)));
-        std::string replacement;
-        {
-            StateLockGuard lock;
-            g_original_classlabels[self] = source;
-            const auto alias = g_classlabel_aliases.find(source);
-            if (alias != g_classlabel_aliases.end()) {
-                replacement = alias->second.target;
-            }
-        }
-
-        if (!replacement.empty() && replacement.size() + 1 <= output_size) {
-            std::memcpy(output, replacement.c_str(), replacement.size() + 1);
-            log_line("Classlabel alias applied: " + source + " -> " +
-                     replacement);
-        }
-    } catch (...) {
-        log_line("ParameterDB string policy skipped after an unexpected "
-                 "C++ exception");
-    }
-
+    struct Context {
+        void* parameter_db;const char* key;std::string& value;
+        std::array<char,4096> output{};const char* end{};
+        float float_value{};std::array<char,48> numeric{};int length{};
+        int integer_value{};std::exception_ptr error{};
+    } context{parameter_db,key,value};
+    const auto op=[](void* opaque,std::uint32_t id) noexcept -> std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(id){
+        case 0:return a2fo_parameter_db_get_string(
+            original_parameter_db_get_string(),c.parameter_db,c.key,
+            c.output.data(),static_cast<std::uint32_t>(c.output.size()),"");
+        case 1:c.output.back()='\0';return 0;
+        case 2:c.end=static_cast<const char*>(
+            std::memchr(c.output.data(),'\0',c.output.size()));return 0;
+        case 3:return c.end!=nullptr;
+        case 4:c.value.assign(c.output.data(),
+            static_cast<std::size_t>(c.end-c.output.data()));return 0;
+        case 5:return g_parameter_db_get_float_hook.gateway!=nullptr;
+        case 6:return a2fo_parameter_db_get_scalar(
+            g_parameter_db_get_float_hook.gateway,c.parameter_db,c.key,
+            &c.float_value,0);
+        case 7:c.length=std::snprintf(c.numeric.data(),c.numeric.size(),
+            "%.9g",static_cast<double>(c.float_value));return 0;
+        case 8:return c.length>0;
+        case 9:return static_cast<std::size_t>(c.length)<c.numeric.size();
+        case 10:c.value.assign(c.numeric.data(),static_cast<std::size_t>(c.length));return 0;
+        case 11:return g_parameter_db_get_int_hook.gateway!=nullptr;
+        case 12:return a2fo_parameter_db_get_scalar(
+            g_parameter_db_get_int_hook.gateway,c.parameter_db,c.key,
+            &c.integer_value,0);
+        case 13:c.value=std::to_string(c.integer_value);return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const bool found=a2fo_rs_stage8_core_odf_snapshot(&context,op)!=0;
+    if(context.error)std::rethrow_exception(context.error);
     return found;
 }
 
-void* A2FO_CALL game_object_class_find_project_id_hook(
-    const std::uint32_t* project_id) {
-    GameObjectClassOdfLoadContext context;
-    GameObjectClassOdfLoadContext* previous_context =
-        g_game_object_class_odf_load_context;
-    g_game_object_class_odf_load_context = &context;
+void capture_game_object_class_odf_fields(void* parameter_db) {
+    struct Context {void* db;std::vector<std::string> fields{};const std::string* command=nullptr;std::optional<std::string> value{};std::exception_ptr error{};} context{parameter_db};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);(void)a;
+        try{switch(op){
+        case 0:return c.db!=nullptr;
+        case 1:return g_game_object_class_odf_load_context!=nullptr;
+        case 2:g_game_object_class_odf_load_context->parameter_db_observed=true;return 0;
+        case 3:{StateLockGuard lock;c.fields.assign(g_game_object_class_odf_fields.begin(),g_game_object_class_odf_fields.end());return 0;}
+        case 4:return c.fields.size();
+        case 5:c.command=&c.fields[a];return 0;
+        case 6:return *c.command=="basename";
+        case 7:c.value.emplace();return 0;
+        case 8:return read_odf_snapshot_value(c.db,c.command->c_str(),*c.value);
+        case 9:g_game_object_class_odf_load_context->fields[*c.command]=std::move(*c.value);return 0;
+        case 10:c.value.reset();return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    a2fo_rs_stage8_core_classload(0,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+}
 
-    using FindProjectIdFunction = void* (A2FO_CALL*)(const std::uint32_t*);
-    const auto original = reinterpret_cast<FindProjectIdFunction>(
-        g_game_object_class_find_project_id_hook.gateway);
-    void* object_class = original(project_id);
+bool __attribute__((fastcall)) parameter_db_get_string_hook(void* self,void*,const char* key,char* output,std::uint32_t output_size,const char* default_value) {
+    const bool found=a2fo_parameter_db_get_string(original_parameter_db_get_string(),self,key,output,output_size,default_value);
+    if(!a2fo_rs_stage8_core_classload_admit(reinterpret_cast<const std::uint8_t*>(key),reinterpret_cast<std::uint8_t*>(output),output_size))return found;
+    wait_for_deferred_initialization();
+    try {
+    struct Context {void* db;const char* key;char* output;std::uint32_t size;bool found;const char* end=nullptr;std::optional<std::string> source{};std::optional<std::string> replacement{};std::optional<StateLockGuard> lock{};decltype(g_classlabel_aliases)::iterator alias{};std::exception_ptr error{};} context{self,key,output,output_size,found};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);(void)a;
+        try{switch(op){
+        case 0:return _stricmp(c.key,"classlabel")==0;
+        case 1:return c.found;
+        case 2:return apply_string_classlabel_default(c.db,c.key,c.output,c.size);
+        case 3:capture_game_object_class_odf_fields(c.db);return 0;
+        case 4:c.end=static_cast<const char*>(std::memchr(c.output,'\0',c.size));return 0;
+        case 5:return c.end!=nullptr;
+        case 6:c.source.emplace(lower_ascii(std::string(c.output,static_cast<std::size_t>(c.end-c.output))));return 0;
+        case 7:c.replacement.emplace();return 0;
+        case 8:c.lock.emplace();return 0;
+        case 9:g_original_classlabels[c.db]=*c.source;return 0;
+        case 10:c.alias=g_classlabel_aliases.find(*c.source);return c.alias!=g_classlabel_aliases.end();
+        case 11:*c.replacement=c.alias->second.target;return 0;
+        case 12:c.lock.reset();return 0;
+        case 13:return !c.replacement->empty();
+        case 14:return c.replacement->size()+1<=c.size;
+        case 15:std::memcpy(c.output,c.replacement->c_str(),c.replacement->size()+1);return 0;
+        case 16:log_line("Classlabel alias applied: "+*c.source+" -> "+*c.replacement);return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_core_classload(1,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
+    }catch(...){log_line("ParameterDB string policy skipped after an unexpected C++ exception");}
+    return found;
+}
 
-    g_game_object_class_odf_load_context = previous_context;
-    if (!object_class || !context.parameter_db_observed) return object_class;
-
-    const char* odf_name = static_cast<const char*>(
-        a2fo_call_game_object_method(
-            at(g_armada, kGameObjectClassGetOdfNameRva), object_class));
-    if (!odf_name) return object_class;
-    const char* odf_end = static_cast<const char*>(
-        std::memchr(odf_name, '\0', 256));
-    if (!odf_end) return object_class;
-
-    const std::string basename(
-        odf_name, static_cast<std::size_t>(odf_end - odf_name));
-    const std::string key = normalize_odf_basename(basename);
-    if (key.empty()) return object_class;
-
-    std::string field_names;
-    for (const auto& field : context.fields) {
-        if (!field_names.empty()) field_names += ", ";
-        field_names += field.first;
-    }
-    context.fields["basename"] = basename;
-    OdfSnapshot snapshot = context.fields;
-    {
-        StateLockGuard lock;
-        g_odf_snapshots[key] = std::move(context.fields);
-    }
-
-    std::vector<NativeGameObjectClassLoadedRegistration> handlers;
-    {
-        StateLockGuard lock;
-        handlers = g_game_object_class_loaded_handlers;
-    }
-    if (!handlers.empty()) {
-        std::vector<A2FO_OdfFieldView> fields;
-        fields.reserve(snapshot.size());
-        for (const auto& field : snapshot) {
-            fields.push_back(A2FO_OdfFieldView{
-                A2FO_StringView{field.first.data(),
-                                static_cast<std::uint32_t>(field.first.size())},
-                A2FO_StringView{field.second.data(),
-                                static_cast<std::uint32_t>(field.second.size())}});
-        }
-        A2FO_GameObjectClassLoadedEvent event{};
-        event.struct_size = sizeof(event);
-        event.object_class = object_class;
-        event.source_odf = A2FO_StringView{
-            basename.data(), static_cast<std::uint32_t>(basename.size())};
-        event.odf_fields = fields.data();
-        event.odf_field_count = static_cast<std::uint32_t>(fields.size());
-        for (const auto& registration : handlers) {
-            if (!registration.handler) continue;
-            try {
-                registration.handler(&event, registration.user_data);
-            } catch (...) {
-                log_line("GameObjectClass-loaded handler failed for " +
-                         registration.owner);
-            }
-        }
-    }
-    log_line("GameObjectClass ODF fields cached: " + basename +
-             " (" + field_names + ")");
-    return object_class;
+void* A2FO_CALL game_object_class_find_project_id_hook(const std::uint32_t* project_id) {
+    struct Context {const std::uint32_t* project_id;a2fo::native11_light_classes::ClassLoadScope class_scope{};GameObjectClassOdfLoadContext load{};GameObjectClassOdfLoadContext* previous=nullptr;void* object_class=nullptr;const char* odf_name=nullptr;const char* odf_end=nullptr;std::optional<std::string> basename{};std::optional<std::string> key{};std::optional<std::string> field_names{};std::optional<OdfSnapshot> snapshot{};a2fo::RustHandlerRegistry<NativeGameObjectClassLoadedRegistration> handlers{};std::optional<std::vector<A2FO_OdfFieldView>> fields{};std::optional<A2FO_GameObjectClassLoadedEvent> event{};OdfSnapshot::const_iterator field{};a2fo::RustHandlerRegistry<NativeGameObjectClassLoadedRegistration>::const_iterator registration{};std::exception_ptr error{};} context{project_id};
+    a2fo::RestoreClassLoadContext<GameObjectClassOdfLoadContext> restore_context(g_game_object_class_odf_load_context);
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);(void)a;
+        try{switch(op){
+        case 0:c.previous=g_game_object_class_odf_load_context;g_game_object_class_odf_load_context=&c.load;return 0;
+        case 1:{using Original=void*(A2FO_CALL*)(const std::uint32_t*);c.object_class=reinterpret_cast<Original>(g_game_object_class_find_project_id_hook.gateway)(c.project_id);return 0;}
+        case 2:g_game_object_class_odf_load_context=c.previous;return 0;
+        case 3:return c.object_class!=nullptr;
+        case 4:return c.load.parameter_db_observed;
+        case 5:c.odf_name=static_cast<const char*>(a2fo_call_game_object_method(at(g_armada,kGameObjectClassGetOdfNameRva),c.object_class));return 0;
+        case 6:return c.odf_name!=nullptr;
+        case 7:c.odf_end=static_cast<const char*>(std::memchr(c.odf_name,'\0',256));return 0;
+        case 8:return c.odf_end!=nullptr;
+        case 9:c.basename.emplace(c.odf_name,static_cast<std::size_t>(c.odf_end-c.odf_name));c.key.emplace(normalize_odf_basename(*c.basename));return 0;
+        case 10:return !c.key->empty();
+        case 11:a2fo::register_nebula_cloak_class_name(c.object_class,c.key->c_str());return 0;
+        case 12:c.field_names.emplace();c.field=c.load.fields.begin();return 0;
+        case 13:return c.field!=c.load.fields.end();
+        case 14:return c.field_names->empty();
+        case 15:*c.field_names+=", ";return 0;
+        case 16:*c.field_names+=c.field->first;++c.field;return 0;
+        case 17:c.load.fields["basename"]=*c.basename;return 0;
+        case 18:c.snapshot.emplace(c.load.fields);return 0;
+        case 19:{{StateLockGuard lock;g_odf_snapshots[*c.key]=std::move(c.load.fields);}
+            c.class_scope.observe_class(c.object_class,*c.basename,*c.snapshot);return 0;}
+        case 20:{StateLockGuard lock;c.handlers=g_game_object_class_loaded_handlers;return 0;}
+        case 21:return !c.handlers.empty();
+        case 22:c.fields.emplace();c.fields->reserve(c.snapshot->size());c.field=c.snapshot->begin();return 0;
+        case 23:return c.field!=c.snapshot->end();
+        case 24:{const auto& field=*c.field++;c.fields->push_back(A2FO_OdfFieldView{A2FO_StringView{field.first.data(),static_cast<std::uint32_t>(field.first.size())},A2FO_StringView{field.second.data(),static_cast<std::uint32_t>(field.second.size())}});return 0;}
+        case 25:c.event.emplace();c.event->struct_size=sizeof(*c.event);c.event->object_class=c.object_class;c.event->source_odf=A2FO_StringView{c.basename->data(),static_cast<std::uint32_t>(c.basename->size())};c.event->odf_fields=c.fields->data();c.event->odf_field_count=static_cast<std::uint32_t>(c.fields->size());return 0;
+        case 26:c.registration=c.handlers.begin();return 0;
+        case 27:return c.registration!=c.handlers.end();
+        case 28:return c.registration->handler!=nullptr;
+        case 29:try{c.registration->handler(&*c.event,c.registration->user_data);}catch(...){c.class_scope.fail();log_line("GameObjectClass-loaded handler failed for "+c.registration->owner);}return 0;
+        case 30:++c.registration;return 0;
+        case 31:c.event.reset();c.fields.reset();return 0;
+        case 32:log_line("GameObjectClass ODF fields cached: "+*c.basename+" ("+*c.field_names+")");return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    a2fo_rs_stage8_core_classload(2,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    context.class_scope.complete();
+    return context.object_class;
 }
 
 extern "C" void __cdecl a2fo_dispatch_race_odf_loaded(
     void* race, void* parameter_db) noexcept {
     if (!race || !parameter_db || !g_state_lock_ready) return;
     try {
-        std::vector<std::string> requested_fields;
-        std::vector<NativeRaceLoadedRegistration> handlers;
-        {
-            StateLockGuard lock;
-            requested_fields.assign(
-                g_race_odf_fields.begin(), g_race_odf_fields.end());
-            handlers = g_race_loaded_handlers;
-        }
-
-        if (handlers.empty()) return;
-
-        OdfSnapshot snapshot;
-        for (const std::string& command : requested_fields) {
-            std::string value;
-            if (read_odf_snapshot_value(
-                    parameter_db, command.c_str(), value)) {
-                snapshot[command] = std::move(value);
-            }
-        }
-        std::vector<A2FO_OdfFieldView> fields;
-        fields.reserve(snapshot.size());
-        for (const auto& field : snapshot) {
-            fields.push_back(A2FO_OdfFieldView{
-                A2FO_StringView{field.first.data(),
-                                static_cast<std::uint32_t>(field.first.size())},
-                A2FO_StringView{field.second.data(),
-                                static_cast<std::uint32_t>(field.second.size())}});
-        }
-        A2FO_RaceLoadedEvent event{};
-        event.struct_size = sizeof(event);
-        event.race = race;
-        event.odf_fields = fields.data();
-        event.odf_field_count = static_cast<std::uint32_t>(fields.size());
-        for (const auto& registration : handlers) {
-            if (!registration.handler) continue;
+        struct Context {
+            void* race;void* parameter_db;
+            std::vector<std::string> requested_fields{};
+            a2fo::RustHandlerRegistry<NativeRaceLoadedRegistration> handlers{};
+            std::unordered_map<std::string,RaceOdfDefaultPolicy> defaults{};
+            std::optional<OdfSnapshot> snapshot{};
+            std::optional<std::vector<A2FO_OdfFieldView>> fields{};
+            std::optional<A2FO_RaceLoadedEvent> event{};
+            std::optional<std::string> value{};
+            const std::string* command{};
+            decltype(defaults)::const_iterator fallback{};
+            OdfSnapshot::const_iterator field{};
+            std::optional<a2fo::RustHandlerRegistry<NativeRaceLoadedRegistration>::Borrowed> registration{};
+            std::exception_ptr error{};
+        } context{race,parameter_db};
+        const auto op=[](void* opaque,std::uint32_t id) noexcept -> std::uint64_t {
+            auto& c=*static_cast<Context*>(opaque);
             try {
-                registration.handler(&event, registration.user_data);
-            } catch (...) {
-                log_line("Race-loaded handler failed for " +
-                         registration.owner);
-            }
-        }
+                if(id>=0x30000){c.registration=c.handlers.borrow(id-0x30000);return 0;}
+                if(id>=0x20000){const auto& item=*c.field++;
+                    c.fields->push_back(A2FO_OdfFieldView{
+                        A2FO_StringView{item.first.data(),static_cast<std::uint32_t>(item.first.size())},
+                        A2FO_StringView{item.second.data(),static_cast<std::uint32_t>(item.second.size())}});
+                    return 0;}
+                if(id>=0x10000){c.command=&c.requested_fields.at(id-0x10000);
+                    c.value.emplace();return 0;}
+                switch(id){
+                case 21:{StateLockGuard lock;
+                    c.requested_fields.assign(g_race_odf_fields.begin(),g_race_odf_fields.end());
+                    c.handlers=g_race_loaded_handlers;
+                    c.defaults=g_race_odf_defaults;return 0;}
+                case 22:return !c.handlers.empty();
+                case 23:c.snapshot.emplace();return c.requested_fields.size();
+                case 24:return read_odf_snapshot_value(
+                    c.parameter_db,c.command->c_str(),*c.value);
+                case 25:(*c.snapshot)[*c.command]=std::move(*c.value);return 0;
+                case 26:c.fallback=c.defaults.find(*c.command);
+                    return c.fallback!=c.defaults.end();
+                case 27:(*c.snapshot)[*c.command]=c.fallback->second.value;return 0;
+                case 28:c.value.reset();return 0;
+                case 29:c.fields.emplace();c.fields->reserve(c.snapshot->size());return 0;
+                case 30:c.field=c.snapshot->begin();return c.snapshot->size();
+                case 31:c.event.emplace();c.event->struct_size=sizeof(*c.event);c.event->race=c.race;
+                    c.event->odf_fields=c.fields->data();
+                    c.event->odf_field_count=static_cast<std::uint32_t>(c.fields->size());return 0;
+                case 32:return c.handlers.size();
+                case 33:return c.registration->handler!=nullptr;
+                case 34:try{c.registration->handler(&*c.event,c.registration->user_data);}
+                    catch(...){log_line("Race-loaded handler failed for "+c.registration->owner);}
+                    return 0;
+                default:return 0;
+                }
+            }catch(...){c.error=std::current_exception();return UINT64_MAX;}
+        };
+        a2fo_rs_stage8_core_odf_race(&context,op);
+        if(context.error)std::rethrow_exception(context.error);
     } catch (...) {
         log_line("Race-loaded dispatch skipped after an unexpected C++ "
                  "exception");
@@ -2139,44 +2111,65 @@ extern "C" void __cdecl a2fo_dispatch_race_odf_loaded(
 
 void dispatch_weapon_class_loaded(
     void* weapon_class, void* parent_class, void* parameter_db) noexcept {
-    if (!weapon_class || !parameter_db ||
-        g_weapon_class_loaded_handlers.empty()) {
-        return;
-    }
     try {
+    struct Context {
+        void* weapon_class;
+        void* parent_class;
+        void* parameter_db;
         OdfSnapshot snapshot;
-        for (const std::string& command : g_weapon_class_odf_fields) {
-            std::string value;
-            if (read_odf_snapshot_value(
-                    parameter_db, command.c_str(), value)) {
-                snapshot[command] = std::move(value);
-            }
-        }
+        std::set<std::string>::const_iterator command;
+        std::set<std::string>::const_iterator command_end;
+        std::optional<std::string> value;
         std::vector<A2FO_OdfFieldView> fields;
-        fields.reserve(snapshot.size());
-        for (const auto& field : snapshot) {
-            fields.push_back(A2FO_OdfFieldView{
-                A2FO_StringView{field.first.data(),
-                    static_cast<std::uint32_t>(field.first.size())},
-                A2FO_StringView{field.second.data(),
-                    static_cast<std::uint32_t>(field.second.size())}});
-        }
+        OdfSnapshot::const_iterator field;
+        OdfSnapshot::const_iterator field_end;
         A2FO_WeaponClassLoadedEvent event{};
-        event.struct_size = sizeof(event);
-        event.weapon_class = weapon_class;
-        event.parent_class = parent_class;
-        event.parameter_db = parameter_db;
-        event.odf_fields = fields.empty() ? nullptr : fields.data();
-        event.odf_field_count = static_cast<std::uint32_t>(fields.size());
-        for (const auto& registration : g_weapon_class_loaded_handlers) {
-            if (!registration.handler) continue;
-            try {
-                registration.handler(&event, registration.user_data);
-            } catch (...) {
-                log_line("WeaponClass-loaded handler failed for " +
-                         registration.owner);
+        a2fo::RustHandlerRegistry<NativeWeaponClassLoadedRegistration>::const_iterator registration;
+        a2fo::RustHandlerRegistry<NativeWeaponClassLoadedRegistration>::const_iterator registration_end;
+        std::exception_ptr error;
+    } context{};
+    context.weapon_class=weapon_class;
+    context.parent_class=parent_class;
+    context.parameter_db=parameter_db;
+    auto op=[](void* opaque,std::uint32_t id)->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {
+            switch(id) {
+            case 0:return c.weapon_class!=nullptr;
+            case 1:return c.parameter_db!=nullptr;
+            case 2:return !g_weapon_class_loaded_handlers.empty();
+            case 3:c.command=g_weapon_class_odf_fields.begin();c.command_end=g_weapon_class_odf_fields.end();return 0;
+            case 4:return c.command!=c.command_end;
+            case 5:c.value.emplace();return 0;
+            case 6:return read_odf_snapshot_value(c.parameter_db,c.command->c_str(),*c.value);
+            case 7:c.snapshot[*c.command]=std::move(*c.value);return 0;
+            case 8:c.value.reset();++c.command;return 0;
+            case 9:c.fields.reserve(c.snapshot.size());return 0;
+            case 10:c.field=c.snapshot.begin();c.field_end=c.snapshot.end();return 0;
+            case 11:return c.field!=c.field_end;
+            case 12:c.fields.push_back(A2FO_OdfFieldView{
+                A2FO_StringView{c.field->first.data(),static_cast<std::uint32_t>(c.field->first.size())},
+                A2FO_StringView{c.field->second.data(),static_cast<std::uint32_t>(c.field->second.size())}});++c.field;return 0;
+            case 13:
+                c.event.struct_size=sizeof(c.event);c.event.weapon_class=c.weapon_class;
+                c.event.parent_class=c.parent_class;c.event.parameter_db=c.parameter_db;
+                c.event.odf_fields=c.fields.empty()?nullptr:c.fields.data();
+                c.event.odf_field_count=static_cast<std::uint32_t>(c.fields.size());return 0;
+            case 14:c.registration=g_weapon_class_loaded_handlers.begin();
+                c.registration_end=g_weapon_class_loaded_handlers.end();return 0;
+            case 15:return c.registration!=c.registration_end;
+            case 16:return c.registration->handler!=nullptr;
+            case 17:
+                try{c.registration->handler(&c.event,c.registration->user_data);}
+                catch(...){log_line("WeaponClass-loaded handler failed for "+c.registration->owner);}
+                return 0;
+            case 18:++c.registration;return 0;
+            default:return 0;
             }
-        }
+        } catch(...) {c.error=std::current_exception();return UINT64_MAX;}
+    };
+        a2fo_rs_stage8_core_dispatch_weapon_class(&context,op);
+        if(context.error)std::rethrow_exception(context.error);
     } catch (...) {
         log_line("WeaponClass-loaded dispatch skipped after an unexpected "
                  "C++ exception");
@@ -2196,26 +2189,37 @@ std::uintptr_t __attribute__((fastcall)) weapon_class_constructor_hook(
 
 bool dispatch_weapon_trigger(
     std::uint32_t kind, void* weapon, const void* target) noexcept {
-    A2FO_WeaponTriggerEvent event{};
-    event.struct_size = sizeof(event);
-    event.kind = kind;
-    event.weapon = weapon;
-    event.target = target;
-    for (const auto& registration : g_weapon_trigger_handlers) {
-        if (!registration.handler) continue;
+    struct Context {
+        A2FO_WeaponTriggerEvent event{};
+        std::uint32_t original_kind = 0;
+        a2fo::RustHandlerRegistry<NativeWeaponTriggerRegistration>::const_iterator registration;
+        a2fo::RustHandlerRegistry<NativeWeaponTriggerRegistration>::const_iterator registration_end;
+        std::exception_ptr error;
+    } context;
+    auto op=[](void* opaque,std::uint32_t id)->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
         try {
-            const bool accepted = registration.handler(
-                &event, registration.user_data);
-            if (kind == A2FO_WEAPON_TRIGGER_PRECHECK && !accepted) {
-                return false;
+            switch(id) {
+            case 0:c.event.struct_size=sizeof(c.event);return 0;
+            case 1:c.registration=g_weapon_trigger_handlers.begin();
+                c.registration_end=g_weapon_trigger_handlers.end();return 0;
+            case 2:return c.registration!=c.registration_end;
+            case 3:return c.registration->handler!=nullptr;
+            case 4:
+                try{return c.registration->handler(&c.event,c.registration->user_data);}
+                catch(...){log_line("Weapon-trigger handler failed for "+c.registration->owner);
+                    return c.original_kind==A2FO_WEAPON_TRIGGER_PRECHECK?0:1;}
+            case 5:++c.registration;return 0;
+            default:return 0;
             }
-        } catch (...) {
-            log_line("Weapon-trigger handler failed for " +
-                     registration.owner);
-            if (kind == A2FO_WEAPON_TRIGGER_PRECHECK) return false;
-        }
-    }
-    return true;
+        } catch(...) {c.error=std::current_exception();return UINT64_MAX;}
+    };
+    context.original_kind=kind;context.event.kind=kind;
+    context.event.weapon=weapon;context.event.target=target;
+    const bool result=a2fo_rs_stage8_core_dispatch_weapon_trigger(
+        &context,op,kind,A2FO_WEAPON_TRIGGER_PRECHECK)!=0;
+    if(context.error)std::rethrow_exception(context.error);
+    return result;
 }
 
 void __attribute__((fastcall)) weapon_trigger_object_hook(
@@ -2233,20 +2237,34 @@ void __attribute__((fastcall)) weapon_trigger_object_hook(
 
 void dispatch_craft_event(std::uint32_t kind, void* craft,
                           float elapsed_seconds) noexcept {
-    A2FO_CraftEvent event{};
-    event.struct_size = sizeof(event);
-    event.kind = kind;
-    event.craft = craft;
-    event.elapsed_seconds = elapsed_seconds;
-    for (const auto& registration : g_craft_event_handlers) {
-        if (!registration.handler) continue;
+    struct Context {
+        A2FO_CraftEvent event{};
+        a2fo::RustHandlerRegistry<NativeCraftEventRegistration>::const_iterator registration;
+        a2fo::RustHandlerRegistry<NativeCraftEventRegistration>::const_iterator registration_end;
+        std::exception_ptr error;
+    } context;
+    auto op=[](void* opaque,std::uint32_t id)->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
         try {
-            registration.handler(&event, registration.user_data);
-        } catch (...) {
-            log_line("Craft-event handler failed for " +
-                     registration.owner);
-        }
-    }
+            switch(id) {
+            case 0:c.event.struct_size=sizeof(c.event);return 0;
+            case 1:c.registration=g_craft_event_handlers.begin();
+                c.registration_end=g_craft_event_handlers.end();return 0;
+            case 2:return c.registration!=c.registration_end;
+            case 3:return c.registration->handler!=nullptr;
+            case 4:
+                try{c.registration->handler(&c.event,c.registration->user_data);}
+                catch(...){log_line("Craft-event handler failed for "+c.registration->owner);}
+                return 0;
+            case 5:++c.registration;return 0;
+            default:return 0;
+            }
+        } catch(...) {c.error=std::current_exception();return UINT64_MAX;}
+    };
+    context.event.kind=kind;context.event.craft=craft;
+    context.event.elapsed_seconds=elapsed_seconds;
+    a2fo_rs_stage8_core_dispatch_craft(&context,op);
+    if(context.error)std::rethrow_exception(context.error);
 }
 
 void __attribute__((fastcall)) craft_simulate_event_hook(
@@ -2293,23 +2311,9 @@ struct DestroyedObjectSnapshot {
     std::uint32_t random_seed = 0;
 };
 
-std::uint32_t hash_destroyed_object(const std::string& odf,
-                                    std::uint32_t handle,
-                                    int team,
-                                    const Matrix34Snapshot& transform) {
-    std::uint32_t hash = 2166136261u;
-    const auto append = [&hash](const void* data, std::size_t size) {
-        const auto* bytes = static_cast<const std::uint8_t*>(data);
-        for (std::size_t index = 0; index < size; ++index) {
-            hash ^= bytes[index];
-            hash *= 16777619u;
-        }
-    };
-    append(odf.data(), odf.size());
-    append(&handle, sizeof(handle));
-    append(&team, sizeof(team));
-    append(transform.values.data(), transform.values.size() * sizeof(float));
-    return hash;
+std::uint32_t hash_destroyed_object(const std::string& odf,std::uint32_t handle,int team,const Matrix34Snapshot& transform) {
+    static_assert(sizeof(team)==sizeof(std::int32_t));
+    return a2fo_rs_stage8_core_object_hash(reinterpret_cast<const std::uint8_t*>(odf.data()),odf.size(),handle,team,reinterpret_cast<const std::uint8_t*>(transform.values.data()),transform.values.size()*sizeof(float));
 }
 
 DestroyedObjectSnapshot snapshot_destroyed_object(void* self) {
@@ -2388,149 +2392,100 @@ DestroyedObjectSnapshot snapshot_destroyed_object(void* self) {
     return snapshot;
 }
 
-bool resolve_native_object_destroyed(
-    const DestroyedObjectSnapshot& source,
-    ObjectReplacement& selected_replacement) {
-    std::vector<NativeObjectDestroyedRegistration> handlers;
-    {
-        StateLockGuard lock;
-        handlers = g_object_destroyed_handlers;
-    }
-    if (handlers.empty()) return false;
-
-    std::vector<A2FO_OdfFieldView> fields;
-    fields.reserve(source.odf.size());
-    for (const auto& field : source.odf) {
-        fields.push_back({
-            {field.first.data(), static_cast<std::uint32_t>(field.first.size())},
-            {field.second.data(), static_cast<std::uint32_t>(field.second.size())},
-        });
-    }
-
-    A2FO_ObjectDestroyedEvent event{};
-    event.struct_size = sizeof(event);
-    event.source_odf = {
-        source.source_odf.data(),
-        static_cast<std::uint32_t>(source.source_odf.size())};
-    event.odf_fields = fields.empty() ? nullptr : fields.data();
-    event.odf_field_count = static_cast<std::uint32_t>(fields.size());
-    std::copy(source.transform.values.begin(), source.transform.values.end(),
-              event.transform);
-    event.source_team = source.source_team;
-    event.source_handle = source.source_handle;
-    event.random_seed = source.random_seed;
-
-    for (std::size_t index = 0; index < handlers.size(); ++index) {
-        const NativeObjectDestroyedRegistration& registration = handlers[index];
-        if (!registration.enabled || !registration.handler) continue;
-
-        A2FO_ObjectReplacement replacement{};
-        replacement.struct_size = sizeof(replacement);
-        replacement.flags = A2FO_REPLACEMENT_INHERIT_POSITION |
-                            A2FO_REPLACEMENT_INHERIT_ROTATION;
-        replacement.owner = A2FO_REPLACEMENT_OWNER_NEUTRAL;
-        bool claimed = false;
-        try {
-            claimed = registration.handler(
-                &event, &replacement, registration.user_data);
-        } catch (...) {
-            log_line("Native object-destroyed handler threw and was disabled: " +
-                     registration.owner);
-            StateLockGuard lock;
-            if (index < g_object_destroyed_handlers.size()) {
-                g_object_destroyed_handlers[index].enabled = false;
+bool resolve_native_object_destroyed(const DestroyedObjectSnapshot& source,ObjectReplacement& selected_replacement) {
+    struct Context {
+        const DestroyedObjectSnapshot& source;ObjectReplacement& selected;
+        a2fo::RustHandlerRegistry<NativeObjectDestroyedRegistration> handlers{};
+        std::vector<A2FO_OdfFieldView> fields{};
+        A2FO_ObjectDestroyedEvent event{};A2FO_ObjectReplacement replacement{};
+        std::optional<a2fo::RustHandlerRegistry<NativeObjectDestroyedRegistration>::Borrowed> current{};
+        const char* odf_end=nullptr;std::size_t odf_length=0;std::exception_ptr error{};
+    } context{source,selected_replacement};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:{StateLockGuard lock;c.handlers=g_object_destroyed_handlers;return c.handlers.size();}
+        case 1:
+            // Native SDK marshalling retains native strings, iteration order,
+            // float bit copies and the lifetime of every borrowed field view.
+            c.fields.reserve(c.source.odf.size());
+            for(const auto& field:c.source.odf)c.fields.push_back({
+                {field.first.data(),static_cast<std::uint32_t>(field.first.size())},
+                {field.second.data(),static_cast<std::uint32_t>(field.second.size())}});
+            c.event.struct_size=sizeof(c.event);
+            c.event.source_odf={c.source.source_odf.data(),static_cast<std::uint32_t>(c.source.source_odf.size())};
+            c.event.odf_fields=c.fields.empty()?nullptr:c.fields.data();
+            c.event.odf_field_count=static_cast<std::uint32_t>(c.fields.size());
+            std::copy(c.source.transform.values.begin(),c.source.transform.values.end(),c.event.transform);
+            c.event.source_team=c.source.source_team;c.event.source_handle=c.source.source_handle;c.event.random_seed=c.source.random_seed;
+            return 0;
+        case 2:return c.handlers.size();
+        case 3:c.current=c.handlers.borrow(a);return c.current->enabled;
+        case 4:return c.current->handler!=nullptr;
+        case 5:c.replacement={};c.replacement.struct_size=sizeof(c.replacement);
+            c.replacement.flags=A2FO_REPLACEMENT_INHERIT_POSITION|A2FO_REPLACEMENT_INHERIT_ROTATION;
+            c.replacement.owner=A2FO_REPLACEMENT_OWNER_NEUTRAL;return 0;
+        case 6:
+            // Preserve the original native catch region and active exception
+            // while logging and updating the current global registration.
+            try{return c.current->handler(&c.event,&c.replacement,c.current->user_data)?1:0;}
+            catch(...){
+                log_line("Native object-destroyed handler threw and was disabled: "+c.current->owner);
+                StateLockGuard lock;
+                if(a<g_object_destroyed_handlers.size())g_object_destroyed_handlers.set_enabled(a,false);
+                return 2;
             }
-            continue;
-        }
-        if (!claimed) continue;
-
-        const char* odf_end = replacement.odf
-            ? static_cast<const char*>(std::memchr(replacement.odf, '\0', 256))
-            : nullptr;
-        const std::uint32_t known_flags =
-            A2FO_REPLACEMENT_INHERIT_POSITION |
-            A2FO_REPLACEMENT_INHERIT_ROTATION;
-        const std::size_t odf_length = odf_end
-            ? static_cast<std::size_t>(odf_end - replacement.odf) : 0;
-        if (replacement.struct_size < sizeof(A2FO_ObjectReplacement) ||
-            !odf_end ||
-            !valid_replacement_odf_name(replacement.odf, odf_length) ||
-            (replacement.flags & ~known_flags) != 0 ||
-            replacement.owner > A2FO_REPLACEMENT_OWNER_ORIGINAL) {
-            log_line("Native object-destroyed handler returned an invalid "
-                     "replacement: " + registration.owner);
-            continue;
-        }
-
-        selected_replacement.odf.assign(
-            replacement.odf, odf_length);
-        selected_replacement.inherit_position =
-            (replacement.flags & A2FO_REPLACEMENT_INHERIT_POSITION) != 0;
-        selected_replacement.inherit_rotation =
-            (replacement.flags & A2FO_REPLACEMENT_INHERIT_ROTATION) != 0;
-        selected_replacement.owner =
-            replacement.owner == A2FO_REPLACEMENT_OWNER_ORIGINAL
-                ? ReplacementOwner::original
-                : ReplacementOwner::neutral;
-        return true;
-    }
-    return false;
+        case 7:c.odf_end=c.replacement.odf?static_cast<const char*>(std::memchr(c.replacement.odf,'\0',256)):nullptr;
+            c.odf_length=c.odf_end?static_cast<std::size_t>(c.odf_end-c.replacement.odf):0;return 0;
+        case 8:return c.replacement.struct_size;
+        case 9:return c.odf_end!=nullptr;
+        case 10:return valid_replacement_odf_name(c.replacement.odf,c.odf_length);
+        case 11:return c.replacement.flags;
+        case 12:return c.replacement.owner;
+        case 13:log_line("Native object-destroyed handler returned an invalid replacement: "+c.current->owner);return 0;
+        case 14:c.selected.odf.assign(c.replacement.odf,c.odf_length);return 0;
+        case 16:c.selected.inherit_position=a!=0;return 0;
+        case 17:c.selected.inherit_rotation=a!=0;return 0;
+        case 18:c.selected.owner=a?ReplacementOwner::original:ReplacementOwner::neutral;return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const A2foRsReplacementRules rules{sizeof(A2FO_ObjectReplacement),A2FO_REPLACEMENT_INHERIT_POSITION|A2FO_REPLACEMENT_INHERIT_ROTATION,A2FO_REPLACEMENT_INHERIT_POSITION,A2FO_REPLACEMENT_INHERIT_ROTATION,A2FO_REPLACEMENT_OWNER_ORIGINAL,A2FO_REPLACEMENT_OWNER_ORIGINAL};
+    const auto result=a2fo_rs_stage8_core_resolve_destroyed(&rules,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result==1;
 }
 
-void spawn_object_replacement(const DestroyedObjectSnapshot& source,
-                              const ObjectReplacement& replacement) {
-    using FindFunction = void* (A2FO_CALL*)(const char*);
-    const auto find_object_class = reinterpret_cast<FindFunction>(
-        at(g_armada, kGameObjectClassFindRva));
-    void* object_class = find_object_class(replacement.odf.c_str());
-    if (!object_class) {
-        log_line("Object replacement ODF was not loaded: " +
-                 replacement.odf);
-        return;
-    }
-
-    Matrix34Snapshot transform;
-    transform.values[0] = 1.0f;
-    transform.values[4] = 1.0f;
-    transform.values[8] = 1.0f;
-    if (replacement.inherit_rotation) {
-        std::copy_n(source.transform.values.begin(), 9,
-                    transform.values.begin());
-    }
-    if (replacement.inherit_position) {
-        std::copy_n(source.transform.values.begin() + 9, 3,
-                    transform.values.begin() + 9);
-    }
-
-    const int team = replacement.owner == ReplacementOwner::original
-        ? source.source_team : 0;
-    void* object = a2fo_call_game_object_construct(
-        at(g_armada, kGameObjectClassConstructRva), object_class,
-        &transform, team, 0, nullptr);
-    if (!object) {
-        log_line("Object replacement could not construct: " +
-                 replacement.odf);
-        return;
-    }
-    using GetCurrentMissionFunction = void* (A2FO_CALL*)();
-    const auto get_current_mission =
-        reinterpret_cast<GetCurrentMissionFunction>(
-            at(g_armada, kAiMissionGetCurrentRva));
-    void* mission = get_current_mission();
-    if (!mission) {
-        log_line("Object replacement was constructed without an active "
-                 "mission: " + replacement.odf);
-        return;
-    }
-    void** mission_vtable = *reinterpret_cast<void***>(mission);
-    if (!mission_vtable || !mission_vtable[6]) {
-        log_line("Object replacement could not reach AiMission::AddObject: " +
-                 replacement.odf);
-        return;
-    }
-    a2fo_call_game_object_argument(mission_vtable[6], mission, object);
-    log_line("Object replacement: " + source.source_odf + " -> " +
-             replacement.odf);
+void spawn_object_replacement(const DestroyedObjectSnapshot& source,const ObjectReplacement& replacement) {
+    struct Context {const DestroyedObjectSnapshot& source;const ObjectReplacement& replacement;
+        void* object_class=nullptr;Matrix34Snapshot transform{};void* object=nullptr;void* mission=nullptr;void** vtable=nullptr;
+        std::exception_ptr error{};
+    } context{source,replacement};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:{using Fn=void*(A2FO_CALL*)(const char*);c.object_class=reinterpret_cast<Fn>(at(g_armada,kGameObjectClassFindRva))(c.replacement.odf.c_str());return c.object_class!=nullptr;}
+        case 1:log_line("Object replacement ODF was not loaded: "+c.replacement.odf);return 0;
+        case 2:c.transform.values[0]=1.0f;c.transform.values[4]=1.0f;c.transform.values[8]=1.0f;return 0;
+        case 3:return c.replacement.inherit_rotation;
+        case 4:std::copy_n(c.source.transform.values.begin(),9,c.transform.values.begin());return 0;
+        case 5:return c.replacement.inherit_position;
+        case 6:std::copy_n(c.source.transform.values.begin()+9,3,c.transform.values.begin()+9);return 0;
+        case 7:return c.replacement.owner==ReplacementOwner::original;
+        case 8:{const int team=a?c.source.source_team:0;c.object=a2fo_call_game_object_construct(at(g_armada,kGameObjectClassConstructRva),c.object_class,&c.transform,team,0,nullptr);return c.object!=nullptr;}
+        case 9:log_line("Object replacement could not construct: "+c.replacement.odf);return 0;
+        case 10:{using Fn=void*(A2FO_CALL*)();c.mission=reinterpret_cast<Fn>(at(g_armada,kAiMissionGetCurrentRva))();return c.mission!=nullptr;}
+        case 11:log_line("Object replacement was constructed without an active mission: "+c.replacement.odf);return 0;
+        case 12:c.vtable=*reinterpret_cast<void***>(c.mission);return c.vtable!=nullptr;
+        case 13:return c.vtable[6]!=nullptr;
+        case 14:log_line("Object replacement could not reach AiMission::AddObject: "+c.replacement.odf);return 0;
+        case 15:a2fo_call_game_object_argument(c.vtable[6],c.mission,c.object);return 0;
+        case 16:log_line("Object replacement: "+c.source.source_odf+" -> "+c.replacement.odf);return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    a2fo_rs_stage8_core_spawn_replacement(step,&context);
+    if(context.error)std::rethrow_exception(context.error);
 }
 
 void __attribute__((fastcall)) craft_explode_hook(void* self, void*) {
@@ -2588,11 +2543,10 @@ bool install_weapon_class_loaded_hook() {
     void* site = at(g_armada, kWeaponClassConstructorRva);
     if (std::memcmp(site, kExpectedWeaponClassConstructor,
                     sizeof(kExpectedWeaponClassConstructor)) == 0) {
-        if (!a2fo::install_inline_hook(
+        if (!a2fo_rs_windows_hook_install(
                 site, reinterpret_cast<void*>(&weapon_class_constructor_hook),
                 sizeof(kExpectedWeaponClassConstructor),
-                kExpectedWeaponClassConstructor,
-                g_weapon_class_constructor_hook)) {
+                kExpectedWeaponClassConstructor, &(g_weapon_class_constructor_hook))) {
             log_line("Could not install WeaponClass-loaded dispatcher");
             return false;
         }
@@ -2612,7 +2566,7 @@ bool install_weapon_class_loaded_hook() {
         }
         std::uint8_t expected_detour[6]{};
         std::memcpy(expected_detour, site, patch_length);
-        if (!a2fo::patch_jump(
+        if (!a2fo_rs_windows_patch_jump(
                 site, reinterpret_cast<void*>(&weapon_class_constructor_hook),
                 expected_detour, patch_length)) {
             log_line("Could not chain WeaponClass-loaded dispatcher");
@@ -2633,12 +2587,11 @@ bool install_weapon_trigger_hook() {
                  "dispatch disabled");
         return false;
     }
-    if (!a2fo::install_inline_hook(
+    if (!a2fo_rs_windows_hook_install(
             at(g_armada, kWeaponTriggerObjectRva),
             reinterpret_cast<void*>(&weapon_trigger_object_hook),
             sizeof(kExpectedWeaponTriggerObject),
-            kExpectedWeaponTriggerObject,
-            g_weapon_trigger_object_hook)) {
+            kExpectedWeaponTriggerObject, &(g_weapon_trigger_object_hook))) {
         log_line("Could not install shared weapon-trigger dispatcher");
         return false;
     }
@@ -2673,18 +2626,17 @@ bool install_craft_event_hooks() {
     }
 
     if (stock_simulate) {
-        if (!a2fo::install_inline_hook(
+        if (!a2fo_rs_windows_hook_install(
                 simulate_site,
                 reinterpret_cast<void*>(&craft_simulate_event_hook),
-                sizeof(kExpectedCraftSimulate), kExpectedCraftSimulate,
-                g_craft_simulate_hook)) {
+                sizeof(kExpectedCraftSimulate), kExpectedCraftSimulate, &(g_craft_simulate_hook))) {
             return false;
         }
         g_craft_simulate_original = g_craft_simulate_hook.gateway;
     } else {
         std::uint8_t expected_detour[6]{};
         std::memcpy(expected_detour, simulate_site, simulate_patch_length);
-        if (!a2fo::patch_jump(
+        if (!a2fo_rs_windows_patch_jump(
                 simulate_site,
                 reinterpret_cast<void*>(&craft_simulate_event_hook),
                 expected_detour, simulate_patch_length)) {
@@ -2692,16 +2644,14 @@ bool install_craft_event_hooks() {
         }
         g_craft_simulate_original = simulate_destination;
     }
-    const bool installed = a2fo::install_inline_hook(
+    const bool installed = a2fo_rs_windows_hook_install(
             at(g_armada, kCraftCleanupRva),
             reinterpret_cast<void*>(&craft_cleanup_event_hook),
-            sizeof(kExpectedCraftCleanup), kExpectedCraftCleanup,
-            g_craft_cleanup_hook) &&
-        a2fo::install_inline_hook(
+            sizeof(kExpectedCraftCleanup), kExpectedCraftCleanup, &(g_craft_cleanup_hook)) &&
+        a2fo_rs_windows_hook_install(
             at(g_armada, kCraftPostLoadRva),
             reinterpret_cast<void*>(&craft_post_load_event_hook),
-            sizeof(kExpectedCraftPostLoad), kExpectedCraftPostLoad,
-            g_craft_post_load_hook);
+            sizeof(kExpectedCraftPostLoad), kExpectedCraftPostLoad, &(g_craft_post_load_hook));
     if (!installed) {
         log_line("Could not install every shared Craft-event hook");
         return false;
@@ -2722,12 +2672,11 @@ bool install_game_object_class_loaded_hook() {
                  "dispatch disabled");
         return false;
     }
-    if (!a2fo::install_inline_hook(
+    if (!a2fo_rs_windows_hook_install(
             at(g_armada, kGameObjectClassFindProjectIdRva),
             reinterpret_cast<void*>(&game_object_class_find_project_id_hook),
             sizeof(kExpectedGameObjectClassFindProjectId),
-            kExpectedGameObjectClassFindProjectId,
-            g_game_object_class_find_project_id_hook)) {
+            kExpectedGameObjectClassFindProjectId, &(g_game_object_class_find_project_id_hook))) {
         log_line("Could not install GameObjectClass ODF field capture hook");
         return false;
     }
@@ -2759,11 +2708,10 @@ bool install_object_destroyed_hook() {
                  "replacement dispatch disabled");
         return false;
     }
-    if (!a2fo::install_inline_hook(
+    if (!a2fo_rs_windows_hook_install(
             at(g_armada, kCraftExplodeRva),
             reinterpret_cast<void*>(&craft_explode_hook),
-            sizeof(kExpectedCraftExplode), kExpectedCraftExplode,
-            g_craft_explode_hook)) {
+            sizeof(kExpectedCraftExplode), kExpectedCraftExplode, &(g_craft_explode_hook))) {
         log_line("Could not install object-destroyed hook");
         return false;
     }
@@ -2785,7 +2733,7 @@ bool install_race_loaded_hook() {
     }
     g_a2fo_race_parameter_db_destructor =
         at(g_fleet_ops, kParameterDbDestructorRva);
-    if (!a2fo::patch_call(
+    if (!a2fo_rs_windows_patch_call(
             at(g_fleet_ops, kRaceParameterDbDestructorCallRva),
             reinterpret_cast<void*>(&a2fo_race_parameter_db_dispatch_bridge),
             kExpectedRaceParameterDbDestructorCall,
@@ -2906,52 +2854,45 @@ bool install_classlabel_alias_hook() {
     // Install the pass-through typed hooks first. No module can register a
     // default policy until the complete suite is ready, so a partial install
     // remains behaviorally native if a later detour unexpectedly fails.
-    if (!a2fo::install_inline_hook(
+    if (!a2fo_rs_windows_hook_install(
             at(g_armada, kParameterDbGetIntRva),
             reinterpret_cast<void*>(&parameter_db_get_int_hook),
             sizeof(kExpectedParameterDbGetScalar),
-            kExpectedParameterDbGetScalar,
-            g_parameter_db_get_int_hook) ||
-        !a2fo::install_inline_hook(
+            kExpectedParameterDbGetScalar, &(g_parameter_db_get_int_hook)) ||
+        !a2fo_rs_windows_hook_install(
             at(g_armada, kParameterDbGetIntAlternativeRva),
             reinterpret_cast<void*>(&parameter_db_get_int_alternative_hook),
             sizeof(kExpectedParameterDbGetScalar),
-            kExpectedParameterDbGetScalar,
-            g_parameter_db_get_int_alternative_hook) ||
-        !a2fo::install_inline_hook(
+            kExpectedParameterDbGetScalar, &(g_parameter_db_get_int_alternative_hook)) ||
+        !a2fo_rs_windows_hook_install(
             at(g_armada, kParameterDbGetFloatRva),
             reinterpret_cast<void*>(&parameter_db_get_float_hook),
             sizeof(kExpectedParameterDbGetScalar),
-            kExpectedParameterDbGetScalar,
-            g_parameter_db_get_float_hook) ||
-        !a2fo::install_inline_hook(
+            kExpectedParameterDbGetScalar, &(g_parameter_db_get_float_hook)) ||
+        !a2fo_rs_windows_hook_install(
             at(g_armada, kParameterDbGetBoolRva),
             reinterpret_cast<void*>(&parameter_db_get_bool_hook),
             sizeof(kExpectedParameterDbGetScalar),
-            kExpectedParameterDbGetScalar,
-            g_parameter_db_get_bool_hook) ||
-        !a2fo::install_inline_hook(
+            kExpectedParameterDbGetScalar, &(g_parameter_db_get_bool_hook)) ||
+        !a2fo_rs_windows_hook_install(
             at(g_armada, kParameterDbGetOwnedStringRva),
             reinterpret_cast<void*>(&parameter_db_get_owned_string_hook),
             sizeof(kExpectedParameterDbGetScalar),
-            kExpectedParameterDbGetScalar,
-            g_parameter_db_get_owned_string_hook) ||
-        !a2fo::install_inline_hook(
+            kExpectedParameterDbGetScalar, &(g_parameter_db_get_owned_string_hook)) ||
+        !a2fo_rs_windows_hook_install(
             at(g_armada, kParameterDbGetStringVectorRva),
             reinterpret_cast<void*>(&parameter_db_get_string_vector_hook),
             sizeof(kExpectedParameterDbGetScalar),
-            kExpectedParameterDbGetScalar,
-            g_parameter_db_get_string_vector_hook)) {
+            kExpectedParameterDbGetScalar, &(g_parameter_db_get_string_vector_hook))) {
         log_line("Could not install ParameterDB typed-default hooks");
         return false;
     }
 
-    if (!a2fo::install_inline_hook(
+    if (!a2fo_rs_windows_hook_install(
             at(g_armada, kParameterDbGetStringRva),
             reinterpret_cast<void*>(&parameter_db_get_string_hook),
             sizeof(kExpectedParameterDbGetString),
-            kExpectedParameterDbGetString,
-            g_parameter_db_get_string_hook)) {
+            kExpectedParameterDbGetString, &(g_parameter_db_get_string_hook))) {
 
         log_line("Could not install ParameterDB GetString hook");
         return false;
@@ -2974,27 +2915,26 @@ bool install_evolver_hooks() {
         log_line("Evolver hook signature mismatch; no evolver hooks installed");
         return false;
     }
-    if (!a2fo::install_inline_hook(
+    if (!a2fo_rs_windows_hook_install(
             at(g_armada, kEvolverClassBuildClassRva),
             reinterpret_cast<void*>(&evolver_class_build_class_hook),
-            sizeof(kExpectedBuildClass), kExpectedBuildClass,
-            g_build_class_hook)) {
+            sizeof(kExpectedBuildClass), kExpectedBuildClass, &(g_build_class_hook))) {
         log_line("EvolverClass BuildClass hook signature mismatch");
         return false;
     }
-    if (!a2fo::install_inline_hook(at(g_armada, kEvolverClassDtorRva),
+    if (!a2fo_rs_windows_hook_install(at(g_armada, kEvolverClassDtorRva),
                                    reinterpret_cast<void*>(&evolver_class_dtor_hook),
-                                   sizeof(kExpectedDtor), kExpectedDtor, g_dtor_hook)) {
+                                   sizeof(kExpectedDtor), kExpectedDtor, &(g_dtor_hook))) {
         log_line("EvolverClass destructor hook signature mismatch");
         return false;
     }
-    if (!a2fo::patch_jump(at(g_armada, kCocoonSelectorRva),
+    if (!a2fo_rs_windows_patch_jump(at(g_armada, kCocoonSelectorRva),
                           reinterpret_cast<void*>(&a2fo_cocoon_selector_hook),
                           kExpectedCocoonJump, sizeof(kExpectedCocoonJump))) {
         log_line("Cocoon selector hook signature mismatch");
         return false;
     }
-    if (!a2fo::patch_jump(
+    if (!a2fo_rs_windows_patch_jump(
             at(g_armada, kCocoonUpdateSelectorRva),
             reinterpret_cast<void*>(&a2fo_cocoon_update_selector_hook),
             kExpectedCocoonUpdateSelector,
@@ -3023,22 +2963,22 @@ bool install_fofs_item_get_lookup_hook() {
         log_line("Fleet Operations ODF lookup call signature mismatch");
         return false;
     }
-    if (!a2fo::patch_call(
+    if (!a2fo_rs_windows_patch_call(
             at(g_fleet_ops, kFofsItemGetHashLookupCallRva),
             reinterpret_cast<void*>(&fofs_item_get_hash_lookup_hook),
             kExpectedFofsItemGetHashLookupCall,
             sizeof(kExpectedFofsItemGetHashLookupCall)) ||
-        !a2fo::patch_call(
+        !a2fo_rs_windows_patch_call(
             at(g_fleet_ops, kFofsItemLocateHashLookupCallRva),
             reinterpret_cast<void*>(&fofs_item_get_hash_lookup_hook),
             kExpectedFofsItemLocateHashLookupCall,
             sizeof(kExpectedFofsItemLocateHashLookupCall)) ||
-        !a2fo::patch_call(
+        !a2fo_rs_windows_patch_call(
             at(g_fleet_ops, kFofsItemExistsHashLookupCallRva),
             reinterpret_cast<void*>(&fofs_item_get_hash_lookup_hook),
             kExpectedFofsItemExistsHashLookupCall,
             sizeof(kExpectedFofsItemExistsHashLookupCall)) ||
-        !a2fo::patch_call(
+        !a2fo_rs_windows_patch_call(
             at(g_fleet_ops, kFofsProjectIdHashLookupCallRva),
             reinterpret_cast<void*>(&fofs_item_get_hash_lookup_hook),
             kExpectedFofsProjectIdHashLookupCall,
@@ -3060,11 +3000,11 @@ bool install_mod_user_directory_hook() {
                  "SettingsDirectory disabled");
         return false;
     }
-    if (!a2fo::install_inline_hook(
+    if (!a2fo_rs_windows_hook_install(
             at(g_fleet_ops, kGetModUserDirectoryRva),
             reinterpret_cast<void*>(&mod_user_directory_hook),
             sizeof(kExpectedGetModUserDirectory),
-            kExpectedGetModUserDirectory, g_mod_user_directory_hook)) {
+            kExpectedGetModUserDirectory, &(g_mod_user_directory_hook))) {
         log_line("Could not install Fleet Operations SettingsDirectory hook");
         return false;
     }
@@ -3081,12 +3021,11 @@ bool install_fo_settings_default_hook() {
                  "Settings.xml DefaultGameSpeed disabled");
         return false;
     }
-    if (!a2fo::install_inline_hook(
+    if (!a2fo_rs_windows_hook_install(
             at(g_fleet_ops, kFoSettingsGetInstanceRva),
             reinterpret_cast<void*>(&fo_settings_get_instance_hook),
             sizeof(kExpectedFoSettingsGetInstance),
-            kExpectedFoSettingsGetInstance,
-            g_fo_settings_get_instance_hook)) {
+            kExpectedFoSettingsGetInstance, &(g_fo_settings_get_instance_hook))) {
         log_line("Could not install Fleet Operations Settings.xml default "
                  "hook");
         return false;
@@ -3104,12 +3043,11 @@ bool install_default_game_speed_hook() {
                  "DefaultGameSpeed disabled");
         return false;
     }
-    if (!a2fo::install_inline_hook(
+    if (!a2fo_rs_windows_hook_install(
             at(g_fleet_ops, kGameConfigurationNewRva),
             reinterpret_cast<void*>(&game_configuration_new_hook),
             sizeof(kExpectedGameConfigurationNew),
-            kExpectedGameConfigurationNew,
-            g_game_configuration_new_hook)) {
+            kExpectedGameConfigurationNew, &(g_game_configuration_new_hook))) {
         log_line("Could not install Fleet Operations DefaultGameSpeed hook");
         return false;
     }
@@ -3126,12 +3064,11 @@ bool install_runtime_game_speed_hook() {
                  "DefaultGameSpeed disabled");
         return false;
     }
-    if (!a2fo::install_inline_hook(
+    if (!a2fo_rs_windows_hook_install(
             at(g_fleet_ops, kGameConfigurationLoadProfileRva),
             reinterpret_cast<void*>(&game_configuration_load_profile_hook),
             sizeof(kExpectedGameConfigurationLoadProfile),
-            kExpectedGameConfigurationLoadProfile,
-            g_game_configuration_load_profile_hook)) {
+            kExpectedGameConfigurationLoadProfile, &(g_game_configuration_load_profile_hook))) {
         log_line("Could not install Fleet Operations runtime "
                  "DefaultGameSpeed hook");
         return false;
@@ -3149,7 +3086,7 @@ bool install_user_profile_game_speed_hook() {
                  "DefaultGameSpeed supplier disabled");
         return false;
     }
-    if (!a2fo::patch_jump(
+    if (!a2fo_rs_windows_patch_jump(
             at(g_armada, kDefaultUserProfileGameSpeedRva),
             reinterpret_cast<void*>(&default_user_profile_game_speed_hook),
             kExpectedDefaultUserProfileGameSpeed,
@@ -3187,8 +3124,8 @@ bool A2FO_CALL api_install_inline_hook(
     if (!output) {
         return false;
     }
-    a2fo::InlineHook hook;
-    if (!a2fo::install_inline_hook(target, replacement, length, expected, hook)) {
+    A2foRsInlineHook hook{};
+    if (!a2fo_rs_windows_hook_install(target, replacement, length, expected, &(hook))) {
         return false;
     }
     output->target = hook.target;
@@ -3200,77 +3137,77 @@ bool A2FO_CALL api_install_inline_hook(
 bool A2FO_CALL api_patch_jump(void* target, void* replacement,
                               const std::uint8_t* expected,
                               std::size_t length) {
-    return a2fo::patch_jump(target, replacement, expected, length);
+    return a2fo_rs_windows_patch_jump(target, replacement, expected, length);
 }
 
 bool A2FO_CALL api_patch_call(void* target, void* replacement,
                               const std::uint8_t* expected,
                               std::size_t length) {
-    return a2fo::patch_call(target, replacement, expected, length);
+    return a2fo_rs_windows_patch_call(target, replacement, expected, length);
 }
 
 bool A2FO_CALL api_patch_bytes(void* target,
                                const std::uint8_t* replacement,
                                const std::uint8_t* expected,
                                std::size_t length) {
-    return a2fo::patch_bytes(target, replacement, expected, length);
+    return a2fo_rs_windows_patch_bytes(target, replacement, expected, length);
 }
 
-bool A2FO_CALL api_register_fofs_item_lookup_handler(
-    const char* module_name, A2FO_FofsItemLookupHandler handler,
-    void* user_data) {
-    if (!handler || !g_state_lock_ready) {
-        return false;
-    }
-    const std::string owner =
-        module_name && *module_name ? module_name : "unnamed module";
-    bool registered = false;
-    EnterCriticalSection(&g_state_lock);
-    if (g_policy_registration_open &&
-        g_registration_transaction.active &&
-        !g_fofs_item_lookup_handler) {
-        g_fofs_item_lookup_handler = handler;
-        g_fofs_item_lookup_user_data = user_data;
-        g_fofs_item_lookup_owner = owner;
-        registered = true;
-    }
-    const std::string existing_owner = g_fofs_item_lookup_owner;
-    LeaveCriticalSection(&g_state_lock);
-    if (registered) {
-        log_line("FOFS item lookup handler registered by " + owner);
-    } else {
-        log_line("FOFS item lookup handler rejected for " + owner +
-                 "; already owned by " + existing_owner);
-    }
-    return registered;
+bool A2FO_CALL api_register_fofs_item_lookup_handler(const char* module_name,A2FO_FofsItemLookupHandler handler,void* user_data) {
+    struct Context {const char* name;A2FO_FofsItemLookupHandler handler;void* user_data;std::optional<std::string> owner{};std::optional<std::string> existing_owner{};std::exception_ptr error{};} context{module_name,handler,user_data};
+    const auto step=+[](void* opaque,std::uint32_t op) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return c.handler!=nullptr;
+        case 1:return g_state_lock_ready;
+        case 2:c.owner.emplace(c.name);return 0;
+        case 14:return c.name!=nullptr;
+        case 15:c.owner.emplace("unnamed module");return 0;
+        case 16:return *c.name!=0;
+        case 3:EnterCriticalSection(&g_state_lock);return 0;
+        case 4:return g_policy_registration_open;
+        case 5:return g_registration_transaction.active;
+        case 6:return g_fofs_item_lookup_handler==nullptr;
+        case 7:g_fofs_item_lookup_handler=c.handler;return 0;
+        case 8:g_fofs_item_lookup_user_data=c.user_data;return 0;
+        case 9:g_fofs_item_lookup_owner=*c.owner;return 0;
+        case 10:c.existing_owner.emplace(g_fofs_item_lookup_owner);return 0;
+        case 11:LeaveCriticalSection(&g_state_lock);return 0;
+        case 12:log_line("FOFS item lookup handler registered by "+*c.owner);return 0;
+        case 13:log_line("FOFS item lookup handler rejected for "+*c.owner+"; already owned by "+*c.existing_owner);return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_core_lookup(1,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
 }
 
-bool A2FO_CALL api_register_info_ini_defaults_handler(
-    const char* module_name, A2FO_InfoIniDefaultsHandler handler,
-    void* user_data) {
-    if (!handler || !g_state_lock_ready) return false;
-    const std::string owner = policy_owner(module_name);
-    bool registered = false;
-    std::string existing_owner;
-    {
-        StateLockGuard lock;
-        if (g_policy_registration_open &&
-            g_registration_transaction.active &&
-            !g_info_ini_defaults_handler) {
-            g_info_ini_defaults_handler = handler;
-            g_info_ini_defaults_user_data = user_data;
-            g_info_ini_defaults_owner = owner;
-            registered = true;
-        }
-        existing_owner = g_info_ini_defaults_owner;
-    }
-    if (registered) {
-        log_line("info.ini defaults handler registered by " + owner);
-    } else {
-        log_line("info.ini defaults handler rejected for " + owner +
-                 "; already owned by " + existing_owner);
-    }
-    return registered;
+bool A2FO_CALL api_register_info_ini_defaults_handler(const char* module_name,A2FO_InfoIniDefaultsHandler handler,void* user_data) {
+    struct Context {const char* name;A2FO_InfoIniDefaultsHandler handler;void* user_data;std::optional<std::string> owner{};std::optional<std::string> existing_owner{};std::optional<StateLockGuard> lock{};std::exception_ptr error{};} context{module_name,handler,user_data};
+    const auto step=+[](void* opaque,std::uint32_t op) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return c.handler!=nullptr;
+        case 1:return g_state_lock_ready;
+        case 2:c.owner.emplace(policy_owner(c.name));return 0;
+        case 3:c.lock.emplace();return 0;
+        case 4:return g_policy_registration_open;
+        case 5:return g_registration_transaction.active;
+        case 6:return g_info_ini_defaults_handler==nullptr;
+        case 7:g_info_ini_defaults_handler=c.handler;return 0;
+        case 8:g_info_ini_defaults_user_data=c.user_data;return 0;
+        case 9:g_info_ini_defaults_owner=*c.owner;return 0;
+        case 10:c.existing_owner.emplace(g_info_ini_defaults_owner);return 0;
+        case 11:c.lock.reset();return 0;
+        case 12:log_line("info.ini defaults handler registered by "+*c.owner);return 0;
+        case 13:log_line("info.ini defaults handler rejected for "+*c.owner+"; already owned by "+*c.existing_owner);return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_core_lookup(2,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
 }
 
 bool A2FO_CALL api_register_classlabel_alias(
@@ -3299,6 +3236,19 @@ bool A2FO_CALL api_register_classlabel_odf_defaults(
     } catch (...) {
         log_line("Classlabel ODF defaults registration failed after an "
                  "unexpected C++ exception");
+        return false;
+    }
+}
+
+bool A2FO_CALL api_register_race_odf_defaults(
+    const char* module_name, const A2FO_RaceOdfDefault* defaults,
+    std::uint32_t default_count) {
+    try {
+        return register_race_odf_defaults_policy(
+            module_name, defaults, default_count);
+    } catch (...) {
+        log_line("Race ODF defaults registration failed after an unexpected "
+                 "C++ exception");
         return false;
     }
 }
@@ -3352,328 +3302,149 @@ bool A2FO_CALL api_get_odf_overlay_directory(
     return true;
 }
 
-bool A2FO_CALL api_register_object_destroyed_handler(
-    const char* module_name,
-    const char* const* required_odf_fields,
-    std::uint32_t required_odf_field_count,
-    A2FO_ObjectDestroyedHandler handler,
-    void* user_data) {
-    const std::string owner = policy_owner(module_name);
-    if (!handler || required_odf_field_count > 64 ||
-        (required_odf_field_count != 0 && !required_odf_fields)) {
-        log_line("Object-destroyed handler rejected for " + owner +
-                 "; invalid callback or field list");
-        return false;
-    }
-
-    NativeObjectDestroyedRegistration registration;
-    registration.owner = owner;
-    registration.handler = handler;
-    registration.user_data = user_data;
-    try {
-        std::set<std::string> unique_fields;
-        for (std::uint32_t index = 0;
-             index < required_odf_field_count; ++index) {
-            const char* field = required_odf_fields[index];
-            if (!valid_odf_field_name(field)) {
-                log_line("Object-destroyed handler rejected for " + owner +
-                         "; ODF fields must be 1-127 character identifiers");
-                return false;
-            }
-            unique_fields.insert(lower_ascii(field));
-        }
-        registration.required_odf_fields.assign(
-            unique_fields.begin(), unique_fields.end());
-    } catch (...) {
-        log_line("Object-destroyed handler rejected for " + owner +
-                 "; could not copy registration data");
-        return false;
-    }
-
-    bool registered = false;
-    {
-        StateLockGuard lock;
-        if (g_policy_registration_open &&
-            g_registration_transaction.active &&
-            g_object_destroyed_handlers.size() < 64) {
-            for (const std::string& field :
-                 registration.required_odf_fields) {
-                g_game_object_class_odf_fields.insert(field);
-            }
-            g_object_destroyed_handlers.push_back(std::move(registration));
-            registered = true;
-        }
-    }
-    if (registered) {
-        log_line("Object-destroyed handler registered by " + owner);
-    } else {
-        log_line("Object-destroyed handler rejected for " + owner +
-                 "; registration is closed or the handler limit was reached");
-    }
-    return registered;
+template<class Registration,class Handler>
+bool core_register_field_handler(std::uint32_t kind,const std::string& owner,
+    const char* const* fields,std::uint32_t count,Handler handler,void* user_data,
+    a2fo::RustHandlerRegistry<Registration>& handlers,std::set<std::string>& captured_fields) {
+    struct Context {
+        std::uint32_t kind;const std::string& owner;const char* const* fields;Handler handler;void* user_data;
+        a2fo::RustHandlerRegistry<Registration>& handlers;std::set<std::string>& captured_fields;
+        std::optional<Registration> registration{};std::optional<std::set<std::string>> unique{};
+        const char* field=nullptr;std::exception_ptr error{};std::optional<StateLockGuard> guard{};
+    } context{kind,owner,fields,handler,user_data,handlers,captured_fields};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        constexpr const char* rejected[]={"Object-destroyed handler rejected for ","GameObjectClass-loaded handler rejected for ","Race-loaded handler rejected for ","WeaponClass-loaded handler rejected for "};
+        constexpr const char* label[]={"Object-destroyed handler ","GameObjectClass-loaded handler ","Race-loaded handler ","WeaponClass-loaded handler "};
+        try{switch(op){
+        case 0:return c.handler!=nullptr;
+        case 1:return c.fields!=nullptr;
+        case 2:log_line(rejected[c.kind]+c.owner+"; invalid callback or field list");return 0;
+        case 3:c.registration.emplace();c.registration->owner=c.owner;c.registration->handler=c.handler;c.registration->user_data=c.user_data;return 0;
+        case 4:c.unique.emplace();return 0;
+        case 5:c.field=c.fields[a];return valid_odf_field_name(c.field);
+        case 6:log_line(rejected[c.kind]+c.owner+(c.kind==0?"; ODF fields must be 1-127 character identifiers":"; invalid ODF field name"));return 0;
+        case 7:c.unique->insert(lower_ascii(c.field));return 0;
+        case 8:c.registration->required_odf_fields.assign(c.unique->begin(),c.unique->end());c.unique.reset();return 0;
+        case 9:c.unique.reset();c.error=nullptr;if(c.kind==0)log_line("Object-destroyed handler rejected for "+c.owner+"; could not copy registration data");return 0;
+        case 10:c.guard.emplace();return 0;
+        case 11:return g_policy_registration_open;
+        case 12:return g_registration_transaction.active;
+        case 13:return c.handlers.size();
+        case 14:return c.registration->required_odf_fields.size();
+        case 15:c.captured_fields.insert(c.registration->required_odf_fields[a]);return 0;
+        case 16:c.handlers.push_back(std::move(*c.registration));return 0;
+        case 17:c.guard.reset();return 0;
+        case 18:
+            if(c.kind==0){if(a)log_line("Object-destroyed handler registered by "+c.owner);
+                else log_line("Object-destroyed handler rejected for "+c.owner+"; registration is closed or the handler limit was reached");}
+            else log_line(std::string(label[c.kind])+(a?"registered by ":"rejected for ")+c.owner);
+            return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_core_field_handler(count,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result==1;
 }
 
-bool A2FO_CALL api_register_producer_event_handler(
-    const char* module_name, A2FO_ProducerEventHandler handler,
-    void* user_data) {
-    const std::string owner = policy_owner(module_name);
-    if (!handler || !g_state_lock_ready) return false;
-
-    bool registered = false;
-    {
-        StateLockGuard lock;
-        if (g_policy_registration_open &&
-            g_registration_transaction.active &&
-            g_producer_event_handlers.size() < 64) {
-            g_producer_event_handlers.push_back(
-                NativeProducerEventRegistration{owner, handler, user_data});
-            registered = true;
-        }
-    }
-    if (registered) {
-        log_line("Producer event handler registered by " + owner);
-    } else {
-        log_line("Producer event handler rejected for " + owner +
-                 "; registration is closed or the handler limit was reached");
-    }
-    return registered;
+bool A2FO_CALL api_register_object_destroyed_handler(const char* module_name,const char* const* required_odf_fields,
+    std::uint32_t required_odf_field_count,A2FO_ObjectDestroyedHandler handler,void* user_data) {
+    const std::string owner=policy_owner(module_name);
+    return core_register_field_handler(0,owner,required_odf_fields,required_odf_field_count,handler,user_data,g_object_destroyed_handlers,g_game_object_class_odf_fields);
 }
 
-bool A2FO_CALL api_register_game_object_class_loaded_handler(
-    const char* module_name,
-    const char* const* required_odf_fields,
-    std::uint32_t required_odf_field_count,
-    A2FO_GameObjectClassLoadedHandler handler,
-    void* user_data) {
-    const std::string owner = policy_owner(module_name);
-    if (!handler || required_odf_field_count > 64 ||
-        (required_odf_field_count != 0 && !required_odf_fields)) {
-        log_line("GameObjectClass-loaded handler rejected for " + owner +
-                 "; invalid callback or field list");
-        return false;
-    }
-    NativeGameObjectClassLoadedRegistration registration;
-    registration.owner = owner;
-    registration.handler = handler;
-    registration.user_data = user_data;
-    try {
-        std::set<std::string> unique_fields;
-        for (std::uint32_t index = 0;
-             index < required_odf_field_count; ++index) {
-            const char* field = required_odf_fields[index];
-            if (!valid_odf_field_name(field)) {
-                log_line("GameObjectClass-loaded handler rejected for " +
-                         owner + "; invalid ODF field name");
-                return false;
-            }
-            unique_fields.insert(lower_ascii(field));
-        }
-        registration.required_odf_fields.assign(
-            unique_fields.begin(), unique_fields.end());
-    } catch (...) {
-        return false;
-    }
-    bool registered = false;
-    {
-        StateLockGuard lock;
-        if (g_policy_registration_open &&
-            g_registration_transaction.active &&
-            g_game_object_class_loaded_handlers.size() < 64) {
-            for (const auto& field : registration.required_odf_fields) {
-                g_game_object_class_odf_fields.insert(field);
-            }
-            g_game_object_class_loaded_handlers.push_back(
-                std::move(registration));
-            registered = true;
-        }
-    }
-    log_line(std::string("GameObjectClass-loaded handler ") +
-             (registered ? "registered by " : "rejected for ") + owner);
-    return registered;
+template<class Registration,class Handler>
+bool core_register_event_handler(std::uint32_t kind,const std::string& owner,Handler handler,void* user_data,a2fo::RustHandlerRegistry<Registration>& handlers) {
+    struct Context {std::uint32_t kind;const std::string& owner;Handler handler;void* user_data;a2fo::RustHandlerRegistry<Registration>& handlers;
+        std::exception_ptr error{};std::optional<StateLockGuard> guard{};
+    } context{kind,owner,handler,user_data,handlers};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return c.handler!=nullptr;
+        case 1:return g_state_lock_ready;
+        case 2:c.guard.emplace();return 0;
+        case 3:return g_policy_registration_open;
+        case 4:return g_registration_transaction.active;
+        case 5:return c.handlers.size();
+        case 6:c.handlers.push_back(Registration{c.owner,c.handler,c.user_data});return 0;
+        case 7:c.guard.reset();return 0;
+        case 8:
+            if(c.kind==0){if(a)log_line("Producer event handler registered by "+c.owner);
+                else log_line("Producer event handler rejected for "+c.owner+"; registration is closed or the handler limit was reached");}
+            else log_line(std::string(c.kind==1?"Weapon-trigger handler ":"Craft-event handler ")+(a?"registered by ":"rejected for ")+c.owner);
+            return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_core_register_handler(step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result==1;
 }
 
-bool A2FO_CALL api_register_race_loaded_handler(
-    const char* module_name,
-    const char* const* required_odf_fields,
-    std::uint32_t required_odf_field_count,
-    A2FO_RaceLoadedHandler handler,
-    void* user_data) {
-    const std::string owner = policy_owner(module_name);
-    if (!handler || required_odf_field_count > 64 ||
-        (required_odf_field_count != 0 && !required_odf_fields)) {
-        log_line("Race-loaded handler rejected for " + owner +
-                 "; invalid callback or field list");
-        return false;
-    }
-    NativeRaceLoadedRegistration registration;
-    registration.owner = owner;
-    registration.handler = handler;
-    registration.user_data = user_data;
-    try {
-        std::set<std::string> unique_fields;
-        for (std::uint32_t index = 0;
-             index < required_odf_field_count; ++index) {
-            const char* field = required_odf_fields[index];
-            if (!valid_odf_field_name(field)) {
-                log_line("Race-loaded handler rejected for " + owner +
-                         "; invalid ODF field name");
-                return false;
-            }
-            unique_fields.insert(lower_ascii(field));
-        }
-        registration.required_odf_fields.assign(
-            unique_fields.begin(), unique_fields.end());
-    } catch (...) {
-        return false;
-    }
-    bool registered = false;
-    {
-        StateLockGuard lock;
-        if (g_policy_registration_open &&
-            g_registration_transaction.active &&
-            g_race_loaded_handlers.size() < 64) {
-            for (const auto& field : registration.required_odf_fields) {
-                g_race_odf_fields.insert(field);
-            }
-            g_race_loaded_handlers.push_back(std::move(registration));
-            registered = true;
-        }
-    }
-    log_line(std::string("Race-loaded handler ") +
-             (registered ? "registered by " : "rejected for ") + owner);
-    return registered;
+bool A2FO_CALL api_register_producer_event_handler(const char* module_name,A2FO_ProducerEventHandler handler,void* user_data) {
+    const std::string owner=policy_owner(module_name);
+    return core_register_event_handler(0,owner,handler,user_data,g_producer_event_handlers);
 }
 
-bool A2FO_CALL api_register_weapon_class_loaded_handler(
-    const char* module_name,
-    const char* const* required_odf_fields,
-    std::uint32_t required_odf_field_count,
-    A2FO_WeaponClassLoadedHandler handler,
-    void* user_data) {
-    const std::string owner = policy_owner(module_name);
-    if (!handler || required_odf_field_count > 64 ||
-        (required_odf_field_count != 0 && !required_odf_fields)) {
-        log_line("WeaponClass-loaded handler rejected for " + owner +
-                 "; invalid callback or field list");
-        return false;
-    }
-    NativeWeaponClassLoadedRegistration registration;
-    registration.owner = owner;
-    registration.handler = handler;
-    registration.user_data = user_data;
-    try {
-        std::set<std::string> unique_fields;
-        for (std::uint32_t index = 0;
-             index < required_odf_field_count; ++index) {
-            const char* field = required_odf_fields[index];
-            if (!valid_odf_field_name(field)) {
-                log_line("WeaponClass-loaded handler rejected for " + owner +
-                         "; invalid ODF field name");
-                return false;
-            }
-            unique_fields.insert(lower_ascii(field));
-        }
-        registration.required_odf_fields.assign(
-            unique_fields.begin(), unique_fields.end());
-    } catch (...) {
-        return false;
-    }
-    bool registered = false;
-    {
-        StateLockGuard lock;
-        if (g_policy_registration_open &&
-            g_registration_transaction.active &&
-            g_weapon_class_loaded_handlers.size() < 64) {
-            for (const auto& field : registration.required_odf_fields) {
-                g_weapon_class_odf_fields.insert(field);
-            }
-            g_weapon_class_loaded_handlers.push_back(
-                std::move(registration));
-            registered = true;
-        }
-    }
-    log_line(std::string("WeaponClass-loaded handler ") +
-             (registered ? "registered by " : "rejected for ") + owner);
-    return registered;
+bool A2FO_CALL api_register_game_object_class_loaded_handler(const char* module_name,const char* const* required_odf_fields,
+    std::uint32_t required_odf_field_count,A2FO_GameObjectClassLoadedHandler handler,void* user_data) {
+    const std::string owner=policy_owner(module_name);
+    return core_register_field_handler(1,owner,required_odf_fields,required_odf_field_count,handler,user_data,g_game_object_class_loaded_handlers,g_game_object_class_odf_fields);
 }
 
-bool A2FO_CALL api_register_weapon_trigger_handler(
-    const char* module_name, A2FO_WeaponTriggerHandler handler,
-    void* user_data) {
-    const std::string owner = policy_owner(module_name);
-    if (!handler || !g_state_lock_ready) return false;
-    bool registered = false;
-    {
-        StateLockGuard lock;
-        if (g_policy_registration_open &&
-            g_registration_transaction.active &&
-            g_weapon_trigger_handlers.size() < 64) {
-            g_weapon_trigger_handlers.push_back(
-                NativeWeaponTriggerRegistration{owner, handler, user_data});
-            registered = true;
-        }
-    }
-    log_line(std::string("Weapon-trigger handler ") +
-             (registered ? "registered by " : "rejected for ") + owner);
-    return registered;
+bool A2FO_CALL api_register_race_loaded_handler(const char* module_name,const char* const* required_odf_fields,
+    std::uint32_t required_odf_field_count,A2FO_RaceLoadedHandler handler,void* user_data) {
+    const std::string owner=policy_owner(module_name);
+    return core_register_field_handler(2,owner,required_odf_fields,required_odf_field_count,handler,user_data,g_race_loaded_handlers,g_race_odf_fields);
 }
 
-bool A2FO_CALL api_register_craft_event_handler(
-    const char* module_name, A2FO_CraftEventHandler handler,
-    void* user_data) {
-    const std::string owner = policy_owner(module_name);
-    if (!handler || !g_state_lock_ready) return false;
-    bool registered = false;
-    {
-        StateLockGuard lock;
-        if (g_policy_registration_open &&
-            g_registration_transaction.active &&
-            g_craft_event_handlers.size() < 64) {
-            g_craft_event_handlers.push_back(
-                NativeCraftEventRegistration{owner, handler, user_data});
-            registered = true;
-        }
-    }
-    log_line(std::string("Craft-event handler ") +
-             (registered ? "registered by " : "rejected for ") + owner);
-    return registered;
+bool A2FO_CALL api_register_weapon_class_loaded_handler(const char* module_name,const char* const* required_odf_fields,
+    std::uint32_t required_odf_field_count,A2FO_WeaponClassLoadedHandler handler,void* user_data) {
+    const std::string owner=policy_owner(module_name);
+    return core_register_field_handler(3,owner,required_odf_fields,required_odf_field_count,handler,user_data,g_weapon_class_loaded_handlers,g_weapon_class_odf_fields);
 }
 
-bool A2FO_CALL api_dispatch_producer_event(
-    const A2FO_ProducerEvent* event) {
-    if (!event ||
-        event->struct_size < sizeof(A2FO_ProducerEvent) ||
-        !event->producer ||
-        event->kind > A2FO_PRODUCER_EVENT_CLEARED ||
-        (event->kind != A2FO_PRODUCER_EVENT_DESTROYING &&
-         !event->target_class) ||
-        !g_state_lock_ready) {
-        return false;
-    }
+bool A2FO_CALL api_register_weapon_trigger_handler(const char* module_name,A2FO_WeaponTriggerHandler handler,void* user_data) {
+    const std::string owner=policy_owner(module_name);
+    return core_register_event_handler(1,owner,handler,user_data,g_weapon_trigger_handlers);
+}
 
-    std::vector<NativeProducerEventRegistration> handlers;
-    try {
-        StateLockGuard lock;
-        handlers = g_producer_event_handlers;
-    } catch (...) {
-        log_line("Producer event dispatch could not copy registrations");
-        return event->kind != A2FO_PRODUCER_EVENT_ADMIT &&
-            event->kind != A2FO_PRODUCER_EVENT_FINISHING &&
-            event->kind != A2FO_PRODUCER_EVENT_STARTING_EFFECT;
-    }
+bool A2FO_CALL api_register_craft_event_handler(const char* module_name,A2FO_CraftEventHandler handler,void* user_data) {
+    const std::string owner=policy_owner(module_name);
+    return core_register_event_handler(2,owner,handler,user_data,g_craft_event_handlers);
+}
 
-    for (const NativeProducerEventRegistration& registration : handlers) {
-        if (!registration.handler) continue;
-        const bool accepted = registration.handler(
-            event, registration.user_data);
-        if ((event->kind == A2FO_PRODUCER_EVENT_ADMIT ||
-             event->kind == A2FO_PRODUCER_EVENT_FINISHING ||
-             event->kind == A2FO_PRODUCER_EVENT_STARTING_EFFECT) &&
-            !accepted) {
-            return false;
-        }
-    }
-    return true;
+bool A2FO_CALL api_dispatch_producer_event(const A2FO_ProducerEvent* event) {
+    struct Context {const A2FO_ProducerEvent* event;
+        a2fo::RustHandlerRegistry<NativeProducerEventRegistration> handlers{};
+        std::optional<a2fo::RustHandlerRegistry<NativeProducerEventRegistration>::Borrowed> current{};
+        std::exception_ptr error{};std::optional<StateLockGuard> guard{};
+    } context{event};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return c.event!=nullptr;
+        case 1:return c.event->struct_size;
+        case 2:return c.event->producer!=nullptr;
+        case 3:return c.event->kind;
+        case 4:return c.event->target_class!=nullptr;
+        case 5:return g_state_lock_ready;
+        case 6:c.guard.emplace();return 0;
+        case 7:c.handlers=g_producer_event_handlers;return 0;
+        case 8:c.guard.reset();return 0;
+        case 9:c.guard.reset();c.error=nullptr;log_line("Producer event dispatch could not copy registrations");return 0;
+        case 10:return c.handlers.size();
+        case 11:c.current=c.handlers.borrow(a);return c.current->handler!=nullptr;
+        case 12:return c.current->handler(c.event,c.current->user_data);
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const A2foRsProducerEventRules rules{sizeof(A2FO_ProducerEvent),A2FO_PRODUCER_EVENT_CLEARED,A2FO_PRODUCER_EVENT_DESTROYING,A2FO_PRODUCER_EVENT_ADMIT,A2FO_PRODUCER_EVENT_FINISHING,A2FO_PRODUCER_EVENT_STARTING_EFFECT};
+    const auto result=a2fo_rs_stage8_core_dispatch_producer(&rules,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result==1;
 }
 
 std::uint32_t A2FO_CALL api_extension_root_count() {
@@ -3759,6 +3530,7 @@ A2FO_ModuleApi make_module_api() {
     api.capabilities |= A2FO_CAP_WEAPON_CLASS_LOADED;
     api.capabilities |= A2FO_CAP_WEAPON_TRIGGER_EVENTS;
     api.capabilities |= A2FO_CAP_CRAFT_EVENTS;
+    api.capabilities |= A2FO_CAP_RACE_ODF_DEFAULTS;
     if (g_classlabel_alias_hook_ready) {
         api.capabilities |= A2FO_CAP_CLASSLABEL_ODF_DEFAULTS;
     }
@@ -3791,172 +3563,131 @@ A2FO_ModuleApi make_module_api() {
     api.register_weapon_trigger_handler =
         &api_register_weapon_trigger_handler;
     api.register_craft_event_handler = &api_register_craft_event_handler;
+    api.register_race_odf_defaults = &api_register_race_odf_defaults;
     return api;
 }
 
+struct CoreEarlyStartupContext {std::exception_ptr error{};};
+std::uint64_t core_early_startup_step(void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept {
+    auto& c=*static_cast<CoreEarlyStartupContext*>(opaque);
+    try {switch(op){
+    case 0:g_armada=GetModuleHandleA(nullptr);return 0;
+    case 1:return g_fleet_ops!=nullptr;
+    case 2:g_fleet_ops=GetModuleHandleA("FleetOpsHook.dll");return 0;
+    case 3:Sleep(10);return 0;
+    case 4:return validate_armada_module(g_armada);
+    case 5:return validate_module(g_fleet_ops,kFleetOpsTimestamp,kFleetOpsImageSize,"FleetOpsHook.dll");
+    case 6:log_line("No hooks installed");return 0;
+    default:return 0;
+    }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+}
+struct CoreStartupContext {
+    a2fo::ExtensionRootDiscovery roots{};
+    a2fo::ModuleRegistrationObserver observer{};
+    bool destroyed_requested=false;
+    std::size_t alias_count=0,classlabel_default_count=0,race_default_count=0;
+    std::string cocoon_command{};
+    std::exception_ptr error{};
+};
+struct CoreStartupHook {bool* ready;bool(*install)();const char* ready_message;};
+std::uint64_t core_startup_step(void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t) noexcept {
+    auto& c=*static_cast<CoreStartupContext*>(opaque);
+    const CoreStartupHook early[]={
+        {&g_classlabel_alias_hook_ready,&install_classlabel_alias_hook,"ParameterDB string policy hook enabled before class loading"},
+        {&g_evolver_hooks_ready,&install_evolver_hooks,"Evolver policy hooks enabled before class loading"},
+        {&g_user_profile_game_speed_hook_ready,&install_user_profile_game_speed_hook,"Armada default user-profile game-speed hook enabled before profile loading"},
+        {&g_fofs_item_get_lookup_hook_ready,&install_fofs_item_get_lookup_hook,"FOFS item lookup dispatcher enabled before ODF loading"},
+        {&g_mod_user_directory_hook_ready,&install_mod_user_directory_hook,"Fleet Operations SettingsDirectory hook enabled before settings loading"},
+        {&g_fo_settings_default_hook_ready,&install_fo_settings_default_hook,"Fleet Operations Settings.xml default hook enabled before settings loading"},
+        {&g_default_game_speed_hook_ready,&install_default_game_speed_hook,"Fleet Operations DefaultGameSpeed hook enabled before profile loading"},
+        {&g_runtime_game_speed_hook_ready,&install_runtime_game_speed_hook,"Fleet Operations runtime DefaultGameSpeed hook enabled before profile loading"},
+    };
+    const CoreStartupHook optional[]={
+        {&g_race_loaded_hook_ready,&install_race_loaded_hook,nullptr},
+        {&g_weapon_class_loaded_hook_ready,&install_weapon_class_loaded_hook,nullptr},
+        {&g_weapon_trigger_hook_ready,&install_weapon_trigger_hook,nullptr},
+        {&g_craft_event_hooks_ready,&install_craft_event_hooks,nullptr},
+    };
+    try {switch(op){
+    case 0:return *early[a].ready;
+    case 1:log_line(early[a].ready_message);return 0;
+    case 2:*early[a].ready=early[a].install();return 0;
+    case 10:return g_root_directory.empty();
+    case 11:g_root_directory=module_directory(nullptr);return 0;
+    case 12:c.roots=a2fo::discover_extension_roots(g_root_directory,GetCommandLineA()?GetCommandLineA():"");return 0;
+    case 13:g_extension_roots=c.roots.roots;
+        a2fo::native11_light_classes::configure_from_roots(g_extension_roots,+[](const char* text){log_line(text);});
+        if(a2fo::native11_light_classes::requested())for(const auto* field:a2fo::native11::requested_light_fields())g_game_object_class_odf_fields.insert(field);return 0;
+    case 14:return c.roots.diagnostics.size();
+    case 15:log_line(c.roots.diagnostics[a]);return 0;
+    case 16:return !c.roots.active_mod.empty();
+    case 17:log_line("Extension roots: active mod: "+c.roots.active_mod);return 0;
+    case 18:log_line("Extension roots: "+std::to_string(g_extension_roots.size())+" search roots");return 0;
+    case 19:return g_extension_roots.size();
+    case 20:log_line("  extension root: "+g_extension_roots[a]);return 0;
+    case 21:return g_module_menu_hook_ready;
+    case 22:return g_fleet_ops!=nullptr;
+    case 23:g_module_menu_hook_ready=a2fo::install_module_menu(g_fleet_ops,g_extension_roots.front(),&log_line);return 0;
+    case 24:return g_renderer_options_hook_ready;
+    case 25:g_renderer_options_hook_ready=a2fo::install_renderer_options(g_fleet_ops,g_root_directory,&log_line);return 0;
+    case 26:g_module_api=make_module_api();return 0;
+    case 27:c.observer.begin=&begin_module_registration;c.observer.finish=&finish_module_registration;
+        a2fo::load_native_modules_from_roots(g_extension_roots,g_module_api,g_loaded_modules,&log_line,c.observer);return 0;
+    case 28:c.destroyed_requested=!g_object_destroyed_handlers.empty();return c.destroyed_requested;
+    case 29:return !g_game_object_class_loaded_handlers.empty()||a2fo::native11_light_classes::requested();
+    case 30:g_game_object_class_loaded_hook_ready=install_game_object_class_loaded_hook();
+        a2fo::native11_light_classes::dispatch_available(g_game_object_class_loaded_hook_ready);return 0;
+    case 31:return g_game_object_class_loaded_hook_ready;
+    case 32:g_object_destroyed_hook_ready=install_object_destroyed_hook();return 0;
+    case 33:switch(a){case 0:return !g_race_loaded_handlers.empty();case 1:return !g_weapon_class_loaded_handlers.empty();case 2:return !g_weapon_trigger_handlers.empty();case 3:return !g_craft_event_handlers.empty();default:return 0;}
+    case 34:*optional[a].ready=optional[a].install();return 0;
+    case 35:
+        // Keep native SDK argument evaluation and process-lifetime API storage.
+        a2fo::finish_builtin_module_preparation(
+            g_object_destroyed_hook_ready&&g_game_object_class_loaded_hook_ready,
+            g_weapon_trigger_hook_ready,g_weapon_class_loaded_hook_ready,
+            g_mod_user_directory_hook_ready&&g_fo_settings_default_hook_ready&&
+                g_default_game_speed_hook_ready&&g_runtime_game_speed_hook_ready&&g_user_profile_game_speed_hook_ready,
+            g_craft_event_hooks_ready,g_game_object_class_loaded_hook_ready,g_race_loaded_hook_ready,
+            a2fo::producer_dispatch_available(g_loaded_modules));return 0;
+    case 36:return static_cast<std::size_t>(a2fo::BuiltinFeature::count);
+    case 37:{const char* name=a2fo::canonical_builtin_name(static_cast<a2fo::BuiltinFeature>(a));
+        log_line(std::string("Built-in module state: ")+name+" - "+a2fo::builtin_module_status(name,g_extension_roots));return 0;}
+    case 38:{
+        // One native critical-section publication, with the original release store.
+        StateLockGuard lock;g_policy_registration_open=false;
+        c.alias_count=g_classlabel_aliases.size();c.classlabel_default_count=g_classlabel_odf_defaults.size();
+        c.race_default_count=g_race_odf_defaults.size();c.cocoon_command=g_evolver_cocoon_command;
+        g_fofs_item_lookup_dispatch.handler=g_fofs_item_lookup_handler;
+        g_fofs_item_lookup_dispatch.user_data=g_fofs_item_lookup_user_data;
+        g_fofs_item_lookup_dispatch_ready.store(true,std::memory_order_release);return 0;
+    }
+    case 39:
+        log_line("Policy registration closed: "+std::to_string(c.alias_count)+" classlabel alias"+
+            (c.alias_count==1?"":"es")+", "+std::to_string(c.classlabel_default_count)+
+            " classlabel ODF default set"+(c.classlabel_default_count==1?"":"s")+
+            ", "+std::to_string(c.race_default_count)+" Race ODF default"+(c.race_default_count==1?"":"s")+
+            ", Evolver cocoon command: "+(c.cocoon_command.empty()?"<none>":c.cocoon_command));return 0;
+    case 40:log_line("Native callbacks ready: "+std::to_string(g_object_destroyed_handlers.size())+" object-destroyed");return 0;
+    default:return 0;
+    }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+}
 DWORD WINAPI initialize(void*) {
-    // Called by the post-attach worker through A2FO_Initialize, so polling and
-    // native-module discovery both happen outside loader lock.
-    g_armada = GetModuleHandleA(nullptr);
-    for (unsigned attempt = 0; attempt < 100 && !g_fleet_ops; ++attempt) {
-        g_fleet_ops = GetModuleHandleA("FleetOpsHook.dll");
-        if (!g_fleet_ops) {
-            Sleep(10);
-        }
-    }
-    if (!validate_armada_module(g_armada) ||
-        !validate_module(g_fleet_ops, kFleetOpsTimestamp, kFleetOpsImageSize,
-                         "FleetOpsHook.dll")) {
-        log_line("No hooks installed");
-        return 1;
-    }
-
+    CoreEarlyStartupContext early;
+    const auto ready=a2fo_rs_stage8_core_startup(0,&core_early_startup_step,&early);
+    if(early.error)std::rethrow_exception(early.error);
+    if(ready!=0)return 1;
     try {
-      if (g_classlabel_alias_hook_ready) {
-        log_line("ParameterDB string policy hook enabled before class loading");
-      } else {
-        g_classlabel_alias_hook_ready =
-          install_classlabel_alias_hook();
-      }
-      if (g_evolver_hooks_ready) {
-          log_line("Evolver policy hooks enabled before class loading");
-      } else {
-          g_evolver_hooks_ready = install_evolver_hooks();
-      }
-      if (g_user_profile_game_speed_hook_ready) {
-          log_line("Armada default user-profile game-speed hook enabled "
-                   "before profile loading");
-      } else {
-          g_user_profile_game_speed_hook_ready =
-              install_user_profile_game_speed_hook();
-      }
-      if (g_fofs_item_get_lookup_hook_ready) {
-          log_line("FOFS item lookup dispatcher enabled before ODF loading");
-      } else {
-          g_fofs_item_get_lookup_hook_ready =
-              install_fofs_item_get_lookup_hook();
-      }
-      if (g_mod_user_directory_hook_ready) {
-          log_line("Fleet Operations SettingsDirectory hook enabled before "
-                   "settings loading");
-      } else {
-          g_mod_user_directory_hook_ready =
-              install_mod_user_directory_hook();
-      }
-      if (g_fo_settings_default_hook_ready) {
-          log_line("Fleet Operations Settings.xml default hook enabled before "
-                   "settings loading");
-      } else {
-          g_fo_settings_default_hook_ready =
-              install_fo_settings_default_hook();
-      }
-      if (g_default_game_speed_hook_ready) {
-          log_line("Fleet Operations DefaultGameSpeed hook enabled before "
-                   "profile loading");
-      } else {
-          g_default_game_speed_hook_ready =
-              install_default_game_speed_hook();
-      }
-      if (g_runtime_game_speed_hook_ready) {
-          log_line("Fleet Operations runtime DefaultGameSpeed hook enabled "
-                   "before profile loading");
-      } else {
-          g_runtime_game_speed_hook_ready =
-              install_runtime_game_speed_hook();
-      }
-
-      // Preserve the proven monolithic startup order: all built-in hooks are
-      // installed first. Native modules are discovered only afterwards, from
-      // the worker thread and outside the loader lock.
-      if (g_root_directory.empty()) {
-          g_root_directory = module_directory(nullptr);
-      }
-      const a2fo::ExtensionRootDiscovery root_discovery =
-          a2fo::discover_extension_roots(
-              g_root_directory,
-              GetCommandLineA() ? GetCommandLineA() : "");
-      g_extension_roots = root_discovery.roots;
-      for (const std::string& diagnostic : root_discovery.diagnostics) {
-          log_line(diagnostic);
-      }
-      if (!root_discovery.active_mod.empty()) {
-          log_line("Extension roots: active mod: " +
-                   root_discovery.active_mod);
-      }
-      log_line("Extension roots: " +
-               std::to_string(g_extension_roots.size()) +
-               " search roots");
-      for (const std::string& root : g_extension_roots) {
-          log_line("  extension root: " + root);
-      }
-
-      if (!g_module_menu_hook_ready && g_fleet_ops) {
-          g_module_menu_hook_ready = a2fo::install_module_menu(
-              g_fleet_ops, g_extension_roots.front(), &log_line);
-      }
-
-      // Modules may retain this pointer and the extension-root strings for
-      // their entire loaded lifetime. Keep both in process-lifetime storage.
-      g_module_api = make_module_api();
-      a2fo::ModuleRegistrationObserver registration_observer;
-      registration_observer.begin = &begin_module_registration;
-      registration_observer.finish = &finish_module_registration;
-      a2fo::load_native_modules_from_roots(
-          g_extension_roots, g_module_api, g_loaded_modules, &log_line,
-          registration_observer);
-      const bool object_destroyed_dispatch_requested =
-          !g_object_destroyed_handlers.empty();
-      if (object_destroyed_dispatch_requested ||
-          !g_game_object_class_loaded_handlers.empty()) {
-          g_game_object_class_loaded_hook_ready =
-              install_game_object_class_loaded_hook();
-      }
-      if (object_destroyed_dispatch_requested &&
-          g_game_object_class_loaded_hook_ready) {
-          g_object_destroyed_hook_ready = install_object_destroyed_hook();
-      }
-      if (!g_race_loaded_handlers.empty()) {
-          g_race_loaded_hook_ready = install_race_loaded_hook();
-      }
-      if (!g_weapon_class_loaded_handlers.empty()) {
-          g_weapon_class_loaded_hook_ready =
-              install_weapon_class_loaded_hook();
-      }
-      if (!g_weapon_trigger_handlers.empty()) {
-          g_weapon_trigger_hook_ready = install_weapon_trigger_hook();
-      }
-      if (!g_craft_event_handlers.empty()) {
-          g_craft_event_hooks_ready = install_craft_event_hooks();
-      }
-
-      std::size_t alias_count = 0;
-      std::size_t classlabel_default_count = 0;
-      std::string cocoon_command;
-      {
-          StateLockGuard lock;
-          g_policy_registration_open = false;
-          alias_count = g_classlabel_aliases.size();
-          classlabel_default_count = g_classlabel_odf_defaults.size();
-          cocoon_command = g_evolver_cocoon_command;
-      }
-      log_line("Policy registration closed: " +
-               std::to_string(alias_count) + " classlabel alias" +
-               (alias_count == 1 ? "" : "es") +
-               ", " + std::to_string(classlabel_default_count) +
-               " classlabel ODF default set" +
-               (classlabel_default_count == 1 ? "" : "s") +
-               ", Evolver cocoon command: " +
-               (cocoon_command.empty() ? "<none>" : cocoon_command));
-      log_line("Native callbacks ready: " +
-               std::to_string(g_object_destroyed_handlers.size()) +
-               " object-destroyed");
-    } catch (...) {
-        log_line("Initialization aborted by an unexpected C++ exception");
-        return 1;
+        CoreStartupContext context;
+        const auto result=a2fo_rs_stage8_core_startup(1,&core_startup_step,&context);
+        if(context.error)std::rethrow_exception(context.error);
+        if(result!=0)return 1;
+    }catch(...){
+        log_line("Initialization aborted by an unexpected C++ exception");return 1;
     }
-    log_line("A2FOExtensions initialization complete");
-    return 0;
-  }
+    log_line("A2FOExtensions initialization complete");return 0;
+}
+
 } //namespace
 
 extern "C" {
@@ -3965,192 +3696,183 @@ void* a2fo_cocoon_update_resume = nullptr;
 }
 
 extern "C" void* a2fo_select_cocoon(void* evolver) {
-    // Called by the small assembly splice at Armada's cocoon-selection site.
-    // Return a cached/custom geometry when possible, otherwise reproduce the
-    // two original Fleet Ops defaults exactly.
-    if (!evolver || !g_state_lock_ready) {
-        return nullptr;
-    }
-    const auto* bytes = static_cast<std::uint8_t*>(evolver);
-    void* class_object = *reinterpret_cast<void* const*>(bytes + 0x40);
-    std::string name;
-    bool cache_known = false;
-    void* cached_geometry = nullptr;
-    bool first_selection = false;
-    EnterCriticalSection(&g_state_lock);
-    const auto selected = g_class_cocoons.find(class_object);
-    if (selected != g_class_cocoons.end()) {
-        name = selected->second;
-    }
-    if (!name.empty()) {
-        const auto cached = g_loaded_cocoons.find(lower_ascii(name));
-        if (cached != g_loaded_cocoons.end()) {
-            cache_known = true;
-            cached_geometry = cached->second;
-        }
-    }
-    first_selection = g_logged_cocoon_classes.insert(class_object).second;
-    LeaveCriticalSection(&g_state_lock);
-
-    if (first_selection) {
-        log_line("Cocoon selector for EvolverClass: " +
-                 (name.empty() ? std::string("<Fleet Ops default>") : name));
-    }
-
-    if (cache_known) {
-        if (cached_geometry) {
-            return cached_geometry;
-        }
-        name.clear();
-    }
-
-    if (!name.empty()) {
-        void* database = *at<void*>(g_armada, kSodDatabaseRva);
-        void* geometry = database ? a2fo_load_sod(at(g_armada, kLoadSodRva),
-                                                  database, name.c_str())
-                                  : nullptr;
-        EnterCriticalSection(&g_state_lock);
-        g_loaded_cocoons[lower_ascii(name)] = geometry;
-        LeaveCriticalSection(&g_state_lock);
-        if (geometry) {
-            return geometry;
-        }
-        log_line("Could not load cocoon SOD; using Fleet Ops default: " + name);
-    }
-
-    const bool alternative =
-        *reinterpret_cast<const std::uint32_t*>(bytes + 0x1e8) == 0;
-    const std::uintptr_t pointer_rva = alternative ? kAlternativeCocoonRva
-                                                   : kDefaultCocoonRva;
-    void** fallback_slot = at<void*>(g_armada, pointer_rva);
-    if (*fallback_slot) {
-        return *fallback_slot;
-    }
-
-    // Evolver's constructor normally initializes these two process globals.
-    // A ResearchStation-hosted hybrid can start evolution before any native
-    // Evolver exists, so reproduce that lazy load here instead of returning a
-    // null geometry to the start/update effect paths.
-    const char* fallback_name = alternative ? kAlternativeCocoonName
-                                            : kDefaultCocoonName;
-    void* database = *at<void*>(g_armada, kSodDatabaseRva);
-    void* geometry = database ? a2fo_load_sod(at(g_armada, kLoadSodRva),
-                                              database, fallback_name)
-                              : nullptr;
-    if (geometry) {
-        *fallback_slot = geometry;
-        log_line("Initialized Fleet Ops default cocoon on demand: " +
-                 std::string(fallback_name));
-    } else {
-        log_line("Could not initialize Fleet Ops default cocoon: " +
-                 std::string(fallback_name));
-    }
-    return geometry;
+    struct Context {void* evolver;const std::uint8_t* bytes=nullptr;void* class_object=nullptr;std::string name{};
+        decltype(g_class_cocoons)::iterator selected{};void* cached=nullptr;void* database=nullptr;void* geometry=nullptr;
+        bool alternative=false;void** slot=nullptr;const char* fallback_name=nullptr;void* result=nullptr;std::exception_ptr error{};
+    } context{evolver};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return c.evolver!=nullptr;
+        case 1:return g_state_lock_ready;
+        case 2:c.bytes=static_cast<std::uint8_t*>(c.evolver);c.class_object=*reinterpret_cast<void* const*>(c.bytes+0x40);return 0;
+        case 3:EnterCriticalSection(&g_state_lock);return 0;
+        case 4:c.selected=g_class_cocoons.find(c.class_object);return c.selected!=g_class_cocoons.end();
+        case 5:c.name=c.selected->second;return 0;
+        case 6:return c.name.empty();
+        case 7:{const auto found=g_loaded_cocoons.find(lower_ascii(c.name));if(found==g_loaded_cocoons.end())return 0;c.cached=found->second;return 1;}
+        case 8:return c.cached!=nullptr;
+        case 9:return g_logged_cocoon_classes.insert(c.class_object).second;
+        case 10:LeaveCriticalSection(&g_state_lock);return 0;
+        case 11:log_line("Cocoon selector for EvolverClass: "+(c.name.empty()?std::string("<Fleet Ops default>"):c.name));return 0;
+        case 12:c.result=c.cached;return 0;
+        case 13:c.name.clear();return 0;
+        case 14:c.database=*at<void*>(g_armada,kSodDatabaseRva);return c.database!=nullptr;
+        case 15:c.geometry=a2fo_load_sod(at(g_armada,kLoadSodRva),c.database,c.name.c_str());return 0;
+        case 16:EnterCriticalSection(&g_state_lock);return 0;
+        case 17:g_loaded_cocoons[lower_ascii(c.name)]=c.geometry;return 0;
+        case 18:LeaveCriticalSection(&g_state_lock);return 0;
+        case 19:return c.geometry!=nullptr;
+        case 20:c.result=c.geometry;return 0;
+        case 21:log_line("Could not load cocoon SOD; using Fleet Ops default: "+c.name);return 0;
+        case 22:return *reinterpret_cast<const std::uint32_t*>(c.bytes+0x1e8)==0;
+        case 23:c.alternative=a!=0;c.slot=at<void*>(g_armada,c.alternative?kAlternativeCocoonRva:kDefaultCocoonRva);return *c.slot!=nullptr;
+        case 24:c.result=*c.slot;return 0;
+        case 25:c.fallback_name=c.alternative?kAlternativeCocoonName:kDefaultCocoonName;return 0;
+        case 26:c.database=*at<void*>(g_armada,kSodDatabaseRva);return c.database!=nullptr;
+        case 27:c.geometry=a2fo_load_sod(at(g_armada,kLoadSodRva),c.database,c.fallback_name);return 0;
+        case 29:*c.slot=c.geometry;return 0;
+        case 30:log_line("Initialized Fleet Ops default cocoon on demand: "+std::string(c.fallback_name));return 0;
+        case 31:log_line("Could not initialize Fleet Ops default cocoon: "+std::string(c.fallback_name));return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    a2fo_rs_stage8_core_select_cocoon(step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return context.result;
 }
 
 extern "C" __declspec(dllexport)
 bool A2FO_CALL A2FO_Initialize() {
-    // This export must be called outside DllMain. Module discovery uses
-    // LoadLibrary, which is unsafe while Windows holds the loader lock.
-    const LONG prior = InterlockedCompareExchange(&g_initialize_state, 1, 0);
-    if (prior == 2) {
-        return true;
-    }
-    if (prior != 0) {
-        return false;
-    }
-
-    if (g_log == INVALID_HANDLE_VALUE) {
-        open_log();
-    }
-    log_line("A2FOExtensions deferred initialization started");
-    if (g_root_directory.empty()) {
-        g_root_directory = module_directory(nullptr);
-    }
-    g_armada = GetModuleHandleA(nullptr);
-    if (!g_fleet_ops) {
-        g_fleet_ops = GetModuleHandleA("FleetOpsHook.dll");
-    }
-    if (!g_armada) {
-        log_line("ArmadaL.exe was unavailable during A2FO_Initialize");
-        InterlockedExchange(&g_initialize_state, 0);
-        return false;
-    }
-
-    a2fo_cocoon_resume = at(g_armada, kCocoonSelectorRva + 5);
-    a2fo_cocoon_update_resume = at(g_armada, kCocoonUpdateResumeRva);
-    if (!g_state_lock_ready) {
-        InitializeCriticalSection(&g_state_lock);
-        g_state_lock_ready = true;
-    }
-
-    const bool ok = initialize(nullptr) == 0;
-    InterlockedExchange(&g_initialize_state, ok ? 2 : 0);
-    return ok;
+    // This native exception boundary is called outside the Rust entry's loader lock.
+    struct Context {std::exception_ptr error{};} context;
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:return static_cast<std::uint32_t>(InterlockedCompareExchange(&g_initialize_state,1,0));
+        case 1:return static_cast<std::uint32_t>(InterlockedCompareExchange(&g_initialize_state,0,0));
+        case 2:Sleep(1);return 0;
+        case 3:return g_log==INVALID_HANDLE_VALUE;
+        case 4:open_log();return 0;
+        case 5:log_line("A2FOExtensions deferred initialization started");return 0;
+        case 6:return g_root_directory.empty();
+        case 7:g_root_directory=module_directory(nullptr);return 0;
+        case 8:g_armada=GetModuleHandleA(nullptr);return 0;
+        case 9:return !g_fleet_ops;
+        case 10:g_fleet_ops=GetModuleHandleA("FleetOpsHook.dll");return 0;
+        case 11:return !g_armada;
+        case 12:log_line("ArmadaL.exe was unavailable during A2FO_Initialize");return 0;
+        case 13:InterlockedExchange(&g_initialize_state,0);return 0;
+        case 14:a2fo_cocoon_resume=at(g_armada,kCocoonSelectorRva+5);a2fo_cocoon_update_resume=at(g_armada,kCocoonUpdateResumeRva);return 0;
+        case 15:return !g_state_lock_ready;
+        case 16:InitializeCriticalSection(&g_state_lock);g_state_lock_ready=true;return 0;
+        case 17:return initialize(nullptr)==0;
+        case 18:InterlockedExchange(&g_initialize_state,a?2:0);return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_core_initialize(step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result==1;
+}
+extern "C" __declspec(dllexport) bool A2FO_CALL A2FO_InitializeNoUnwind() noexcept {
+    return a2fo::initialize_without_unwind(
+        [] { return A2FO_Initialize(); },
+        []() noexcept { InterlockedExchange(&g_initialize_state, 0); });
 }
 
 DWORD WINAPI initialize_worker(void*) {
-    g_initialize_thread_id = GetCurrentThreadId();
-    const bool initialized = A2FO_Initialize();
-    g_initialize_thread_id = 0;
-    InterlockedExchange(&g_deferred_initialization_finished, 1);
-    if (initialized) {
-        if (kShellDisplayMonitorEnabled) {
-            run_shell_display_monitor();
-        } else {
-            log_line("Shell display: graphics-settings monitor disabled");
-        }
-    }
+    struct Context {std::exception_ptr error{};} context;
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:g_initialize_thread_id=GetCurrentThreadId();return 0;
+        case 1:return A2FO_Initialize();
+        case 2:g_initialize_thread_id=0;return 0;
+        case 3:InterlockedExchange(&g_deferred_initialization_finished,1);return 0;
+        case 4:return kShellDisplayMonitorEnabled;
+        case 5:run_shell_display_monitor();return 0;
+        case 6:log_line("Shell display: graphics-settings monitor disabled");return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    a2fo_rs_stage8_core_worker(step,&context);
+    if(context.error)std::rethrow_exception(context.error);
     return 0;
 }
 
-BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
-    if (reason == DLL_PROCESS_ATTACH) {
-        // Preserve the startup timing of the proven monolithic build. These
-        // checked memory hooks must exist before Armada builds its ODF classes.
-        // Native modules are not loaded here; the worker is serialized behind
-        // DLL attachment and calls A2FO_Initialize after loader lock releases.
-        DisableThreadLibraryCalls(instance);
-        open_log();
-        log_line("A2FOExtensions initialization started");
-        g_root_directory = module_directory(nullptr);
-        g_armada = GetModuleHandleA(nullptr);
-        g_fleet_ops = GetModuleHandleA("FleetOpsHook.dll");
-        if (g_armada) {
-            a2fo_cocoon_resume = at(g_armada, kCocoonSelectorRva + 5);
-            a2fo_cocoon_update_resume = at(
-                g_armada, kCocoonUpdateResumeRva);
+// Native primitives for the Rust-owned DLL entry. These operations preserve
+// the established attachment order and cannot unwind across the Rust ABI.
+extern "C" std::uint32_t a2fo_native_process_attach_step(
+    std::uint32_t operation, HINSTANCE instance) noexcept {
+    try {
+        switch (operation) {
+        case 0: DisableThreadLibraryCalls(instance); return 0;
+        case 1: open_log(); return 0;
+        case 2: log_line("A2FOExtensions initialization started"); return 0;
+        case 3: g_root_directory=module_directory(nullptr); return 0;
+        case 4: g_armada=GetModuleHandleA(nullptr); return 0;
+        case 5: g_fleet_ops=GetModuleHandleA("FleetOpsHook.dll"); return 0;
+        case 6: return g_armada!=nullptr;
+        case 7: a2fo_cocoon_resume=at(g_armada,kCocoonSelectorRva+5); return 0;
+        case 8: a2fo_cocoon_update_resume=at(g_armada,kCocoonUpdateResumeRva); return 0;
+        case 9: InitializeCriticalSection(&g_state_lock); g_state_lock_ready=true; return 0;
+        case 10: return validate_armada_module(g_armada);
+        case 11:
+            if (!a2fo::refit::install_startup(g_armada,g_root_directory,&log_line,&a2fo::initialize_refit_scene_sources))
+                a2fo::renderer::install_d3d8_observer(g_armada,g_fleet_ops,g_root_directory,&log_line);
+            return 0;
+        case 12: g_evolver_hooks_ready=install_evolver_hooks(); return 0;
+        case 13: g_user_profile_game_speed_hook_ready=install_user_profile_game_speed_hook(); return 0;
+        case 14: return validate_module(g_fleet_ops,kFleetOpsTimestamp,kFleetOpsImageSize,"FleetOpsHook.dll");
+        case 15: a2fo::install_nebula_renderer_early(g_armada,g_fleet_ops,g_root_directory,&log_line); return 0;
+        case 16: g_fofs_item_get_lookup_hook_ready=install_fofs_item_get_lookup_hook(); return 0;
+        case 17: g_mod_user_directory_hook_ready=install_mod_user_directory_hook(); return 0;
+        case 18: g_fo_settings_default_hook_ready=install_fo_settings_default_hook(); return 0;
+        case 19: g_default_game_speed_hook_ready=install_default_game_speed_hook(); return 0;
+        case 20: g_runtime_game_speed_hook_ready=install_runtime_game_speed_hook(); return 0;
+        case 21: log_line("Could not create deferred initialization worker"); return 0;
+        default: std::terminate();
         }
-        InitializeCriticalSection(&g_state_lock);
-        g_state_lock_ready = true;
-        if (validate_armada_module(g_armada)) {
-            g_evolver_hooks_ready = install_evolver_hooks();
-            g_user_profile_game_speed_hook_ready =
-                install_user_profile_game_speed_hook();
-            if (validate_module(g_fleet_ops, kFleetOpsTimestamp,
-                                kFleetOpsImageSize, "FleetOpsHook.dll")) {
-                a2fo::install_nebula_renderer_early(
-                    g_armada, g_fleet_ops, g_root_directory, &log_line);
-                g_fofs_item_get_lookup_hook_ready =
-                    install_fofs_item_get_lookup_hook();
-                g_mod_user_directory_hook_ready =
-                    install_mod_user_directory_hook();
-                g_fo_settings_default_hook_ready =
-                    install_fo_settings_default_hook();
-                g_default_game_speed_hook_ready =
-                    install_default_game_speed_hook();
-                g_runtime_game_speed_hook_ready =
-                    install_runtime_game_speed_hook();
-            }
-        }
-        HANDLE thread =
-            CreateThread(nullptr, 0, initialize_worker, nullptr, 0, nullptr);
-        if (thread) {
-            CloseHandle(thread);
-        } else {
-            log_line("Could not create deferred initialization worker");
-        }
-        (void)instance;
+    } catch (...) {
+        // The old loader entry had no native exception recovery. Preserve a
+        // fatal boundary failure without unwinding through Rust or loader code.
+        std::terminate();
     }
-    return TRUE;
 }
+extern "C" DWORD a2fo_native_initialize_worker() noexcept {
+    try { return initialize_worker(nullptr); }
+    catch (...) { std::terminate(); }
+}
+
+#if defined(A2FO_RUST_BINK_RUNTIME)
+namespace { volatile LONG g_bink_early_attach_state = 0; }
+// The paired proxy calls this while its original nested-load sequence still
+// holds loader lock, after FleetOpsHook has attached. These are exactly the
+// early hook primitives previously run by our DllMain, not full initialization.
+extern "C" __declspec(dllexport) bool A2FO_CALL A2FO_BinkEarlyAttachNoUnwind() noexcept {
+    return a2fo::initialize_without_unwind([] {
+        if (InterlockedCompareExchange(&g_bink_early_attach_state, 0, 0) == 2) return true;
+        if (InterlockedCompareExchange(&g_bink_early_attach_state, 1, 0) != 0) return false;
+        g_fleet_ops = GetModuleHandleA("FleetOpsHook.dll");
+        if (!validate_armada_module(g_armada) ||
+            !validate_module(g_fleet_ops,kFleetOpsTimestamp,kFleetOpsImageSize,"FleetOpsHook.dll")) {
+            InterlockedExchange(&g_bink_early_attach_state,0);
+            log_line("Rust Bink early attachment refused unsupported engine/provider");
+            return false;
+        }
+        for (std::uint32_t operation = 11; operation <= 13; ++operation)
+            a2fo_native_process_attach_step(operation,nullptr);
+        for (std::uint32_t operation = 15; operation <= 20; ++operation)
+            a2fo_native_process_attach_step(operation,nullptr);
+        InterlockedExchange(&g_bink_early_attach_state,2);
+        log_line("Rust Bink early attachment completed after FleetOpsHook attachment");
+        return true;
+    }, []() noexcept { InterlockedExchange(&g_bink_early_attach_state,0); });
+}
+extern "C" std::uint32_t a2fo_native_bink_early_ready() noexcept {
+    if (InterlockedCompareExchange(&g_bink_early_attach_state,0,0) == 2) return 1;
+    log_line("Rust Bink initialization requires the paired startup proxy early-attach bridge");
+    return 0;
+}
+#endif

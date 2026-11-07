@@ -1,0 +1,142 @@
+// --- File identity and inheritance ---
+basename = "fed_eraudi_yard"
+
+// --- Display and localization ---
+unitname = "Eraudi Type Yard"
+tooltip = "Eraudi Type Yard"
+verbosetooltip = "AUTOTOOLTIP-fed_eraudi_yardY.odf"
+race = "unitedfederation"
+possiblecraftnames = "Angola Yards" "Arup Yards" "Atkins Yards" "Bandel Yards" "Belfast Yards" "Clyde Yards" "Degenkolb Yards" "Eisaku Yards" "Fairbairn Yards" "Freyssinet Yards" "Hallberg-Rassy Yards" "Hennebique Yards" "Hodgkinson Yards" "LeMessurier Yards" "Liddell Yards" "Marwe Yards" "Maunsell Yards" "Nagoya Yards" "Nandan Yards" "Otsu Yards" "Rijeka Yards" "Roebling Yards" "Schlaich Yards" "Serrurier Yards" "Southampton Yards" "Stettin Yards" "Stirling Yards" "Stralsund Yards" "Susumu Yards" "Talford Yards" "Taule Yards" "Trevithick Yards" "Trogir Yards" "Turner Yards" "Wellman Yards" "Whitney Yards" "Wiberg Yards" "Yen Lin Yards" "Yisheng Yards" "Youssef Yards"
+hotkeylabel = "GAME-HOTKEY-F7"
+
+// --- Construction and costs ---
+buildtime = 60
+officercost = 0
+crewcost = 450
+dilithiumcost = 1200
+latinumcost = 300
+builditem0 = "fed_excelsioriiY"
+builditem1 = "fed_remooreY"
+builditem2 = "fed_avalon"
+builditem3 = "fed_defiantY"
+builditem4 = "fed_sovereignY"
+builditem5 = "fed_phalanx"
+builditem6 = "all_alliedrepair"
+builditem7 = "all_halt"
+
+// --- Hull, shields, crew, and energy ---
+maxhealth = 1048
+curhealth = 1048
+healthrate = 2.193
+maxshields = 3510
+curshields = 3510
+shieldrate = 6.848
+specialenergydisplaymode = 1
+shielddelay = 2
+repairyellow = 2.0f
+repairred = 4.0f
+repairside = 8
+
+// --- Subsystems, damage, and repair ---
+shieldgeneratorhitpoints = 384
+engineshitpoints = 0
+weaponshitpoints = 0
+lifesupporthitpoints = 384
+sensorshitpoints = 384
+enginesrepairtime = 0.25
+lifesupportrepairtime = 0.0625
+weaponsrepairtime = 0.25
+shieldgeneratorrepairtime = 0.25
+sensorsrepairtime = 0.25
+enginescrewloss = 5.0f
+lifesupportcrewloss = 5.0f
+weaponscrewloss = 8.0f
+shieldgeneratorcrewloss = 8.0f
+sensorscrewloss = 5.0f
+lifesupportloss = 0.5
+engineshitpercent = 0.0f
+lifesupporthitpercent = 7.0f
+weaponshitpercent = 7.0f
+shieldgeneratorhitpercent = 1.0f
+sensorshitpercent = 0
+crewhitpercent = 7.0f
+hullhitpercent = 78.0f
+
+// --- Weapons and ordnance ---
+maxextraweapons = 10
+
+// --- Accuracy, hardpoints, and targeting ---
+hulltargethardpoints = "hp09" "hp10" "hp11" "hp12" "hp13" "hp14" "hp15" "hp16"
+lifesupporttargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06" "hp07" "hp08"
+weaponstargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06" "hp07" "hp08"
+shieldgeneratortargethardpoints = "hp09" "hp10" "hp11" "hp12" "hp13" "hp14" "hp15" "hp16"
+sensorstargethardpoints = "hp17" "hp18" "hp19" "hp20" "hp21" "hp22" "hp23" "hp24"
+enginestargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06" "hp07" "hp08"
+criticaltargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06" "hp07" "hp08"
+extraweaponhardpoints = "root"
+buildhardpoint = "hp99"
+repairhardpoint = "hp98"
+
+// --- Artificial intelligence and tactical behavior ---
+attackpower = 0.000
+intrinsicvalue = 0.000
+avoidanceclass = 9
+rangescan = 600
+damagedscan = 50.0f
+ainame = "StarbaseProcess"
+alert = 1
+combat = 1
+
+// --- Interface and controls ---
+show_sw_autonomy = 1
+show_movement_autonomy = 1
+overlaysod = "fed_s_shuttlesM"
+
+// --- Audio and events ---
+eventselect = "FederationMcKinleySelect"
+eventacknowledge = "StarbaseAcknowledge"
+eventattack = "StarbaseAttack"
+eventdecommission = "StarbaseDecommission"
+
+// --- Movement and physics ---
+percentNebulaWarn = 0
+footprintbuffer = 120.0f
+southbuffer = 170.0
+weldingradius = 1.0
+
+// --- Progression and variants ---
+worthxp = 196
+alliedrepairupgrade = "all_alliedrepair"
+
+// --- Resource handling and recycling ---
+recycledilithium = 360
+recycletime = 33
+recyclelatinum = 90
+recyclebiomatter = 0
+checkvalidresourceinterval = 10.0f
+
+// --- Art, animation, and effects ---
+fireball = "x_building_explosion"
+shieldhit = "shield_fed_hitXL"
+shieldhitcritical = "shield_fed_hitcritXL"
+shielddown = "shield_fed_down"
+animation = 2
+buildanimation = 0
+repairanimation = 0
+
+// --- Capabilities and object behavior ---
+has_hitpoints = 1
+has_crew = 1
+transporter = 1
+can_sandd = 0
+buildablebyownerraceonly = 1
+builder_ship = 1
+is_starbase = 1
+facility = 1
+
+// --- Runtime class ---
+classlabel = "shipyard"
+
+// FO4Nexus overlay
+torpedoResupply = 1
+torpedoResupplyRange = 350

@@ -1,3 +1,4 @@
+#include "../../rust/native_hooks_ffi.h"
 /*
  * ODF-driven captain names and craft registries for Fleet Operations.
  *
@@ -9,6 +10,7 @@
  */
 
 #include "../../sdk/include/a2fo_module_api.h"
+#include "../../sdk/include/a2fo_module_provider.hpp"
 #include "../A2FODirectionalShields/api.hpp"
 #include "directional_shield_display_config.hpp"
 #include "directional_shield_fill.hpp"
@@ -17,6 +19,9 @@
 #include "object_editor.hpp"
 #include "selected_panel_anchor.hpp"
 #include "system_icon_state.hpp"
+#include "../../rust/stage9_craft_runtime_ffi.h"
+#include "../../rust/stage9_craft_sprite_ffi.h"
+#include "../../rust/stage10_identity_completion_ffi.h"
 
 #include <windows.h>
 #include <d3d8.h>
@@ -30,8 +35,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -122,6 +129,10 @@ constexpr char kGetQuantumTorpedoReloadSecondsExport[] =
     "A2FOEnergySystems_GetQuantumTorpedoReloadSeconds";
 constexpr char kGetShuttleCraftReloadSecondsExport[] =
     "A2FOEnergySystems_GetShuttleCraftReloadSeconds";
+constexpr char kGetResupplyWeaponStateExport[] =
+    "A2FOEnergySystems_GetResupplyWeaponState";
+// Default resupplyweapon icon tint while a valid receiver is in range.
+constexpr float kDefaultResupplyWeaponIconColour[3]{0.10f, 1.00f, 0.10f};
 constexpr char kDirectionalShieldsModuleName[] =
     "A2FODirectionalShields.dll";
 constexpr char kDirectionalShieldsIsEnabledExport[] =
@@ -130,6 +141,8 @@ constexpr char kDirectionalShieldsGetCurrentExport[] =
     "A2FODirectionalShields_GetCurrent";
 constexpr char kDirectionalShieldsGetMaximumExport[] =
     "A2FODirectionalShields_GetMaximum";
+constexpr char kDirectionalShieldsGetModeExport[] =
+    "A2FODirectionalShields_GetMode";
 constexpr std::size_t kMaximumIdentityEntries = 4096;
 constexpr std::size_t kMaximumIdentityLength = 512;
 
@@ -212,12 +225,25 @@ constexpr std::size_t kStorm3DDeviceTextureNativeOffset = 0x04;
 constexpr float kDirectionalShieldTextureDimension = 128.0f;
 constexpr DWORD kDirectionalShieldSpriteStabilizationMs = 500;
 
+constexpr std::array<const char*, 2> kCompactQuadShieldSpriteNames{{
+    "dsq",
+    "dsqs",
+}};
+
 constexpr std::array<const char*, 4> kDirectionalShieldSpriteNames{{
     "dsb",
     "dsf",
     "dsl",
     "dsr",
 }};
+
+constexpr std::array<const char*, 2> kTriShieldSpriteNames{{
+    "dstc",
+    "dsts",
+}};
+
+constexpr char kHemisphereShieldSpriteName[] = "dsh";
+constexpr char kHemisphereSideShieldSpriteName[] = "dshs";
 
 constexpr std::array<const char*, 4> kDirectionalShieldPositionCommands{{
     "forwardShieldPos",
@@ -606,6 +632,49 @@ constexpr std::array<FloatRectangle, 4>
         FloatRectangle{108.0f, 26.0f, 20.0f, 76.0f},
     }};
 
+// Default tri-forward placement for the full-canvas dstc/dsts masks. Mods may
+// override each facing independently with the existing facing Area controls
+// or per-Craft *ShieldPos commands. Aft is inactive in mode 2.
+constexpr std::array<FloatRectangle, 4>
+    kDefaultTriForwardShieldPositions{{
+        FloatRectangle{10.0f, 0.0f, 108.0f, 64.0f},
+        FloatRectangle{},
+        FloatRectangle{0.0f, 48.0f, 72.0f, 80.0f},
+        FloatRectangle{56.0f, 48.0f, 72.0f, 80.0f},
+    }};
+
+// Tri-rear mirrors the tri-forward canvas vertically. Forward is inactive;
+// the aft centre arc occupies the lower half while port/starboard meet at the
+// front. Existing per-facing GUI/ODF placement overrides still take priority.
+constexpr std::array<FloatRectangle, 4>
+    kDefaultTriRearShieldPositions{{
+        FloatRectangle{},
+        FloatRectangle{10.0f, 64.0f, 108.0f, 64.0f},
+        FloatRectangle{0.0f, 0.0f, 72.0f, 80.0f},
+        FloatRectangle{56.0f, 0.0f, 72.0f, 80.0f},
+    }};
+
+// Forward/rear hemisphere mode reuses one full-canvas upper-half mask. The
+// aft copy is vertically mirrored at draw time. Port/starboard are inactive.
+constexpr std::array<FloatRectangle, 4>
+    kDefaultHemiForwardRearShieldPositions{{
+        FloatRectangle{0.0f, 0.0f, 128.0f, 128.0f},
+        FloatRectangle{0.0f, 0.0f, 128.0f, 128.0f},
+        FloatRectangle{},
+        FloatRectangle{},
+    }};
+
+// Port/starboard hemisphere mode uses a separately rotated full-canvas left
+// half mask. The starboard copy is mirrored horizontally at draw time.
+// Forward/aft are inactive.
+constexpr std::array<FloatRectangle, 4>
+    kDefaultHemiPortStarboardShieldPositions{{
+        FloatRectangle{},
+        FloatRectangle{},
+        FloatRectangle{0.0f, 0.0f, 128.0f, 128.0f},
+        FloatRectangle{0.0f, 0.0f, 128.0f, 128.0f},
+    }};
+
 struct SpriteVector {
     float x = 0.0f;
     float y = 0.0f;
@@ -759,6 +828,7 @@ struct UiConfiguration {
     std::array<bool, 5> system_icon_colour_found{};
     std::array<bool, 5> weapon_icon_colour_found{};
     bool passive_weapon_icon_colour_found = false;
+    bool resupply_weapon_icon_colour_found = false;
     bool special_energy_icon_colour_found = false;
     bool officer_icon_colour_found = false;
     bool experience_bar_colour_found = false;
@@ -785,6 +855,7 @@ struct UiConfiguration {
     std::array<Colour, 5> system_icon_colours{};
     std::array<Colour, 5> weapon_icon_colours{};
     Colour passive_weapon_icon_colour{};
+    Colour resupply_weapon_icon_colour{};
     Colour special_energy_icon_colour{};
     Colour officer_icon_colour{};
     Colour experience_bar_colour{};
@@ -792,6 +863,8 @@ struct UiConfiguration {
 };
 
 using EnergyAmountGetter = float (A2FO_CALL *)(void* craft);
+// -1: not a resupplyweapon, 0: no valid receiver, 1: valid receiver in range.
+using ResupplyWeaponStateGetter = std::int32_t (A2FO_CALL *)(void* weapon);
 
 const A2FO_ModuleApi* g_api = nullptr;
 HMODULE g_armada = nullptr;
@@ -808,9 +881,12 @@ EnergyAmountGetter g_get_maximum_shuttle_craft = nullptr;
 EnergyAmountGetter g_get_photon_torpedo_reload_seconds = nullptr;
 EnergyAmountGetter g_get_quantum_torpedo_reload_seconds = nullptr;
 EnergyAmountGetter g_get_shuttle_craft_reload_seconds = nullptr;
+ResupplyWeaponStateGetter g_get_resupply_weapon_state = nullptr;
+bool g_resupply_weapon_state_resolution_attempted = false;
 A2FO_DirectionalShieldsIsEnabledFn g_directional_shields_is_enabled = nullptr;
 A2FO_DirectionalShieldsGetValueFn g_directional_shields_get_current = nullptr;
 A2FO_DirectionalShieldsGetValueFn g_directional_shields_get_maximum = nullptr;
+A2FO_DirectionalShieldsGetModeFn g_directional_shields_get_mode = nullptr;
 bool g_runtime_ready = false;
 bool g_chained_fo_craft_class_constructor = false;
 bool g_energy_api_resolution_attempted = false;
@@ -888,8 +964,23 @@ LONG g_directional_shield_hover_presented_report_count = 0;
 struct DirectionalShieldSpriteRuntime {
     bool resolution_attempted = false;
     bool ready = false;
+    bool compact = false;
     void* database = nullptr;
     std::array<void*, 4> sprites{};
+};
+
+struct TriShieldSpriteRuntime {
+    bool resolution_attempted = false;
+    bool ready = false;
+    void* database = nullptr;
+    std::array<void*, 2> sprites{};
+};
+
+struct HemisphereShieldSpriteRuntime {
+    bool resolution_attempted = false;
+    bool ready = false;
+    void* database = nullptr;
+    void* sprite = nullptr;
 };
 
 struct DirectionalShieldAnimation {
@@ -1041,6 +1132,9 @@ struct AmmunitionBarCache {
 };
 
 DirectionalShieldSpriteRuntime g_directional_shield_sprites{};
+TriShieldSpriteRuntime g_tri_shield_sprites{};
+HemisphereShieldSpriteRuntime g_hemisphere_shield_sprite{};
+HemisphereShieldSpriteRuntime g_hemisphere_side_shield_sprite{};
 DirectionalShieldAnimation g_directional_shield_animation{};
 DirectionalShieldTooltipRuntime g_directional_shield_tooltip{};
 DirectionalShieldTooltipBinding g_directional_shield_tooltip_binding{};
@@ -1060,6 +1154,9 @@ void* g_directional_shield_sprite_retry_database = nullptr;
 
 void reset_directional_shield_sprite_runtime() noexcept {
     g_directional_shield_sprites = {};
+    g_tri_shield_sprites = {};
+    g_hemisphere_shield_sprite = {};
+    g_hemisphere_side_shield_sprite = {};
     g_directional_shield_animation = {};
     g_directional_shield_tooltip = {};
     // Interface teardown owns the old component and its copied strings. Drop
@@ -1083,28 +1180,79 @@ void log_line(const std::string& message) noexcept {
 }
 
 std::string join_path(const std::string& left, const std::string& right) {
-    if (left.empty()) return right;
-    if (right.empty()) return left;
-    if (left.back() == '\\' || left.back() == '/') return left + right;
-    return left + "\\" + right;
+    struct Context {
+        const std::string* left;
+        const std::string* right;
+        std::string result;
+        std::exception_ptr failure;
+    } context{&left, &right, {}, {}};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        try {
+            if (action == 0) return ctx.left->empty();
+            if (action == 1) return ctx.right->empty();
+            if (action == 2)
+                return ctx.left->back() == '\\' || ctx.left->back() == '/';
+            if (action == 3) ctx.result = *ctx.right;
+            else if (action == 4) ctx.result = *ctx.left;
+            else if (action == 5) ctx.result = *ctx.left + *ctx.right;
+            else if (action == 6) ctx.result = *ctx.left + "\\" + *ctx.right;
+            return 0;
+        } catch (...) {
+            ctx.failure = std::current_exception();
+            return 3;
+        }
+    };
+    a2fo_rs_stage9_craft_join_path(step, &context);
+    if (context.failure) std::rethrow_exception(context.failure);
+    return std::move(context.result);
 }
 
 bool read_small_art_config(
     const std::string& path, std::string& contents) {
-    contents.clear();
-    std::ifstream input(path, std::ios::binary);
-    if (!input) return false;
-    input.seekg(0, std::ios::end);
-    const std::streamoff size = input.tellg();
-    if (size < 0 || size > kMaximumArtConfigSize) {
-        log_line("Ignored oversized ART configuration: " + path);
-        return false;
-    }
-    input.seekg(0, std::ios::beg);
-    std::ostringstream stream;
-    stream << input.rdbuf();
-    contents = stream.str();
-    return input.good() || input.eof();
+    struct Context {
+        const std::string* path;
+        std::string* contents;
+        std::optional<std::ifstream> input;
+        std::optional<std::ostringstream> stream;
+        std::streamoff size = 0;
+        std::exception_ptr failure;
+    } context{&path, &contents, {}, {}, 0, {}};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        try {
+            if (action == 0) {
+                ctx.contents->clear();
+                ctx.input.emplace(*ctx.path, std::ios::binary);
+                return static_cast<bool>(*ctx.input);
+            }
+            if (action == 1) {
+                ctx.input->seekg(0, std::ios::end);
+                ctx.size = ctx.input->tellg();
+            } else if (action == 2) {
+                return ctx.size < 0 || ctx.size > kMaximumArtConfigSize;
+            } else if (action == 3) {
+                log_line("Ignored oversized ART configuration: " + *ctx.path);
+            } else if (action == 4) {
+                ctx.input->seekg(0, std::ios::beg);
+                ctx.stream.emplace();
+                *ctx.stream << ctx.input->rdbuf();
+            } else if (action == 5) {
+                *ctx.contents = ctx.stream->str();
+            } else if (action == 6) {
+                return ctx.input->good() || ctx.input->eof();
+            }
+            return 0;
+        } catch (...) {
+            ctx.failure = std::current_exception();
+            return 3;
+        }
+    };
+    const bool read = a2fo_rs_stage9_craft_read_art_file(step, &context);
+    if (context.failure) std::rethrow_exception(context.failure);
+    return read;
 }
 
 void load_directional_shield_display_config() {
@@ -1113,199 +1261,311 @@ void load_directional_shield_display_config() {
 
     g_directional_shield_display_config = {};
     const std::uint32_t root_count = g_api->extension_root_count();
-    if (root_count > 4096) {
-        log_line("Extension-root count is invalid; directional-shield ART settings retain defaults");
-        return;
-    }
-    for (std::uint32_t index = 0; index < root_count; ++index) {
-        const char* root = g_api->extension_root(index);
-        if (!root || !*root) continue;
-        const std::string path = join_path(root, kArtConfigFileName);
+    struct Row {
+        std::string path;
         std::string contents;
-        if (!read_small_art_config(path, contents)) continue;
-        const auto report = parse_directional_shield_display_config(
-            contents, &g_directional_shield_display_config);
-        if (report.valid_assignments != 0) {
-            char message[384]{};
-            std::snprintf(
-                message, sizeof(message),
-                "Applied %u directional-shield ART assignment(s) from %s",
-                report.valid_assignments, path.c_str());
-            log_line(message);
+        a2fo::craft_identity::DirectionalShieldDisplayParseReport report{};
+    };
+    struct Context {
+        std::optional<Row> row;
+        std::exception_ptr failure;
+    } context{};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t index) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        try {
+            if (action == 0) {
+                log_line("Extension-root count is invalid; directional-shield ART settings retain defaults");
+            } else if (action == 1) {
+                const char* root = g_api->extension_root(
+                    static_cast<std::uint32_t>(index));
+                if (!root || !*root) return 0;
+                ctx.row.emplace(Row{join_path(root, kArtConfigFileName), {}, {}});
+                return 1;
+            } else if (action == 2) {
+                return read_small_art_config(
+                    ctx.row->path, ctx.row->contents);
+            } else if (action == 3) {
+                ctx.row->report = parse_directional_shield_display_config(
+                    ctx.row->contents, &g_directional_shield_display_config);
+            } else if (action == 4) {
+                if (ctx.row->report.valid_assignments != 0) {
+                    char message[384]{};
+                    std::snprintf(message, sizeof(message),
+                        "Applied %u directional-shield ART assignment(s) from %s",
+                        ctx.row->report.valid_assignments, ctx.row->path.c_str());
+                    log_line(message);
+                }
+            } else if (action == 5) {
+                if (ctx.row->report.invalid_assignments != 0) {
+                    char message[384]{};
+                    std::snprintf(message, sizeof(message),
+                        "Ignored %u invalid directional-shield ART assignment(s) in %s",
+                        ctx.row->report.invalid_assignments, ctx.row->path.c_str());
+                    log_line(message);
+                }
+            } else if (action == 6) ctx.row.reset();
+            else if (action == 7) {
+                const auto& config = g_directional_shield_display_config;
+                return config.position_mapping_configured &&
+                    !valid_directional_shield_position_mapping(config);
+            } else if (action == 8) {
+                g_directional_shield_display_config.position_mapping_configured = false;
+                log_line("Directional-shield ART positions contain duplicates; existing ODF positions retained");
+            } else if (action == 9) {
+                const auto& config = g_directional_shield_display_config;
+                char message[256]{};
+                std::snprintf(message, sizeof(message),
+                    "Directional-shield ART display: mode=%d positions=%s F=%d A=%d P=%d S=%d",
+                    config.display_mode,
+                    config.position_mapping_configured ? "configured" : "ODF",
+                    config.facing_positions[0], config.facing_positions[1],
+                    config.facing_positions[2], config.facing_positions[3]);
+                log_line(message);
+            }
+            return 0;
+        } catch (...) {
+            ctx.failure = std::current_exception();
+            return 3;
         }
-        if (report.invalid_assignments != 0) {
-            char message[384]{};
-            std::snprintf(
-                message, sizeof(message),
-                "Ignored %u invalid directional-shield ART assignment(s) in %s",
-                report.invalid_assignments, path.c_str());
-            log_line(message);
-        }
-    }
-
-    auto& config = g_directional_shield_display_config;
-    if (config.position_mapping_configured &&
-        !valid_directional_shield_position_mapping(config)) {
-        config.position_mapping_configured = false;
-        log_line("Directional-shield ART positions contain duplicates; existing ODF positions retained");
-    }
-    char message[256]{};
-    std::snprintf(
-        message, sizeof(message),
-        "Directional-shield ART display: mode=%d positions=%s F=%d A=%d P=%d S=%d",
-        config.display_mode,
-        config.position_mapping_configured ? "configured" : "ODF",
-        config.facing_positions[0], config.facing_positions[1],
-        config.facing_positions[2], config.facing_positions[3]);
-    log_line(message);
+    };
+    a2fo_rs_stage9_craft_load_art(step, &context, root_count);
+    if (context.failure) std::rethrow_exception(context.failure);
 }
 
 bool resolve_energy_amount_api() noexcept {
-    if (g_energy_api_resolution_attempted) {
-        return g_get_photon_torpedoes && g_get_quantum_torpedoes &&
-            g_get_maximum_photon_torpedoes &&
+    struct Context {
+        HMODULE energy = nullptr;
+        std::array<FARPROC, 9> exports{};
+    } context{};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t index) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        static constexpr std::array<const char*, 9> names{{
+            kGetPhotonTorpedoesExport, kGetQuantumTorpedoesExport,
+            kGetShuttleCraftExport, kGetMaximumPhotonTorpedoesExport,
+            kGetMaximumQuantumTorpedoesExport, kGetMaximumShuttleCraftExport,
+            kGetPhotonTorpedoReloadSecondsExport,
+            kGetQuantumTorpedoReloadSecondsExport,
+            kGetShuttleCraftReloadSecondsExport}};
+        if (action == 0) return g_energy_api_resolution_attempted;
+        if (action == 1) return g_get_photon_torpedoes &&
+            g_get_quantum_torpedoes && g_get_maximum_photon_torpedoes &&
             g_get_maximum_quantum_torpedoes;
-    }
-    g_energy_api_resolution_attempted = true;
-    HMODULE energy = GetModuleHandleA(kEnergySystemsModuleName);
-    if (!energy) return false;
-
-    FARPROC photon = GetProcAddress(energy, kGetPhotonTorpedoesExport);
-    FARPROC quantum = GetProcAddress(energy, kGetQuantumTorpedoesExport);
-    FARPROC shuttle_craft = GetProcAddress(
-        energy, kGetShuttleCraftExport);
-    FARPROC maximum_photon = GetProcAddress(
-        energy, kGetMaximumPhotonTorpedoesExport);
-    FARPROC maximum_quantum = GetProcAddress(
-        energy, kGetMaximumQuantumTorpedoesExport);
-    FARPROC maximum_shuttle_craft = GetProcAddress(
-        energy, kGetMaximumShuttleCraftExport);
-    FARPROC photon_reload = GetProcAddress(
-        energy, kGetPhotonTorpedoReloadSecondsExport);
-    FARPROC quantum_reload = GetProcAddress(
-        energy, kGetQuantumTorpedoReloadSecondsExport);
-    FARPROC shuttle_craft_reload = GetProcAddress(
-        energy, kGetShuttleCraftReloadSecondsExport);
-    static_assert(sizeof(photon) == sizeof(g_get_photon_torpedoes),
-                  "unexpected function-pointer size");
-    std::memcpy(&g_get_photon_torpedoes, &photon,
-                sizeof(g_get_photon_torpedoes));
-    std::memcpy(&g_get_quantum_torpedoes, &quantum,
-                sizeof(g_get_quantum_torpedoes));
-    std::memcpy(&g_get_shuttle_craft, &shuttle_craft,
-                sizeof(g_get_shuttle_craft));
-    std::memcpy(&g_get_maximum_photon_torpedoes, &maximum_photon,
-                sizeof(g_get_maximum_photon_torpedoes));
-    std::memcpy(&g_get_maximum_quantum_torpedoes, &maximum_quantum,
-                sizeof(g_get_maximum_quantum_torpedoes));
-    std::memcpy(&g_get_maximum_shuttle_craft, &maximum_shuttle_craft,
-                sizeof(g_get_maximum_shuttle_craft));
-    std::memcpy(&g_get_photon_torpedo_reload_seconds, &photon_reload,
-                sizeof(g_get_photon_torpedo_reload_seconds));
-    std::memcpy(&g_get_quantum_torpedo_reload_seconds, &quantum_reload,
-                sizeof(g_get_quantum_torpedo_reload_seconds));
-    std::memcpy(&g_get_shuttle_craft_reload_seconds, &shuttle_craft_reload,
-                sizeof(g_get_shuttle_craft_reload_seconds));
-    const bool ready = g_get_photon_torpedoes &&
-        g_get_quantum_torpedoes && g_get_maximum_photon_torpedoes &&
-        g_get_maximum_quantum_torpedoes;
-    log_line(ready
-        ? "Ammunition display linked to A2FOEnergySystems value exports"
-        : "A2FOEnergySystems value exports unavailable; ammunition display disabled");
-    if (ready && (!g_get_photon_torpedo_reload_seconds ||
-                  !g_get_quantum_torpedo_reload_seconds)) {
-        log_line("Ammunition reload-time exports unavailable; value display mode 2 will show Resupply while below full");
-    }
-    if (ready && (!g_get_shuttle_craft ||
-                  !g_get_maximum_shuttle_craft)) {
-        log_line("Shuttle Craft value exports unavailable; Photon and Quantum display remains active");
-    } else if (ready && !g_get_shuttle_craft_reload_seconds) {
-        log_line("Shuttle Craft reload-time export unavailable; value display mode 2 will show Resupply while below full");
-    }
-    return ready;
+        if (action == 2) {
+            g_energy_api_resolution_attempted = true;
+            ctx.energy = a2fo::module_provider(kEnergySystemsModuleName, {
+                kGetPhotonTorpedoesExport, kGetQuantumTorpedoesExport,
+                kGetShuttleCraftExport, kGetMaximumPhotonTorpedoesExport,
+                kGetMaximumQuantumTorpedoesExport,
+                kGetMaximumShuttleCraftExport,
+                kGetPhotonTorpedoReloadSecondsExport,
+                kGetQuantumTorpedoReloadSecondsExport,
+                kGetShuttleCraftReloadSecondsExport,
+                kGetResupplyWeaponStateExport});
+            return ctx.energy != nullptr;
+        }
+        if (action == 3) {
+            ctx.exports[index] = GetProcAddress(ctx.energy, names[index]);
+        } else if (action == 4) {
+            static_assert(sizeof(FARPROC) == sizeof(g_get_photon_torpedoes),
+                "unexpected function-pointer size");
+            switch (index) {
+                case 0: std::memcpy(&g_get_photon_torpedoes, &ctx.exports[0],
+                    sizeof(g_get_photon_torpedoes)); break;
+                case 1: std::memcpy(&g_get_quantum_torpedoes, &ctx.exports[1],
+                    sizeof(g_get_quantum_torpedoes)); break;
+                case 2: std::memcpy(&g_get_shuttle_craft, &ctx.exports[2],
+                    sizeof(g_get_shuttle_craft)); break;
+                case 3: std::memcpy(&g_get_maximum_photon_torpedoes, &ctx.exports[3],
+                    sizeof(g_get_maximum_photon_torpedoes)); break;
+                case 4: std::memcpy(&g_get_maximum_quantum_torpedoes, &ctx.exports[4],
+                    sizeof(g_get_maximum_quantum_torpedoes)); break;
+                case 5: std::memcpy(&g_get_maximum_shuttle_craft, &ctx.exports[5],
+                    sizeof(g_get_maximum_shuttle_craft)); break;
+                case 6: std::memcpy(&g_get_photon_torpedo_reload_seconds, &ctx.exports[6],
+                    sizeof(g_get_photon_torpedo_reload_seconds)); break;
+                case 7: std::memcpy(&g_get_quantum_torpedo_reload_seconds, &ctx.exports[7],
+                    sizeof(g_get_quantum_torpedo_reload_seconds)); break;
+                case 8: std::memcpy(&g_get_shuttle_craft_reload_seconds, &ctx.exports[8],
+                    sizeof(g_get_shuttle_craft_reload_seconds)); break;
+                default: break;
+            }
+        } else if (action == 5) {
+            return g_get_photon_torpedoes && g_get_quantum_torpedoes &&
+                g_get_maximum_photon_torpedoes &&
+                g_get_maximum_quantum_torpedoes;
+        } else if (action == 6) {
+            log_line(index
+                ? "Ammunition display linked to A2FOEnergySystems value exports"
+                : "A2FOEnergySystems value exports unavailable; ammunition display disabled");
+        } else if (action == 7) {
+            return !g_get_photon_torpedo_reload_seconds ||
+                !g_get_quantum_torpedo_reload_seconds;
+        } else if (action == 8) {
+            log_line("Ammunition reload-time exports unavailable; value display mode 2 will show Resupply while below full");
+        } else if (action == 9) {
+            return !g_get_shuttle_craft || !g_get_maximum_shuttle_craft;
+        } else if (action == 10) {
+            log_line("Shuttle Craft value exports unavailable; Photon and Quantum display remains active");
+        } else if (action == 11) {
+            return !g_get_shuttle_craft_reload_seconds;
+        } else if (action == 12) {
+            log_line("Shuttle Craft reload-time export unavailable; value display mode 2 will show Resupply while below full");
+        }
+        return 0;
+    };
+    return a2fo_rs_stage9_craft_resolve_energy(step, &context,
+        context.exports.size());
 }
 
 bool resolve_directional_shields_api() noexcept {
-    if (g_directional_shields_api_resolution_attempted) {
-        return g_directional_shields_is_enabled &&
+    struct Context {
+        HMODULE directional = nullptr;
+        std::array<FARPROC, 4> exports{};
+    } context{};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t index) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        static constexpr std::array<const char*, 4> names{{
+            kDirectionalShieldsIsEnabledExport,
+            kDirectionalShieldsGetCurrentExport,
+            kDirectionalShieldsGetMaximumExport,
+            kDirectionalShieldsGetModeExport}};
+        if (action == 0) return g_directional_shields_api_resolution_attempted;
+        if (action == 1) return g_directional_shields_is_enabled &&
             g_directional_shields_get_current &&
             g_directional_shields_get_maximum;
-    }
-    g_directional_shields_api_resolution_attempted = true;
-    HMODULE directional = GetModuleHandleA(kDirectionalShieldsModuleName);
-    if (!directional) return false;
-
-    FARPROC is_enabled = GetProcAddress(
-        directional, kDirectionalShieldsIsEnabledExport);
-    FARPROC get_current = GetProcAddress(
-        directional, kDirectionalShieldsGetCurrentExport);
-    FARPROC get_maximum = GetProcAddress(
-        directional, kDirectionalShieldsGetMaximumExport);
-    static_assert(sizeof(is_enabled) ==
-                      sizeof(g_directional_shields_is_enabled),
-                  "unexpected function-pointer size");
-    std::memcpy(&g_directional_shields_is_enabled, &is_enabled,
-                sizeof(g_directional_shields_is_enabled));
-    std::memcpy(&g_directional_shields_get_current, &get_current,
-                sizeof(g_directional_shields_get_current));
-    std::memcpy(&g_directional_shields_get_maximum, &get_maximum,
-                sizeof(g_directional_shields_get_maximum));
-    const bool ready = g_directional_shields_is_enabled &&
-        g_directional_shields_get_current &&
-        g_directional_shields_get_maximum;
-    log_line(ready
-        ? "Directional-shield display linked to facing-value exports"
-        : "Directional-shield value exports unavailable; facing display disabled");
-    return ready;
+        if (action == 2) {
+            g_directional_shields_api_resolution_attempted = true;
+            ctx.directional = a2fo::module_provider(
+                kDirectionalShieldsModuleName,
+                {kDirectionalShieldsIsEnabledExport,
+                 kDirectionalShieldsGetCurrentExport,
+                 kDirectionalShieldsGetMaximumExport,
+                 kDirectionalShieldsGetModeExport});
+            return ctx.directional != nullptr;
+        }
+        if (action == 3) {
+            ctx.exports[index] = GetProcAddress(ctx.directional, names[index]);
+        } else if (action == 4) {
+            static_assert(sizeof(FARPROC) ==
+                sizeof(g_directional_shields_is_enabled),
+                "unexpected function-pointer size");
+            static_assert(sizeof(FARPROC) ==
+                sizeof(g_directional_shields_get_mode),
+                "unexpected function-pointer size");
+            switch (index) {
+                case 0: std::memcpy(&g_directional_shields_is_enabled,
+                    &ctx.exports[0], sizeof(g_directional_shields_is_enabled)); break;
+                case 1: std::memcpy(&g_directional_shields_get_current,
+                    &ctx.exports[1], sizeof(g_directional_shields_get_current)); break;
+                case 2: std::memcpy(&g_directional_shields_get_maximum,
+                    &ctx.exports[2], sizeof(g_directional_shields_get_maximum)); break;
+                case 3: std::memcpy(&g_directional_shields_get_mode,
+                    &ctx.exports[3], sizeof(g_directional_shields_get_mode)); break;
+                default: break;
+            }
+        } else if (action == 5) {
+            return g_directional_shields_is_enabled &&
+                g_directional_shields_get_current &&
+                g_directional_shields_get_maximum;
+        } else if (action == 6) {
+            log_line(index
+                ? (g_directional_shields_get_mode
+                    ? "Directional-shield display linked to facing-value/mode exports"
+                    : "Directional-shield display linked to legacy facing-value exports")
+                : "Directional-shield value exports unavailable; facing display disabled");
+        }
+        return 0;
+    };
+    return a2fo_rs_stage9_craft_resolve_directional(step, &context,
+        context.exports.size());
 }
 
 void resolve_shield_class_observer() noexcept {
-    HMODULE shields = GetModuleHandleA(kAlwaysShowShieldsModuleName);
-    FARPROC exported = shields
-        ? GetProcAddress(shields, kShieldClassObserverExport)
-        : nullptr;
-    static_assert(sizeof(exported) == sizeof(g_shield_class_observer),
-                  "unexpected function-pointer size");
-    std::memcpy(&g_shield_class_observer, &exported,
+    struct Context { HMODULE provider = nullptr; FARPROC exported = nullptr; } context{};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) {
+            ctx.provider = GetModuleHandleA("A2FOExtensions.dll");
+            ctx.exported = ctx.provider
+                ? GetProcAddress(ctx.provider, kShieldClassObserverExport)
+                : nullptr;
+            return ctx.exported != nullptr;
+        }
+        if (action == 1) {
+            ctx.provider = GetModuleHandleA(kAlwaysShowShieldsModuleName);
+            ctx.exported = ctx.provider
+                ? GetProcAddress(ctx.provider, kShieldClassObserverExport)
+                : nullptr;
+        } else if (action == 2) {
+            static_assert(sizeof(FARPROC) == sizeof(g_shield_class_observer),
+                "unexpected function-pointer size");
+            std::memcpy(&g_shield_class_observer, &ctx.exported,
                 sizeof(g_shield_class_observer));
-    if (g_shield_class_observer) {
-        log_line(
-            "Shield class registration linked through "
-            "A2FOAlwaysShowShields");
-    }
+        } else if (action == 3) return g_shield_class_observer != nullptr;
+        else if (action == 4)
+            log_line("Shield class registration linked through A2FOAlwaysShowShields");
+        return 0;
+    };
+    a2fo_rs_stage9_craft_observer(step, &context, 1);
 }
 
 void resolve_nebula_class_observer() noexcept {
-    HMODULE renderer = GetModuleHandleA(kNebulaRendererModuleName);
-    FARPROC exported = renderer
-        ? GetProcAddress(renderer, kNebulaClassObserverExport)
-        : nullptr;
-    static_assert(sizeof(exported) == sizeof(g_nebula_class_observer),
-                  "unexpected function-pointer size");
-    std::memcpy(&g_nebula_class_observer, &exported,
+    struct Context { HMODULE renderer = nullptr; FARPROC exported = nullptr; } context{};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) {
+            ctx.renderer = a2fo::module_provider(
+                kNebulaRendererModuleName, {kNebulaClassObserverExport});
+            ctx.exported = ctx.renderer
+                ? GetProcAddress(ctx.renderer, kNebulaClassObserverExport)
+                : nullptr;
+            return ctx.exported != nullptr;
+        }
+        if (action == 2) {
+            static_assert(sizeof(FARPROC) == sizeof(g_nebula_class_observer),
+                "unexpected function-pointer size");
+            std::memcpy(&g_nebula_class_observer, &ctx.exported,
                 sizeof(g_nebula_class_observer));
-    if (g_nebula_class_observer) {
-        log_line(
-            "Emissive-map class registration linked through "
-            "A2FONebulaRenderer");
-    }
+        } else if (action == 3) return g_nebula_class_observer != nullptr;
+        else if (action == 4)
+            log_line("Emissive-map class registration linked through A2FONebulaRenderer");
+        return 0;
+    };
+    a2fo_rs_stage9_craft_observer(step, &context, 0);
 }
 
 void resolve_texture_variants_class_observer() noexcept {
-    HMODULE variants = GetModuleHandleA(kTextureVariantsModuleName);
-    FARPROC exported = variants
-        ? GetProcAddress(variants, kTextureVariantsClassObserverExport)
-        : nullptr;
-    static_assert(
-        sizeof(exported) == sizeof(g_texture_variants_class_observer),
-        "unexpected function-pointer size");
-    std::memcpy(&g_texture_variants_class_observer, &exported,
+    struct Context { HMODULE variants = nullptr; FARPROC exported = nullptr; } context{};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) {
+            ctx.variants = a2fo::module_provider(
+                kTextureVariantsModuleName,
+                {kTextureVariantsClassObserverExport});
+            ctx.exported = ctx.variants
+                ? GetProcAddress(ctx.variants, kTextureVariantsClassObserverExport)
+                : nullptr;
+            return ctx.exported != nullptr;
+        }
+        if (action == 2) {
+            static_assert(sizeof(FARPROC) ==
+                sizeof(g_texture_variants_class_observer),
+                "unexpected function-pointer size");
+            std::memcpy(&g_texture_variants_class_observer, &ctx.exported,
                 sizeof(g_texture_variants_class_observer));
-    if (g_texture_variants_class_observer) {
-        log_line(
-            "Subsystem mesh class registration linked through "
-            "A2FOTextureVariants");
-    }
+        } else if (action == 3)
+            return g_texture_variants_class_observer != nullptr;
+        else if (action == 4)
+            log_line("Subsystem mesh class registration linked through A2FOTextureVariants");
+        return 0;
+    };
+    a2fo_rs_stage9_craft_observer(step, &context, 0);
 }
 
 void* at(HMODULE module, std::uintptr_t rva) noexcept {
@@ -1390,18 +1650,25 @@ bool event_field_value(
     if (output) *output = {};
     if (!name || !output || (!fields && field_count != 0)) return false;
     const std::size_t name_size = std::strlen(name);
-    for (std::uint32_t index = 0; index < field_count; ++index) {
-        const A2FO_OdfFieldView& field = fields[index];
-        if (!field.name.data || field.name.size != name_size ||
-            _strnicmp(field.name.data, name, name_size) != 0 ||
-            (!field.value.data && field.value.size != 0)) {
-            continue;
-        }
-        *output = std::string_view(
+    struct Context {
+        const A2FO_OdfFieldView* fields;
+        const char* name;
+        std::size_t name_size;
+        std::string_view* output;
+    } context{fields, name, name_size, output};
+    const auto step = +[](void* opaque, std::uint32_t,
+                          std::size_t index) noexcept -> std::uint32_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        const A2FO_OdfFieldView& field = ctx.fields[index];
+        if (!field.name.data || field.name.size != ctx.name_size ||
+            _strnicmp(field.name.data, ctx.name, ctx.name_size) != 0 ||
+            (!field.value.data && field.value.size != 0)) return 0;
+        *ctx.output = std::string_view(
             field.value.data ? field.value.data : "", field.value.size);
-        return true;
-    }
-    return false;
+        return 1;
+    };
+    return a2fo_rs_stage10_identity_first_match(
+        field_count, step, &context);
 }
 
 void A2FO_CALL weapon_class_loaded_handler(
@@ -1475,6 +1742,31 @@ void* weapon_for_ship_system_icon(
     return read_at<void*>(
         begin, static_cast<std::size_t>(weapon_index) * sizeof(void*),
         nullptr);
+}
+
+std::int32_t resupply_weapon_state(void* weapon) noexcept {
+    if (!g_resupply_weapon_state_resolution_attempted) {
+        g_resupply_weapon_state_resolution_attempted = true;
+        HMODULE energy = a2fo::module_provider(
+            kEnergySystemsModuleName, {kGetPhotonTorpedoesExport,
+            kGetQuantumTorpedoesExport, kGetShuttleCraftExport,
+            kGetMaximumPhotonTorpedoesExport,
+            kGetMaximumQuantumTorpedoesExport,
+            kGetMaximumShuttleCraftExport,
+            kGetPhotonTorpedoReloadSecondsExport,
+            kGetQuantumTorpedoReloadSecondsExport,
+            kGetShuttleCraftReloadSecondsExport,
+            kGetResupplyWeaponStateExport});
+        FARPROC exported = energy
+            ? GetProcAddress(energy, kGetResupplyWeaponStateExport)
+            : nullptr;
+        static_assert(sizeof(exported) == sizeof(g_get_resupply_weapon_state),
+                      "unexpected function-pointer size");
+        std::memcpy(&g_get_resupply_weapon_state, &exported,
+                    sizeof(g_get_resupply_weapon_state));
+    }
+    return weapon && g_get_resupply_weapon_state
+        ? g_get_resupply_weapon_state(weapon) : -1;
 }
 
 a2fo::craft_identity::WeaponIconKind weapon_icon_kind(
@@ -1575,38 +1867,60 @@ a2fo::craft_identity::WeaponIconPresentation weapon_icon_presentation(
         ? WeaponTechnologyPresentation{
               a2fo::craft_identity::WeaponTechnologyState::available, false}
         : weapon_technology_presentation(craft, weapon_class);
-    return a2fo::craft_identity::weapon_icon_presentation(
+    const auto presentation = a2fo::craft_identity::weapon_icon_presentation(
         kind, technology.state, technology.hide_when_unavailable);
+    // Research-locked resupply weapons keep the disabled/hidden policy.
+    if (presentation != WeaponIconPresentation::live_status) {
+        return presentation;
+    }
+    const std::int32_t resupply_state = resupply_weapon_state(weapon);
+    if (resupply_state < 0) return presentation;
+    return resupply_state > 0
+        ? WeaponIconPresentation::resupply_ready
+        : WeaponIconPresentation::passive_neutral;
+}
+
+bool native_identity_is_space(std::uint8_t value) noexcept {
+    return std::isspace(static_cast<unsigned char>(value)) != 0;
 }
 
 void trim_string(std::string* value) {
     if (!value) return;
-    std::size_t begin = 0;
-    while (begin < value->size() && std::isspace(
-               static_cast<unsigned char>((*value)[begin]))) {
-        ++begin;
+    A2foIdentityTrimSpan span{};
+    if (a2fo_rs_stage10_identity_trim(
+            reinterpret_cast<const std::uint8_t*>(value->data()),
+            value->size(), &native_identity_is_space, &span)) {
+        *value = value->substr(span.begin, span.end - span.begin);
     }
-    std::size_t end = value->size();
-    while (end > begin && std::isspace(
-               static_cast<unsigned char>((*value)[end - 1]))) {
-        --end;
-    }
-    *value = value->substr(begin, end - begin);
 }
 
 bool copy_native_string(const char* source, std::string* output) {
-    if (!source || !output) return false;
-    std::size_t length = 0;
-    while (length < kMaximumIdentityLength) {
-        if (!readable_range(source + length, 1)) return false;
-        if (source[length] == '\0') {
-            output->assign(source, length);
-            trim_string(output);
-            return true;
+    struct Context {
+        const char* source;
+        std::string* output;
+        std::exception_ptr failure;
+    } context{source, output, {}};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t length) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) return ctx.source && ctx.output;
+        if (action == 1) return readable_range(ctx.source + length, 1);
+        if (action == 2) return ctx.source[length] == '\0';
+        if (action == 3) {
+            try {
+                ctx.output->assign(ctx.source, length);
+                trim_string(ctx.output);
+            } catch (...) {
+                ctx.failure = std::current_exception();
+                return 3;
+            }
         }
-        ++length;
-    }
-    return false;
+        return 0;
+    };
+    const bool copied = a2fo_rs_stage9_craft_copy_native_string(
+        step, &context, kMaximumIdentityLength);
+    if (context.failure) std::rethrow_exception(context.failure);
+    return copied;
 }
 
 bool valid_vector_bounds(const NativeStringVector& values,
@@ -1635,11 +1949,22 @@ void release_native_vector(NativeStringVector* values) noexcept {
     const auto engine_delete = reinterpret_cast<DeleteFn>(
         at(g_armada, kEngineOperatorDeleteRva));
     if (!engine_delete) return;
-    for (std::size_t index = 0; index < count; ++index) {
-        if (values->begin[index]) engine_delete(values->begin[index]);
-    }
-    if (values->begin) engine_delete(values->begin);
-    *values = NativeStringVector{};
+    struct Context {
+        NativeStringVector* values;
+        DeleteFn engine_delete;
+    } context{values, engine_delete};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t index) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) {
+            if (ctx.values->begin[index])
+                ctx.engine_delete(ctx.values->begin[index]);
+        } else if (action == 1) {
+            if (ctx.values->begin) ctx.engine_delete(ctx.values->begin);
+        } else if (action == 2) *ctx.values = NativeStringVector{};
+        return 0;
+    };
+    a2fo_rs_stage9_craft_release_native_vector(step, &context, count);
 }
 
 bool read_identity_list(void* parameter_db, const char* command,
@@ -1655,10 +1980,20 @@ bool read_identity_list(void* parameter_db, const char* command,
         std::size_t count = 0;
         if (valid_vector_bounds(native_values, &count)) {
             output->resize(count);
-            for (std::size_t index = 0; index < count; ++index) {
-                copy_native_string(native_values.begin[index],
-                                   &(*output)[index]);
-            }
+            struct CopyContext {
+                const NativeStringVector* values;
+                std::vector<std::string>* output;
+                std::exception_ptr failure;
+            } copy{&native_values, output, {}};
+            const auto step = +[](void* opaque, std::uint32_t, std::uintptr_t index) noexcept -> std::uintptr_t {
+                auto& ctx = *static_cast<CopyContext*>(opaque);
+                try {
+                    copy_native_string(ctx.values->begin[index], &(*ctx.output)[index]);
+                } catch (...) { ctx.failure = std::current_exception(); return 3; }
+                return 0;
+            };
+            a2fo_rs_stage9_craft_copy_identity_rows(step, &copy, count);
+            if (copy.failure) std::rethrow_exception(copy.failure);
             copied = !output->empty();
         }
     } catch (...) {
@@ -1712,11 +2047,10 @@ bool parse_display_mode(
     if (!mode || value.empty()) return false;
     char* end = nullptr;
     const long parsed = std::strtol(value.c_str(), &end, 10);
-    while (end && *end != '\0' && std::isspace(
-               static_cast<unsigned char>(*end))) {
-        ++end;
-    }
-    if (!end || *end != '\0' || parsed < 1 || parsed > 2) return false;
+    if (!end || !a2fo_rs_stage10_identity_display_tail(
+            reinterpret_cast<const std::uint8_t*>(end),
+            value.c_str() + value.size() - end + 1,
+            parsed, &native_identity_is_space)) return false;
     *mode = static_cast<AmmunitionDisplayMode>(parsed);
     return true;
 }
@@ -1739,257 +2073,271 @@ bool read_parameter_int(
 
 void register_selected_status_ui_policy(
     void* object_class, void* parameter_db) noexcept {
-    if (!object_class || !parameter_db) return;
-    SelectedStatusUiPolicy policy{};
-    bool any_found = read_parameter_string(
-        parameter_db, kShieldTooltipCommand,
-        &policy.shield_tooltip);
-    any_found = read_parameter_string(
-        parameter_db, kShieldVerboseTooltipCommand,
-        &policy.shield_verbose_tooltip) || any_found;
-    if (!any_found) {
-        g_selected_status_ui_policies.erase(object_class);
-        return;
-    }
-    try {
-        g_selected_status_ui_policies[object_class] = std::move(policy);
-    } catch (...) {
-        g_selected_status_ui_policies.erase(object_class);
-        log_line("Could not retain selected-status tooltip policy");
-    }
+    struct Context {
+        void* object_class;
+        void* parameter_db;
+        SelectedStatusUiPolicy policy{};
+    } context{object_class, parameter_db, {}};
+    const auto step = +[](void* opaque, std::uint32_t action, std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) return ctx.object_class && ctx.parameter_db;
+        if (action == 1) return read_parameter_string(
+            ctx.parameter_db, kShieldTooltipCommand, &ctx.policy.shield_tooltip);
+        if (action == 2) return read_parameter_string(
+            ctx.parameter_db, kShieldVerboseTooltipCommand, &ctx.policy.shield_verbose_tooltip);
+        if (action == 3) g_selected_status_ui_policies.erase(ctx.object_class);
+        else if (action == 4) {
+            try { g_selected_status_ui_policies[ctx.object_class] = std::move(ctx.policy); }
+            catch (...) {
+                g_selected_status_ui_policies.erase(ctx.object_class);
+                log_line("Could not retain selected-status tooltip policy");
+            }
+        }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_register_selected_status(step, &context);
 }
 
 void register_ammunition_ui_policy(
     void* object_class, void* parameter_db) noexcept {
-    if (!object_class || !parameter_db) return;
-    AmmunitionUiPolicy policy{};
-    bool any_found = false;
-    for (std::size_t index = 0; index < policy.stores.size(); ++index) {
-        AmmunitionPresentation& store = policy.stores[index];
-        int numeric_mode = static_cast<int>(store.display_mode);
-        if (read_parameter_int(
-                parameter_db, kAmmunitionDisplayModeCommands[index],
-                &numeric_mode)) {
-            if (numeric_mode < static_cast<int>(AmmunitionDisplayMode::text) ||
-                numeric_mode > static_cast<int>(AmmunitionDisplayMode::icon)) {
-                log_line(std::string("Ignored invalid ") +
-                         kAmmunitionDisplayModeCommands[index] +
-                         "; use 1 for text or 2 for icon");
-            } else {
-                store.display_mode =
-                    static_cast<AmmunitionDisplayMode>(numeric_mode);
-                any_found = true;
+    struct Context {
+        void* object_class;
+        void* parameter_db;
+        AmmunitionUiPolicy policy{};
+        bool any_found = false;
+        int numeric_mode = 0;
+    } context{object_class, parameter_db, {}, false, 0};
+    const auto step = +[](void* opaque, std::uint32_t action, std::uintptr_t packed) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) return ctx.object_class && ctx.parameter_db;
+        const std::size_t index = action == 5 ? packed / 4 : packed;
+        if (action >= 1 && action <= 6) {
+            AmmunitionPresentation& store = ctx.policy.stores[index];
+            if (action == 1) {
+                ctx.numeric_mode = static_cast<int>(store.display_mode);
+                return read_parameter_int(ctx.parameter_db,
+                    kAmmunitionDisplayModeCommands[index], &ctx.numeric_mode);
             }
-        } else {
-            // Also accept a quoted numeric value for compatibility with the
-            // initial development build which queried this field as text.
-            std::string mode;
-            if (read_parameter_string(
-                    parameter_db, kAmmunitionDisplayModeCommands[index],
-                    &mode)) {
-                if (!parse_display_mode(mode, &store.display_mode)) {
+            if (action == 2) {
+                if (ctx.numeric_mode < static_cast<int>(AmmunitionDisplayMode::text) ||
+                    ctx.numeric_mode > static_cast<int>(AmmunitionDisplayMode::icon)) {
                     log_line(std::string("Ignored invalid ") +
                              kAmmunitionDisplayModeCommands[index] +
                              "; use 1 for text or 2 for icon");
                 } else {
-                    any_found = true;
+                    store.display_mode = static_cast<AmmunitionDisplayMode>(ctx.numeric_mode);
+                    ctx.any_found = true;
+                }
+            } else if (action == 3) {
+                std::string mode;
+                if (read_parameter_string(ctx.parameter_db,
+                        kAmmunitionDisplayModeCommands[index], &mode)) {
+                    if (!parse_display_mode(mode, &store.display_mode)) {
+                        log_line(std::string("Ignored invalid ") +
+                                 kAmmunitionDisplayModeCommands[index] +
+                                 "; use 1 for text or 2 for icon");
+                    } else ctx.any_found = true;
+                }
+            } else if (action == 4) {
+                int value_mode = static_cast<int>(store.value_display_mode);
+                if (read_parameter_int(ctx.parameter_db,
+                        kAmmunitionValueDisplayModeCommands[index], &value_mode)) {
+                    if (value_mode < static_cast<int>(AmmunitionValueDisplayMode::percent) ||
+                        value_mode > static_cast<int>(AmmunitionValueDisplayMode::bar)) {
+                        log_line(std::string("Ignored invalid ") +
+                                 kAmmunitionValueDisplayModeCommands[index] +
+                                 "; use 0 for percent, 1 for current/maximum, 2 for reload status, or 3 for a capacity bar");
+                    } else {
+                        store.value_display_mode = static_cast<AmmunitionValueDisplayMode>(value_mode);
+                        ctx.any_found = true;
+                    }
+                }
+            } else if (action == 5) {
+                const std::size_t field = packed % 4;
+                const char* commands[]{kAmmunitionLabelCommands[index],
+                    kAmmunitionTooltipCommands[index],
+                    kAmmunitionVerboseTooltipCommands[index],
+                    kAmmunitionIconCommands[index]};
+                std::string* values[]{&store.label, &store.tooltip,
+                    &store.verbose_tooltip, &store.icon};
+                ctx.any_found = read_parameter_string(
+                    ctx.parameter_db, commands[field], values[field]) || ctx.any_found;
+            } else if (action == 6) {
+                RawRectangle icon_position{};
+                if (read_ui_rectangle(ctx.parameter_db,
+                        kAmmunitionIconPositionCommands[index], &icon_position)) {
+                    if (icon_position.width <= 0 || icon_position.height <= 0) {
+                        log_line(std::string("Ignored invalid ") +
+                                 kAmmunitionIconPositionCommands[index] +
+                                 "; width and height must be positive");
+                    } else {
+                        store.icon_position_found = true;
+                        store.icon_position = icon_position;
+                        ctx.any_found = true;
+                    }
                 }
             }
+            return 0;
         }
-        int value_mode = static_cast<int>(store.value_display_mode);
-        if (read_parameter_int(
-                parameter_db,
-                kAmmunitionValueDisplayModeCommands[index],
-                &value_mode)) {
-            if (value_mode <
-                    static_cast<int>(AmmunitionValueDisplayMode::percent) ||
-                value_mode >
-                    static_cast<int>(AmmunitionValueDisplayMode::bar)) {
-                log_line(std::string("Ignored invalid ") +
-                         kAmmunitionValueDisplayModeCommands[index] +
-                         "; use 0 for percent, 1 for current/maximum, 2 for reload status, or 3 for a capacity bar");
-            } else {
-                store.value_display_mode =
-                    static_cast<AmmunitionValueDisplayMode>(value_mode);
-                any_found = true;
+        if (action == 7) return ctx.any_found;
+        if (action == 8) g_ammunition_ui_policies.erase(ctx.object_class);
+        else if (action == 9) {
+            try {
+                g_ammunition_ui_policies[ctx.object_class] = std::move(ctx.policy);
+                const std::string odf = class_odf_name(ctx.object_class);
+                const AmmunitionUiPolicy& retained = g_ammunition_ui_policies[ctx.object_class];
+                char message[640]{};
+                std::snprintf(message, sizeof(message),
+                    "Registered ammunition UI on '%s': Photon=%s/value%d%s Quantum=%s/value%d%s Shuttle Craft=%s/value%d%s",
+                    odf.empty() ? "<unknown>" : odf.c_str(),
+                    retained.stores[0].display_mode == AmmunitionDisplayMode::icon ? "icon" : "text",
+                    static_cast<int>(retained.stores[0].value_display_mode),
+                    retained.stores[0].label.empty() ? "" : "/label",
+                    retained.stores[1].display_mode == AmmunitionDisplayMode::icon ? "icon" : "text",
+                    static_cast<int>(retained.stores[1].value_display_mode),
+                    retained.stores[1].label.empty() ? "" : "/label",
+                    retained.stores[2].display_mode == AmmunitionDisplayMode::icon ? "icon" : "text",
+                    static_cast<int>(retained.stores[2].value_display_mode),
+                    retained.stores[2].label.empty() ? "" : "/label");
+                log_line(message);
+            } catch (...) {
+                g_ammunition_ui_policies.erase(ctx.object_class);
+                log_line("Could not retain ammunition UI policy");
             }
         }
-        any_found = read_parameter_string(
-            parameter_db, kAmmunitionLabelCommands[index],
-            &store.label) || any_found;
-        any_found = read_parameter_string(
-            parameter_db, kAmmunitionTooltipCommands[index],
-            &store.tooltip) || any_found;
-        any_found = read_parameter_string(
-            parameter_db, kAmmunitionVerboseTooltipCommands[index],
-            &store.verbose_tooltip) || any_found;
-        any_found = read_parameter_string(
-            parameter_db, kAmmunitionIconCommands[index],
-            &store.icon) || any_found;
-        RawRectangle icon_position{};
-        if (read_ui_rectangle(
-                parameter_db, kAmmunitionIconPositionCommands[index],
-                &icon_position)) {
-            if (icon_position.width <= 0 || icon_position.height <= 0) {
-                log_line(std::string("Ignored invalid ") +
-                         kAmmunitionIconPositionCommands[index] +
-                         "; width and height must be positive");
-            } else {
-                store.icon_position_found = true;
-                store.icon_position = icon_position;
-                any_found = true;
-            }
-        }
-    }
-    if (!any_found) {
-        g_ammunition_ui_policies.erase(object_class);
-        return;
-    }
-    try {
-        g_ammunition_ui_policies[object_class] = std::move(policy);
-        const std::string odf = class_odf_name(object_class);
-        const AmmunitionUiPolicy& retained =
-            g_ammunition_ui_policies[object_class];
-        char message[640]{};
-        std::snprintf(
-            message, sizeof(message),
-            "Registered ammunition UI on '%s': Photon=%s/value%d%s Quantum=%s/value%d%s Shuttle Craft=%s/value%d%s",
-            odf.empty() ? "<unknown>" : odf.c_str(),
-            retained.stores[0].display_mode == AmmunitionDisplayMode::icon
-                ? "icon" : "text",
-            static_cast<int>(retained.stores[0].value_display_mode),
-            retained.stores[0].label.empty() ? "" : "/label",
-            retained.stores[1].display_mode == AmmunitionDisplayMode::icon
-                ? "icon" : "text",
-            static_cast<int>(retained.stores[1].value_display_mode),
-            retained.stores[1].label.empty() ? "" : "/label",
-            retained.stores[2].display_mode == AmmunitionDisplayMode::icon
-                ? "icon" : "text",
-            static_cast<int>(retained.stores[2].value_display_mode),
-            retained.stores[2].label.empty() ? "" : "/label");
-        log_line(message);
-    } catch (...) {
-        g_ammunition_ui_policies.erase(object_class);
-        log_line("Could not retain ammunition UI policy");
-    }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_register_ammunition(step, &context, context.policy.stores.size());
 }
 
 void register_directional_shield_ui_policy(
     void* object_class, void* parameter_db) noexcept {
-    if (!object_class || !parameter_db) return;
-    DirectionalShieldUiPolicy policy{};
-    bool any_found = false;
-    int value_display_mode = 0;
-    if (read_parameter_int(
-            parameter_db, kDirectionalShieldValueDisplayModeCommand,
-            &value_display_mode)) {
-        if (value_display_mode < 0 || value_display_mode > 2) {
-            log_line(std::string("Ignored invalid ") +
-                     kDirectionalShieldValueDisplayModeCommand +
-                     "; expected 0, 1, or 2");
-        } else {
-            policy.value_display_mode_found = true;
-            policy.value_display_mode = static_cast<
-                a2fo::craft_identity::DirectionalShieldValueDisplayMode>(
-                    value_display_mode);
-            any_found = true;
+    struct Context {
+        void* object_class;
+        void* parameter_db;
+        DirectionalShieldUiPolicy policy{};
+        bool any_found = false;
+        int value_display_mode = 0;
+    } context{object_class, parameter_db, {}, false, 0};
+    const auto step = +[](void* opaque, std::uint32_t action, std::uintptr_t index) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) return ctx.object_class && ctx.parameter_db;
+        if (action == 1) {
+            if (read_parameter_int(ctx.parameter_db,
+                    kDirectionalShieldValueDisplayModeCommand, &ctx.value_display_mode)) {
+                if (ctx.value_display_mode < 0 || ctx.value_display_mode > 2) {
+                    log_line(std::string("Ignored invalid ") +
+                             kDirectionalShieldValueDisplayModeCommand + "; expected 0, 1, or 2");
+                } else {
+                    ctx.policy.value_display_mode_found = true;
+                    ctx.policy.value_display_mode = static_cast<
+                        a2fo::craft_identity::DirectionalShieldValueDisplayMode>(ctx.value_display_mode);
+                    ctx.any_found = true;
+                }
+            }
+        } else if (action == 2) {
+            RawRectangle rectangle{};
+            if (!read_ui_rectangle(ctx.parameter_db,
+                    kDirectionalShieldPositionCommands[index], &rectangle)) return 0;
+            if (rectangle.width <= 0 || rectangle.height <= 0) {
+                log_line(std::string("Ignored invalid ") +
+                         kDirectionalShieldPositionCommands[index] +
+                         "; width and height must be positive");
+                return 0;
+            }
+            ctx.policy.position_found[index] = true;
+            ctx.policy.positions[index] = rectangle;
+            ctx.any_found = true;
+        } else if (action == 3) return ctx.any_found;
+        else if (action == 4) g_directional_shield_ui_policies.erase(ctx.object_class);
+        else if (action == 5) {
+            try {
+                g_directional_shield_ui_policies[ctx.object_class] = ctx.policy;
+                const std::string odf = class_odf_name(ctx.object_class);
+                char message[384]{};
+                std::snprintf(message, sizeof(message),
+                    "Registered directional-shield UI on '%s': values=%s F=%s A=%s P=%s S=%s",
+                    odf.empty() ? "<unknown>" : odf.c_str(),
+                    ctx.policy.value_display_mode_found
+                        ? (ctx.value_display_mode == 0 ? "off" :
+                           ctx.value_display_mode == 1 ? "percent" : "amount") : "legacy",
+                    ctx.policy.position_found[0] ? "ODF" : "default",
+                    ctx.policy.position_found[1] ? "ODF" : "default",
+                    ctx.policy.position_found[2] ? "ODF" : "default",
+                    ctx.policy.position_found[3] ? "ODF" : "default");
+                log_line(message);
+            } catch (...) {
+                g_directional_shield_ui_policies.erase(ctx.object_class);
+                log_line("Could not retain directional-shield UI policy");
+            }
         }
-    }
-    for (std::size_t index = 0;
-         index < kDirectionalShieldPositionCommands.size(); ++index) {
-        RawRectangle rectangle{};
-        if (!read_ui_rectangle(
-                parameter_db, kDirectionalShieldPositionCommands[index],
-                &rectangle)) {
-            continue;
-        }
-        if (rectangle.width <= 0 || rectangle.height <= 0) {
-            log_line(std::string("Ignored invalid ") +
-                     kDirectionalShieldPositionCommands[index] +
-                     "; width and height must be positive");
-            continue;
-        }
-        policy.position_found[index] = true;
-        policy.positions[index] = rectangle;
-        any_found = true;
-    }
-    if (!any_found) {
-        g_directional_shield_ui_policies.erase(object_class);
-        return;
-    }
-    try {
-        g_directional_shield_ui_policies[object_class] = policy;
-        const std::string odf = class_odf_name(object_class);
-        char message[384]{};
-        std::snprintf(
-            message, sizeof(message),
-            "Registered directional-shield UI on '%s': values=%s F=%s A=%s P=%s S=%s",
-            odf.empty() ? "<unknown>" : odf.c_str(),
-            policy.value_display_mode_found
-                ? (value_display_mode == 0 ? "off" :
-                   value_display_mode == 1 ? "percent" : "amount")
-                : "legacy",
-            policy.position_found[0] ? "ODF" : "default",
-            policy.position_found[1] ? "ODF" : "default",
-            policy.position_found[2] ? "ODF" : "default",
-            policy.position_found[3] ? "ODF" : "default");
-        log_line(message);
-    } catch (...) {
-        g_directional_shield_ui_policies.erase(object_class);
-        log_line("Could not retain directional-shield UI policy");
-    }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_register_directional(
+        step, &context, kDirectionalShieldPositionCommands.size());
 }
 
 void register_class_policy(void* object_class, void* parameter_db) noexcept {
-    if (!g_runtime_ready || !object_class || !parameter_db) return;
-    register_directional_shield_ui_policy(object_class, parameter_db);
-    register_ammunition_ui_policy(object_class, parameter_db);
-    register_selected_status_ui_policy(object_class, parameter_db);
-    ClassIdentityPolicy policy{};
-    read_identity_list(parameter_db, kCraftNameCommand,
-                       &policy.craft_names);
-    read_identity_list(parameter_db, kCaptainCommand,
-                       &policy.captain_names);
-    read_identity_list(parameter_db, kRegistryCommand,
-                       &policy.craft_registries);
-    if (policy.captain_names.empty() && policy.craft_registries.empty()) {
-        return;
-    }
-    try {
-        policy.odf_name = class_odf_name(object_class);
-        const std::size_t craft_name_count = policy.craft_names.size();
-        const std::size_t captain_count = policy.captain_names.size();
-        const std::size_t registry_count = policy.craft_registries.size();
-        const std::string odf = policy.odf_name;
-        g_class_policies[object_class] = std::move(policy);
-        char message[320]{};
-        std::snprintf(
-            message, sizeof(message),
-            "Registered identity rows on '%s': %lu craft name%s, "
-            "%lu captain%s, %lu registr%s",
-            odf.empty() ? "<unknown>" : odf.c_str(),
-            static_cast<unsigned long>(craft_name_count),
-            craft_name_count == 1 ? "" : "s",
-            static_cast<unsigned long>(captain_count),
-            captain_count == 1 ? "" : "s",
-            static_cast<unsigned long>(registry_count),
-            registry_count == 1 ? "y" : "ies");
-        log_line(message);
-        if (craft_name_count == 0) {
-            log_line(std::string("Identity rows on '") +
-                     (odf.empty() ? "<unknown>" : odf) +
-                     "' cannot be selected without possibleCraftNames");
-        } else if ((!g_class_policies[object_class].captain_names.empty() &&
-                    captain_count != craft_name_count) ||
-                   (!g_class_policies[object_class].craft_registries.empty() &&
-                    registry_count != craft_name_count)) {
-            log_line(std::string("Identity row-count mismatch on '") +
-                     (odf.empty() ? "<unknown>" : odf) +
-                     "'; out-of-range companion rows will remain blank");
-        }
-    } catch (...) {
-        log_line("Could not retain a craft identity class policy");
-    }
+    struct Context {
+        void* object_class;
+        void* parameter_db;
+        ClassIdentityPolicy policy{};
+        std::string odf;
+        std::size_t craft_name_count = 0, captain_count = 0, registry_count = 0;
+        std::exception_ptr failure;
+    } context{object_class, parameter_db, {}, {}, 0, 0, 0, {}};
+    const auto step = +[](void* opaque, std::uint32_t action, std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) return g_runtime_ready && ctx.object_class && ctx.parameter_db;
+        if (action == 1) { register_directional_shield_ui_policy(ctx.object_class, ctx.parameter_db); return 0; }
+        if (action == 2) { register_ammunition_ui_policy(ctx.object_class, ctx.parameter_db); return 0; }
+        if (action == 3) { register_selected_status_ui_policy(ctx.object_class, ctx.parameter_db); return 0; }
+        if (action == 4) { read_identity_list(ctx.parameter_db, kCraftNameCommand, &ctx.policy.craft_names); return 0; }
+        if (action == 5) { read_identity_list(ctx.parameter_db, kCaptainCommand, &ctx.policy.captain_names); return 0; }
+        if (action == 6) { read_identity_list(ctx.parameter_db, kRegistryCommand, &ctx.policy.craft_registries); return 0; }
+        if (action == 7) return !ctx.policy.captain_names.empty() || !ctx.policy.craft_registries.empty();
+        try {
+            if (action == 8) {
+                ctx.policy.odf_name = class_odf_name(ctx.object_class);
+                ctx.craft_name_count = ctx.policy.craft_names.size();
+                ctx.captain_count = ctx.policy.captain_names.size();
+                ctx.registry_count = ctx.policy.craft_registries.size();
+                ctx.odf = ctx.policy.odf_name;
+            } else if (action == 9) {
+                g_class_policies[ctx.object_class] = std::move(ctx.policy);
+            } else if (action == 10) {
+                char message[320]{};
+                std::snprintf(message, sizeof(message),
+                    "Registered identity rows on '%s': %lu craft name%s, "
+                    "%lu captain%s, %lu registr%s",
+                    ctx.odf.empty() ? "<unknown>" : ctx.odf.c_str(),
+                    static_cast<unsigned long>(ctx.craft_name_count),
+                    ctx.craft_name_count == 1 ? "" : "s",
+                    static_cast<unsigned long>(ctx.captain_count),
+                    ctx.captain_count == 1 ? "" : "s",
+                    static_cast<unsigned long>(ctx.registry_count),
+                    ctx.registry_count == 1 ? "y" : "ies");
+                log_line(message);
+            } else if (action == 11) return ctx.craft_name_count == 0;
+            else if (action == 12) {
+                log_line(std::string("Identity rows on '") +
+                         (ctx.odf.empty() ? "<unknown>" : ctx.odf) +
+                         "' cannot be selected without possibleCraftNames");
+            } else if (action == 13) {
+                return (!g_class_policies[ctx.object_class].captain_names.empty() &&
+                        ctx.captain_count != ctx.craft_name_count) ||
+                       (!g_class_policies[ctx.object_class].craft_registries.empty() &&
+                        ctx.registry_count != ctx.craft_name_count);
+            } else if (action == 14) {
+                log_line(std::string("Identity row-count mismatch on '") +
+                         (ctx.odf.empty() ? "<unknown>" : ctx.odf) +
+                         "'; out-of-range companion rows will remain blank");
+            }
+        } catch (...) { ctx.failure = std::current_exception(); return 3; }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_register_class(step, &context);
+    if (context.failure) log_line("Could not retain a craft identity class policy");
 }
 
 std::uintptr_t __attribute__((fastcall)) craft_class_constructor_hook(
@@ -2035,78 +2383,107 @@ const CraftIdentity* ensure_craft_identity(void* craft) noexcept {
     const bool has_manual = manual &&
         (manual->flags & (a2fo::object_editor::kCaptain | a2fo::object_editor::kRegistry));
     const auto editor_revision = a2fo::object_editor::revision(craft);
-    if (handle == 0 || !object_class || (craft_name_index < 0 && !has_manual)) return nullptr;
-
-    const auto policy = g_class_policies.find(object_class);
-    if (policy == g_class_policies.end() && !has_manual) {
-        g_craft_identities.erase(handle);
-        return nullptr;
-    }
-    const auto present = g_craft_identities.find(handle);
-    if (present != g_craft_identities.end() &&
-        present->second.object_class == object_class &&
-        present->second.craft_name_index == craft_name_index &&
-        present->second.editor_revision == editor_revision) {
-        return &present->second;
-    }
-
-    try {
+    struct Context {
+        std::uint32_t handle;
+        void* object_class;
+        std::int32_t craft_name_index;
+        const a2fo::object_editor::SavedState* manual;
+        bool has_manual;
+        std::uint64_t editor_revision;
+        decltype(g_class_policies)::iterator policy{};
+        const ClassIdentityPolicy* class_policy = nullptr;
         CraftIdentity identity{};
-        identity.object_class = object_class;
-        identity.craft_name_index = craft_name_index;
-        identity.editor_revision = editor_revision;
-        static const ClassIdentityPolicy empty_policy{};
-        const ClassIdentityPolicy& class_policy = policy == g_class_policies.end()
-            ? empty_policy : policy->second;
         std::size_t aligned_index = 0;
-        if (a2fo::craft_identity::aligned_identity_index(
-                craft_name_index, class_policy.captain_names.size(),
-                &aligned_index)) {
-            identity.captain_name =
-                class_policy.captain_names[aligned_index];
+        const CraftIdentity* result = nullptr;
+        std::exception_ptr failure;
+    } context{handle, object_class, craft_name_index, manual, has_manual,
+              editor_revision, {}, nullptr, {}, 0, nullptr, {}};
+    const auto step = +[](void* opaque, std::uint32_t action, std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) return ctx.handle != 0 && ctx.object_class &&
+            (ctx.craft_name_index >= 0 || ctx.has_manual);
+        if (action == 1) {
+            ctx.policy = g_class_policies.find(ctx.object_class);
+            if (ctx.policy == g_class_policies.end() && !ctx.has_manual) {
+                g_craft_identities.erase(ctx.handle);
+                return 0;
+            }
+            return 1;
         }
-        if (a2fo::craft_identity::aligned_identity_index(
-                craft_name_index, class_policy.craft_registries.size(),
-                &aligned_index)) {
-            identity.craft_registry =
-                class_policy.craft_registries[aligned_index];
+        if (action == 2) {
+            const auto present = g_craft_identities.find(ctx.handle);
+            if (present != g_craft_identities.end() &&
+                present->second.object_class == ctx.object_class &&
+                present->second.craft_name_index == ctx.craft_name_index &&
+                present->second.editor_revision == ctx.editor_revision) {
+                ctx.result = &present->second;
+                return 1;
+            }
+            return 0;
         }
-        if (manual && (manual->flags & a2fo::object_editor::kCaptain))
-            identity.captain_name = manual->captain.data();
-        if (manual && (manual->flags & a2fo::object_editor::kRegistry))
-            identity.craft_registry = manual->registry.data();
-        auto inserted = g_craft_identities.insert_or_assign(
-            handle, std::move(identity));
-        const LONG report = InterlockedIncrement(&g_assignment_report_count);
-        if (report <= 32) {
-            char message[512]{};
-            std::snprintf(
-                message, sizeof(message),
-                "Aligned craft %lu from '%s' to native name row %ld "
-                "('%s'): captain='%s', registry='%s'",
-                static_cast<unsigned long>(handle),
-                class_policy.odf_name.empty()
-                    ? "<unknown>" : class_policy.odf_name.c_str(),
-                static_cast<long>(craft_name_index),
-                static_cast<std::size_t>(craft_name_index) <
-                        class_policy.craft_names.size()
-                    ? class_policy.craft_names[
-                          static_cast<std::size_t>(craft_name_index)].c_str()
-                    : "<out-of-range>",
-                inserted.first->second.captain_name.empty()
-                    ? "<none>" : inserted.first->second.captain_name.c_str(),
-                inserted.first->second.craft_registry.empty()
-                    ? "<none>" : inserted.first->second.craft_registry.c_str());
-            log_line(message);
-        } else if (report == 33) {
-            log_line("Further per-craft identity assignment reports suppressed");
-        }
-        return &inserted.first->second;
-    } catch (...) {
+        try {
+            if (action == 3) {
+                ctx.identity.object_class = ctx.object_class;
+                ctx.identity.craft_name_index = ctx.craft_name_index;
+                ctx.identity.editor_revision = ctx.editor_revision;
+                static const ClassIdentityPolicy empty_policy{};
+                ctx.class_policy = ctx.policy == g_class_policies.end()
+                    ? &empty_policy : &ctx.policy->second;
+            } else if (action == 4) {
+                if (a2fo::craft_identity::aligned_identity_index(
+                        ctx.craft_name_index, ctx.class_policy->captain_names.size(),
+                        &ctx.aligned_index))
+                    ctx.identity.captain_name = ctx.class_policy->captain_names[ctx.aligned_index];
+            } else if (action == 5) {
+                if (a2fo::craft_identity::aligned_identity_index(
+                        ctx.craft_name_index, ctx.class_policy->craft_registries.size(),
+                        &ctx.aligned_index))
+                    ctx.identity.craft_registry = ctx.class_policy->craft_registries[ctx.aligned_index];
+            } else if (action == 6) {
+                if (ctx.manual && (ctx.manual->flags & a2fo::object_editor::kCaptain))
+                    ctx.identity.captain_name = ctx.manual->captain.data();
+            } else if (action == 7) {
+                if (ctx.manual && (ctx.manual->flags & a2fo::object_editor::kRegistry))
+                    ctx.identity.craft_registry = ctx.manual->registry.data();
+            } else if (action == 8) {
+                auto inserted = g_craft_identities.insert_or_assign(
+                    ctx.handle, std::move(ctx.identity));
+                ctx.result = &inserted.first->second;
+            } else if (action == 9) {
+                const LONG report = InterlockedIncrement(&g_assignment_report_count);
+                if (report <= 32) {
+                    char message[512]{};
+                    std::snprintf(message, sizeof(message),
+                        "Aligned craft %lu from '%s' to native name row %ld "
+                        "('%s'): captain='%s', registry='%s'",
+                        static_cast<unsigned long>(ctx.handle),
+                        ctx.class_policy->odf_name.empty()
+                            ? "<unknown>" : ctx.class_policy->odf_name.c_str(),
+                        static_cast<long>(ctx.craft_name_index),
+                        static_cast<std::size_t>(ctx.craft_name_index) <
+                                ctx.class_policy->craft_names.size()
+                            ? ctx.class_policy->craft_names[
+                                  static_cast<std::size_t>(ctx.craft_name_index)].c_str()
+                            : "<out-of-range>",
+                        ctx.result->captain_name.empty()
+                            ? "<none>" : ctx.result->captain_name.c_str(),
+                        ctx.result->craft_registry.empty()
+                            ? "<none>" : ctx.result->craft_registry.c_str());
+                    log_line(message);
+                } else if (report == 33) {
+                    log_line("Further per-craft identity assignment reports suppressed");
+                }
+            }
+        } catch (...) { ctx.failure = std::current_exception(); return 3; }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_ensure_identity(step, &context);
+    if (context.failure) {
         g_craft_identities.erase(handle);
         log_line("Could not allocate per-craft identity state");
         return nullptr;
     }
+    return context.result;
 }
 
 void* gui_parameter_db() noexcept {
@@ -2198,44 +2575,67 @@ constexpr std::array<PanelElement, 4> kShieldValues{{
     PanelElement::DirectionalShieldsPortValueText, PanelElement::DirectionalShieldsStarboardValueText}};
 
 void load_panel_styles(void* db) noexcept {
-    g_panel_styles = {};
-    if (!db) return;
-    for (std::size_t panel = 0; panel < 2; ++panel) {
-        if (panel == 1) g_panel_styles[1] = g_panel_styles[0];
-        for (std::size_t i = 0; i < kPanelElementNames.size(); ++i) {
-            auto& style = g_panel_styles[panel][i];
-            const std::string prefix = std::string(panel ? "infoBuild" : "infoSingle") +
-                kPanelElementNames[i];
-            RawRectangle area{};
-            if (read_ui_rectangle(db, (prefix + "Area").c_str(), &area) &&
-                area.x >= -32768 && area.x <= 32767 &&
-                area.y >= -32768 && area.y <= 32767 &&
-                area.width >= 0 && area.width <= 32767 &&
-                area.height >= 0 && area.height <= 32767) {
-                // Zero-size rectangles intentionally hide just this element.
-                style.area = area;
-                style.area_found = true;
-            }
-            const auto colour = [&](const char* suffix, bool& found, Colour& target) {
+    struct Row {
+        PanelElementStyle* style;
+        std::string prefix, value;
+    };
+    struct Context {
+        void* db;
+        std::size_t panel = 0;
+        std::optional<Row> row;
+        std::exception_ptr failure;
+    } context{db, 0, {}, {}};
+    const auto step = +[](void* opaque, std::uint32_t action, std::uintptr_t index) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        try {
+            if (action == 0) g_panel_styles = {};
+            else if (action == 1) return ctx.db != nullptr;
+            else if (action == 2) {
+                ctx.panel = index;
+                if (index == 1) g_panel_styles[1] = g_panel_styles[0];
+            } else if (action == 3) {
+                ctx.row.emplace(Row{
+                    &g_panel_styles[ctx.panel][index],
+                    std::string(ctx.panel ? "infoBuild" : "infoSingle") + kPanelElementNames[index],
+                    {}});
+            } else if (action == 4) {
+                RawRectangle area{};
+                if (read_ui_rectangle(ctx.db, (ctx.row->prefix + "Area").c_str(), &area) &&
+                    area.x >= -32768 && area.x <= 32767 &&
+                    area.y >= -32768 && area.y <= 32767 &&
+                    area.width >= 0 && area.width <= 32767 &&
+                    area.height >= 0 && area.height <= 32767) {
+                    ctx.row->style->area = area;
+                    ctx.row->style->area_found = true;
+                }
+            } else if (action == 5) {
+                static constexpr const char* suffixes[]{"Color", "LowColor", "CriticalColor", "BackgroundColor"};
+                bool* found[]{&ctx.row->style->colour_found, &ctx.row->style->low_found,
+                              &ctx.row->style->critical_found, &ctx.row->style->background_found};
+                Colour* target[]{&ctx.row->style->colour, &ctx.row->style->low,
+                                 &ctx.row->style->critical, &ctx.row->style->background};
                 Colour value{};
-                if (read_ui_colour(db, (prefix + suffix).c_str(), &value) &&
+                if (read_ui_colour(ctx.db, (ctx.row->prefix + suffixes[index]).c_str(), &value) &&
                     std::isfinite(value.red) && std::isfinite(value.green) &&
                     std::isfinite(value.blue)) {
-                    target = value;
-                    found = true;
+                    *target[index] = value;
+                    *found[index] = true;
                 }
-            };
-            colour("Color", style.colour_found, style.colour);
-            colour("LowColor", style.low_found, style.low);
-            colour("CriticalColor", style.critical_found, style.critical);
-            colour("BackgroundColor", style.background_found, style.background);
-            std::string value;
-            if (read_parameter_string(db, (prefix + "Sprite").c_str(), &value))
-                style.sprite = value;
-            if (read_parameter_string(db, (prefix + "BackgroundSprite").c_str(), &value))
-                style.background_sprite = value;
-        }
-    }
+            } else if (action == 6) {
+                if (index == 0) {
+                    if (read_parameter_string(ctx.db, (ctx.row->prefix + "Sprite").c_str(),
+                                              &ctx.row->value))
+                        ctx.row->style->sprite = ctx.row->value;
+                } else if (read_parameter_string(ctx.db,
+                        (ctx.row->prefix + "BackgroundSprite").c_str(), &ctx.row->value)) {
+                    ctx.row->style->background_sprite = ctx.row->value;
+                }
+            } else if (action == 7) ctx.row.reset();
+            return 0;
+        } catch (...) { ctx.failure = std::current_exception(); return 3; }
+    };
+    a2fo_rs_stage9_craft_panel_styles(step, &context, kPanelElementNames.size());
+    if (context.failure) std::rethrow_exception(context.failure);
 }
 
 void refresh_ui_configuration(void* parameter_db) noexcept {
@@ -2243,165 +2643,127 @@ void refresh_ui_configuration(void* parameter_db) noexcept {
     // pointers remain readable long enough to look plausible, but their
     // internal frame list has already been released. Drop every presentation
     // cache whenever the companion GUI database changes.
-    if (g_ui_configuration.loaded &&
-        g_ui_configuration.parameter_db != parameter_db) {
-        reset_directional_shield_sprite_runtime();
-    }
     UiConfiguration loaded{};
     loaded.parameter_db = parameter_db;
     loaded.loaded = true;
-    if (parameter_db) {
-        loaded.single_name_rectangle_found = read_ui_rectangle(
-            parameter_db, "infoSingleNameTextArea",
-            &loaded.single_name_rectangle);
-        loaded.single_class_rectangle_found = read_ui_rectangle(
-            parameter_db, "infoSingleClassTextArea",
-            &loaded.single_class_rectangle);
-        loaded.builder_name_rectangle_found = read_ui_rectangle(
-            parameter_db, "infoBuildName",
-            &loaded.builder_name_rectangle);
-        if (!loaded.builder_name_rectangle_found) {
-            loaded.builder_name_rectangle_found = read_ui_rectangle(
-                parameter_db, "infoBuildNameTextArea",
-                &loaded.builder_name_rectangle);
+    struct RectangleRead {
+        const char* key;
+        bool UiConfiguration::*found;
+        RawRectangle UiConfiguration::*rectangle;
+    };
+    static constexpr std::array<RectangleRead, 15> rectangle_reads{{
+        {"infoSingleNameTextArea", &UiConfiguration::single_name_rectangle_found,
+         &UiConfiguration::single_name_rectangle},
+        {"infoSingleClassTextArea", &UiConfiguration::single_class_rectangle_found,
+         &UiConfiguration::single_class_rectangle},
+        {"infoBuildName", &UiConfiguration::builder_name_rectangle_found,
+         &UiConfiguration::builder_name_rectangle},
+        {"infoBuildClass", &UiConfiguration::builder_class_rectangle_found,
+         &UiConfiguration::builder_class_rectangle},
+        {"infoSingleCaptainTextArea", &UiConfiguration::captain_rectangle_found,
+         &UiConfiguration::captain_rectangle},
+        {"infoSingleRegistryTextArea", &UiConfiguration::registry_rectangle_found,
+         &UiConfiguration::registry_rectangle},
+        {"infoSinglePhotonTorpedoesTextArea", &UiConfiguration::photon_rectangle_found,
+         &UiConfiguration::photon_rectangle},
+        {"infoSingleQuantumTorpedoesTextArea", &UiConfiguration::quantum_rectangle_found,
+         &UiConfiguration::quantum_rectangle},
+        {"infoSingleShuttleCraftTextArea", &UiConfiguration::shuttle_craft_rectangle_found,
+         &UiConfiguration::shuttle_craft_rectangle},
+        {"infoSingleDirectionalShieldsForwardAftTextArea",
+         &UiConfiguration::directional_forward_aft_rectangle_found,
+         &UiConfiguration::directional_forward_aft_rectangle},
+        {"infoSingleDirectionalShieldsPortStarboardTextArea",
+         &UiConfiguration::directional_port_starboard_rectangle_found,
+         &UiConfiguration::directional_port_starboard_rectangle},
+        {"infoSingleDirectionalShieldsGraphicArea",
+         &UiConfiguration::directional_graphic_rectangle_found,
+         &UiConfiguration::directional_graphic_rectangle},
+        {"infoSingleShieldBarArea", &UiConfiguration::shield_bar_rectangle_found,
+         &UiConfiguration::shield_bar_rectangle},
+        {"infoBuildShieldBar", &UiConfiguration::builder_shield_bar_rectangle_found,
+         &UiConfiguration::builder_shield_bar_rectangle},
+        {"infoSingleExperienceBarArea", &UiConfiguration::experience_bar_rectangle_found,
+         &UiConfiguration::experience_bar_rectangle},
+    }};
+    static constexpr const char* rectangle_fallbacks[]{
+        "infoBuildNameTextArea", "infoBuildClassTextArea", "captainName", "shipRegistry"};
+    struct ColourRead {
+        const char* key;
+        bool UiConfiguration::*found;
+        Colour UiConfiguration::*colour;
+    };
+    static constexpr std::array<ColourRead, 19> colour_reads{{
+        {"infoTextColor", &UiConfiguration::shared_text_colour_found, &UiConfiguration::shared_text_colour},
+        {"shipNameColor", &UiConfiguration::ship_name_colour_found, &UiConfiguration::ship_name_colour},
+        {"captainNameColor", &UiConfiguration::captain_colour_found, &UiConfiguration::captain_colour},
+        {"shipRegistryColor", &UiConfiguration::registry_colour_found, &UiConfiguration::registry_colour},
+        {"photonTorpedoColor", &UiConfiguration::photon_colour_found, &UiConfiguration::photon_colour},
+        {"quantumTorpedoColor", &UiConfiguration::quantum_colour_found, &UiConfiguration::quantum_colour},
+        {"shuttleCraftColor", &UiConfiguration::shuttle_craft_colour_found, &UiConfiguration::shuttle_craft_colour},
+        {"photonTorpedoLowColor", &UiConfiguration::photon_low_colour_found, &UiConfiguration::photon_low_colour},
+        {"quantumTorpedoLowColor", &UiConfiguration::quantum_low_colour_found, &UiConfiguration::quantum_low_colour},
+        {"shuttleCraftLowColor", &UiConfiguration::shuttle_craft_low_colour_found, &UiConfiguration::shuttle_craft_low_colour},
+        {"photonTorpedoCriticalColor", &UiConfiguration::photon_critical_colour_found, &UiConfiguration::photon_critical_colour},
+        {"quantumTorpedoCriticalColor", &UiConfiguration::quantum_critical_colour_found, &UiConfiguration::quantum_critical_colour},
+        {"shuttleCraftCriticalColor", &UiConfiguration::shuttle_craft_critical_colour_found, &UiConfiguration::shuttle_craft_critical_colour},
+        {"directionalShieldColor", &UiConfiguration::directional_shield_colour_found, &UiConfiguration::directional_shield_colour},
+        {"directionalShieldLowColor", &UiConfiguration::directional_shield_low_colour_found, &UiConfiguration::directional_shield_low_colour},
+        {"directionalShieldCriticalColor", &UiConfiguration::directional_shield_critical_colour_found, &UiConfiguration::directional_shield_critical_colour},
+        {"directionalShieldValueColor", &UiConfiguration::directional_shield_value_colour_found, &UiConfiguration::directional_shield_value_colour},
+        {"directionalShieldValueLowColor", &UiConfiguration::directional_shield_value_low_colour_found, &UiConfiguration::directional_shield_value_low_colour},
+        {"directionalShieldValueCriticalColor", &UiConfiguration::directional_shield_value_critical_colour_found, &UiConfiguration::directional_shield_value_critical_colour},
+    }};
+    static constexpr std::array<ColourRead, 6> extra_colour_reads{{
+        {"passiveWeaponIconColor", &UiConfiguration::passive_weapon_icon_colour_found, &UiConfiguration::passive_weapon_icon_colour},
+        {"resupplyWeaponIconColor", &UiConfiguration::resupply_weapon_icon_colour_found, &UiConfiguration::resupply_weapon_icon_colour},
+        {"specialEnergyIconColor", &UiConfiguration::special_energy_icon_colour_found, &UiConfiguration::special_energy_icon_colour},
+        {"officerIconColor", &UiConfiguration::officer_icon_colour_found, &UiConfiguration::officer_icon_colour},
+        {"experienceBarColor", &UiConfiguration::experience_bar_colour_found, &UiConfiguration::experience_bar_colour},
+        {"experienceBarBackgroundColor", &UiConfiguration::experience_bar_background_colour_found, &UiConfiguration::experience_bar_background_colour},
+    }};
+    struct RefreshContext { void* db; UiConfiguration* loaded; } context{parameter_db, &loaded};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t index) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<RefreshContext*>(opaque);
+        auto& result = *ctx.loaded;
+        if (action == 0) {
+            if (g_ui_configuration.loaded && g_ui_configuration.parameter_db != ctx.db)
+                reset_directional_shield_sprite_runtime();
+            return ctx.db != nullptr;
         }
-        loaded.builder_class_rectangle_found = read_ui_rectangle(
-            parameter_db, "infoBuildClass",
-            &loaded.builder_class_rectangle);
-        if (!loaded.builder_class_rectangle_found) {
-            loaded.builder_class_rectangle_found = read_ui_rectangle(
-                parameter_db, "infoBuildClassTextArea",
-                &loaded.builder_class_rectangle);
+        if (action == 1) {
+            const auto& read = rectangle_reads[index];
+            result.*(read.found) = read_ui_rectangle(
+                ctx.db, read.key, &(result.*(read.rectangle)));
+            return result.*(read.found);
         }
-        loaded.captain_rectangle_found = read_ui_rectangle(
-            parameter_db, "infoSingleCaptainTextArea",
-            &loaded.captain_rectangle);
-        if (!loaded.captain_rectangle_found) {
-            loaded.captain_rectangle_found = read_ui_rectangle(
-                parameter_db, "captainName", &loaded.captain_rectangle);
+        if (action == 2) {
+            const auto& read = rectangle_reads[index];
+            result.*(read.found) = read_ui_rectangle(
+                ctx.db, rectangle_fallbacks[index - 2], &(result.*(read.rectangle)));
+        } else if (action == 3) {
+            result.directional_value_rectangle_found[index] = read_ui_rectangle(
+                ctx.db, kDirectionalShieldValueRectangleCommands[index],
+                &result.directional_value_rectangles[index]);
+        } else if (action == 4 || action == 7) {
+            const auto& read = action == 4 ? colour_reads[index] : extra_colour_reads[index];
+            result.*(read.found) = read_ui_colour(
+                ctx.db, read.key, &(result.*(read.colour)));
+        } else if (action == 5) {
+            result.system_icon_colour_found[index] = read_ui_colour(
+                ctx.db, kSystemIconColourCommands[index],
+                &result.system_icon_colours[index]);
+        } else if (action == 6) {
+            result.weapon_icon_colour_found[index] = read_ui_colour(
+                ctx.db, kWeaponIconColourCommands[index],
+                &result.weapon_icon_colours[index]);
         }
-        loaded.registry_rectangle_found = read_ui_rectangle(
-            parameter_db, "infoSingleRegistryTextArea",
-            &loaded.registry_rectangle);
-        if (!loaded.registry_rectangle_found) {
-            loaded.registry_rectangle_found = read_ui_rectangle(
-                parameter_db, "shipRegistry", &loaded.registry_rectangle);
-        }
-        loaded.photon_rectangle_found = read_ui_rectangle(
-            parameter_db, "infoSinglePhotonTorpedoesTextArea",
-            &loaded.photon_rectangle);
-        loaded.quantum_rectangle_found = read_ui_rectangle(
-            parameter_db, "infoSingleQuantumTorpedoesTextArea",
-            &loaded.quantum_rectangle);
-        loaded.shuttle_craft_rectangle_found = read_ui_rectangle(
-            parameter_db, "infoSingleShuttleCraftTextArea",
-            &loaded.shuttle_craft_rectangle);
-        loaded.directional_forward_aft_rectangle_found = read_ui_rectangle(
-            parameter_db,
-            "infoSingleDirectionalShieldsForwardAftTextArea",
-            &loaded.directional_forward_aft_rectangle);
-        loaded.directional_port_starboard_rectangle_found = read_ui_rectangle(
-            parameter_db,
-            "infoSingleDirectionalShieldsPortStarboardTextArea",
-            &loaded.directional_port_starboard_rectangle);
-        loaded.directional_graphic_rectangle_found = read_ui_rectangle(
-            parameter_db,
-            "infoSingleDirectionalShieldsGraphicArea",
-            &loaded.directional_graphic_rectangle);
-        for (std::size_t index = 0;
-             index < kDirectionalShieldValueRectangleCommands.size();
-             ++index) {
-            loaded.directional_value_rectangle_found[index] =
-                read_ui_rectangle(
-                    parameter_db,
-                    kDirectionalShieldValueRectangleCommands[index],
-                    &loaded.directional_value_rectangles[index]);
-        }
-        loaded.shield_bar_rectangle_found = read_ui_rectangle(
-            parameter_db, "infoSingleShieldBarArea",
-            &loaded.shield_bar_rectangle);
-        loaded.builder_shield_bar_rectangle_found = read_ui_rectangle(
-            parameter_db, "infoBuildShieldBar", &loaded.builder_shield_bar_rectangle);
-        loaded.experience_bar_rectangle_found = read_ui_rectangle(
-            parameter_db, "infoSingleExperienceBarArea",
-            &loaded.experience_bar_rectangle);
-        loaded.shared_text_colour_found = read_ui_colour(
-            parameter_db, "infoTextColor", &loaded.shared_text_colour);
-        loaded.ship_name_colour_found = read_ui_colour(
-            parameter_db, "shipNameColor", &loaded.ship_name_colour);
-        loaded.captain_colour_found = read_ui_colour(
-            parameter_db, "captainNameColor", &loaded.captain_colour);
-        loaded.registry_colour_found = read_ui_colour(
-            parameter_db, "shipRegistryColor", &loaded.registry_colour);
-        loaded.photon_colour_found = read_ui_colour(
-            parameter_db, "photonTorpedoColor", &loaded.photon_colour);
-        loaded.quantum_colour_found = read_ui_colour(
-            parameter_db, "quantumTorpedoColor", &loaded.quantum_colour);
-        loaded.shuttle_craft_colour_found = read_ui_colour(
-            parameter_db, "shuttleCraftColor",
-            &loaded.shuttle_craft_colour);
-        loaded.photon_low_colour_found = read_ui_colour(
-            parameter_db, "photonTorpedoLowColor",
-            &loaded.photon_low_colour);
-        loaded.quantum_low_colour_found = read_ui_colour(
-            parameter_db, "quantumTorpedoLowColor",
-            &loaded.quantum_low_colour);
-        loaded.shuttle_craft_low_colour_found = read_ui_colour(
-            parameter_db, "shuttleCraftLowColor",
-            &loaded.shuttle_craft_low_colour);
-        loaded.photon_critical_colour_found = read_ui_colour(
-            parameter_db, "photonTorpedoCriticalColor",
-            &loaded.photon_critical_colour);
-        loaded.quantum_critical_colour_found = read_ui_colour(
-            parameter_db, "quantumTorpedoCriticalColor",
-            &loaded.quantum_critical_colour);
-        loaded.shuttle_craft_critical_colour_found = read_ui_colour(
-            parameter_db, "shuttleCraftCriticalColor",
-            &loaded.shuttle_craft_critical_colour);
-        loaded.directional_shield_colour_found = read_ui_colour(
-            parameter_db, "directionalShieldColor",
-            &loaded.directional_shield_colour);
-        loaded.directional_shield_low_colour_found = read_ui_colour(
-            parameter_db, "directionalShieldLowColor",
-            &loaded.directional_shield_low_colour);
-        loaded.directional_shield_critical_colour_found = read_ui_colour(
-            parameter_db, "directionalShieldCriticalColor",
-            &loaded.directional_shield_critical_colour);
-        loaded.directional_shield_value_colour_found = read_ui_colour(
-            parameter_db, "directionalShieldValueColor",
-            &loaded.directional_shield_value_colour);
-        loaded.directional_shield_value_low_colour_found = read_ui_colour(
-            parameter_db, "directionalShieldValueLowColor",
-            &loaded.directional_shield_value_low_colour);
-        loaded.directional_shield_value_critical_colour_found =
-            read_ui_colour(
-                parameter_db, "directionalShieldValueCriticalColor",
-                &loaded.directional_shield_value_critical_colour);
-        for (std::size_t index = 0;
-             index < kSystemIconColourCommands.size(); ++index) {
-            loaded.system_icon_colour_found[index] = read_ui_colour(
-                parameter_db, kSystemIconColourCommands[index],
-                &loaded.system_icon_colours[index]);
-            loaded.weapon_icon_colour_found[index] = read_ui_colour(
-                parameter_db, kWeaponIconColourCommands[index],
-                &loaded.weapon_icon_colours[index]);
-        }
-        loaded.passive_weapon_icon_colour_found = read_ui_colour(
-            parameter_db, "passiveWeaponIconColor",
-            &loaded.passive_weapon_icon_colour);
-        loaded.special_energy_icon_colour_found = read_ui_colour(
-            parameter_db, "specialEnergyIconColor",
-            &loaded.special_energy_icon_colour);
-        loaded.officer_icon_colour_found = read_ui_colour(
-            parameter_db, "officerIconColor",
-            &loaded.officer_icon_colour);
-        loaded.experience_bar_colour_found = read_ui_colour(
-            parameter_db, "experienceBarColor",
-            &loaded.experience_bar_colour);
-        loaded.experience_bar_background_colour_found = read_ui_colour(
-            parameter_db, "experienceBarBackgroundColor",
-            &loaded.experience_bar_background_colour);
-    }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_refresh_ui(step, &context,
+        kDirectionalShieldValueRectangleCommands.size(),
+        kSystemIconColourCommands.size());
     g_ui_configuration = loaded;
     load_panel_styles(parameter_db);
 
@@ -2587,67 +2949,95 @@ ValueComponentKind value_component_kind(const void* component) noexcept {
 bool configured_value_colour(
     void* component, Colour* output,
     ValueComponentKind* kind_output = nullptr) noexcept {
-    const ValueComponentKind kind = value_component_kind(component);
-    if (kind_output) *kind_output = kind;
-    if (kind == ValueComponentKind::system) {
-        return configured_system_colour(
-            read_at<void*>(component, kSystemTextCraftOffset, nullptr),
-            read_at<std::int32_t>(
-                component, kSystemTextIndexOffset, -1),
-            output);
-    }
-    if (kind == ValueComponentKind::crew ||
-        kind == ValueComponentKind::mouseover_status) {
-        return configured_percentage_colour(component, output);
-    }
-    if (kind == ValueComponentKind::special_energy &&
-        g_ui_configuration.special_energy_icon_colour_found && output) {
-        *output = g_ui_configuration.special_energy_icon_colour;
-        return true;
-    }
-    if (kind == ValueComponentKind::officer &&
-        g_ui_configuration.officer_icon_colour_found && output) {
-        *output = g_ui_configuration.officer_icon_colour;
-        return true;
-    }
-    return false;
+    struct Context {
+        void* component;
+        Colour* output;
+        ValueComponentKind* kind_output;
+        ValueComponentKind kind = ValueComponentKind::unrelated;
+    } context{component, output, kind_output};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) {
+            ctx.kind = value_component_kind(ctx.component);
+            if (ctx.kind_output) *ctx.kind_output = ctx.kind;
+            return static_cast<std::uintptr_t>(ctx.kind);
+        }
+        if (action == 1) {
+            return configured_system_colour(
+                read_at<void*>(ctx.component, kSystemTextCraftOffset, nullptr),
+                read_at<std::int32_t>(ctx.component, kSystemTextIndexOffset, -1),
+                ctx.output);
+        }
+        if (action == 2) return configured_percentage_colour(
+            ctx.component, ctx.output);
+        if (action == 3) {
+            if (g_ui_configuration.special_energy_icon_colour_found && ctx.output) {
+                *ctx.output = g_ui_configuration.special_energy_icon_colour;
+                return 1;
+            }
+        } else if (action == 4) {
+            if (g_ui_configuration.officer_icon_colour_found && ctx.output) {
+                *ctx.output = g_ui_configuration.officer_icon_colour;
+                return 1;
+            }
+        }
+        return 0;
+    };
+    return a2fo_rs_stage9_craft_value_colour(step, &context);
 }
 
 void system_colour_set_colour_from_context(
     void* sprite, void* craft, std::int32_t system_index,
     const Colour* native_colour, LONG* report_count,
     const char* report_message) noexcept {
-    const Colour* applied_colour = native_colour;
-    Colour configured_colour{};
-    Colour tinted{};
-    bool applied = false;
-    if (g_runtime_ready && craft) {
-        void* parameter_db = gui_parameter_db();
-        if (!g_ui_configuration.loaded ||
-            g_ui_configuration.parameter_db != parameter_db) {
-            refresh_ui_configuration(parameter_db);
+    struct Context {
+        void* sprite;
+        void* craft;
+        std::int32_t system_index;
+        const Colour* native_colour;
+        LONG* report_count;
+        const char* report_message;
+        const Colour* applied_colour;
+        Colour configured_colour{}, tinted{};
+        bool applied = false;
+    } context{sprite, craft, system_index, native_colour, report_count,
+              report_message, native_colour, {}, {}, false};
+    const auto step = +[](void* opaque, std::uint32_t action, std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) {
+            if (g_runtime_ready && ctx.craft) {
+                void* parameter_db = gui_parameter_db();
+                if (!g_ui_configuration.loaded ||
+                    g_ui_configuration.parameter_db != parameter_db)
+                    refresh_ui_configuration(parameter_db);
+                ctx.applied = configured_system_colour(
+                    ctx.craft, ctx.system_index, &ctx.configured_colour);
+            }
+        } else if (action == 1) {
+            return ctx.applied && ctx.native_colour &&
+                readable_range(ctx.native_colour, sizeof(*ctx.native_colour));
+        } else if (action == 2) {
+            Colour native{};
+            std::memcpy(&native, ctx.native_colour, sizeof(native));
+            const auto result = a2fo::craft_identity::tint_system_icon_colour(
+                {{native.red, native.green, native.blue}},
+                {{ctx.configured_colour.red, ctx.configured_colour.green,
+                  ctx.configured_colour.blue}});
+            ctx.tinted = Colour{result[0], result[1], result[2]};
+            ctx.applied_colour = &ctx.tinted;
+        } else if (action == 3) {
+            a2fo_identity_call_thiscall_1(
+                at(g_armada, kSpriteSetColourRva), ctx.sprite,
+                reinterpret_cast<std::uintptr_t>(ctx.applied_colour));
+        } else if (action == 4) {
+            if (ctx.applied && ctx.report_count && ctx.report_message &&
+                InterlockedCompareExchange(ctx.report_count, 1, 0) == 0)
+                log_line(ctx.report_message);
         }
-        applied = configured_system_colour(
-            craft, system_index, &configured_colour);
-    }
-    if (applied && native_colour &&
-        readable_range(native_colour, sizeof(*native_colour))) {
-        Colour native{};
-        std::memcpy(&native, native_colour, sizeof(native));
-        const auto result = a2fo::craft_identity::tint_system_icon_colour(
-            {{native.red, native.green, native.blue}},
-            {{configured_colour.red, configured_colour.green,
-              configured_colour.blue}});
-        tinted = Colour{result[0], result[1], result[2]};
-        applied_colour = &tinted;
-    }
-    a2fo_identity_call_thiscall_1(
-        at(g_armada, kSpriteSetColourRva), sprite,
-        reinterpret_cast<std::uintptr_t>(applied_colour));
-    if (applied && report_count && report_message &&
-        InterlockedCompareExchange(report_count, 1, 0) == 0) {
-        log_line(report_message);
-    }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_colour_apply(step, &context);
 }
 
 void system_icon_set_colour_from_context(
@@ -2662,209 +3052,249 @@ void system_icon_set_colour_from_context(
 
 void weapon_icon_set_colour_from_context(
     void* sprite, void* icon, const Colour* native_colour) noexcept {
-    const Colour* applied_colour = native_colour;
-    Colour configured_colour{};
-    Colour tinted{};
-    bool applied = false;
-    bool passive_colour_configured = false;
-    auto presentation =
-        a2fo::craft_identity::WeaponIconPresentation::live_status;
-    if (g_runtime_ready && icon) {
-        void* parameter_db = gui_parameter_db();
-        if (!g_ui_configuration.loaded ||
-            g_ui_configuration.parameter_db != parameter_db) {
-            refresh_ui_configuration(parameter_db);
-        }
+    struct Context {
+        void* sprite;
+        void* icon;
+        const Colour* native_colour;
+        const Colour* applied_colour;
+        Colour configured_colour{}, tinted{};
+        bool applied = false, passive_colour_configured = false;
         void* craft = nullptr;
-        if (g_rendering_weapon_icon == icon) {
-            craft = g_rendering_weapon_craft;
-            presentation = g_rendering_weapon_presentation;
-        } else {
-            presentation = weapon_icon_presentation(icon, &craft);
+        a2fo::craft_identity::WeaponIconPresentation presentation =
+            a2fo::craft_identity::WeaponIconPresentation::live_status;
+    } context{sprite, icon, native_colour, native_colour, {}, {}, false, false,
+              nullptr, a2fo::craft_identity::WeaponIconPresentation::live_status};
+    const auto step = +[](void* opaque, std::uint32_t action, std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        using Presentation = a2fo::craft_identity::WeaponIconPresentation;
+        if (action == 0) {
+            if (!g_runtime_ready || !ctx.icon) return 0;
+            void* parameter_db = gui_parameter_db();
+            if (!g_ui_configuration.loaded ||
+                g_ui_configuration.parameter_db != parameter_db)
+                refresh_ui_configuration(parameter_db);
+            if (g_rendering_weapon_icon == ctx.icon) {
+                ctx.craft = g_rendering_weapon_craft;
+                ctx.presentation = g_rendering_weapon_presentation;
+            } else ctx.presentation = weapon_icon_presentation(ctx.icon, &ctx.craft);
+            switch (ctx.presentation) {
+                case Presentation::passive_neutral: return 1;
+                case Presentation::resupply_ready: return 2;
+                case Presentation::disabled: return 3;
+                case Presentation::hidden: return 4;
+                case Presentation::live_status: return 5;
+            }
+            return 0;
         }
-        switch (presentation) {
-            case a2fo::craft_identity::WeaponIconPresentation::passive_neutral:
-                passive_colour_configured =
-                    g_ui_configuration.passive_weapon_icon_colour_found;
-                configured_colour = passive_colour_configured
-                    ? g_ui_configuration.passive_weapon_icon_colour
-                    : Colour{1.0f, 1.0f, 1.0f};
-                applied = true;
-                break;
-            case a2fo::craft_identity::WeaponIconPresentation::disabled:
-                applied = configured_weapon_state_colour(
-                    a2fo::craft_identity::SystemIconState::disabled,
-                    &configured_colour);
-                break;
-            case a2fo::craft_identity::WeaponIconPresentation::hidden:
-                break;
-            case a2fo::craft_identity::WeaponIconPresentation::live_status:
-                applied = configured_weapon_colour(
-                    craft, &configured_colour);
-                break;
+        if (action == 1) {
+            ctx.passive_colour_configured = g_ui_configuration.passive_weapon_icon_colour_found;
+            ctx.configured_colour = ctx.passive_colour_configured
+                ? g_ui_configuration.passive_weapon_icon_colour : Colour{1.0f, 1.0f, 1.0f};
+            ctx.applied = true;
+        } else if (action == 2) {
+            ctx.configured_colour = g_ui_configuration.resupply_weapon_icon_colour_found
+                ? g_ui_configuration.resupply_weapon_icon_colour
+                : Colour{kDefaultResupplyWeaponIconColour[0],
+                         kDefaultResupplyWeaponIconColour[1],
+                         kDefaultResupplyWeaponIconColour[2]};
+            ctx.applied = true;
+        } else if (action == 3) {
+            ctx.applied = configured_weapon_state_colour(
+                a2fo::craft_identity::SystemIconState::disabled, &ctx.configured_colour);
+        } else if (action == 5) {
+            ctx.applied = configured_weapon_colour(ctx.craft, &ctx.configured_colour);
+        } else if (action == 6) {
+            return ctx.applied && ctx.native_colour &&
+                readable_range(ctx.native_colour, sizeof(*ctx.native_colour));
+        } else if (action == 7) {
+            Colour native{};
+            std::memcpy(&native, ctx.native_colour, sizeof(native));
+            const auto result = a2fo::craft_identity::tint_system_icon_colour(
+                {{native.red, native.green, native.blue}},
+                {{ctx.configured_colour.red, ctx.configured_colour.green,
+                  ctx.configured_colour.blue}});
+            ctx.tinted = Colour{result[0], result[1], result[2]};
+            ctx.applied_colour = &ctx.tinted;
+        } else if (action == 8) {
+            a2fo_identity_fo_sprite_set_colour(
+                at(g_fleet_ops, kFoSpriteSetColourRva), ctx.sprite, ctx.applied_colour);
+        } else if (action == 9) {
+            if (ctx.applied && InterlockedCompareExchange(
+                    &g_weapon_icon_colour_report_count, 1, 0) == 0)
+                log_line("WeaponXiconpos colour policy applied to native icon layers");
+        } else if (action == 10) {
+            if (InterlockedCompareExchange(&g_passive_weapon_icon_report_count, 1, 0) == 0)
+                log_line(ctx.passive_colour_configured
+                    ? "passiveWeaponIconColor applied to UtilityWeapon icons"
+                    : "Passive UtilityWeapon icon rendered in neutral white/grey");
+        } else if (action == 11) {
+            if (InterlockedCompareExchange(&g_disabled_weapon_icon_report_count, 1, 0) == 0)
+                log_line("Research-locked weapon icon rendered disabled");
         }
-    }
-    if (applied && native_colour &&
-        readable_range(native_colour, sizeof(*native_colour))) {
-        Colour native{};
-        std::memcpy(&native, native_colour, sizeof(native));
-        const auto result = a2fo::craft_identity::tint_system_icon_colour(
-            {{native.red, native.green, native.blue}},
-            {{configured_colour.red, configured_colour.green,
-              configured_colour.blue}});
-        tinted = Colour{result[0], result[1], result[2]};
-        applied_colour = &tinted;
-    }
-    a2fo_identity_fo_sprite_set_colour(
-        at(g_fleet_ops, kFoSpriteSetColourRva), sprite, applied_colour);
-    if (applied && InterlockedCompareExchange(
-            &g_weapon_icon_colour_report_count, 1, 0) == 0) {
-        log_line(
-            "WeaponXiconpos colour policy applied to native icon layers");
-    }
-    if (presentation ==
-            a2fo::craft_identity::WeaponIconPresentation::passive_neutral &&
-        InterlockedCompareExchange(
-            &g_passive_weapon_icon_report_count, 1, 0) == 0) {
-        log_line(passive_colour_configured
-            ? "passiveWeaponIconColor applied to UtilityWeapon icons"
-            : "Passive UtilityWeapon icon rendered in neutral white/grey");
-    }
-    if (presentation ==
-            a2fo::craft_identity::WeaponIconPresentation::disabled &&
-        InterlockedCompareExchange(
-            &g_disabled_weapon_icon_report_count, 1, 0) == 0) {
-        log_line(
-            "Research-locked weapon icon rendered disabled");
-    }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_weapon_colour(step, &context);
 }
 
 void __attribute__((fastcall)) ship_system_icon_render_policy_hook(
     void* icon, void*) noexcept {
-    if (!g_ship_system_icon_render_original) return;
-    void* craft = nullptr;
-    const auto presentation = g_runtime_ready && icon
-        ? weapon_icon_presentation(icon, &craft)
-        : a2fo::craft_identity::WeaponIconPresentation::live_status;
-    if (presentation ==
-            a2fo::craft_identity::WeaponIconPresentation::hidden) {
-        if (InterlockedCompareExchange(
-                &g_hidden_weapon_icon_report_count, 1, 0) == 0) {
-            log_line(
-                "WeaponXiconpos icon hidden by buttonHideUnavailable");
+    struct Context {
+        void* icon;
+        void* craft = nullptr;
+        a2fo::craft_identity::WeaponIconPresentation presentation =
+            a2fo::craft_identity::WeaponIconPresentation::live_status;
+        void* previous_icon = nullptr;
+        void* previous_craft = nullptr;
+        a2fo::craft_identity::WeaponIconPresentation previous_presentation =
+            a2fo::craft_identity::WeaponIconPresentation::live_status;
+    } context{icon};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) return g_ship_system_icon_render_original != nullptr;
+        if (action == 1) {
+            ctx.presentation = g_runtime_ready && ctx.icon
+                ? weapon_icon_presentation(ctx.icon, &ctx.craft)
+                : a2fo::craft_identity::WeaponIconPresentation::live_status;
+        } else if (action == 2) {
+            return ctx.presentation ==
+                a2fo::craft_identity::WeaponIconPresentation::hidden;
+        } else if (action == 3) {
+            if (InterlockedCompareExchange(
+                    &g_hidden_weapon_icon_report_count, 1, 0) == 0)
+                log_line("WeaponXiconpos icon hidden by buttonHideUnavailable");
+        } else if (action == 4) {
+            ctx.previous_icon = g_rendering_weapon_icon;
+            ctx.previous_craft = g_rendering_weapon_craft;
+            ctx.previous_presentation = g_rendering_weapon_presentation;
+        } else if (action == 5) {
+            g_rendering_weapon_icon = ctx.icon;
+            g_rendering_weapon_craft = ctx.craft;
+            g_rendering_weapon_presentation = ctx.presentation;
+        } else if (action == 6) {
+            a2fo_identity_call_thiscall_0(
+                g_ship_system_icon_render_original, ctx.icon);
+        } else if (action == 7) {
+            g_rendering_weapon_icon = ctx.previous_icon;
+            g_rendering_weapon_craft = ctx.previous_craft;
+            g_rendering_weapon_presentation = ctx.previous_presentation;
         }
-        return;
-    }
-    void* const previous_icon = g_rendering_weapon_icon;
-    void* const previous_craft = g_rendering_weapon_craft;
-    const auto previous_presentation = g_rendering_weapon_presentation;
-    g_rendering_weapon_icon = icon;
-    g_rendering_weapon_craft = craft;
-    g_rendering_weapon_presentation = presentation;
-    a2fo_identity_call_thiscall_0(
-        g_ship_system_icon_render_original, icon);
-    g_rendering_weapon_icon = previous_icon;
-    g_rendering_weapon_craft = previous_craft;
-    g_rendering_weapon_presentation = previous_presentation;
+        return 0;
+    };
+    a2fo_rs_stage9_craft_ship_icon_render(step, &context);
 }
 
 void system_text_set_colour_from_context(
     void* sprite, void* text, const Colour* native_colour) noexcept {
-    const Colour* applied_colour = native_colour;
-    Colour configured_colour{};
-    Colour tinted{};
-    ValueComponentKind kind = ValueComponentKind::unrelated;
-    bool applied = false;
-    if (g_runtime_ready && text) {
-        void* parameter_db = gui_parameter_db();
-        if (!g_ui_configuration.loaded ||
-            g_ui_configuration.parameter_db != parameter_db) {
-            refresh_ui_configuration(parameter_db);
+    struct Context {
+        void* sprite;
+        void* text;
+        const Colour* native_colour;
+        const Colour* applied_colour;
+        Colour configured_colour{}, tinted{};
+        ValueComponentKind kind = ValueComponentKind::unrelated;
+        bool applied = false;
+    } context{sprite, text, native_colour, native_colour, {}, {},
+              ValueComponentKind::unrelated, false};
+    const auto step = +[](void* opaque, std::uint32_t action, std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) {
+            if (g_runtime_ready && ctx.text) {
+                void* parameter_db = gui_parameter_db();
+                if (!g_ui_configuration.loaded ||
+                    g_ui_configuration.parameter_db != parameter_db)
+                    refresh_ui_configuration(parameter_db);
+                ctx.applied = configured_value_colour(
+                    ctx.text, &ctx.configured_colour, &ctx.kind);
+            }
+        } else if (action == 1) {
+            return ctx.applied && ctx.native_colour &&
+                readable_range(ctx.native_colour, sizeof(*ctx.native_colour));
+        } else if (action == 2) {
+            Colour native{};
+            std::memcpy(&native, ctx.native_colour, sizeof(native));
+            const auto result = a2fo::craft_identity::tint_system_icon_colour(
+                {{native.red, native.green, native.blue}},
+                {{ctx.configured_colour.red, ctx.configured_colour.green,
+                  ctx.configured_colour.blue}});
+            ctx.tinted = Colour{result[0], result[1], result[2]};
+            ctx.applied_colour = &ctx.tinted;
+        } else if (action == 3) {
+            a2fo_identity_call_thiscall_1(
+                at(g_armada, kSpriteSetColourRva), ctx.sprite,
+                reinterpret_cast<std::uintptr_t>(ctx.applied_colour));
+        } else if (action == 4) {
+            LONG* report_count = &g_system_value_icon_colour_report_count;
+            const char* report_message =
+                "Configured live-health colours applied to the native selected-panel system value icons";
+            if (ctx.kind == ValueComponentKind::crew) {
+                report_count = &g_crew_icon_colour_report_count;
+                report_message = "Configured live-health colour applied to the native crew icon";
+            } else if (ctx.kind == ValueComponentKind::mouseover_status) {
+                report_count = &g_mouseover_status_icon_colour_report_count;
+                report_message = "Configured live-health colours applied to native mouse-over hull/shield icons";
+            } else if (ctx.kind == ValueComponentKind::special_energy) {
+                report_count = &g_special_energy_icon_colour_report_count;
+                report_message = "specialEnergyIconColor applied to the native special-energy icon";
+            } else if (ctx.kind == ValueComponentKind::officer) {
+                report_count = &g_officer_icon_colour_report_count;
+                report_message = "officerIconColor applied to the native officer icon";
+            }
+            if (ctx.applied && InterlockedCompareExchange(report_count, 1, 0) == 0)
+                log_line(report_message);
         }
-        applied = configured_value_colour(
-            text, &configured_colour, &kind);
-    }
-    if (applied && native_colour &&
-        readable_range(native_colour, sizeof(*native_colour))) {
-        Colour native{};
-        std::memcpy(&native, native_colour, sizeof(native));
-        const auto result = a2fo::craft_identity::tint_system_icon_colour(
-            {{native.red, native.green, native.blue}},
-            {{configured_colour.red, configured_colour.green,
-              configured_colour.blue}});
-        tinted = Colour{result[0], result[1], result[2]};
-        applied_colour = &tinted;
-    }
-    a2fo_identity_call_thiscall_1(
-        at(g_armada, kSpriteSetColourRva), sprite,
-        reinterpret_cast<std::uintptr_t>(applied_colour));
-    LONG* report_count = &g_system_value_icon_colour_report_count;
-    const char* report_message =
-        "Configured live-health colours applied to the native selected-panel system value icons";
-    if (kind == ValueComponentKind::crew) {
-        report_count = &g_crew_icon_colour_report_count;
-        report_message =
-            "Configured live-health colour applied to the native crew icon";
-    } else if (kind == ValueComponentKind::mouseover_status) {
-        report_count = &g_mouseover_status_icon_colour_report_count;
-        report_message =
-            "Configured live-health colours applied to native mouse-over hull/shield icons";
-    } else if (kind == ValueComponentKind::special_energy) {
-        report_count = &g_special_energy_icon_colour_report_count;
-        report_message =
-            "specialEnergyIconColor applied to the native special-energy icon";
-    } else if (kind == ValueComponentKind::officer) {
-        report_count = &g_officer_icon_colour_report_count;
-        report_message =
-            "officerIconColor applied to the native officer icon";
-    }
-    if (applied && InterlockedCompareExchange(
-            report_count, 1, 0) == 0) {
-        log_line(report_message);
-    }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_colour_apply(step, &context);
 }
 
 void value_text_colour_from_context(
     void* component, void* text_record) noexcept {
-    if (!g_runtime_ready || !component ||
-        !writable_range(text_record, sizeof(Colour))) {
-        return;
-    }
-    void* parameter_db = gui_parameter_db();
-    if (!g_ui_configuration.loaded ||
-        g_ui_configuration.parameter_db != parameter_db) {
-        refresh_ui_configuration(parameter_db);
-    }
-    Colour configured_colour{};
-    ValueComponentKind kind = ValueComponentKind::unrelated;
-    if (!configured_value_colour(
-            component, &configured_colour, &kind)) {
-        return;
-    }
-    std::memcpy(text_record, &configured_colour, sizeof(configured_colour));
-    LONG* report_count = &g_system_text_colour_report_count;
-    const char* report_message =
-        "Configured live-health colours applied to the native selected-panel system value text";
-    if (kind == ValueComponentKind::crew) {
-        report_count = &g_crew_text_colour_report_count;
-        report_message =
-            "Configured live-health colour applied to the native crew value text";
-    } else if (kind == ValueComponentKind::mouseover_status) {
-        report_count = &g_mouseover_status_text_colour_report_count;
-        report_message =
-            "Configured live-health colours applied to native mouse-over hull/shield value text";
-    } else if (kind == ValueComponentKind::special_energy) {
-        report_count = &g_special_energy_text_colour_report_count;
-        report_message =
-            "specialEnergyIconColor applied to the native special-energy value text";
-    } else if (kind == ValueComponentKind::officer) {
-        report_count = &g_officer_text_colour_report_count;
-        report_message =
-            "officerIconColor applied to the native officer value text";
-    }
-    if (InterlockedCompareExchange(report_count, 1, 0) == 0) {
-        log_line(report_message);
-    }
+    struct Context {
+        void* component;
+        void* text_record;
+        Colour configured_colour{};
+        ValueComponentKind kind = ValueComponentKind::unrelated;
+    } context{component, text_record};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) return g_runtime_ready && ctx.component &&
+            writable_range(ctx.text_record, sizeof(Colour));
+        if (action == 1) {
+            void* parameter_db = gui_parameter_db();
+            if (!g_ui_configuration.loaded ||
+                g_ui_configuration.parameter_db != parameter_db)
+                refresh_ui_configuration(parameter_db);
+        } else if (action == 2) {
+            return configured_value_colour(
+                ctx.component, &ctx.configured_colour, &ctx.kind);
+        } else if (action == 3) {
+            std::memcpy(ctx.text_record, &ctx.configured_colour,
+                sizeof(ctx.configured_colour));
+        } else if (action == 4) {
+            LONG* report_count = &g_system_text_colour_report_count;
+            const char* report_message =
+                "Configured live-health colours applied to the native selected-panel system value text";
+            if (ctx.kind == ValueComponentKind::crew) {
+                report_count = &g_crew_text_colour_report_count;
+                report_message = "Configured live-health colour applied to the native crew value text";
+            } else if (ctx.kind == ValueComponentKind::mouseover_status) {
+                report_count = &g_mouseover_status_text_colour_report_count;
+                report_message = "Configured live-health colours applied to native mouse-over hull/shield value text";
+            } else if (ctx.kind == ValueComponentKind::special_energy) {
+                report_count = &g_special_energy_text_colour_report_count;
+                report_message = "specialEnergyIconColor applied to the native special-energy value text";
+            } else if (ctx.kind == ValueComponentKind::officer) {
+                report_count = &g_officer_text_colour_report_count;
+                report_message = "officerIconColor applied to the native officer value text";
+            }
+            if (InterlockedCompareExchange(report_count, 1, 0) == 0)
+                log_line(report_message);
+        }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_value_text_colour(step, &context);
 }
 
 Colour text_component_colour(const void* text_component) noexcept {
@@ -2996,231 +3426,242 @@ void draw_ammunition_rows(
     void* info_display, void* craft, void* text_component,
     const NativeRectangle& live_anchor,
     const Colour&) noexcept {
-    if (!info_display || !craft || !text_component ||
-        !resolve_energy_amount_api()) return;
-
-    const std::array<float, 3> maximum{{
-        g_get_maximum_photon_torpedoes(craft),
-        g_get_maximum_quantum_torpedoes(craft),
-        g_get_maximum_shuttle_craft
-            ? g_get_maximum_shuttle_craft(craft) : 0.0f}};
-    bool any_store = false;
-    for (float value : maximum) {
-        any_store = any_store || (std::isfinite(value) && value > 0.0f);
-    }
-    if (!any_store) return;
-
-    NativeRectangle photon_rectangle = live_anchor;
-    NativeRectangle quantum_rectangle = live_anchor;
-    NativeRectangle shuttle_craft_rectangle = live_anchor;
-    photon_rectangle.top += 16;
-    photon_rectangle.bottom += 16;
-    quantum_rectangle.top += 40;
-    quantum_rectangle.bottom += 40;
-    shuttle_craft_rectangle.top += 64;
-    shuttle_craft_rectangle.bottom += 64;
-    if (g_ui_configuration.captain_rectangle_found &&
-        g_ui_configuration.photon_rectangle_found) {
-        photon_rectangle = translated_rectangle(
-            live_anchor, g_ui_configuration.captain_rectangle,
-            g_ui_configuration.photon_rectangle);
-    }
-    if (g_ui_configuration.captain_rectangle_found &&
-        g_ui_configuration.quantum_rectangle_found) {
-        quantum_rectangle = translated_rectangle(
-            live_anchor, g_ui_configuration.captain_rectangle,
-            g_ui_configuration.quantum_rectangle);
-    }
-    if (g_ui_configuration.captain_rectangle_found &&
-        g_ui_configuration.shuttle_craft_rectangle_found) {
-        shuttle_craft_rectangle = translated_rectangle(
-            live_anchor, g_ui_configuration.captain_rectangle,
-            g_ui_configuration.shuttle_craft_rectangle);
-    }
-
-    const std::array<NativeRectangle, 3> rectangles{{
-        panel_rectangle(kAmmoRows[0], photon_rectangle),
-        panel_rectangle(kAmmoRows[1], quantum_rectangle),
-        panel_rectangle(kAmmoRows[2], shuttle_craft_rectangle)}};
-    constexpr std::array<const char*, 3> default_labels{{
-        "Photon Torpedoes", "Quantum Torpedoes", "Shuttle Craft"}};
-    const std::array<float, 3> current{{
-        g_get_photon_torpedoes(craft),
-        g_get_quantum_torpedoes(craft),
-        g_get_shuttle_craft ? g_get_shuttle_craft(craft) : 0.0f}};
-    const std::array<EnergyAmountGetter, 3> reload_getters{{
-        g_get_photon_torpedo_reload_seconds,
-        g_get_quantum_torpedo_reload_seconds,
-        g_get_shuttle_craft_reload_seconds}};
-    const AmmunitionUiPolicy* policy = ammunition_ui_policy(craft);
-
-    void* display_interface = read_at<void*>(text_component, 0x04, nullptr);
-    if (!display_interface) return;
-    const std::int32_t display_origin_x = read_at<std::int32_t>(
-        display_interface, 0x04, 0);
-    const std::int32_t display_origin_y = read_at<std::int32_t>(
-        display_interface, 0x08, 0);
-
-    AmmunitionTooltipRuntime updated{};
-    updated.info_display = info_display;
-    updated.craft = craft;
-    std::array<bool, 3> drawn{};
-    for (std::size_t index = 0; index < drawn.size(); ++index) {
-        if (!std::isfinite(maximum[index]) || maximum[index] <= 0.0f ||
-            !std::isfinite(current[index])) {
-            continue;
-        }
-        const AmmunitionPresentation* presentation = policy
-            ? &policy->stores[index] : nullptr;
-        const char* configured_label = presentation &&
-                !presentation->label.empty()
-            ? presentation->label.c_str() : default_labels[index];
-        const char* label = localized_directional_shield_text(
-            configured_label, configured_label);
-        const int displayed_current = whole_ammunition_amount(current[index]);
-        const int displayed_maximum = whole_ammunition_amount(maximum[index]);
-        const float ratio = clamped_ratio(current[index], maximum[index]);
-        Colour healthy{0.0f, 1.0f, 0.0f};
-        Colour low{1.0f, 1.0f, 0.0f};
-        Colour critical{1.0f, 0.0f, 0.0f};
-        if (index == 0) {
-            if (g_ui_configuration.photon_colour_found) {
-                healthy = g_ui_configuration.photon_colour;
-            }
-            if (g_ui_configuration.photon_low_colour_found) {
-                low = g_ui_configuration.photon_low_colour;
-            }
-            if (g_ui_configuration.photon_critical_colour_found) {
-                critical = g_ui_configuration.photon_critical_colour;
-            }
-        } else if (index == 1) {
-            if (g_ui_configuration.quantum_colour_found) {
-                healthy = g_ui_configuration.quantum_colour;
-            }
-            if (g_ui_configuration.quantum_low_colour_found) {
-                low = g_ui_configuration.quantum_low_colour;
-            }
-            if (g_ui_configuration.quantum_critical_colour_found) {
-                critical = g_ui_configuration.quantum_critical_colour;
-            }
-        } else {
-            if (g_ui_configuration.shuttle_craft_colour_found) {
-                healthy = g_ui_configuration.shuttle_craft_colour;
-            }
-            if (g_ui_configuration.shuttle_craft_low_colour_found) {
-                low = g_ui_configuration.shuttle_craft_low_colour;
-            }
-            if (g_ui_configuration.shuttle_craft_critical_colour_found) {
-                critical = g_ui_configuration.shuttle_craft_critical_colour;
-            }
-        }
-        const Colour status_colour = panel_colour(kAmmoRows[index],
-            ratio <= 0.25f ? critical : ratio <= 0.50f ? low : healthy, ratio);
-
-        AmmunitionValueDisplayMode value_mode = presentation
-            ? presentation->value_display_mode
-            : AmmunitionValueDisplayMode::percent;
-        char value_text[128]{};
-        if (value_mode == AmmunitionValueDisplayMode::amount) {
-            std::snprintf(value_text, sizeof(value_text), "%d/%d",
-                          displayed_current, displayed_maximum);
-        } else if (value_mode == AmmunitionValueDisplayMode::reload) {
-            if (ratio >= 0.9999f) {
-                const char* ready = localized_directional_shield_text(
-                    "GUI_SD_SPE_READY", "Ready");
-                std::snprintf(value_text, sizeof(value_text), "%s", ready);
+    struct Row {
+        const AmmunitionPresentation* presentation = nullptr;
+        const char* label = nullptr;
+        int displayed_current = 0, displayed_maximum = 0;
+        float ratio = 0.0f, seconds = -1.0f;
+        Colour status_colour{};
+        AmmunitionValueDisplayMode value_mode = AmmunitionValueDisplayMode::percent;
+        char value_text[128]{}, text[640]{};
+        NativeRectangle hit_rectangle{}, amount_rectangle{}, bar_rectangle{};
+        bool icon_drawn = false, text_drawn = false, bar_drawn = false;
+        bool requested_icon = false, separate = false;
+    };
+    struct Context {
+        void* info_display;
+        void* craft;
+        void* text_component;
+        const NativeRectangle* live_anchor;
+        std::array<float, 3> maximum{}, current{};
+        std::array<NativeRectangle, 3> configured_rectangles{}, rectangles{};
+        std::array<EnergyAmountGetter, 3> reload_getters{};
+        const AmmunitionUiPolicy* policy = nullptr;
+        std::int32_t origin_x = 0, origin_y = 0;
+        AmmunitionTooltipRuntime updated{};
+        std::array<bool, 3> drawn{};
+        Row row{};
+    } context{info_display, craft, text_component, &live_anchor};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t index) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        static constexpr std::array<const char*, 3> default_labels{{
+            "Photon Torpedoes", "Quantum Torpedoes", "Shuttle Craft"}};
+        if (action == 0) return ctx.info_display && ctx.craft &&
+            ctx.text_component && resolve_energy_amount_api();
+        if (action == 1) {
+            ctx.maximum = {{g_get_maximum_photon_torpedoes(ctx.craft),
+                g_get_maximum_quantum_torpedoes(ctx.craft),
+                g_get_maximum_shuttle_craft
+                    ? g_get_maximum_shuttle_craft(ctx.craft) : 0.0f}};
+        } else if (action == 2) {
+            return std::isfinite(ctx.maximum[index]) && ctx.maximum[index] > 0.0f;
+        } else if (action == 3) {
+            ctx.configured_rectangles = {{*ctx.live_anchor, *ctx.live_anchor,
+                *ctx.live_anchor}};
+            ctx.configured_rectangles[0].top += 16;
+            ctx.configured_rectangles[0].bottom += 16;
+            ctx.configured_rectangles[1].top += 40;
+            ctx.configured_rectangles[1].bottom += 40;
+            ctx.configured_rectangles[2].top += 64;
+            ctx.configured_rectangles[2].bottom += 64;
+        } else if (action == 4) {
+            return g_ui_configuration.captain_rectangle_found &&
+                (index == 0 ? g_ui_configuration.photon_rectangle_found :
+                 index == 1 ? g_ui_configuration.quantum_rectangle_found :
+                              g_ui_configuration.shuttle_craft_rectangle_found);
+        } else if (action == 5) {
+            const RawRectangle& configured = index == 0
+                ? g_ui_configuration.photon_rectangle
+                : index == 1 ? g_ui_configuration.quantum_rectangle
+                             : g_ui_configuration.shuttle_craft_rectangle;
+            ctx.configured_rectangles[index] = translated_rectangle(
+                *ctx.live_anchor, g_ui_configuration.captain_rectangle,
+                configured);
+        } else if (action == 6) {
+            ctx.rectangles[index] = panel_rectangle(
+                kAmmoRows[index], ctx.configured_rectangles[index]);
+        } else if (action == 7) {
+            ctx.current = {{g_get_photon_torpedoes(ctx.craft),
+                g_get_quantum_torpedoes(ctx.craft),
+                g_get_shuttle_craft ? g_get_shuttle_craft(ctx.craft) : 0.0f}};
+            ctx.reload_getters = {{g_get_photon_torpedo_reload_seconds,
+                g_get_quantum_torpedo_reload_seconds,
+                g_get_shuttle_craft_reload_seconds}};
+            ctx.policy = ammunition_ui_policy(ctx.craft);
+        } else if (action == 8) {
+            void* display_interface = read_at<void*>(
+                ctx.text_component, 0x04, nullptr);
+            if (!display_interface) return 0;
+            ctx.origin_x = read_at<std::int32_t>(
+                display_interface, 0x04, 0);
+            ctx.origin_y = read_at<std::int32_t>(
+                display_interface, 0x08, 0);
+            return 1;
+        } else if (action == 9) {
+            ctx.updated.info_display = ctx.info_display;
+            ctx.updated.craft = ctx.craft;
+        } else if (action == 10) {
+            return std::isfinite(ctx.maximum[index]) &&
+                ctx.maximum[index] > 0.0f && std::isfinite(ctx.current[index]);
+        } else if (action == 11) {
+            ctx.row = {};
+            auto& row = ctx.row;
+            row.presentation = ctx.policy ? &ctx.policy->stores[index] : nullptr;
+            const char* configured_label = row.presentation &&
+                !row.presentation->label.empty()
+                ? row.presentation->label.c_str() : default_labels[index];
+            row.label = localized_directional_shield_text(
+                configured_label, configured_label);
+            row.displayed_current = whole_ammunition_amount(ctx.current[index]);
+            row.displayed_maximum = whole_ammunition_amount(ctx.maximum[index]);
+            row.ratio = clamped_ratio(ctx.current[index], ctx.maximum[index]);
+            Colour healthy{0.0f, 1.0f, 0.0f};
+            Colour low{1.0f, 1.0f, 0.0f};
+            Colour critical{1.0f, 0.0f, 0.0f};
+            if (index == 0) {
+                if (g_ui_configuration.photon_colour_found)
+                    healthy = g_ui_configuration.photon_colour;
+                if (g_ui_configuration.photon_low_colour_found)
+                    low = g_ui_configuration.photon_low_colour;
+                if (g_ui_configuration.photon_critical_colour_found)
+                    critical = g_ui_configuration.photon_critical_colour;
+            } else if (index == 1) {
+                if (g_ui_configuration.quantum_colour_found)
+                    healthy = g_ui_configuration.quantum_colour;
+                if (g_ui_configuration.quantum_low_colour_found)
+                    low = g_ui_configuration.quantum_low_colour;
+                if (g_ui_configuration.quantum_critical_colour_found)
+                    critical = g_ui_configuration.quantum_critical_colour;
             } else {
-                EnergyAmountGetter reload_getter = reload_getters[index];
-                const float seconds = reload_getter
-                    ? reload_getter(craft) : -1.0f;
-                if (std::isfinite(seconds) && seconds >= 0.0f) {
-                    const int displayed_seconds = std::max(
-                        1, static_cast<int>(std::ceil(seconds)));
-                    std::snprintf(value_text, sizeof(value_text), "%d s",
-                                  displayed_seconds);
-                } else {
-                    const char* waiting = localized_directional_shield_text(
-                        "GUI_SD_AMMO_WAITING", "Resupply");
-                    std::snprintf(value_text, sizeof(value_text), "%s",
-                                  waiting);
-                }
+                if (g_ui_configuration.shuttle_craft_colour_found)
+                    healthy = g_ui_configuration.shuttle_craft_colour;
+                if (g_ui_configuration.shuttle_craft_low_colour_found)
+                    low = g_ui_configuration.shuttle_craft_low_colour;
+                if (g_ui_configuration.shuttle_craft_critical_colour_found)
+                    critical = g_ui_configuration.shuttle_craft_critical_colour;
             }
-        } else {
+            row.status_colour = panel_colour(kAmmoRows[index],
+                row.ratio <= 0.25f ? critical : row.ratio <= 0.50f ? low : healthy,
+                row.ratio);
+            row.value_mode = row.presentation
+                ? row.presentation->value_display_mode
+                : AmmunitionValueDisplayMode::percent;
+        } else if (action == 12) {
+            return static_cast<std::uintptr_t>(ctx.row.value_mode);
+        } else if (action == 13) {
+            std::snprintf(ctx.row.value_text, sizeof(ctx.row.value_text),
+                "%d/%d", ctx.row.displayed_current, ctx.row.displayed_maximum);
+        } else if (action == 14) {
+            return ctx.row.ratio >= 0.9999f;
+        } else if (action == 15) {
+            const char* ready = localized_directional_shield_text(
+                "GUI_SD_SPE_READY", "Ready");
+            std::snprintf(ctx.row.value_text, sizeof(ctx.row.value_text),
+                "%s", ready);
+        } else if (action == 16) {
+            EnergyAmountGetter reload_getter = ctx.reload_getters[index];
+            ctx.row.seconds = reload_getter
+                ? reload_getter(ctx.craft) : -1.0f;
+        } else if (action == 17) {
+            return std::isfinite(ctx.row.seconds) && ctx.row.seconds >= 0.0f;
+        } else if (action == 18) {
+            const int displayed_seconds = std::max(
+                1, static_cast<int>(std::ceil(ctx.row.seconds)));
+            std::snprintf(ctx.row.value_text, sizeof(ctx.row.value_text),
+                "%d s", displayed_seconds);
+        } else if (action == 19) {
+            const char* waiting = localized_directional_shield_text(
+                "GUI_SD_AMMO_WAITING", "Resupply");
+            std::snprintf(ctx.row.value_text, sizeof(ctx.row.value_text),
+                "%s", waiting);
+        } else if (action == 20) {
             const int percent = static_cast<int>(std::floor(
-                ratio * 100.0f + 0.5f));
-            std::snprintf(value_text, sizeof(value_text), "%d%%", percent);
-        }
-        NativeRectangle hit_rectangle{};
-        bool icon_drawn = false;
-        NativeRectangle amount_rectangle = rectangles[index];
-        const bool requested_icon = presentation &&
-            presentation->display_mode == AmmunitionDisplayMode::icon;
-        if (requested_icon && !presentation->icon.empty() &&
-            presentation->icon_position_found) {
-            const RawRectangle& configured = presentation->icon_position;
+                ctx.row.ratio * 100.0f + 0.5f));
+            std::snprintf(ctx.row.value_text, sizeof(ctx.row.value_text),
+                "%d%%", percent);
+        } else if (action == 21) {
+            ctx.row.amount_rectangle = ctx.rectangles[index];
+            ctx.row.requested_icon = ctx.row.presentation &&
+                ctx.row.presentation->display_mode == AmmunitionDisplayMode::icon;
+            return ctx.row.requested_icon && !ctx.row.presentation->icon.empty() &&
+                ctx.row.presentation->icon_position_found;
+        } else if (action == 22) {
+            auto& row = ctx.row;
+            const RawRectangle& configured = row.presentation->icon_position;
             const std::int32_t row_height =
-                rectangles[index].bottom - rectangles[index].top;
-            const NativeRectangle icon_rectangle = panel_rectangle(kAmmoIcons[index], NativeRectangle{
-                rectangles[index].left,
-                rectangles[index].top +
-                    (row_height - configured.height) / 2,
-                rectangles[index].left + configured.width,
-                rectangles[index].top +
-                    (row_height - configured.height) / 2 +
-                    configured.height});
-            icon_drawn = draw_ammunition_icon(
-                index, presentation->icon, configured, icon_rectangle,
-                panel_colour(kAmmoIcons[index], status_colour, ratio),
-                display_origin_x, display_origin_y);
-            if (icon_drawn) {
-                hit_rectangle = union_rectangle(
-                    hit_rectangle, icon_rectangle);
+                ctx.rectangles[index].bottom - ctx.rectangles[index].top;
+            const NativeRectangle icon_rectangle = panel_rectangle(
+                kAmmoIcons[index], NativeRectangle{
+                    ctx.rectangles[index].left,
+                    ctx.rectangles[index].top +
+                        (row_height - configured.height) / 2,
+                    ctx.rectangles[index].left + configured.width,
+                    ctx.rectangles[index].top +
+                        (row_height - configured.height) / 2 + configured.height});
+            row.icon_drawn = draw_ammunition_icon(index,
+                row.presentation->icon, configured, icon_rectangle,
+                panel_colour(kAmmoIcons[index], row.status_colour, row.ratio),
+                ctx.origin_x, ctx.origin_y);
+            if (row.icon_drawn) {
+                row.hit_rectangle = union_rectangle(
+                    row.hit_rectangle, icon_rectangle);
                 if (!panel_style(kAmmoIcons[index]).area_found)
-                    amount_rectangle.left = std::max(
-                        amount_rectangle.left, icon_rectangle.right + 4);
+                    row.amount_rectangle.left = std::max(
+                        row.amount_rectangle.left, icon_rectangle.right + 4);
             }
-        }
-
-        bool text_drawn = false;
-        bool bar_drawn = false;
-        if (value_mode == AmmunitionValueDisplayMode::bar) {
-            NativeRectangle bar_rectangle = amount_rectangle;
-            if (!requested_icon && usable_native_rectangle(amount_rectangle)) {
-                const std::int32_t width =
-                    amount_rectangle.right - amount_rectangle.left;
-                NativeRectangle label_rectangle = amount_rectangle;
-                label_rectangle.right = amount_rectangle.left +
-                    std::max<std::int32_t>(1, width * 3 / 5);
-                bar_rectangle.left = std::min(
-                    amount_rectangle.right, label_rectangle.right + 4);
-                char label_text[512]{};
-                std::snprintf(
-                    label_text, sizeof(label_text), "%s:", label);
-                text_drawn = draw_identity_text(
-                    label_text, panel_rectangle(kAmmoLabels[index], label_rectangle),
-                    panel_colour(kAmmoLabels[index], status_colour, ratio), text_component);
-                if (text_drawn) hit_rectangle = union_rectangle(hit_rectangle,
-                    panel_rectangle(kAmmoLabels[index], label_rectangle));
-            }
-            if (usable_native_rectangle(bar_rectangle) || panel_style(kAmmoBars[index]).area_found) {
-                const std::int32_t row_height =
-                    bar_rectangle.bottom - bar_rectangle.top;
-                const std::int32_t bar_height = std::max<std::int32_t>(
-                    1, std::min<std::int32_t>(8, row_height));
-                bar_rectangle.top += (row_height - bar_height) / 2;
-                bar_rectangle.bottom = bar_rectangle.top + bar_height;
-                bar_rectangle = panel_rectangle(kAmmoBars[index], bar_rectangle);
-                bar_drawn = draw_ammunition_value_bar(
-                    bar_rectangle, ratio, status_colour,
-                    display_origin_x, display_origin_y, nullptr, kAmmoBars[index]);
-                if (bar_drawn) {
-                    hit_rectangle = union_rectangle(
-                        hit_rectangle, bar_rectangle);
-                }
-            }
-        } else {
-            char text[640]{};
-            const bool separate = panel_style(kAmmoLabels[index]).area_found ||
+        } else if (action == 23) {
+            ctx.row.bar_rectangle = ctx.row.amount_rectangle;
+        } else if (action == 24) {
+            return !ctx.row.requested_icon &&
+                usable_native_rectangle(ctx.row.amount_rectangle);
+        } else if (action == 25) {
+            auto& row = ctx.row;
+            const std::int32_t width =
+                row.amount_rectangle.right - row.amount_rectangle.left;
+            NativeRectangle label_rectangle = row.amount_rectangle;
+            label_rectangle.right = row.amount_rectangle.left +
+                std::max<std::int32_t>(1, width * 3 / 5);
+            row.bar_rectangle.left = std::min(
+                row.amount_rectangle.right, label_rectangle.right + 4);
+            char label_text[512]{};
+            std::snprintf(label_text, sizeof(label_text), "%s:", row.label);
+            row.text_drawn = draw_identity_text(label_text,
+                panel_rectangle(kAmmoLabels[index], label_rectangle),
+                panel_colour(kAmmoLabels[index], row.status_colour, row.ratio),
+                ctx.text_component);
+            if (row.text_drawn) row.hit_rectangle = union_rectangle(
+                row.hit_rectangle,
+                panel_rectangle(kAmmoLabels[index], label_rectangle));
+        } else if (action == 26) {
+            return usable_native_rectangle(ctx.row.bar_rectangle) ||
+                panel_style(kAmmoBars[index]).area_found;
+        } else if (action == 27) {
+            auto& row = ctx.row;
+            const std::int32_t row_height =
+                row.bar_rectangle.bottom - row.bar_rectangle.top;
+            const std::int32_t bar_height = std::max<std::int32_t>(
+                1, std::min<std::int32_t>(8, row_height));
+            row.bar_rectangle.top += (row_height - bar_height) / 2;
+            row.bar_rectangle.bottom = row.bar_rectangle.top + bar_height;
+            row.bar_rectangle = panel_rectangle(kAmmoBars[index], row.bar_rectangle);
+            row.bar_drawn = draw_ammunition_value_bar(
+                row.bar_rectangle, row.ratio, row.status_colour,
+                ctx.origin_x, ctx.origin_y, nullptr, kAmmoBars[index]);
+            if (row.bar_drawn) row.hit_rectangle = union_rectangle(
+                row.hit_rectangle, row.bar_rectangle);
+        } else if (action == 28) {
+            ctx.row.separate = panel_style(kAmmoLabels[index]).area_found ||
                 panel_style(kAmmoValues[index]).area_found ||
                 panel_style(kAmmoLabels[index]).colour_found ||
                 panel_style(kAmmoValues[index]).colour_found ||
@@ -3228,187 +3669,249 @@ void draw_ammunition_rows(
                 panel_style(kAmmoLabels[index]).critical_found ||
                 panel_style(kAmmoValues[index]).low_found ||
                 panel_style(kAmmoValues[index]).critical_found;
-            if (separate && !requested_icon) {
-                NativeRectangle label_rectangle = amount_rectangle;
-                label_rectangle.right = label_rectangle.left +
-                    (label_rectangle.right - label_rectangle.left) * 3 / 5;
-                amount_rectangle.left = label_rectangle.right + 4;
-                label_rectangle = panel_rectangle(kAmmoLabels[index], label_rectangle);
-                text_drawn = draw_identity_text(std::string(label) + ":",
-                    label_rectangle, panel_colour(kAmmoLabels[index], status_colour, ratio),
-                    text_component);
-                if (text_drawn) hit_rectangle = union_rectangle(hit_rectangle, label_rectangle);
+        } else if (action == 29) {
+            return ctx.row.separate && !ctx.row.requested_icon;
+        } else if (action == 31) {
+            auto& row = ctx.row;
+            NativeRectangle label_rectangle = row.amount_rectangle;
+            label_rectangle.right = label_rectangle.left +
+                (label_rectangle.right - label_rectangle.left) * 3 / 5;
+            row.amount_rectangle.left = label_rectangle.right + 4;
+            label_rectangle = panel_rectangle(kAmmoLabels[index], label_rectangle);
+            row.text_drawn = draw_identity_text(std::string(row.label) + ":",
+                label_rectangle,
+                panel_colour(kAmmoLabels[index], row.status_colour, row.ratio),
+                ctx.text_component);
+            if (row.text_drawn) row.hit_rectangle = union_rectangle(
+                row.hit_rectangle, label_rectangle);
+        } else if (action == 32) {
+            auto& row = ctx.row;
+            if (row.requested_icon || row.separate)
+                std::snprintf(row.text, sizeof(row.text), "%s", row.value_text);
+            else
+                std::snprintf(row.text, sizeof(row.text), "%s: %s",
+                    row.label, row.value_text);
+            row.amount_rectangle = panel_rectangle(
+                kAmmoValues[index], row.amount_rectangle);
+        } else if (action == 33) {
+            auto& row = ctx.row;
+            const bool value_drawn = draw_identity_text(row.text,
+                row.amount_rectangle,
+                panel_colour(kAmmoValues[index], row.status_colour, row.ratio),
+                ctx.text_component);
+            if (value_drawn) row.hit_rectangle = union_rectangle(
+                row.hit_rectangle, row.amount_rectangle);
+            row.text_drawn = row.text_drawn || value_drawn;
+        } else if (action == 34) {
+            const auto& row = ctx.row;
+            ctx.drawn[index] = row.icon_drawn || row.text_drawn || row.bar_drawn;
+            return ctx.drawn[index];
+        } else if (action == 37) {
+            const auto& row = ctx.row;
+            ctx.updated.visible[index] = true;
+            ctx.updated.current[index] = ctx.current[index];
+            ctx.updated.maximum[index] = ctx.maximum[index];
+            ctx.updated.hit_rectangles[index] = FloatRectangle{
+                static_cast<float>(row.hit_rectangle.left + ctx.origin_x),
+                static_cast<float>(row.hit_rectangle.top + ctx.origin_y),
+                static_cast<float>(row.hit_rectangle.right - row.hit_rectangle.left),
+                static_cast<float>(row.hit_rectangle.bottom - row.hit_rectangle.top)};
+            ctx.updated.active = true;
+        } else if (action == 35) {
+            if (ctx.updated.active) g_ammunition_tooltip = ctx.updated;
+        } else if (action == 36) {
+            if (a2fo_rs_stage10_identity_any(
+                    ctx.drawn.size(),
+                    +[](void* opaque, std::uint32_t,
+                        std::size_t item) noexcept -> std::uint32_t {
+                        return (*static_cast<decltype(ctx.drawn)*>(opaque))[item];
+                    }, &ctx.drawn) &&
+                InterlockedCompareExchange(
+                    &g_ammunition_draw_report_count, 1, 0) == 0) {
+                char message[384]{};
+                std::snprintf(message, sizeof(message),
+                    "First ammunition UI draw submitted: Photon=%s at %ld,%ld; "
+                    "Quantum=%s at %ld,%ld; Shuttle Craft=%s at %ld,%ld",
+                    ctx.drawn[0] ? "yes" : "no",
+                    static_cast<long>(ctx.configured_rectangles[0].left),
+                    static_cast<long>(ctx.configured_rectangles[0].top),
+                    ctx.drawn[1] ? "yes" : "no",
+                    static_cast<long>(ctx.configured_rectangles[1].left),
+                    static_cast<long>(ctx.configured_rectangles[1].top),
+                    ctx.drawn[2] ? "yes" : "no",
+                    static_cast<long>(ctx.configured_rectangles[2].left),
+                    static_cast<long>(ctx.configured_rectangles[2].top));
+                log_line(message);
             }
-            if (requested_icon || separate) {
-                std::snprintf(text, sizeof(text), "%s", value_text);
-            } else {
-                std::snprintf(
-                    text, sizeof(text), "%s: %s", label, value_text);
-            }
-            amount_rectangle = panel_rectangle(kAmmoValues[index], amount_rectangle);
-            const bool value_drawn = draw_identity_text(text, amount_rectangle,
-                panel_colour(kAmmoValues[index], status_colour, ratio), text_component);
-            if (value_drawn) hit_rectangle = union_rectangle(hit_rectangle, amount_rectangle);
-            text_drawn = text_drawn || value_drawn;
         }
-        drawn[index] = icon_drawn || text_drawn || bar_drawn;
-        if (!drawn[index]) continue;
-
-        updated.visible[index] = true;
-        updated.current[index] = current[index];
-        updated.maximum[index] = maximum[index];
-        updated.hit_rectangles[index] = FloatRectangle{
-            static_cast<float>(hit_rectangle.left + display_origin_x),
-            static_cast<float>(hit_rectangle.top + display_origin_y),
-            static_cast<float>(hit_rectangle.right - hit_rectangle.left),
-            static_cast<float>(hit_rectangle.bottom - hit_rectangle.top)};
-        updated.active = true;
-    }
-    if (updated.active) g_ammunition_tooltip = updated;
-
-    if (std::any_of(drawn.begin(), drawn.end(), [](bool value) {
-            return value;
-        }) &&
-        InterlockedCompareExchange(
-            &g_ammunition_draw_report_count, 1, 0) == 0) {
-        char message[384]{};
-        std::snprintf(
-            message, sizeof(message),
-            "First ammunition UI draw submitted: Photon=%s at %ld,%ld; "
-            "Quantum=%s at %ld,%ld; Shuttle Craft=%s at %ld,%ld",
-            drawn[0] ? "yes" : "no",
-            static_cast<long>(photon_rectangle.left),
-            static_cast<long>(photon_rectangle.top),
-            drawn[1] ? "yes" : "no",
-            static_cast<long>(quantum_rectangle.left),
-            static_cast<long>(quantum_rectangle.top),
-            drawn[2] ? "yes" : "no",
-            static_cast<long>(shuttle_craft_rectangle.left),
-            static_cast<long>(shuttle_craft_rectangle.top));
-        log_line(message);
-    }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_draw_ammo_rows(step, &context, context.drawn.size());
 }
 
 bool read_experience_progress(
     void* craft, float* current, float* next_rank) noexcept {
-    if (current) *current = 0.0f;
-    if (next_rank) *next_rank = 0.0f;
-    if (!craft || !current || !next_rank) return false;
-    void* enhancement = read_at<void*>(
-        craft, kCraftEnhancementOffset, nullptr);
-    void* enhancement_class = read_at<void*>(
-        enhancement, kEnhancementClassOffset, nullptr);
-    const float live_current = read_at<float>(
-        enhancement, kEnhancementCurrentXpOffset,
-        std::numeric_limits<float>::quiet_NaN());
-    const float live_next = read_at<float>(
-        enhancement_class, kEnhancementNextRankXpOffset,
-        std::numeric_limits<float>::quiet_NaN());
-    if (!std::isfinite(live_current) || live_current < 0.0f ||
-        !std::isfinite(live_next) || live_next <= 0.0f) {
-        return false;
-    }
-    *current = live_current;
-    *next_rank = live_next;
-    return true;
+    struct Context {
+        void* craft;
+        float* current;
+        float* next_rank;
+        double pooled = 0.0, required = 0.0;
+        float live_current = 0.0f, live_next = 0.0f;
+    } context{craft, current, next_rank};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) {
+            if (ctx.current) *ctx.current = 0.0f;
+            if (ctx.next_rank) *ctx.next_rank = 0.0f;
+        } else if (action == 1) {
+            return ctx.craft && ctx.current && ctx.next_rank;
+        } else if (action == 2) {
+            // Optional provider uses the selected craft's owner, including AI selections.
+            using CollectiveProgress = bool (__cdecl*)(unsigned,unsigned*,double*,double*);
+            HMODULE collective = a2fo::module_provider(
+                "A2FOCollectiveXP.dll", {"A2FOCollectiveXP_GetProgress"});
+            auto progress = collective ? reinterpret_cast<CollectiveProgress>(
+                reinterpret_cast<void*>(GetProcAddress(
+                    collective,"A2FOCollectiveXP_GetProgress"))) : nullptr;
+            return progress && progress(read_at<unsigned>(ctx.craft,0xec,~0u),
+                nullptr,&ctx.pooled,&ctx.required);
+        } else if (action == 3) {
+            return std::isfinite(ctx.pooled) && std::isfinite(ctx.required) &&
+                ctx.required > 0.0 &&
+                ctx.required <= std::numeric_limits<float>::max();
+        } else if (action == 4) {
+            *ctx.current = static_cast<float>(std::min(ctx.pooled,ctx.required));
+            *ctx.next_rank = static_cast<float>(ctx.required);
+        } else if (action == 5) {
+            void* enhancement = read_at<void*>(
+                ctx.craft, kCraftEnhancementOffset, nullptr);
+            void* enhancement_class = read_at<void*>(
+                enhancement, kEnhancementClassOffset, nullptr);
+            ctx.live_current = read_at<float>(
+                enhancement, kEnhancementCurrentXpOffset,
+                std::numeric_limits<float>::quiet_NaN());
+            ctx.live_next = read_at<float>(
+                enhancement_class, kEnhancementNextRankXpOffset,
+                std::numeric_limits<float>::quiet_NaN());
+        } else if (action == 6) {
+            return std::isfinite(ctx.live_current) && ctx.live_current >= 0.0f &&
+                std::isfinite(ctx.live_next) && ctx.live_next > 0.0f;
+        } else if (action == 7) {
+            *ctx.current = ctx.live_current;
+            *ctx.next_rank = ctx.live_next;
+        }
+        return 0;
+    };
+    return a2fo_rs_stage9_craft_experience_progress(step, &context);
 }
 
 void draw_selected_status_bars(
     void* info_display, void* craft, void* text_component,
     const NativeRectangle& live_anchor) noexcept {
-    if (!info_display || !craft || !text_component) {
-        return;
-    }
-    void* display_interface = read_at<void*>(text_component, 0x04, nullptr);
-    if (!display_interface) return;
-    const std::int32_t display_origin_x = read_at<std::int32_t>(
-        display_interface, 0x04, 0);
-    const std::int32_t display_origin_y = read_at<std::int32_t>(
-        display_interface, 0x08, 0);
-
-    SelectedStatusTooltipRuntime updated{};
-    updated.info_display = info_display;
-    updated.craft = craft;
-
-    auto add_hit_rectangle = [&](SelectedStatusIndex status,
-                                 const NativeRectangle& rectangle,
-                                 float current, float maximum) {
-        if (!usable_native_rectangle(rectangle)) return;
-        const std::size_t index = static_cast<std::size_t>(status);
-        updated.visible[index] = true;
-        updated.current[index] = current;
-        updated.maximum[index] = maximum;
-        updated.hit_rectangles[index] = FloatRectangle{
-            static_cast<float>(rectangle.left + display_origin_x),
-            static_cast<float>(rectangle.top + display_origin_y),
-            static_cast<float>(rectangle.right - rectangle.left),
-            static_cast<float>(rectangle.bottom - rectangle.top)};
-        updated.active = true;
+    struct Context {
+        void* info_display;
+        void* craft;
+        void* text_component;
+        const NativeRectangle* live_anchor;
+        std::int32_t origin_x = 0, origin_y = 0;
+        SelectedStatusTooltipRuntime updated{};
+        NativeRectangle shield_rectangle{}, experience_rectangle{};
+        float current_shields = 0.0f, maximum_shields = 0.0f;
+        float current_xp = 0.0f, next_rank_xp = 0.0f;
+        bool builder_shield = false;
+        bool experience_drawn = false;
+    } context{info_display, craft, text_component, &live_anchor};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) return ctx.info_display && ctx.craft && ctx.text_component;
+        if (action == 1) {
+            void* display_interface = read_at<void*>(ctx.text_component, 0x04, nullptr);
+            if (!display_interface) return 0;
+            ctx.origin_x = read_at<std::int32_t>(display_interface, 0x04, 0);
+            ctx.origin_y = read_at<std::int32_t>(display_interface, 0x08, 0);
+            ctx.updated.info_display = ctx.info_display;
+            ctx.updated.craft = ctx.craft;
+            return 1;
+        }
+        if (action == 2) {
+            ctx.builder_shield = g_active_panel == 1 &&
+                g_ui_configuration.builder_shield_bar_rectangle_found;
+            return ctx.builder_shield || g_ui_configuration.shield_bar_rectangle_found;
+        }
+        if (action == 3) {
+            const auto& configured = ctx.builder_shield
+                ? g_ui_configuration.builder_shield_bar_rectangle
+                : g_ui_configuration.shield_bar_rectangle;
+            const auto offset = read_at<std::int32_t>(ctx.info_display, 0x1f0, 0);
+            ctx.shield_rectangle = NativeRectangle{configured.x, configured.y - offset,
+                configured.x + configured.width - 1,
+                configured.y - offset + configured.height - 1};
+            ctx.current_shields = read_at<float>(ctx.craft, kCurrentShieldsOffset,
+                std::numeric_limits<float>::quiet_NaN());
+            ctx.maximum_shields = read_at<float>(ctx.craft, kMaximumShieldsOffset,
+                std::numeric_limits<float>::quiet_NaN());
+        } else if (action == 4) {
+            return std::isfinite(ctx.current_shields) && ctx.current_shields >= 0.0f &&
+                std::isfinite(ctx.maximum_shields) && ctx.maximum_shields > 0.0f;
+        } else if (action == 6) {
+            return g_ui_configuration.experience_bar_rectangle_found ||
+                panel_style(PanelElement::ExperienceBar).area_found;
+        } else if (action == 7) {
+            return read_experience_progress(
+                ctx.craft, &ctx.current_xp, &ctx.next_rank_xp);
+        } else if (action == 8) {
+            ctx.experience_rectangle = panel_rectangle(PanelElement::ExperienceBar,
+                translated_rectangle(*ctx.live_anchor,
+                    g_ui_configuration.captain_rectangle,
+                    g_ui_configuration.experience_bar_rectangle));
+            const Colour experience_colour =
+                g_ui_configuration.experience_bar_colour_found
+                ? g_ui_configuration.experience_bar_colour
+                : Colour{0.2f, 0.65f, 1.0f};
+            ctx.experience_drawn = draw_ammunition_value_bar(
+                ctx.experience_rectangle,
+                clamped_ratio(ctx.current_xp, ctx.next_rank_xp), experience_colour,
+                ctx.origin_x, ctx.origin_y,
+                g_ui_configuration.experience_bar_background_colour_found
+                    ? &g_ui_configuration.experience_bar_background_colour : nullptr);
+            return ctx.experience_drawn;
+        } else if (action == 10) {
+            if (ctx.updated.active) g_selected_status_tooltip = ctx.updated;
+        } else if (action == 11) {
+            if (ctx.experience_drawn && InterlockedCompareExchange(
+                    &g_selected_status_draw_report_count, 1, 0) == 0) {
+                char message[192]{};
+                std::snprintf(message, sizeof(message),
+                    "First selected-object XP bar submitted: %.0f / %.0f",
+                    static_cast<double>(ctx.current_xp),
+                    static_cast<double>(ctx.next_rank_xp));
+                log_line(message);
+            }
+        }
+        if (action == 5 || action == 9) {
+            const auto status = action == 5
+                ? SelectedStatusIndex::shields : SelectedStatusIndex::experience;
+            const auto& rectangle = action == 5
+                ? ctx.shield_rectangle : ctx.experience_rectangle;
+            if (!usable_native_rectangle(rectangle)) return 0;
+            const std::size_t index = static_cast<std::size_t>(status);
+            ctx.updated.visible[index] = true;
+            ctx.updated.current[index] = action == 5
+                ? ctx.current_shields : ctx.current_xp;
+            ctx.updated.maximum[index] = action == 5
+                ? ctx.maximum_shields : ctx.next_rank_xp;
+            ctx.updated.hit_rectangles[index] = FloatRectangle{
+                static_cast<float>(rectangle.left + ctx.origin_x),
+                static_cast<float>(rectangle.top + ctx.origin_y),
+                static_cast<float>(rectangle.right - rectangle.left),
+                static_cast<float>(rectangle.bottom - rectangle.top)};
+            ctx.updated.active = true;
+        }
+        return 0;
     };
-
-    const bool builder_shield = g_active_panel == 1 &&
-        g_ui_configuration.builder_shield_bar_rectangle_found;
-    if (builder_shield || g_ui_configuration.shield_bar_rectangle_found) {
-        const auto& configured = builder_shield
-            ? g_ui_configuration.builder_shield_bar_rectangle
-            : g_ui_configuration.shield_bar_rectangle;
-        const auto offset = read_at<std::int32_t>(info_display, 0x1f0, 0);
-        const NativeRectangle shield_rectangle{configured.x, configured.y - offset,
-            configured.x + configured.width - 1,
-            configured.y - offset + configured.height - 1};
-        const float current_shields = read_at<float>(
-            craft, kCurrentShieldsOffset,
-            std::numeric_limits<float>::quiet_NaN());
-        const float maximum_shields = read_at<float>(
-            craft, kMaximumShieldsOffset,
-            std::numeric_limits<float>::quiet_NaN());
-        if (std::isfinite(current_shields) && current_shields >= 0.0f &&
-            std::isfinite(maximum_shields) && maximum_shields > 0.0f) {
-            // Native shield bars already expose position/size and an SPR skin.
-            // Keep their disabled-system rendering; add only the missing hover.
-            add_hit_rectangle(
-                SelectedStatusIndex::shields, shield_rectangle,
-                current_shields, maximum_shields);
-        }
-    }
-
-    bool experience_drawn = false;
-    float current_xp = 0.0f;
-    float next_rank_xp = 0.0f;
-    if ((g_ui_configuration.experience_bar_rectangle_found ||
-         panel_style(PanelElement::ExperienceBar).area_found) &&
-        read_experience_progress(craft, &current_xp, &next_rank_xp)) {
-        const NativeRectangle experience_rectangle = panel_rectangle(PanelElement::ExperienceBar,
-            translated_rectangle(live_anchor, g_ui_configuration.captain_rectangle,
-                                 g_ui_configuration.experience_bar_rectangle));
-        const Colour experience_colour =
-            g_ui_configuration.experience_bar_colour_found
-            ? g_ui_configuration.experience_bar_colour
-            : Colour{0.2f, 0.65f, 1.0f};
-        experience_drawn = draw_ammunition_value_bar(
-            experience_rectangle,
-            clamped_ratio(current_xp, next_rank_xp), experience_colour,
-            display_origin_x, display_origin_y,
-            g_ui_configuration.experience_bar_background_colour_found
-                ? &g_ui_configuration.experience_bar_background_colour
-                : nullptr);
-        if (experience_drawn) {
-            add_hit_rectangle(
-                SelectedStatusIndex::experience, experience_rectangle,
-                current_xp, next_rank_xp);
-        }
-    }
-    if (updated.active) g_selected_status_tooltip = updated;
-    if (experience_drawn && InterlockedCompareExchange(
-            &g_selected_status_draw_report_count, 1, 0) == 0) {
-        char message[192]{};
-        std::snprintf(
-            message, sizeof(message),
-            "First selected-object XP bar submitted: %.0f / %.0f",
-            static_cast<double>(current_xp),
-            static_cast<double>(next_rank_xp));
-        log_line(message);
-    }
+    a2fo_rs_stage9_craft_draw_status_bars(step, &context);
 }
 
 float clamped_ratio(float current, float maximum) noexcept {
@@ -3474,35 +3977,48 @@ float move_towards(float displayed, float target,
 std::array<float, 4> animated_directional_shield_ratios(
     void* craft, const std::array<float, 4>& current,
     const std::array<float, 4>& maximum) noexcept {
-    std::array<float, 4> target{};
-    for (std::size_t index = 0; index < target.size(); ++index) {
-        target[index] = clamped_ratio(current[index], maximum[index]);
-    }
-
-    const DWORD now = GetTickCount();
-    const DWORD elapsed = now - g_directional_shield_animation.last_tick;
-    if (!g_directional_shield_animation.initialized ||
-        g_directional_shield_animation.craft != craft || elapsed > 1000u) {
-        g_directional_shield_animation.craft = craft;
-        g_directional_shield_animation.last_tick = now;
-        g_directional_shield_animation.initialized = true;
-        g_directional_shield_animation.displayed_ratio = target;
-        return target;
-    }
-
-    // A full-to-empty visual transition takes about 450 ms. Gameplay values
-    // remain immediate; only the selected-panel presentation eases toward the
-    // live value so a large hit reads as a drain rather than a single-frame
-    // pop.
-    const float maximum_step = std::min(
-        1.0f, static_cast<float>(elapsed) / 450.0f);
-    for (std::size_t index = 0; index < target.size(); ++index) {
-        g_directional_shield_animation.displayed_ratio[index] = move_towards(
-            g_directional_shield_animation.displayed_ratio[index],
-            target[index], maximum_step);
-    }
-    g_directional_shield_animation.last_tick = now;
-    return g_directional_shield_animation.displayed_ratio;
+    struct Context {
+        void* craft;
+        const std::array<float, 4>* current;
+        const std::array<float, 4>* maximum;
+        std::array<float, 4> target{}, result{};
+        DWORD now = 0, elapsed = 0;
+        float maximum_step = 0.0f;
+    } context{craft, &current, &maximum};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t index) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) {
+            ctx.target[index] = clamped_ratio(
+                (*ctx.current)[index], (*ctx.maximum)[index]);
+        } else if (action == 1) {
+            ctx.now = GetTickCount();
+            ctx.elapsed = ctx.now - g_directional_shield_animation.last_tick;
+            return !g_directional_shield_animation.initialized ||
+                g_directional_shield_animation.craft != ctx.craft ||
+                ctx.elapsed > 1000u;
+        } else if (action == 2) {
+            g_directional_shield_animation.craft = ctx.craft;
+            g_directional_shield_animation.last_tick = ctx.now;
+            g_directional_shield_animation.initialized = true;
+            g_directional_shield_animation.displayed_ratio = ctx.target;
+            ctx.result = ctx.target;
+        } else if (action == 3) {
+            ctx.maximum_step = std::min(
+                1.0f, static_cast<float>(ctx.elapsed) / 450.0f);
+        } else if (action == 4) {
+            g_directional_shield_animation.displayed_ratio[index] = move_towards(
+                g_directional_shield_animation.displayed_ratio[index],
+                ctx.target[index], ctx.maximum_step);
+        } else if (action == 5) {
+            g_directional_shield_animation.last_tick = ctx.now;
+            ctx.result = g_directional_shield_animation.displayed_ratio;
+        }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_animate_shield_ratios(step, &context,
+        context.target.size());
+    return context.result;
 }
 
 bool usable_float_rectangle(const FloatRectangle& rectangle) noexcept {
@@ -3553,11 +4069,22 @@ void* ammunition_icon_sprite(
         {"all_interface_ranks", "select_rank_1"},
         {"all_interface_ranks2", "select_rank_6"},
     }};
-    for (const AtlasCarrier& carrier : carriers) {
-        if (_stricmp(reference.c_str(), carrier.atlas) != 0) continue;
-        return find_interface_sprite(database, carrier.sprite);
-    }
-    return nullptr;
+    struct Context {
+        void* database;
+        const std::string& reference;
+        const std::array<AtlasCarrier, 5>& carriers;
+        void* sprite = nullptr;
+    } context{database, reference, carriers};
+    const auto step = +[](void* opaque, std::uint32_t,
+                          std::size_t index) noexcept -> std::uint32_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        const AtlasCarrier& carrier = ctx.carriers[index];
+        if (_stricmp(ctx.reference.c_str(), carrier.atlas) != 0) return 0;
+        ctx.sprite = find_interface_sprite(ctx.database, carrier.sprite);
+        return 1;
+    };
+    a2fo_rs_stage10_identity_first_match(carriers.size(), step, &context);
+    return context.sprite;
 }
 
 bool ammunition_icon_texture_dimensions(
@@ -3594,12 +4121,39 @@ bool ammunition_icon_texture_dimensions(
     return true;
 }
 
+// The icon uses a live reference to its cache slot throughout draw/restore;
+// the bar layer below deliberately snapshots its sprite before native draws.
+template<class Context, class Step>
+bool craft_sprite_policy(std::uint32_t kind, Context& context, Step step) {
+    struct Call { Context& context; Step& step; std::exception_ptr error; std::uint8_t failed = 0; };
+    Call call{context, step, {}, 0};
+    const auto bridge = +[](void* opaque, std::uint32_t op, std::uintptr_t arg) -> std::uintptr_t {
+        auto& c = *static_cast<Call*>(opaque);
+        try { return c.step(c.context, op, arg); }
+        catch (...) { c.error = std::current_exception(); c.failed = 1; return 0; }
+    };
+    const bool result = a2fo_rs_stage9_craft_sprite_flow(kind, bridge, &call, &call.failed) != 0;
+    if (call.error) std::rethrow_exception(call.error);
+    return result;
+}
+
 bool draw_ammunition_icon(
     std::size_t store_index, const std::string& sprite_name,
     const RawRectangle& source_rectangle,
     const NativeRectangle& rectangle, const Colour& colour,
     std::int32_t display_origin_x,
     std::int32_t display_origin_y) noexcept {
+    struct Context {
+        std::size_t index; void* database = nullptr; AmmunitionIconCache* cache = nullptr;
+        std::uint8_t *x = nullptr, *y = nullptr, *width = nullptr, *height = nullptr;
+        UINT texture_width = 0, texture_height = 0;
+        Colour saved_colour{}; FloatRectangle saved_window{}; SpriteVector position{};
+        void*& sprite() { return cache->sprites[index]; }
+    } c{store_index};
+    return craft_sprite_policy(0, c, [&](Context& ctx, std::uint32_t op, std::uintptr_t) -> std::uintptr_t {
+        switch (op) {
+        case 0: {
+
     if (store_index >= g_ammunition_icon_cache.sprites.size() ||
         sprite_name.empty() || !usable_native_rectangle(rectangle) ||
         source_rectangle.x < 0 || source_rectangle.y < 0 ||
@@ -3623,118 +4177,107 @@ bool draw_ammunition_icon(
         return false;
     }
 
-    void* database = read_at<void*>(
-        at(g_armada, kInterfaceSpriteDatabasePointerRva), 0, nullptr);
-    AmmunitionIconCache& cache = g_ammunition_icon_cache;
-    if (!database) return false;
-    if (cache.database != database) {
-        cache = {};
-        cache.database = database;
-    }
-    if (cache.names[store_index] != sprite_name) {
-        cache.names[store_index] = sprite_name;
-        cache.sprites[store_index] = nullptr;
-        cache.attempted[store_index] = false;
-    }
-    void*& sprite = cache.sprites[store_index];
-    if (sprite && !directional_shield_sprite_is_drawable(sprite)) {
-        // Do not enter the database lookup in the same frame that exposed a
-        // stale sprite. The interface may still be tearing down.
-        sprite = nullptr;
-        cache.attempted[store_index] = false;
-        return false;
-    }
-    if (!sprite && !cache.attempted[store_index]) {
-        cache.attempted[store_index] = true;
-        sprite = ammunition_icon_sprite(database, sprite_name);
-    }
-    if (!directional_shield_sprite_is_drawable(sprite)) {
-        if (InterlockedCompareExchange(
-                &g_ammunition_icon_failure_report_count, 1, 0) == 0) {
-            log_line(std::string("Ammunition icon sprite '") + sprite_name +
-                     "' was not found or draw-ready; using the compact value without a label");
+            return 1;
         }
-        return false;
-    }
-
-    auto* texture_x_address =
-        static_cast<std::uint8_t*>(sprite) + kSpriteTextureXOffset;
-    auto* texture_y_address =
-        static_cast<std::uint8_t*>(sprite) + kSpriteTextureYOffset;
-    auto* texture_width_address =
-        static_cast<std::uint8_t*>(sprite) + kSpriteTextureWidthOffset;
-    auto* texture_height_address =
-        static_cast<std::uint8_t*>(sprite) + kSpriteTextureHeightOffset;
-    if (!writable_range(texture_x_address, sizeof(float)) ||
-        !writable_range(texture_y_address, sizeof(float)) ||
-        !writable_range(texture_width_address, sizeof(float)) ||
-        !writable_range(texture_height_address, sizeof(float))) {
-        return false;
-    }
-    UINT texture_width = 0;
-    UINT texture_height = 0;
-    if (!ammunition_icon_texture_dimensions(
-            sprite, &texture_width, &texture_height) ||
-        static_cast<std::uint64_t>(source_rectangle.x) +
-                static_cast<std::uint64_t>(source_rectangle.width) >
-            texture_width ||
-        static_cast<std::uint64_t>(source_rectangle.y) +
-                static_cast<std::uint64_t>(source_rectangle.height) >
-            texture_height) {
-        if (InterlockedCompareExchange(
-                &g_ammunition_icon_failure_report_count, 1, 0) == 0) {
-            log_line(std::string("Ammunition icon crop for '") +
-                     sprite_name +
-                     "' is outside its texture or its dimensions are unavailable");
+        case 1: ctx.database = read_at<void*>(at(g_armada, kInterfaceSpriteDatabasePointerRva), 0, nullptr); ctx.cache = &g_ammunition_icon_cache; return ctx.database != nullptr;
+        case 2: return ctx.cache->database == ctx.database;
+        case 3: *ctx.cache = {}; ctx.cache->database = ctx.database; return 0;
+        case 4: return ctx.cache->names[store_index] == sprite_name;
+        case 5: ctx.cache->names[store_index] = sprite_name; ctx.sprite() = nullptr; ctx.cache->attempted[store_index] = false; return 0;
+        case 6: case 9: return ctx.sprite() != nullptr;
+        case 7: case 13: return directional_shield_sprite_is_drawable(ctx.sprite());
+        case 8: ctx.sprite() = nullptr; ctx.cache->attempted[store_index] = false; return 0;
+        case 10: return ctx.cache->attempted[store_index];
+        case 11: ctx.cache->attempted[store_index] = true; return 0;
+        case 12: ctx.sprite() = ammunition_icon_sprite(ctx.database, sprite_name); return 0;
+        case 14: case 23: return static_cast<std::uint32_t>(InterlockedCompareExchange(&g_ammunition_icon_failure_report_count, 1, 0));
+        case 15: log_line(std::string("Ammunition icon sprite '") + sprite_name + "' was not found or draw-ready; using the compact value without a label"); return 0;
+        case 16:
+            ctx.x = static_cast<std::uint8_t*>(ctx.sprite()) + kSpriteTextureXOffset;
+            ctx.y = static_cast<std::uint8_t*>(ctx.sprite()) + kSpriteTextureYOffset;
+            ctx.width = static_cast<std::uint8_t*>(ctx.sprite()) + kSpriteTextureWidthOffset;
+            ctx.height = static_cast<std::uint8_t*>(ctx.sprite()) + kSpriteTextureHeightOffset; return 0;
+        case 17: return writable_range(ctx.x, sizeof(float));
+        case 18: return writable_range(ctx.y, sizeof(float));
+        case 19: return writable_range(ctx.width, sizeof(float));
+        case 20: return writable_range(ctx.height, sizeof(float));
+        case 21: return ammunition_icon_texture_dimensions(ctx.sprite(), &ctx.texture_width, &ctx.texture_height);
+        case 22: return static_cast<std::uint64_t>(source_rectangle.x) + static_cast<std::uint64_t>(source_rectangle.width) <= ctx.texture_width &&
+            static_cast<std::uint64_t>(source_rectangle.y) + static_cast<std::uint64_t>(source_rectangle.height) <= ctx.texture_height;
+        case 24: log_line(std::string("Ammunition icon crop for '") + sprite_name + "' is outside its texture or its dimensions are unavailable"); return 0;
+        case 25: ctx.saved_colour = read_at<Colour>(ctx.sprite(), kSpriteColourOffset, Colour{}); return 0;
+        case 26: ctx.saved_window = FloatRectangle{
+            read_at<float>(ctx.sprite(), kSpriteTextureXOffset, 0.0f),
+            read_at<float>(ctx.sprite(), kSpriteTextureYOffset, 0.0f),
+            read_at<float>(ctx.sprite(), kSpriteTextureWidthOffset, 0.0f),
+            read_at<float>(ctx.sprite(), kSpriteTextureHeightOffset, 0.0f)}; return 0;
+        case 27: return usable_float_rectangle(ctx.saved_window);
+        case 28: {
+            // Preserve the original x87 division/conversion and write order.
+            const float x = static_cast<float>(source_rectangle.x) / static_cast<float>(ctx.texture_width);
+            const float y = static_cast<float>(source_rectangle.y) / static_cast<float>(ctx.texture_height);
+            const float width = static_cast<float>(source_rectangle.width) / static_cast<float>(ctx.texture_width);
+            const float height = static_cast<float>(source_rectangle.height) / static_cast<float>(ctx.texture_height);
+            std::memcpy(ctx.x, &x, sizeof(x)); std::memcpy(ctx.y, &y, sizeof(y));
+            std::memcpy(ctx.width, &width, sizeof(width)); std::memcpy(ctx.height, &height, sizeof(height));
+            ctx.position = SpriteVector{static_cast<float>(rectangle.left + display_origin_x), static_cast<float>(rectangle.top + display_origin_y), 0.0f}; return 0;
         }
-        return false;
-    }
+        case 29: a2fo_identity_fo_sprite_set_colour(at(g_fleet_ops, kFoSpriteSetColourRva), ctx.sprite(), &colour); return 0;
+        case 30: a2fo_identity_fo_sprite_draw_scaled_2d(at(g_fleet_ops, kFoSpriteDrawScaled2DRva), ctx.sprite(), &ctx.position,
+            static_cast<float>(rectangle.right - rectangle.left), static_cast<float>(rectangle.bottom - rectangle.top)); return 0;
+        case 31: a2fo_identity_fo_sprite_set_colour(at(g_fleet_ops, kFoSpriteSetColourRva), ctx.sprite(), &ctx.saved_colour); return 0;
+        case 32:
+            std::memcpy(ctx.x, &ctx.saved_window.x, sizeof(ctx.saved_window.x)); std::memcpy(ctx.y, &ctx.saved_window.y, sizeof(ctx.saved_window.y));
+            std::memcpy(ctx.width, &ctx.saved_window.width, sizeof(ctx.saved_window.width)); std::memcpy(ctx.height, &ctx.saved_window.height, sizeof(ctx.saved_window.height)); return 0;
+        default: return 0;
+        }
+    });
+}
 
-    const Colour saved_colour = read_at<Colour>(
-        sprite, kSpriteColourOffset, Colour{});
-    const FloatRectangle saved_texture_window{
-        read_at<float>(sprite, kSpriteTextureXOffset, 0.0f),
-        read_at<float>(sprite, kSpriteTextureYOffset, 0.0f),
-        read_at<float>(sprite, kSpriteTextureWidthOffset, 0.0f),
-        read_at<float>(sprite, kSpriteTextureHeightOffset, 0.0f)};
-    if (!usable_float_rectangle(saved_texture_window)) return false;
-    const float texture_x = static_cast<float>(source_rectangle.x) /
-        static_cast<float>(texture_width);
-    const float texture_y = static_cast<float>(source_rectangle.y) /
-        static_cast<float>(texture_height);
-    const float cropped_texture_width =
-        static_cast<float>(source_rectangle.width) /
-        static_cast<float>(texture_width);
-    const float cropped_texture_height =
-        static_cast<float>(source_rectangle.height) /
-        static_cast<float>(texture_height);
-    std::memcpy(texture_x_address, &texture_x, sizeof(texture_x));
-    std::memcpy(texture_y_address, &texture_y, sizeof(texture_y));
-    std::memcpy(texture_width_address, &cropped_texture_width,
-                sizeof(cropped_texture_width));
-    std::memcpy(texture_height_address, &cropped_texture_height,
-                sizeof(cropped_texture_height));
-    const SpriteVector position{
-        static_cast<float>(rectangle.left + display_origin_x),
-        static_cast<float>(rectangle.top + display_origin_y),
-        0.0f};
-    a2fo_identity_fo_sprite_set_colour(
-        at(g_fleet_ops, kFoSpriteSetColourRva), sprite, &colour);
-    a2fo_identity_fo_sprite_draw_scaled_2d(
-        at(g_fleet_ops, kFoSpriteDrawScaled2DRva), sprite, &position,
-        static_cast<float>(rectangle.right - rectangle.left),
-        static_cast<float>(rectangle.bottom - rectangle.top));
-    a2fo_identity_fo_sprite_set_colour(
-        at(g_fleet_ops, kFoSpriteSetColourRva), sprite, &saved_colour);
-    std::memcpy(texture_x_address, &saved_texture_window.x,
-                sizeof(saved_texture_window.x));
-    std::memcpy(texture_y_address, &saved_texture_window.y,
-                sizeof(saved_texture_window.y));
-    std::memcpy(texture_width_address, &saved_texture_window.width,
-                sizeof(saved_texture_window.width));
-    std::memcpy(texture_height_address, &saved_texture_window.height,
-                sizeof(saved_texture_window.height));
-    return true;
+bool draw_ammunition_bar_layer(
+    void* database, std::size_t layer, const std::string& requested,
+    float fill, const Colour& tint, const NativeRectangle& rectangle,
+    std::int32_t display_origin_x, std::int32_t display_origin_y,
+    PanelElement element) noexcept {
+    struct Context {
+        AmmunitionBarCache* cache = nullptr; std::string name;
+        void* sprite = nullptr; std::uint8_t* width_address = nullptr;
+        float saved_width = 0.0f; Colour saved_colour{}; SpriteVector position{};
+    } c;
+    return craft_sprite_policy(1, c, [&](Context& ctx, std::uint32_t op, std::uintptr_t) -> std::uintptr_t {
+        switch (op) {
+        case 0: ctx.cache = &g_ammunition_bar_cache[static_cast<std::size_t>(element)][layer]; ctx.name = requested.empty() ? "large_shield_bar" : requested; return 0;
+        case 1: return ctx.cache->database == database;
+        case 2: return ctx.cache->name == ctx.name;
+        case 3: *ctx.cache = {}; ctx.cache->database = database; ctx.cache->name = ctx.name; return 0;
+        case 4: return ctx.cache->sprite != nullptr;
+        case 5: case 10: return directional_shield_sprite_is_drawable(ctx.cache->sprite);
+        case 6: ctx.cache->sprite = nullptr; ctx.cache->attempted = false; return 0;
+        case 7: return ctx.cache->attempted;
+        case 8: ctx.cache->attempted = true; return 0;
+        case 9: ctx.cache->sprite = find_interface_sprite(database, ctx.name.c_str()); return 0;
+        case 11: return requested.empty();
+        case 12: log_line(std::string("Panel bar sprite '") + ctx.name + "' unavailable; using large_shield_bar"); return 0;
+        case 13: ctx.cache->sprite = find_interface_sprite(database, "large_shield_bar"); return 0;
+        case 14: ctx.sprite = ctx.cache->sprite; return 0;
+        case 15: return directional_shield_sprite_is_drawable(ctx.sprite);
+        case 16: ctx.width_address = static_cast<std::uint8_t*>(ctx.sprite) + kSpriteTextureWidthOffset; return writable_range(ctx.width_address, sizeof(float));
+        case 17: ctx.saved_width = read_at<float>(ctx.sprite, kSpriteTextureWidthOffset, 0.0f); return 0;
+        case 18: return std::isfinite(ctx.saved_width) && ctx.saved_width > 0.0f;
+        case 19: ctx.saved_colour = read_at<Colour>(ctx.sprite, kSpriteColourOffset, Colour{}); return 0;
+        case 20: {
+            const float cropped_width = ctx.saved_width * fill;
+            std::memcpy(ctx.width_address, &cropped_width, sizeof(cropped_width));
+            ctx.position = SpriteVector{static_cast<float>(rectangle.left + display_origin_x), static_cast<float>(rectangle.top + display_origin_y), 0.0f}; return 0;
+        }
+        case 21: a2fo_identity_fo_sprite_set_colour(at(g_fleet_ops, kFoSpriteSetColourRva), ctx.sprite, &tint); return 0;
+        case 22: a2fo_identity_fo_sprite_draw_scaled_2d(at(g_fleet_ops, kFoSpriteDrawScaled2DRva), ctx.sprite, &ctx.position,
+            (rectangle.right - rectangle.left) * fill, static_cast<float>(rectangle.bottom - rectangle.top)); return 0;
+        case 23: std::memcpy(ctx.width_address, &ctx.saved_width, sizeof(ctx.saved_width)); return 0;
+        case 24: a2fo_identity_fo_sprite_set_colour(at(g_fleet_ops, kFoSpriteSetColourRva), ctx.sprite, &ctx.saved_colour); return 0;
+        default: return 0;
+        }
+    });
 }
 
 bool draw_ammunition_value_bar(
@@ -3742,6 +4285,11 @@ bool draw_ammunition_value_bar(
     std::int32_t display_origin_x,
     std::int32_t display_origin_y,
     const Colour* background_colour, PanelElement element) noexcept {
+    struct Context { void* database = nullptr; const PanelElementStyle* style = nullptr; Colour background{}; float fill = 0.0f; } c;
+    return craft_sprite_policy(2, c, [&](Context& ctx, std::uint32_t op, std::uintptr_t) -> std::uintptr_t {
+        switch (op) {
+        case 0: {
+
     if (!usable_native_rectangle(rectangle) || !g_armada || !g_fleet_ops ||
         !readable_range(at(g_armada, kInterfaceSpriteDatabaseGetRva),
                         sizeof(kExpectedInterfaceSpriteDatabaseGet)) ||
@@ -3761,59 +4309,25 @@ bool draw_ammunition_value_bar(
         return false;
     }
 
-    void* database = read_at<void*>(
-        at(g_armada, kInterfaceSpriteDatabasePointerRva), 0, nullptr);
-    if (!database) return false;
-    const auto& style = panel_style(element);
-    const auto draw_layer = [&](std::size_t layer, const std::string& requested,
-                                float fill, const Colour& tint) noexcept {
-        auto& cache = g_ammunition_bar_cache[static_cast<std::size_t>(element)][layer];
-        const std::string name = requested.empty() ? "large_shield_bar" : requested;
-        if (cache.database != database || cache.name != name) {
-            cache = {};
-            cache.database = database;
-            cache.name = name;
+            return 1;
         }
-        if (cache.sprite && !directional_shield_sprite_is_drawable(cache.sprite)) {
-            cache.sprite = nullptr;
-            cache.attempted = false;
-            return false;
+        case 1: ctx.database = read_at<void*>(at(g_armada, kInterfaceSpriteDatabasePointerRva), 0, nullptr); return ctx.database != nullptr;
+        case 2: ctx.style = &panel_style(element); return 0;
+        case 3: ctx.background = ctx.style->background_found ? ctx.style->background :
+            background_colour ? *background_colour : Colour{0.08f, 0.08f, 0.08f}; return 0;
+        case 4: return draw_ammunition_bar_layer(ctx.database, 0,
+            ctx.style->background_sprite.empty() ? ctx.style->sprite : ctx.style->background_sprite,
+            1.0f, ctx.background, rectangle, display_origin_x, display_origin_y, element);
+        case 5: ctx.fill = std::isfinite(ratio) ? std::clamp(ratio, 0.0f, 1.0f) : 0.0f; return 0;
+        case 6: return ctx.fill > 0.0f;
+        case 7: {
+            const Colour tint = panel_colour(element, colour, ctx.fill);
+            return draw_ammunition_bar_layer(ctx.database, 1, ctx.style->sprite, ctx.fill, tint,
+                rectangle, display_origin_x, display_origin_y, element);
         }
-        if (!cache.attempted) {
-            cache.attempted = true;
-            cache.sprite = find_interface_sprite(database, name.c_str());
-            if (!directional_shield_sprite_is_drawable(cache.sprite) && !requested.empty()) {
-                log_line(std::string("Panel bar sprite '") + name + "' unavailable; using large_shield_bar");
-                cache.sprite = find_interface_sprite(database, "large_shield_bar");
-            }
+        default: return 0;
         }
-        void* sprite = cache.sprite;
-        if (!directional_shield_sprite_is_drawable(sprite)) return false;
-        auto* width_address = static_cast<std::uint8_t*>(sprite) + kSpriteTextureWidthOffset;
-        if (!writable_range(width_address, sizeof(float))) return false;
-        const float saved_width = read_at<float>(sprite, kSpriteTextureWidthOffset, 0.0f);
-        if (!std::isfinite(saved_width) || saved_width <= 0.0f) return false;
-        const Colour saved_colour = read_at<Colour>(sprite, kSpriteColourOffset, Colour{});
-        const float cropped_width = saved_width * fill;
-        std::memcpy(width_address, &cropped_width, sizeof(cropped_width));
-        const SpriteVector position{static_cast<float>(rectangle.left + display_origin_x),
-            static_cast<float>(rectangle.top + display_origin_y), 0.0f};
-        a2fo_identity_fo_sprite_set_colour(at(g_fleet_ops, kFoSpriteSetColourRva), sprite, &tint);
-        a2fo_identity_fo_sprite_draw_scaled_2d(at(g_fleet_ops, kFoSpriteDrawScaled2DRva), sprite,
-            &position, (rectangle.right - rectangle.left) * fill,
-            static_cast<float>(rectangle.bottom - rectangle.top));
-        std::memcpy(width_address, &saved_width, sizeof(saved_width));
-        a2fo_identity_fo_sprite_set_colour(at(g_fleet_ops, kFoSpriteSetColourRva), sprite, &saved_colour);
-        return true;
-    };
-    const Colour background = style.background_found ? style.background :
-        background_colour ? *background_colour : Colour{0.08f, 0.08f, 0.08f};
-    const bool track = draw_layer(0,
-        style.background_sprite.empty() ? style.sprite : style.background_sprite, 1.0f, background);
-    const float fill = std::isfinite(ratio) ? std::clamp(ratio, 0.0f, 1.0f) : 0.0f;
-    const bool foreground = fill > 0.0f && draw_layer(1, style.sprite, fill,
-        panel_colour(element, colour, fill));
-    return track || foreground;
+    });
 }
 
 bool directional_shield_sprite_cache_is_live(void* database) noexcept {
@@ -3821,13 +4335,136 @@ bool directional_shield_sprite_cache_is_live(void* database) noexcept {
         g_directional_shield_sprites.database != database) {
         return false;
     }
-    for (void* sprite : g_directional_shield_sprites.sprites) {
-        if (!directional_shield_sprite_is_drawable(sprite)) return false;
-    }
-    return true;
+    const std::size_t count = g_directional_shield_sprites.compact ? 2u : 4u;
+    const auto step = +[](void*, std::uint32_t, std::uintptr_t index) noexcept -> std::uintptr_t {
+        return directional_shield_sprite_is_drawable(
+            g_directional_shield_sprites.sprites[index]);
+    };
+    return a2fo_rs_stage9_craft_all_sprites_live(step, nullptr, count);
 }
 
 bool resolve_directional_shield_sprites() noexcept {
+    struct Context { void* database = nullptr; } context{};
+    const auto step = +[](void* opaque, std::uint32_t action, std::uintptr_t index) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) {
+            if (!g_fleet_ops ||
+                !readable_range(at(g_armada, kInterfaceSpriteDatabaseGetRva),
+                                sizeof(kExpectedInterfaceSpriteDatabaseGet)) ||
+                std::memcmp(at(g_armada, kInterfaceSpriteDatabaseGetRva),
+                            kExpectedInterfaceSpriteDatabaseGet,
+                            sizeof(kExpectedInterfaceSpriteDatabaseGet)) != 0 ||
+                !readable_range(at(g_fleet_ops, kFoSpriteSetColourRva),
+                                sizeof(kExpectedFoSpriteSetColour)) ||
+                std::memcmp(at(g_fleet_ops, kFoSpriteSetColourRva),
+                            kExpectedFoSpriteSetColour,
+                            sizeof(kExpectedFoSpriteSetColour)) != 0 ||
+                !readable_range(at(g_fleet_ops, kFoSpriteDrawScaled2DRva),
+                                sizeof(kExpectedFoSpriteDrawScaled2D)) ||
+                std::memcmp(at(g_fleet_ops, kFoSpriteDrawScaled2DRva),
+                            kExpectedFoSpriteDrawScaled2D,
+                            sizeof(kExpectedFoSpriteDrawScaled2D)) != 0) {
+                log_line("Directional-shield sprite helpers are unavailable; numeric display retained");
+                return 0;
+            }
+            return 1;
+        }
+        if (action == 1) {
+            ctx.database = read_at<void*>(
+                at(g_armada, kInterfaceSpriteDatabasePointerRva), 0, nullptr);
+        } else if (action == 2) {
+            if (g_directional_shield_sprite_retry_after != 0) {
+                const DWORD now = GetTickCount();
+                if (g_directional_shield_sprite_retry_database != ctx.database) {
+                    g_directional_shield_sprite_retry_database = ctx.database;
+                    g_directional_shield_sprite_retry_after =
+                        now + kDirectionalShieldSpriteStabilizationMs;
+                }
+                if (static_cast<LONG>(now - g_directional_shield_sprite_retry_after) < 0)
+                    return 0;
+                g_directional_shield_sprite_retry_after = 0;
+                g_directional_shield_sprite_retry_database = nullptr;
+            }
+            return 1;
+        } else if (action == 3) {
+            if (g_directional_shield_sprites.resolution_attempted) {
+                if (directional_shield_sprite_cache_is_live(ctx.database)) return 1;
+                if (!g_directional_shield_sprites.ready &&
+                    g_directional_shield_sprites.database == ctx.database) {
+                    g_directional_shield_sprites.resolution_attempted = false;
+                    g_directional_shield_sprites.sprites = {};
+                    return 2;
+                }
+                reset_directional_shield_sprite_runtime();
+                return 3;
+            }
+        } else if (action == 4) {
+            g_directional_shield_sprites.resolution_attempted = true;
+            g_directional_shield_sprites.database = ctx.database;
+            if (!ctx.database) {
+                log_line("Directional-shield sprite database is unavailable; numeric display retained");
+                return 0;
+            }
+            return 1;
+        } else if (action == 5) {
+            g_directional_shield_sprites.sprites[index] = find_interface_sprite(
+                ctx.database, kCompactQuadShieldSpriteNames[index]);
+        } else if (action == 6) {
+            return directional_shield_sprite_is_drawable(
+                g_directional_shield_sprites.sprites[index]);
+        } else if (action == 7) {
+            g_directional_shield_sprites.compact = true;
+            g_directional_shield_sprites.ready = true;
+            log_line("Compact quad directional-shield sprites resolved (dsq/dsqs)");
+        } else if (action == 8) {
+            g_directional_shield_sprites.sprites = {};
+            g_directional_shield_sprites.compact = false;
+        } else if (action == 9) {
+            g_directional_shield_sprites.sprites[index] = find_interface_sprite(
+                ctx.database, kDirectionalShieldSpriteNames[index]);
+        } else if (action == 10) {
+            return directional_shield_sprite_is_drawable(
+                g_directional_shield_sprites.sprites[index]);
+        } else if (action == 11) {
+            void* sprite = g_directional_shield_sprites.sprites[index];
+            void* frame_list = sprite ? read_at<void*>(
+                sprite, kSpriteFrameListOffset, nullptr) : nullptr;
+            if (InterlockedCompareExchange(
+                    &g_directional_shield_sprite_failure_report_count, 1, 0) == 0) {
+                char message[448]{};
+                std::snprintf(message, sizeof(message),
+                    "Compact quad sprites dsq/dsqs were unavailable and legacy directional-shield sprite '%s' was missing or not draw-ready (sprite=%p frameList=%p database=%p); retrying after interface quiet period",
+                    kDirectionalShieldSpriteNames[index], sprite,
+                    frame_list, ctx.database);
+                log_line(message);
+            }
+            g_directional_shield_sprite_retry_database = ctx.database;
+            g_directional_shield_sprite_retry_after =
+                GetTickCount() + kDirectionalShieldSpriteStabilizationMs;
+        } else if (action == 12) {
+            g_directional_shield_sprites.ready = true;
+            log_line("Legacy four-sprite directional-shield ring resolved");
+        }
+        return 0;
+    };
+    return a2fo_rs_stage9_craft_resolve_shield_sprites(
+        step, &context, kCompactQuadShieldSpriteNames.size(),
+        kDirectionalShieldSpriteNames.size());
+}
+
+bool tri_shield_sprite_cache_is_live(void* database) noexcept {
+    if (!g_tri_shield_sprites.ready || !database ||
+        g_tri_shield_sprites.database != database) {
+        return false;
+    }
+    const auto step = +[](void*, std::uint32_t, std::uintptr_t index) noexcept -> std::uintptr_t {
+        return directional_shield_sprite_is_drawable(g_tri_shield_sprites.sprites[index]);
+    };
+    return a2fo_rs_stage9_craft_all_sprites_live(
+        step, nullptr, g_tri_shield_sprites.sprites.size());
+}
+
+bool resolve_tri_shield_sprites() noexcept {
     if (!g_fleet_ops ||
         !readable_range(at(g_armada, kInterfaceSpriteDatabaseGetRva),
                         sizeof(kExpectedInterfaceSpriteDatabaseGet)) ||
@@ -3844,84 +4481,213 @@ bool resolve_directional_shield_sprites() noexcept {
         std::memcmp(at(g_fleet_ops, kFoSpriteDrawScaled2DRva),
                     kExpectedFoSpriteDrawScaled2D,
                     sizeof(kExpectedFoSpriteDrawScaled2D)) != 0) {
-        log_line("Directional-shield sprite helpers are unavailable; numeric display retained");
         return false;
     }
 
-    void* database = read_at<void*>(
-        at(g_armada, kInterfaceSpriteDatabasePointerRva), 0, nullptr);
-    if (g_directional_shield_sprite_retry_after != 0) {
-        const DWORD now = GetTickCount();
-        if (g_directional_shield_sprite_retry_database != database) {
-            // A changing pointer means the menu/interface transition is still
-            // active. Restart the quiet period without entering native lookup.
-            g_directional_shield_sprite_retry_database = database;
-            g_directional_shield_sprite_retry_after =
-                now + kDirectionalShieldSpriteStabilizationMs;
-        }
-        if (static_cast<LONG>(
-                now - g_directional_shield_sprite_retry_after) < 0) {
-            return false;
-        }
-        g_directional_shield_sprite_retry_after = 0;
-        g_directional_shield_sprite_retry_database = nullptr;
-    }
-    if (g_directional_shield_sprites.resolution_attempted) {
-        if (directional_shield_sprite_cache_is_live(database)) return true;
-        if (!g_directional_shield_sprites.ready &&
-            g_directional_shield_sprites.database == database) {
-            // Fleet Operations can publish a newly parsed interface sprite
-            // before its texture/frame list is ready. The previous one-shot
-            // failure cache made that transient state permanent for the rest
-            // of the mission. The quiet-period gate above has now elapsed, so
-            // permit another lookup against the same live database.
-            g_directional_shield_sprites.resolution_attempted = false;
-            g_directional_shield_sprites.sprites = {};
-        } else {
-            // The interface database changed, or one of its former sprites
-            // has been destructed in place. Do not call its lookup routine
-            // during the same frame: menu teardown can leave the pointer
-            // temporarily non-null while its internal tree is already invalid.
-            reset_directional_shield_sprite_runtime();
-            return false;
-        }
-    }
-    g_directional_shield_sprites.resolution_attempted = true;
-    g_directional_shield_sprites.database = database;
-    if (!database) {
-        log_line("Directional-shield sprite database is unavailable; numeric display retained");
-        return false;
-    }
-
-    for (std::size_t index = 0;
-         index < kDirectionalShieldSpriteNames.size(); ++index) {
-        g_directional_shield_sprites.sprites[index] = find_interface_sprite(
-            database, kDirectionalShieldSpriteNames[index]);
-        if (!directional_shield_sprite_is_drawable(
-                g_directional_shield_sprites.sprites[index])) {
-            void* sprite = g_directional_shield_sprites.sprites[index];
-            void* frame_list = sprite ? read_at<void*>(
-                sprite, kSpriteFrameListOffset, nullptr) : nullptr;
+    struct TriContext { void* database = nullptr; } context;
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t index) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<TriContext*>(opaque);
+        if (action == 0) {
+            ctx.database = read_at<void*>(
+                at(g_armada, kInterfaceSpriteDatabasePointerRva), 0, nullptr);
+        } else if (action == 1) {
+            if (g_directional_shield_sprite_retry_after != 0) {
+                const DWORD now = GetTickCount();
+                if (g_directional_shield_sprite_retry_database != ctx.database) {
+                    g_directional_shield_sprite_retry_database = ctx.database;
+                    g_directional_shield_sprite_retry_after =
+                        now + kDirectionalShieldSpriteStabilizationMs;
+                }
+                if (static_cast<LONG>(
+                        now - g_directional_shield_sprite_retry_after) < 0) return 0;
+                g_directional_shield_sprite_retry_after = 0;
+                g_directional_shield_sprite_retry_database = nullptr;
+            }
+            return 1;
+        } else if (action == 2) {
+            if (g_tri_shield_sprites.resolution_attempted) {
+                if (tri_shield_sprite_cache_is_live(ctx.database)) return 1;
+                if (!g_tri_shield_sprites.ready &&
+                    g_tri_shield_sprites.database == ctx.database) {
+                    g_tri_shield_sprites.resolution_attempted = false;
+                    g_tri_shield_sprites.sprites = {};
+                    return 2;
+                }
+                reset_directional_shield_sprite_runtime();
+                return 3;
+            }
+        } else if (action == 3) {
+            g_tri_shield_sprites.resolution_attempted = true;
+            g_tri_shield_sprites.database = ctx.database;
+            return ctx.database != nullptr;
+        } else if (action == 4) {
+            g_tri_shield_sprites.sprites[index] = find_interface_sprite(
+                ctx.database, kTriShieldSpriteNames[index]);
+        } else if (action == 5) {
+            return directional_shield_sprite_is_drawable(
+                g_tri_shield_sprites.sprites[index]);
+        } else if (action == 6) {
             if (InterlockedCompareExchange(
-                    &g_directional_shield_sprite_failure_report_count,
-                    1, 0) == 0) {
-                char message[384]{};
-                std::snprintf(
-                    message, sizeof(message),
-                    "Directional-shield sprite '%s' was missing or not draw-ready (sprite=%p frameList=%p database=%p); retrying after interface quiet period",
-                    kDirectionalShieldSpriteNames[index], sprite,
-                    frame_list, database);
+                    &g_directional_shield_sprite_failure_report_count, 1, 0) == 0) {
+                char message[320]{};
+                std::snprintf(message, sizeof(message),
+                    "Tri shield sprite '%s' is missing or not draw-ready; numeric display retained",
+                    kTriShieldSpriteNames[index]);
                 log_line(message);
             }
-            g_directional_shield_sprite_retry_database = database;
+            g_directional_shield_sprite_retry_database = ctx.database;
             g_directional_shield_sprite_retry_after =
                 GetTickCount() + kDirectionalShieldSpriteStabilizationMs;
-            return false;
+        } else if (action == 7) {
+            g_tri_shield_sprites.ready = true;
+            log_line("Tri directional-shield sprites resolved");
         }
+        return 0;
+    };
+    return a2fo_rs_stage9_craft_resolve_simple_sprites(
+        step, &context, kTriShieldSpriteNames.size());
+}
+
+bool hemisphere_shield_sprite_cache_is_live(void* database) noexcept {
+    return g_hemisphere_shield_sprite.ready && database &&
+        g_hemisphere_shield_sprite.database == database &&
+        directional_shield_sprite_is_drawable(
+            g_hemisphere_shield_sprite.sprite);
+}
+
+bool hemisphere_side_shield_sprite_cache_is_live(void* database) noexcept {
+    return g_hemisphere_side_shield_sprite.ready && database &&
+        g_hemisphere_side_shield_sprite.database == database &&
+        directional_shield_sprite_is_drawable(
+            g_hemisphere_side_shield_sprite.sprite);
+}
+
+bool resolve_hemisphere_sprite_runtime(
+    HemisphereShieldSpriteRuntime* runtime,
+    bool (*cache_is_live)(void*) noexcept,
+    const char* sprite_name, const char* failure_format,
+    const char* resolved_message) noexcept {
+    struct Context {
+        HemisphereShieldSpriteRuntime* runtime;
+        bool (*cache_is_live)(void*) noexcept;
+        const char* sprite_name;
+        const char* failure_format;
+        const char* resolved_message;
+        void* database = nullptr;
+    } context{runtime, cache_is_live, sprite_name, failure_format, resolved_message};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) {
+            ctx.database = read_at<void*>(
+                at(g_armada, kInterfaceSpriteDatabasePointerRva), 0, nullptr);
+        } else if (action == 1) {
+            if (g_directional_shield_sprite_retry_after != 0) {
+                const DWORD now = GetTickCount();
+                if (g_directional_shield_sprite_retry_database != ctx.database) {
+                    g_directional_shield_sprite_retry_database = ctx.database;
+                    g_directional_shield_sprite_retry_after =
+                        now + kDirectionalShieldSpriteStabilizationMs;
+                }
+                if (static_cast<LONG>(
+                        now - g_directional_shield_sprite_retry_after) < 0) return 0;
+                g_directional_shield_sprite_retry_after = 0;
+                g_directional_shield_sprite_retry_database = nullptr;
+            }
+            return 1;
+        } else if (action == 2) {
+            if (ctx.runtime->resolution_attempted) {
+                if (ctx.cache_is_live(ctx.database)) return 1;
+                if (!ctx.runtime->ready && ctx.runtime->database == ctx.database) {
+                    ctx.runtime->resolution_attempted = false;
+                    ctx.runtime->sprite = nullptr;
+                    return 2;
+                }
+                reset_directional_shield_sprite_runtime();
+                return 3;
+            }
+        } else if (action == 3) {
+            ctx.runtime->resolution_attempted = true;
+            ctx.runtime->database = ctx.database;
+            return ctx.database != nullptr;
+        } else if (action == 4) {
+            ctx.runtime->sprite = find_interface_sprite(ctx.database, ctx.sprite_name);
+        } else if (action == 5) {
+            return directional_shield_sprite_is_drawable(ctx.runtime->sprite);
+        } else if (action == 6) {
+            if (InterlockedCompareExchange(
+                    &g_directional_shield_sprite_failure_report_count, 1, 0) == 0) {
+                char message[320]{};
+                std::snprintf(message, sizeof(message),
+                    ctx.failure_format, ctx.sprite_name);
+                log_line(message);
+            }
+            g_directional_shield_sprite_retry_database = ctx.database;
+            g_directional_shield_sprite_retry_after =
+                GetTickCount() + kDirectionalShieldSpriteStabilizationMs;
+        } else if (action == 7) {
+            ctx.runtime->ready = true;
+            log_line(ctx.resolved_message);
+        }
+        return 0;
+    };
+    return a2fo_rs_stage9_craft_resolve_simple_sprites(step, &context, 1);
+}
+
+bool resolve_hemisphere_shield_sprite() noexcept {
+    if (!g_fleet_ops ||
+        !readable_range(at(g_armada, kInterfaceSpriteDatabaseGetRva),
+                        sizeof(kExpectedInterfaceSpriteDatabaseGet)) ||
+        std::memcmp(at(g_armada, kInterfaceSpriteDatabaseGetRva),
+                    kExpectedInterfaceSpriteDatabaseGet,
+                    sizeof(kExpectedInterfaceSpriteDatabaseGet)) != 0 ||
+        !readable_range(at(g_fleet_ops, kFoSpriteSetColourRva),
+                        sizeof(kExpectedFoSpriteSetColour)) ||
+        std::memcmp(at(g_fleet_ops, kFoSpriteSetColourRva),
+                    kExpectedFoSpriteSetColour,
+                    sizeof(kExpectedFoSpriteSetColour)) != 0 ||
+        !readable_range(at(g_fleet_ops, kFoSpriteDrawScaled2DRva),
+                        sizeof(kExpectedFoSpriteDrawScaled2D)) ||
+        std::memcmp(at(g_fleet_ops, kFoSpriteDrawScaled2DRva),
+                    kExpectedFoSpriteDrawScaled2D,
+                    sizeof(kExpectedFoSpriteDrawScaled2D)) != 0) {
+        return false;
     }
-    g_directional_shield_sprites.ready = true;
-    log_line("Directional-shield sprite ring resolved");
-    return true;
+
+    return resolve_hemisphere_sprite_runtime(
+        &g_hemisphere_shield_sprite, hemisphere_shield_sprite_cache_is_live,
+        kHemisphereShieldSpriteName,
+        "Hemisphere shield sprite '%s' is missing or not draw-ready; numeric display retained",
+        "Hemisphere directional-shield sprite resolved");
+}
+
+bool resolve_hemisphere_side_shield_sprite() noexcept {
+    if (!g_fleet_ops ||
+        !readable_range(at(g_armada, kInterfaceSpriteDatabaseGetRva),
+                        sizeof(kExpectedInterfaceSpriteDatabaseGet)) ||
+        std::memcmp(at(g_armada, kInterfaceSpriteDatabaseGetRva),
+                    kExpectedInterfaceSpriteDatabaseGet,
+                    sizeof(kExpectedInterfaceSpriteDatabaseGet)) != 0 ||
+        !readable_range(at(g_fleet_ops, kFoSpriteSetColourRva),
+                        sizeof(kExpectedFoSpriteSetColour)) ||
+        std::memcmp(at(g_fleet_ops, kFoSpriteSetColourRva),
+                    kExpectedFoSpriteSetColour,
+                    sizeof(kExpectedFoSpriteSetColour)) != 0 ||
+        !readable_range(at(g_fleet_ops, kFoSpriteDrawScaled2DRva),
+                        sizeof(kExpectedFoSpriteDrawScaled2D)) ||
+        std::memcmp(at(g_fleet_ops, kFoSpriteDrawScaled2DRva),
+                    kExpectedFoSpriteDrawScaled2D,
+                    sizeof(kExpectedFoSpriteDrawScaled2D)) != 0) {
+        return false;
+    }
+
+    return resolve_hemisphere_sprite_runtime(
+        &g_hemisphere_side_shield_sprite,
+        hemisphere_side_shield_sprite_cache_is_live,
+        kHemisphereSideShieldSpriteName,
+        "Side hemisphere shield sprite '%s' is missing or not draw-ready; numeric display retained",
+        "Side hemisphere directional-shield sprite resolved");
 }
 
 void update_directional_shield_tooltip_runtime(
@@ -3931,36 +4697,47 @@ void update_directional_shield_tooltip_runtime(
     const NativeRectangle& display_rectangle,
     const std::array<FloatRectangle, 4>& segment_positions,
     const std::array<bool, 4>& segment_drawn) noexcept {
-    g_directional_shield_tooltip = {};
-    if (!info_display || !craft ||
-        !usable_native_rectangle(display_rectangle)) {
-        return;
-    }
-
-    DirectionalShieldTooltipRuntime updated{};
-    updated.info_display = info_display;
-    updated.craft = craft;
-    updated.current = current;
-    updated.maximum = maximum;
-    for (std::size_t index = 0;
-         index < segment_positions.size(); ++index) {
-        if (!segment_drawn[index]) continue;
-        const FloatRectangle logical_rectangle{
-            static_cast<float>(display_rectangle.left) +
-                segment_positions[index].x,
-            static_cast<float>(display_rectangle.top) +
-                segment_positions[index].y,
-            segment_positions[index].width,
-            segment_positions[index].height};
-        // Both StandardComponent::Update and Armada's cursor globals use the
-        // virtual 1600x1200 UI coordinate space. DrawScaled2D applies the
-        // physical viewport transform later, during submission; applying it
-        // here would move the hover rectangles away from their sprites.
-        updated.hit_rectangles[index] = logical_rectangle;
-        updated.active = updated.active || usable_float_rectangle(
-            updated.hit_rectangles[index]);
-    }
-    if (updated.active) g_directional_shield_tooltip = updated;
+    struct Context {
+        void* info_display;
+        void* craft;
+        const std::array<float, 4>* current;
+        const std::array<float, 4>* maximum;
+        const NativeRectangle* display_rectangle;
+        const std::array<FloatRectangle, 4>* positions;
+        const std::array<bool, 4>* drawn;
+        DirectionalShieldTooltipRuntime updated{};
+    } context{info_display, craft, &current, &maximum,
+              &display_rectangle, &segment_positions, &segment_drawn};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t index) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) g_directional_shield_tooltip = {};
+        else if (action == 1) {
+            if (!ctx.info_display || !ctx.craft ||
+                !usable_native_rectangle(*ctx.display_rectangle)) return 0;
+            ctx.updated.info_display = ctx.info_display;
+            ctx.updated.craft = ctx.craft;
+            ctx.updated.current = *ctx.current;
+            ctx.updated.maximum = *ctx.maximum;
+            return 1;
+        } else if (action == 2) return (*ctx.drawn)[index];
+        else if (action == 3) {
+            const auto& position = (*ctx.positions)[index];
+            const FloatRectangle logical_rectangle{
+                static_cast<float>(ctx.display_rectangle->left) + position.x,
+                static_cast<float>(ctx.display_rectangle->top) + position.y,
+                position.width, position.height};
+            // Hover coordinates remain in native virtual UI space.
+            ctx.updated.hit_rectangles[index] = logical_rectangle;
+            ctx.updated.active = ctx.updated.active || usable_float_rectangle(
+                ctx.updated.hit_rectangles[index]);
+        } else if (action == 4) {
+            if (ctx.updated.active) g_directional_shield_tooltip = ctx.updated;
+        }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_update_shield_tip_rects(step, &context,
+        segment_positions.size());
 }
 
 NativeRectangle directional_shield_graphic_rectangle(
@@ -3982,450 +4759,555 @@ NativeRectangle directional_shield_graphic_rectangle(
 bool draw_directional_shield_graphic(
     void* info_display, void* craft,
     const std::array<float, 4>& current,
-    const std::array<float, 4>& maximum, void* text_component,
-    const NativeRectangle& live_anchor) noexcept {
-    if (!craft || !text_component) return false;
-    const bool ring_ready = resolve_directional_shield_sprites();
-
-    const NativeRectangle graphic_rectangle =
-        directional_shield_graphic_rectangle(live_anchor);
-    if (!usable_native_rectangle(graphic_rectangle)) return false;
-
-    // The GUI rectangles above are local to the selected InfoDisplay. Native
-    // DisplayInterface::DrawTextInRectangle adds its origin at +4/+8 before
-    // submitting geometry; direct ST3D sprite drawing must apply the same
-    // translation explicitly.
-    void* display_interface = read_at<void*>(
-        text_component, 0x04, nullptr);
-    if (!display_interface) return false;
-    const std::int32_t display_origin_x = read_at<std::int32_t>(
-        display_interface, 0x04, 0);
-    const std::int32_t display_origin_y = read_at<std::int32_t>(
-        display_interface, 0x08, 0);
-    NativeRectangle display_rectangle = graphic_rectangle;
-    display_rectangle.left += display_origin_x;
-    display_rectangle.right += display_origin_x;
-    display_rectangle.top += display_origin_y;
-    display_rectangle.bottom += display_origin_y;
-    if (!usable_native_rectangle(display_rectangle)) return false;
-
-    const std::array<float, 4> ratios =
-        animated_directional_shield_ratios(craft, current, maximum);
-    std::array<FloatRectangle, 4> segment_positions =
-        kDefaultDirectionalShieldPositions;
-    void* object_class = read_at<void*>(
-        craft, kObjectClassOffset, nullptr);
-    const auto configured_positions =
-        g_directional_shield_ui_policies.find(object_class);
-    if (configured_positions != g_directional_shield_ui_policies.end()) {
-        for (std::size_t index = 0; index < segment_positions.size(); ++index) {
-            if (!configured_positions->second.position_found[index]) continue;
-            const RawRectangle& configured =
-                configured_positions->second.positions[index];
-            segment_positions[index] = FloatRectangle{
+    const std::array<float, 4>& maximum, std::uint32_t shield_mode,
+    void* text_component, const NativeRectangle& live_anchor) noexcept {
+    struct Segment {
+        bool compact = false, tri = false, hemisphere = false;
+        bool colour_only = false;
+        std::size_t physical_quad_index = 0, sprite_index = 0;
+        void* sprite = nullptr;
+        std::uint8_t* texture_x = nullptr;
+        std::uint8_t* texture_y = nullptr;
+        std::uint8_t* texture_width = nullptr;
+        std::uint8_t* texture_height = nullptr;
+        Colour saved_colour{}, colour{};
+        FloatRectangle saved_window{}, source{};
+        const FloatRectangle* target = nullptr;
+        float ratio = 0.0f;
+    };
+    struct Context {
+        void* info_display;
+        void* craft;
+        const std::array<float, 4>* current;
+        const std::array<float, 4>* maximum;
+        std::uint32_t mode;
+        void* text_component;
+        const NativeRectangle* live_anchor;
+        bool quad_ready = false, tri_ready = false;
+        bool hemisphere_ready = false, hemisphere_side_ready = false;
+        NativeRectangle graphic_rectangle{}, display_rectangle{};
+        std::int32_t origin_x = 0, origin_y = 0;
+        std::array<float, 4> ratios{};
+        std::array<FloatRectangle, 4> positions{}, remapped_positions{};
+        std::array<std::size_t, 4> remapped_indices{}, sprite_indices{};
+        std::array<bool, 4> authored{}, original_authored{}, segment_drawn{};
+        const DirectionalShieldUiPolicy* policy = nullptr;
+        float graphic_width = 0.0f, graphic_height = 0.0f;
+        bool drew = false;
+        Segment segment{};
+    } context{info_display, craft, &current, &maximum, shield_mode,
+              text_component, &live_anchor};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t index) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        auto& segment = ctx.segment;
+        if (action == 0) return ctx.craft && ctx.text_component;
+        if (action == 1) return ctx.mode;
+        if (action == 13) ctx.quad_ready = resolve_directional_shield_sprites();
+        else if (action == 14) ctx.tri_ready = resolve_tri_shield_sprites();
+        else if (action == 15) ctx.hemisphere_ready = resolve_hemisphere_shield_sprite();
+        else if (action == 16) ctx.hemisphere_side_ready =
+            resolve_hemisphere_side_shield_sprite();
+        else if (action == 2) {
+            ctx.graphic_rectangle = directional_shield_graphic_rectangle(
+                *ctx.live_anchor);
+            return usable_native_rectangle(ctx.graphic_rectangle);
+        } else if (action == 3) {
+            void* display_interface = read_at<void*>(
+                ctx.text_component, 0x04, nullptr);
+            if (!display_interface) return 0;
+            ctx.origin_x = read_at<std::int32_t>(display_interface, 0x04, 0);
+            ctx.origin_y = read_at<std::int32_t>(display_interface, 0x08, 0);
+            ctx.display_rectangle = ctx.graphic_rectangle;
+            ctx.display_rectangle.left += ctx.origin_x;
+            ctx.display_rectangle.right += ctx.origin_x;
+            ctx.display_rectangle.top += ctx.origin_y;
+            ctx.display_rectangle.bottom += ctx.origin_y;
+            return usable_native_rectangle(ctx.display_rectangle);
+        } else if (action == 4) {
+            ctx.ratios = animated_directional_shield_ratios(
+                ctx.craft, *ctx.current, *ctx.maximum);
+            ctx.positions = ctx.mode == 2u ? kDefaultTriForwardShieldPositions :
+                ctx.mode == 3u ? kDefaultTriRearShieldPositions :
+                ctx.mode == 4u ? kDefaultHemiForwardRearShieldPositions :
+                ctx.mode == 5u ? kDefaultHemiPortStarboardShieldPositions :
+                kDefaultDirectionalShieldPositions;
+            void* object_class = read_at<void*>(
+                ctx.craft, kObjectClassOffset, nullptr);
+            const auto configured = g_directional_shield_ui_policies.find(object_class);
+            ctx.policy = configured == g_directional_shield_ui_policies.end()
+                ? nullptr : &configured->second;
+        } else if (action == 5) {
+            return ctx.policy && ctx.policy->position_found[index];
+        } else if (action == 6) {
+            ctx.authored[index] = true;
+            const RawRectangle& configured = ctx.policy->positions[index];
+            ctx.positions[index] = FloatRectangle{
                 static_cast<float>(configured.x),
                 static_cast<float>(configured.y),
                 static_cast<float>(configured.width),
                 static_cast<float>(configured.height)};
-        }
-    }
-    std::array<FloatRectangle, 4> remapped_positions{};
-    if (a2fo::craft_identity::remap_directional_shield_positions(
-            g_directional_shield_display_config, segment_positions,
-            &remapped_positions)) {
-        segment_positions = remapped_positions;
-    }
-
-    bool drew = false;
-    std::array<bool, 4> segment_drawn{};
-    const float graphic_width = static_cast<float>(
-        graphic_rectangle.right - graphic_rectangle.left);
-    const float graphic_height = static_cast<float>(
-        graphic_rectangle.bottom - graphic_rectangle.top);
-    std::array<std::size_t, 4> sprite_indices{};
-    for (std::size_t i = 0; i < sprite_indices.size(); ++i)
-        sprite_indices[i] = directional_shield_sprite_index_for_destination(
-            segment_positions, i, 128.0f, 128.0f);
-    for (std::size_t facing_index = 0;
-         facing_index < segment_positions.size(); ++facing_index) {
-        auto& target = segment_positions[facing_index];
-        target.x *= graphic_width / 128.0f;
-        target.y *= graphic_height / 128.0f;
-        target.width *= graphic_width / 128.0f;
-        target.height *= graphic_height / 128.0f;
-        if (panel_style(kShieldSegments[facing_index]).area_found) {
-            const auto r = panel_rectangle(kShieldSegments[facing_index], {});
-            target = {static_cast<float>(r.left - graphic_rectangle.left),
-                static_cast<float>(r.top - graphic_rectangle.top),
-                static_cast<float>(r.right - r.left), static_cast<float>(r.bottom - r.top)};
-        }
-    }
-    for (std::size_t facing_index = 0;
-         facing_index < segment_positions.size(); ++facing_index) {
-        const auto& target = segment_positions[facing_index];
-        const auto& style = panel_style(kShieldSegments[facing_index]);
-        if (!style.sprite.empty()) {
-            const NativeRectangle destination{
-                graphic_rectangle.left + static_cast<std::int32_t>(target.x),
-                graphic_rectangle.top + static_cast<std::int32_t>(target.y),
-                graphic_rectangle.left + static_cast<std::int32_t>(target.x + target.width),
-                graphic_rectangle.top + static_cast<std::int32_t>(target.y + target.height)};
-            segment_drawn[facing_index] = draw_ammunition_value_bar(destination,
-                ratios[facing_index], directional_shield_status_colour(ratios[facing_index]),
-                display_origin_x, display_origin_y, nullptr, kShieldSegments[facing_index]);
-            drew = segment_drawn[facing_index] || drew;
-            continue;
-        }
-        if (!ring_ready) continue;
-        const std::size_t sprite_index = sprite_indices[facing_index];
-        void* sprite = g_directional_shield_sprites.sprites[sprite_index];
-        auto* texture_x_address = sprite
-            ? static_cast<std::uint8_t*>(sprite) + kSpriteTextureXOffset
-            : nullptr;
-        auto* texture_y_address = sprite
-            ? static_cast<std::uint8_t*>(sprite) + kSpriteTextureYOffset
-            : nullptr;
-        auto* texture_width_address = sprite
-            ? static_cast<std::uint8_t*>(sprite) +
-                kSpriteTextureWidthOffset
-            : nullptr;
-        auto* texture_height_address = sprite
-            ? static_cast<std::uint8_t*>(sprite) +
-                kSpriteTextureHeightOffset
-            : nullptr;
-        if (!sprite || !writable_range(
-                static_cast<std::uint8_t*>(sprite) + kSpriteColourOffset,
-                sizeof(Colour)) ||
-            !writable_range(texture_x_address, sizeof(float)) ||
-            !writable_range(texture_y_address, sizeof(float)) ||
-            !writable_range(texture_width_address, sizeof(float)) ||
-            !writable_range(texture_height_address, sizeof(float))) {
-            continue;
-        }
-        const Colour saved_colour = read_at<Colour>(
-            sprite, kSpriteColourOffset, Colour{});
-        const FloatRectangle saved_texture_window{
-            read_at<float>(sprite, kSpriteTextureXOffset, 0.0f),
-            read_at<float>(sprite, kSpriteTextureYOffset, 0.0f),
-            read_at<float>(sprite, kSpriteTextureWidthOffset, 0.0f),
-            read_at<float>(sprite, kSpriteTextureHeightOffset, 0.0f)};
-        if (!usable_float_rectangle(saved_texture_window)) continue;
-        const FloatRectangle& source =
-            kDirectionalShieldSourceBounds[sprite_index];
-        if (!usable_float_rectangle(source) ||
-            !usable_float_rectangle(target)) continue;
-
-        const auto restore_sprite = [&]() noexcept {
-            a2fo_identity_fo_sprite_set_colour(
-                at(g_fleet_ops, kFoSpriteSetColourRva), sprite,
-                &saved_colour);
-            std::memcpy(texture_x_address, &saved_texture_window.x,
-                        sizeof(saved_texture_window.x));
-            std::memcpy(texture_y_address, &saved_texture_window.y,
-                        sizeof(saved_texture_window.y));
-            std::memcpy(texture_width_address,
-                        &saved_texture_window.width,
-                        sizeof(saved_texture_window.width));
-            std::memcpy(texture_height_address,
-                        &saved_texture_window.height,
-                        sizeof(saved_texture_window.height));
-        };
-        const auto draw_texture_window = [&, sprite](
-            const FloatRectangle& source_window,
-            const FloatRectangle& destination,
-            const Colour& draw_colour) noexcept {
-            if (!usable_float_rectangle(source_window) ||
-                !usable_float_rectangle(destination)) return false;
-            const float texture_x = saved_texture_window.x +
-                saved_texture_window.width *
-                    (source_window.x /
-                     kDirectionalShieldTextureDimension);
-            const float texture_y = saved_texture_window.y +
-                saved_texture_window.height *
-                    (source_window.y /
-                     kDirectionalShieldTextureDimension);
-            const float texture_width = saved_texture_window.width *
-                (source_window.width /
-                 kDirectionalShieldTextureDimension);
-            const float texture_height = saved_texture_window.height *
-                (source_window.height /
-                 kDirectionalShieldTextureDimension);
-            if (!std::isfinite(texture_x) ||
-                !std::isfinite(texture_y) ||
-                !std::isfinite(texture_width) || texture_width <= 0.0f ||
-                !std::isfinite(texture_height) || texture_height <= 0.0f) {
-                return false;
+        } else if (action == 7) {
+            if (ctx.mode != 1u ||
+                !a2fo::craft_identity::remap_directional_shield_positions(
+                    g_directional_shield_display_config, ctx.positions,
+                    &ctx.remapped_positions, &ctx.remapped_indices)) return 0;
+            ctx.positions = ctx.remapped_positions;
+            ctx.original_authored = ctx.authored;
+            return 1;
+        } else if (action == 8) {
+            ctx.authored[index] = ctx.original_authored[
+                ctx.remapped_indices[index]];
+        } else if (action == 9) {
+            if (index == 0) {
+                ctx.graphic_width = static_cast<float>(
+                    ctx.graphic_rectangle.right - ctx.graphic_rectangle.left);
+                ctx.graphic_height = static_cast<float>(
+                    ctx.graphic_rectangle.bottom - ctx.graphic_rectangle.top);
             }
-            std::memcpy(texture_x_address, &texture_x,
-                        sizeof(texture_x));
-            std::memcpy(texture_y_address, &texture_y,
-                        sizeof(texture_y));
-            std::memcpy(texture_width_address, &texture_width,
-                        sizeof(texture_width));
-            std::memcpy(texture_height_address, &texture_height,
-                        sizeof(texture_height));
-            const SpriteVector position{
-                static_cast<float>(display_rectangle.left) +
-                    destination.x,
-                static_cast<float>(display_rectangle.top) +
-                    destination.y,
-                0.0f};
+            ctx.sprite_indices[index] = directional_shield_sprite_index_for_destination(
+                ctx.positions, index, 128.0f, 128.0f);
+        } else if (action == 10) {
+            a2fo::craft_identity::scale_directional_shield_default_positions(
+                &ctx.positions, ctx.authored,
+                ctx.graphic_width, ctx.graphic_height);
+        } else if (action == 11) {
+            return panel_style(kShieldSegments[index]).area_found;
+        } else if (action == 12) {
+            auto& target = ctx.positions[index];
+            const auto r = panel_rectangle(kShieldSegments[index], {});
+            target = {static_cast<float>(r.left - ctx.graphic_rectangle.left),
+                static_cast<float>(r.top - ctx.graphic_rectangle.top),
+                static_cast<float>(r.right - r.left),
+                static_cast<float>(r.bottom - r.top)};
+        } else if (action == 17) {
+            return std::isfinite((*ctx.maximum)[index]) &&
+                (*ctx.maximum)[index] > 0.0f;
+        } else if (action == 18) {
+            return !panel_style(kShieldSegments[index]).sprite.empty();
+        } else if (action == 19) {
+            const auto& target = ctx.positions[index];
+            const NativeRectangle destination{
+                ctx.graphic_rectangle.left + static_cast<std::int32_t>(target.x),
+                ctx.graphic_rectangle.top + static_cast<std::int32_t>(target.y),
+                ctx.graphic_rectangle.left + static_cast<std::int32_t>(target.x + target.width),
+                ctx.graphic_rectangle.top + static_cast<std::int32_t>(target.y + target.height)};
+            ctx.segment_drawn[index] = draw_ammunition_value_bar(destination,
+                ctx.ratios[index], directional_shield_status_colour(ctx.ratios[index]),
+                ctx.origin_x, ctx.origin_y, nullptr, kShieldSegments[index]);
+            ctx.drew = ctx.segment_drawn[index] || ctx.drew;
+        } else if (action == 20) {
+            segment.compact = ctx.mode == 1u && g_directional_shield_sprites.compact;
+            segment.tri = ctx.mode == 2u || ctx.mode == 3u;
+            segment.hemisphere = ctx.mode == 4u || ctx.mode == 5u;
+            return !((!segment.tri && !segment.hemisphere && !ctx.quad_ready) ||
+                (segment.tri && !ctx.tri_ready) ||
+                (ctx.mode == 4u && !ctx.hemisphere_ready) ||
+                (ctx.mode == 5u && !ctx.hemisphere_side_ready));
+        } else if (action == 21) {
+            segment.physical_quad_index = ctx.sprite_indices[index];
+            segment.sprite_index = segment.tri
+                ? ((ctx.mode == 2u && index == 0u) ||
+                   (ctx.mode == 3u && index == 1u) ? 0u : 1u)
+                : segment.compact
+                    ? (segment.physical_quad_index < 2u ? 0u : 1u)
+                    : segment.physical_quad_index;
+            segment.sprite = ctx.mode == 4u
+                ? g_hemisphere_shield_sprite.sprite
+                : ctx.mode == 5u
+                    ? g_hemisphere_side_shield_sprite.sprite
+                    : segment.tri
+                        ? g_tri_shield_sprites.sprites[segment.sprite_index]
+                        : g_directional_shield_sprites.sprites[segment.sprite_index];
+            segment.texture_x = segment.sprite
+                ? static_cast<std::uint8_t*>(segment.sprite) + kSpriteTextureXOffset : nullptr;
+            segment.texture_y = segment.sprite
+                ? static_cast<std::uint8_t*>(segment.sprite) + kSpriteTextureYOffset : nullptr;
+            segment.texture_width = segment.sprite
+                ? static_cast<std::uint8_t*>(segment.sprite) + kSpriteTextureWidthOffset : nullptr;
+            segment.texture_height = segment.sprite
+                ? static_cast<std::uint8_t*>(segment.sprite) + kSpriteTextureHeightOffset : nullptr;
+            return segment.sprite && writable_range(
+                    static_cast<std::uint8_t*>(segment.sprite) + kSpriteColourOffset,
+                    sizeof(Colour)) &&
+                writable_range(segment.texture_x, sizeof(float)) &&
+                writable_range(segment.texture_y, sizeof(float)) &&
+                writable_range(segment.texture_width, sizeof(float)) &&
+                writable_range(segment.texture_height, sizeof(float));
+        } else if (action == 22) {
+            segment.saved_colour = read_at<Colour>(
+                segment.sprite, kSpriteColourOffset, Colour{});
+            segment.saved_window = FloatRectangle{
+                read_at<float>(segment.sprite, kSpriteTextureXOffset, 0.0f),
+                read_at<float>(segment.sprite, kSpriteTextureYOffset, 0.0f),
+                read_at<float>(segment.sprite, kSpriteTextureWidthOffset, 0.0f),
+                read_at<float>(segment.sprite, kSpriteTextureHeightOffset, 0.0f)};
+            if (!usable_float_rectangle(segment.saved_window)) return 0;
+            segment.source = (segment.compact || segment.tri || segment.hemisphere)
+                ? FloatRectangle{0.0f, 0.0f, 128.0f, 128.0f}
+                : kDirectionalShieldSourceBounds[segment.sprite_index];
+            segment.target = &ctx.positions[index];
+            return usable_float_rectangle(segment.source) &&
+                usable_float_rectangle(*segment.target);
+        } else if (action == 23) {
+            segment.ratio = ctx.ratios[index];
+            segment.colour_only =
+                g_directional_shield_display_config.display_mode == 2;
+            segment.colour = segment.colour_only && segment.ratio <= 0.0f
+                ? Colour{0.0f, 0.0f, 0.0f}
+                : panel_colour(kShieldSegments[index],
+                    panel_colour(PanelElement::DirectionalShieldsGraphic,
+                        directional_shield_status_colour(segment.ratio),
+                        segment.ratio), segment.ratio);
+            return segment.colour_only;
+        } else if (action == 26) return segment.ratio > 0.0f;
+        else if (action == 28) {
             a2fo_identity_fo_sprite_set_colour(
-                at(g_fleet_ops, kFoSpriteSetColourRva), sprite,
-                &draw_colour);
-            a2fo_identity_fo_sprite_draw_scaled_2d(
-                at(g_fleet_ops, kFoSpriteDrawScaled2DRva), sprite,
-                &position, destination.width, destination.height);
-            return true;
-        };
-
-        const float ratio = ratios[facing_index];
-        const bool colour_only_mode =
-            g_directional_shield_display_config.display_mode == 2;
-        const Colour colour = colour_only_mode && ratio <= 0.0f
-            ? Colour{0.0f, 0.0f, 0.0f}
-            : panel_colour(kShieldSegments[facing_index],
-                panel_colour(PanelElement::DirectionalShieldsGraphic,
-                    directional_shield_status_colour(ratio), ratio), ratio);
-        if (colour_only_mode) {
-            // The entire segment remains present. Health is communicated only
-            // by colour, with an exactly depleted facing drawn black.
-            segment_drawn[facing_index] = draw_texture_window(
-                source, target, colour);
-            drew = segment_drawn[facing_index] || drew;
-        } else {
-            const Colour depleted_colour = dimmed_colour(colour);
-            segment_drawn[facing_index] = draw_texture_window(
-                source, target, depleted_colour);
-            drew = segment_drawn[facing_index] || drew;
-
-            if (ratio > 0.0f) {
+                at(g_fleet_ops, kFoSpriteSetColourRva), segment.sprite,
+                &segment.saved_colour);
+            std::memcpy(segment.texture_x, &segment.saved_window.x,
+                        sizeof(segment.saved_window.x));
+            std::memcpy(segment.texture_y, &segment.saved_window.y,
+                        sizeof(segment.saved_window.y));
+            std::memcpy(segment.texture_width, &segment.saved_window.width,
+                        sizeof(segment.saved_window.width));
+            std::memcpy(segment.texture_height, &segment.saved_window.height,
+                        sizeof(segment.saved_window.height));
+        } else if (action == 29) return ctx.drew;
+        else if (action == 30) {
+            update_directional_shield_tooltip_runtime(
+                ctx.info_display, ctx.craft, *ctx.current, *ctx.maximum,
+                ctx.display_rectangle, ctx.positions, ctx.segment_drawn);
+        } else if (action == 31) {
+            if (ctx.drew && InterlockedCompareExchange(
+                    &g_directional_shields_graphic_report_count, 1, 0) == 0) {
+                char message[640]{};
+                std::snprintf(message, sizeof(message),
+                    "First directional-shield ring draw submitted at local=%ld,%ld origin=%ld,%ld display=%ld,%ld: F=%.2f A=%.2f P=%.2f S=%.2f positions F=%.0f,%.0f,%.0f,%.0f A=%.0f,%.0f,%.0f,%.0f P=%.0f,%.0f,%.0f,%.0f S=%.0f,%.0f,%.0f,%.0f",
+                    static_cast<long>(ctx.graphic_rectangle.left),
+                    static_cast<long>(ctx.graphic_rectangle.top),
+                    static_cast<long>(ctx.origin_x), static_cast<long>(ctx.origin_y),
+                    static_cast<long>(ctx.display_rectangle.left),
+                    static_cast<long>(ctx.display_rectangle.top),
+                    static_cast<double>(ctx.ratios[0]),
+                    static_cast<double>(ctx.ratios[1]),
+                    static_cast<double>(ctx.ratios[2]),
+                    static_cast<double>(ctx.ratios[3]),
+                    static_cast<double>(ctx.positions[0].x),
+                    static_cast<double>(ctx.positions[0].y),
+                    static_cast<double>(ctx.positions[0].width),
+                    static_cast<double>(ctx.positions[0].height),
+                    static_cast<double>(ctx.positions[1].x),
+                    static_cast<double>(ctx.positions[1].y),
+                    static_cast<double>(ctx.positions[1].width),
+                    static_cast<double>(ctx.positions[1].height),
+                    static_cast<double>(ctx.positions[2].x),
+                    static_cast<double>(ctx.positions[2].y),
+                    static_cast<double>(ctx.positions[2].width),
+                    static_cast<double>(ctx.positions[2].height),
+                    static_cast<double>(ctx.positions[3].x),
+                    static_cast<double>(ctx.positions[3].y),
+                    static_cast<double>(ctx.positions[3].width),
+                    static_cast<double>(ctx.positions[3].height));
+                log_line(message);
+            }
+        } else if (action == 32) return ctx.drew;
+        else if (action == 24 || action == 25 || action == 27) {
+            const bool flip_x = (segment.compact && segment.physical_quad_index == 3u) ||
+                (segment.tri && index == 3u) ||
+                (ctx.mode == 5u && index == 3u);
+            const bool flip_y = (segment.compact && segment.physical_quad_index == 1u) ||
+                (ctx.mode == 3u && segment.tri) ||
+                (ctx.mode == 4u && index == 1u);
+            const auto draw_texture_window = [&](const FloatRectangle& source_window,
+                const FloatRectangle& destination,
+                const Colour& draw_colour) noexcept {
+                if (!usable_float_rectangle(source_window) ||
+                    !usable_float_rectangle(destination)) return false;
+                float texture_x = segment.saved_window.x +
+                    segment.saved_window.width *
+                        (source_window.x / kDirectionalShieldTextureDimension);
+                float texture_y = segment.saved_window.y +
+                    segment.saved_window.height *
+                        (source_window.y / kDirectionalShieldTextureDimension);
+                float texture_width = segment.saved_window.width *
+                    (source_window.width / kDirectionalShieldTextureDimension);
+                float texture_height = segment.saved_window.height *
+                    (source_window.height / kDirectionalShieldTextureDimension);
+                if (!std::isfinite(texture_x) || !std::isfinite(texture_y) ||
+                    !std::isfinite(texture_width) || texture_width == 0.0f ||
+                    !std::isfinite(texture_height) || texture_height == 0.0f)
+                    return false;
+                if (flip_x) { texture_x += texture_width; texture_width = -texture_width; }
+                if (flip_y) { texture_y += texture_height; texture_height = -texture_height; }
+                std::memcpy(segment.texture_x, &texture_x, sizeof(texture_x));
+                std::memcpy(segment.texture_y, &texture_y, sizeof(texture_y));
+                std::memcpy(segment.texture_width, &texture_width, sizeof(texture_width));
+                std::memcpy(segment.texture_height, &texture_height, sizeof(texture_height));
+                const SpriteVector position{
+                    static_cast<float>(ctx.display_rectangle.left) + destination.x,
+                    static_cast<float>(ctx.display_rectangle.top) + destination.y,
+                    0.0f};
+                a2fo_identity_fo_sprite_set_colour(
+                    at(g_fleet_ops, kFoSpriteSetColourRva), segment.sprite,
+                    &draw_colour);
+                a2fo_identity_fo_sprite_draw_scaled_2d(
+                    at(g_fleet_ops, kFoSpriteDrawScaled2DRva), segment.sprite,
+                    &position, destination.width, destination.height);
+                return true;
+            };
+            if (action == 24) {
+                ctx.segment_drawn[index] = draw_texture_window(
+                    segment.source, *segment.target, segment.colour);
+                ctx.drew = ctx.segment_drawn[index] || ctx.drew;
+            } else if (action == 25) {
+                const Colour depleted_colour = dimmed_colour(segment.colour);
+                ctx.segment_drawn[index] = draw_texture_window(
+                    segment.source, *segment.target, depleted_colour);
+                ctx.drew = ctx.segment_drawn[index] || ctx.drew;
+            } else {
                 const auto fill =
                     a2fo::craft_identity::centered_directional_shield_fill(
-                        source, target, ratio,
-                        target.width >= target.height);
-                drew = draw_texture_window(
-                    fill.source, fill.destination, colour) || drew;
+                        segment.source, *segment.target, segment.ratio,
+                        segment.compact
+                            ? segment.physical_quad_index < 2u
+                            : segment.tri
+                                ? (index == 0u || index == 1u)
+                                : ctx.mode == 4u
+                                    ? true
+                                    : ctx.mode == 5u
+                                        ? false
+                                        : segment.target->width >= segment.target->height);
+                ctx.drew = draw_texture_window(fill.source, fill.destination,
+                    segment.colour) || ctx.drew;
             }
         }
-        restore_sprite();
-    }
-
-    if (drew) {
-        update_directional_shield_tooltip_runtime(
-            info_display, craft, current, maximum, display_rectangle,
-            segment_positions, segment_drawn);
-    }
-
-    if (drew && InterlockedCompareExchange(
-            &g_directional_shields_graphic_report_count, 1, 0) == 0) {
-        char message[640]{};
-        std::snprintf(
-            message, sizeof(message),
-            "First directional-shield ring draw submitted at local=%ld,%ld origin=%ld,%ld display=%ld,%ld: F=%.2f A=%.2f P=%.2f S=%.2f positions F=%.0f,%.0f,%.0f,%.0f A=%.0f,%.0f,%.0f,%.0f P=%.0f,%.0f,%.0f,%.0f S=%.0f,%.0f,%.0f,%.0f",
-            static_cast<long>(graphic_rectangle.left),
-            static_cast<long>(graphic_rectangle.top),
-            static_cast<long>(display_origin_x),
-            static_cast<long>(display_origin_y),
-            static_cast<long>(display_rectangle.left),
-            static_cast<long>(display_rectangle.top),
-            static_cast<double>(ratios[0]),
-            static_cast<double>(ratios[1]),
-            static_cast<double>(ratios[2]),
-            static_cast<double>(ratios[3]),
-            static_cast<double>(segment_positions[0].x),
-            static_cast<double>(segment_positions[0].y),
-            static_cast<double>(segment_positions[0].width),
-            static_cast<double>(segment_positions[0].height),
-            static_cast<double>(segment_positions[1].x),
-            static_cast<double>(segment_positions[1].y),
-            static_cast<double>(segment_positions[1].width),
-            static_cast<double>(segment_positions[1].height),
-            static_cast<double>(segment_positions[2].x),
-            static_cast<double>(segment_positions[2].y),
-            static_cast<double>(segment_positions[2].width),
-            static_cast<double>(segment_positions[2].height),
-            static_cast<double>(segment_positions[3].x),
-            static_cast<double>(segment_positions[3].y),
-            static_cast<double>(segment_positions[3].width),
-            static_cast<double>(segment_positions[3].height));
-        log_line(message);
-    }
-    return drew;
+        return 0;
+    };
+    return a2fo_rs_stage9_craft_draw_shield_graphic(step, &context, 4);
 }
 
 std::array<NativeRectangle, 4> directional_shield_value_rectangles(
     const NativeRectangle& live_anchor) noexcept {
-    const NativeRectangle graphic =
-        directional_shield_graphic_rectangle(live_anchor);
-    const std::int32_t width = graphic.right - graphic.left;
-    const std::int32_t height = graphic.bottom - graphic.top;
-    const auto rectangle = [&](std::int32_t left, std::int32_t top,
-                               std::int32_t right,
-                               std::int32_t bottom) noexcept {
-        return NativeRectangle{
-            graphic.left + width * left / 128,
-            graphic.top + height * top / 128,
-            graphic.left + width * right / 128,
-            graphic.top + height * bottom / 128};
-    };
-    std::array<NativeRectangle, 4> rectangles{{
-        rectangle(32, 22, 96, 40),
-        rectangle(32, 88, 96, 106),
-        rectangle(20, 55, 64, 73),
-        rectangle(64, 55, 108, 73),
-    }};
-    if (g_ui_configuration.captain_rectangle_found) {
-        for (std::size_t index = 0; index < rectangles.size(); ++index) {
-            if (!g_ui_configuration.
-                    directional_value_rectangle_found[index]) {
-                continue;
-            }
-            rectangles[index] = translated_rectangle(
-                live_anchor, g_ui_configuration.captain_rectangle,
+    struct Context {
+        const NativeRectangle* live_anchor;
+        std::array<NativeRectangle, 4> rectangles{};
+    } context{&live_anchor};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t index) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) {
+            const NativeRectangle graphic = directional_shield_graphic_rectangle(
+                *ctx.live_anchor);
+            const std::int32_t width = graphic.right - graphic.left;
+            const std::int32_t height = graphic.bottom - graphic.top;
+            const auto rectangle = [&](std::int32_t left, std::int32_t top,
+                                       std::int32_t right,
+                                       std::int32_t bottom) noexcept {
+                return NativeRectangle{
+                    graphic.left + width * left / 128,
+                    graphic.top + height * top / 128,
+                    graphic.left + width * right / 128,
+                    graphic.top + height * bottom / 128};
+            };
+            ctx.rectangles = {{
+                rectangle(32, 22, 96, 40),
+                rectangle(32, 88, 96, 106),
+                rectangle(20, 55, 64, 73),
+                rectangle(64, 55, 108, 73),
+            }};
+        } else if (action == 1) {
+            return g_ui_configuration.captain_rectangle_found;
+        } else if (action == 2) {
+            return g_ui_configuration.directional_value_rectangle_found[index];
+        } else if (action == 3) {
+            ctx.rectangles[index] = translated_rectangle(
+                *ctx.live_anchor, g_ui_configuration.captain_rectangle,
                 g_ui_configuration.directional_value_rectangles[index]);
         }
-    }
-    return rectangles;
+        return 0;
+    };
+    a2fo_rs_stage9_craft_value_rectangles(step, &context,
+        context.rectangles.size());
+    return context.rectangles;
 }
 
 void draw_directional_shield_rows(
     void* info_display, void* craft, void* text_component,
     const NativeRectangle& live_anchor,
     const Colour& shared_colour) noexcept {
-    if (!craft || !text_component || !resolve_directional_shields_api() ||
-        !g_directional_shields_is_enabled(craft)) {
-        return;
-    }
-
-    constexpr std::array<std::uint32_t, 4> facings{{
-        A2FO_DIRECTIONAL_SHIELD_FORWARD,
-        A2FO_DIRECTIONAL_SHIELD_AFT,
-        A2FO_DIRECTIONAL_SHIELD_PORT,
-        A2FO_DIRECTIONAL_SHIELD_STARBOARD,
-    }};
-    std::array<float, 4> current{};
-    std::array<float, 4> maximum{};
-    for (std::size_t index = 0; index < facings.size(); ++index) {
-        maximum[index] = g_directional_shields_get_maximum(
-            craft, facings[index]);
-        current[index] = g_directional_shields_get_current(
-            craft, facings[index]);
-        if (!std::isfinite(maximum[index]) || maximum[index] <= 0.0f ||
-            !std::isfinite(current[index])) {
-            return;
-        }
-    }
-
-    void* object_class = read_at<void*>(craft, kObjectClassOffset, nullptr);
-    const auto configured_policy =
-        g_directional_shield_ui_policies.find(object_class);
-    const DirectionalShieldUiPolicy* policy =
-        configured_policy == g_directional_shield_ui_policies.end()
-            ? nullptr : &configured_policy->second;
-    const bool graphic_drawn = draw_directional_shield_graphic(
-        info_display, craft, current, maximum,
-        text_component, live_anchor);
-
-    if (policy && policy->value_display_mode_found) {
-        if (policy->value_display_mode ==
-            a2fo::craft_identity::DirectionalShieldValueDisplayMode::none) {
-            return;
-        }
-        const std::array<NativeRectangle, 4> rectangles =
-            directional_shield_value_rectangles(live_anchor);
+    struct Context {
+        void* info_display;
+        void* craft;
+        void* text_component;
+        const NativeRectangle* live_anchor;
+        const Colour* shared_colour;
+        std::array<float, 4> current{}, maximum{};
+        bool any_active = false;
+        std::uint32_t shield_mode = 1;
+        const DirectionalShieldUiPolicy* policy = nullptr;
+        bool graphic_drawn = false;
+        std::array<NativeRectangle, 4> rectangles{};
         std::array<bool, 4> drawn{};
-        for (std::size_t index = 0; index < rectangles.size(); ++index) {
-            char value[64]{};
-            if (!a2fo::craft_identity::format_directional_shield_value(
-                    policy->value_display_mode, current[index],
-                    maximum[index], value, sizeof(value))) {
-                continue;
+        char value[64]{};
+        NativeRectangle forward_aft_rectangle{}, port_starboard_rectangle{};
+        Colour colour{};
+        char forward_aft[160]{}, port_starboard[160]{};
+        bool forward_aft_drawn = false, port_starboard_drawn = false;
+    } context{info_display, craft, text_component, &live_anchor, &shared_colour};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t index) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        constexpr std::array<std::uint32_t, 4> facings{{
+            A2FO_DIRECTIONAL_SHIELD_FORWARD, A2FO_DIRECTIONAL_SHIELD_AFT,
+            A2FO_DIRECTIONAL_SHIELD_PORT, A2FO_DIRECTIONAL_SHIELD_STARBOARD}};
+        if (action == 0) return ctx.craft && ctx.text_component &&
+            resolve_directional_shields_api() &&
+            g_directional_shields_is_enabled(ctx.craft);
+        if (action == 1) {
+            ctx.maximum[index] = g_directional_shields_get_maximum(
+                ctx.craft, facings[index]);
+            ctx.current[index] = g_directional_shields_get_current(
+                ctx.craft, facings[index]);
+            if (!std::isfinite(ctx.maximum[index]) || ctx.maximum[index] < 0.0f ||
+                !std::isfinite(ctx.current[index]) || ctx.current[index] < 0.0f ||
+                (ctx.maximum[index] == 0.0f && ctx.current[index] != 0.0f) ||
+                (ctx.maximum[index] > 0.0f &&
+                 ctx.current[index] > ctx.maximum[index])) return 0;
+            ctx.any_active = ctx.any_active || ctx.maximum[index] > 0.0f;
+            return 1;
+        }
+        if (action == 2) return ctx.any_active;
+        if (action == 3) {
+            ctx.shield_mode = g_directional_shields_get_mode
+                ? g_directional_shields_get_mode(ctx.craft) : 1u;
+            void* object_class = read_at<void*>(
+                ctx.craft, kObjectClassOffset, nullptr);
+            const auto configured_policy =
+                g_directional_shield_ui_policies.find(object_class);
+            ctx.policy = configured_policy == g_directional_shield_ui_policies.end()
+                ? nullptr : &configured_policy->second;
+        } else if (action == 4) {
+            ctx.graphic_drawn = draw_directional_shield_graphic(
+                ctx.info_display, ctx.craft, ctx.current, ctx.maximum,
+                ctx.shield_mode, ctx.text_component, *ctx.live_anchor);
+        } else if (action == 5) {
+            if (ctx.policy && ctx.policy->value_display_mode_found) {
+                return ctx.policy->value_display_mode ==
+                    a2fo::craft_identity::DirectionalShieldValueDisplayMode::none ? 1 : 2;
             }
+        } else if (action == 6) {
+            ctx.rectangles = directional_shield_value_rectangles(*ctx.live_anchor);
+        } else if (action == 7) {
+            std::memset(ctx.value, 0, sizeof(ctx.value));
+            return a2fo::craft_identity::format_directional_shield_value(
+                ctx.policy->value_display_mode, ctx.current[index],
+                ctx.maximum[index], ctx.value, sizeof(ctx.value));
+        } else if (action == 8) {
+            const float ratio = clamped_ratio(
+                ctx.current[index], ctx.maximum[index]);
             const Colour colour = directional_shield_value_status_colour(
-                clamped_ratio(current[index], maximum[index]),
-                shared_colour);
-            drawn[index] = draw_identity_text(
-                value, panel_rectangle(kShieldValues[index], rectangles[index]),
+                ratio, *ctx.shared_colour);
+            ctx.drawn[index] = draw_identity_text(ctx.value,
+                panel_rectangle(kShieldValues[index], ctx.rectangles[index]),
                 panel_colour(kShieldValues[index], colour,
-                    clamped_ratio(current[index], maximum[index])), text_component);
+                    clamped_ratio(ctx.current[index], ctx.maximum[index])),
+                ctx.text_component);
+        } else if (action == 9) {
+            if (a2fo_rs_stage10_identity_any(
+                    ctx.drawn.size(),
+                    +[](void* opaque, std::uint32_t,
+                        std::size_t item) noexcept -> std::uint32_t {
+                        return (*static_cast<decltype(ctx.drawn)*>(opaque))[item];
+                    }, &ctx.drawn) &&
+                InterlockedCompareExchange(
+                    &g_directional_shields_draw_report_count, 1, 0) == 0) {
+                char message[384]{};
+                std::snprintf(message, sizeof(message),
+                    "First directional-shield value-label draw submitted: mode=%d F=%s A=%s P=%s S=%s",
+                    static_cast<int>(ctx.policy->value_display_mode),
+                    ctx.drawn[0] ? "yes" : "no", ctx.drawn[1] ? "yes" : "no",
+                    ctx.drawn[2] ? "yes" : "no", ctx.drawn[3] ? "yes" : "no");
+                log_line(message);
+            }
+        } else if (action == 10) return ctx.graphic_drawn;
+        else if (action == 11) {
+            ctx.forward_aft_rectangle = *ctx.live_anchor;
+            ctx.port_starboard_rectangle = *ctx.live_anchor;
+            ctx.forward_aft_rectangle.top += 112;
+            ctx.forward_aft_rectangle.bottom += 112;
+            ctx.port_starboard_rectangle.top += 132;
+            ctx.port_starboard_rectangle.bottom += 132;
+            if (g_ui_configuration.captain_rectangle_found &&
+                g_ui_configuration.directional_forward_aft_rectangle_found) {
+                ctx.forward_aft_rectangle = translated_rectangle(
+                    *ctx.live_anchor, g_ui_configuration.captain_rectangle,
+                    g_ui_configuration.directional_forward_aft_rectangle);
+            }
+            if (g_ui_configuration.captain_rectangle_found &&
+                g_ui_configuration.directional_port_starboard_rectangle_found) {
+                ctx.port_starboard_rectangle = translated_rectangle(
+                    *ctx.live_anchor, g_ui_configuration.captain_rectangle,
+                    g_ui_configuration.directional_port_starboard_rectangle);
+            }
+            ctx.colour = g_ui_configuration.directional_shield_colour_found
+                ? g_ui_configuration.directional_shield_colour : *ctx.shared_colour;
+        } else if (action == 12) return ctx.shield_mode;
+        else if (action == 13) {
+            std::snprintf(ctx.forward_aft, sizeof(ctx.forward_aft),
+                "Shields  F %.0f/%.0f",
+                static_cast<double>(ctx.current[0]),
+                static_cast<double>(ctx.maximum[0]));
+        } else if (action == 14) {
+            std::snprintf(ctx.forward_aft, sizeof(ctx.forward_aft),
+                "Shields  A %.0f/%.0f",
+                static_cast<double>(ctx.current[1]),
+                static_cast<double>(ctx.maximum[1]));
+        } else if (action == 15) {
+            std::snprintf(ctx.forward_aft, sizeof(ctx.forward_aft),
+                "Shields  F %.0f/%.0f   A %.0f/%.0f",
+                static_cast<double>(ctx.current[0]),
+                static_cast<double>(ctx.maximum[0]),
+                static_cast<double>(ctx.current[1]),
+                static_cast<double>(ctx.maximum[1]));
+        } else if (action == 16) {
+            std::snprintf(ctx.port_starboard, sizeof(ctx.port_starboard),
+                "         P %.0f/%.0f   S %.0f/%.0f",
+                static_cast<double>(ctx.current[2]),
+                static_cast<double>(ctx.maximum[2]),
+                static_cast<double>(ctx.current[3]),
+                static_cast<double>(ctx.maximum[3]));
+        } else if (action == 17) {
+            ctx.forward_aft_drawn = draw_identity_text(ctx.forward_aft,
+                panel_rectangle(PanelElement::DirectionalShieldsForwardAftText,
+                    ctx.forward_aft_rectangle),
+                panel_colour(PanelElement::DirectionalShieldsForwardAftText,
+                    ctx.colour), ctx.text_component);
+        } else if (action == 18) {
+            ctx.port_starboard_drawn = draw_identity_text(ctx.port_starboard,
+                panel_rectangle(PanelElement::DirectionalShieldsPortStarboardText,
+                    ctx.port_starboard_rectangle),
+                panel_colour(PanelElement::DirectionalShieldsPortStarboardText,
+                    ctx.colour), ctx.text_component);
+        } else if (action == 19) {
+            if ((ctx.forward_aft_drawn || ctx.port_starboard_drawn) &&
+                InterlockedCompareExchange(
+                    &g_directional_shields_draw_report_count, 1, 0) == 0) {
+                char message[320]{};
+                std::snprintf(message, sizeof(message),
+                    "First directional-shield UI draw submitted: F/A=%s at %ld,%ld; P/S=%s at %ld,%ld",
+                    ctx.forward_aft_drawn ? "yes" : "no",
+                    static_cast<long>(ctx.forward_aft_rectangle.left),
+                    static_cast<long>(ctx.forward_aft_rectangle.top),
+                    ctx.port_starboard_drawn ? "yes" : "no",
+                    static_cast<long>(ctx.port_starboard_rectangle.left),
+                    static_cast<long>(ctx.port_starboard_rectangle.top));
+                log_line(message);
+            }
         }
-        if (std::any_of(drawn.begin(), drawn.end(),
-                        [](bool value) { return value; }) &&
-            InterlockedCompareExchange(
-                &g_directional_shields_draw_report_count, 1, 0) == 0) {
-            char message[384]{};
-            std::snprintf(
-                message, sizeof(message),
-                "First directional-shield value-label draw submitted: mode=%d F=%s A=%s P=%s S=%s",
-                static_cast<int>(policy->value_display_mode),
-                drawn[0] ? "yes" : "no", drawn[1] ? "yes" : "no",
-                drawn[2] ? "yes" : "no", drawn[3] ? "yes" : "no");
-            log_line(message);
-        }
-        return;
-    }
-
-    if (graphic_drawn) return;
-
-    NativeRectangle forward_aft_rectangle = live_anchor;
-    NativeRectangle port_starboard_rectangle = live_anchor;
-    forward_aft_rectangle.top += 112;
-    forward_aft_rectangle.bottom += 112;
-    port_starboard_rectangle.top += 132;
-    port_starboard_rectangle.bottom += 132;
-    if (g_ui_configuration.captain_rectangle_found &&
-        g_ui_configuration.directional_forward_aft_rectangle_found) {
-        forward_aft_rectangle = translated_rectangle(
-            live_anchor, g_ui_configuration.captain_rectangle,
-            g_ui_configuration.directional_forward_aft_rectangle);
-    }
-    if (g_ui_configuration.captain_rectangle_found &&
-        g_ui_configuration.directional_port_starboard_rectangle_found) {
-        port_starboard_rectangle = translated_rectangle(
-            live_anchor, g_ui_configuration.captain_rectangle,
-            g_ui_configuration.directional_port_starboard_rectangle);
-    }
-
-    const Colour colour = g_ui_configuration.directional_shield_colour_found
-        ? g_ui_configuration.directional_shield_colour : shared_colour;
-    char forward_aft[160]{};
-    char port_starboard[160]{};
-    std::snprintf(
-        forward_aft, sizeof(forward_aft),
-        "Shields  F %.0f/%.0f   A %.0f/%.0f",
-        static_cast<double>(current[0]),
-        static_cast<double>(maximum[0]),
-        static_cast<double>(current[1]),
-        static_cast<double>(maximum[1]));
-    std::snprintf(
-        port_starboard, sizeof(port_starboard),
-        "         P %.0f/%.0f   S %.0f/%.0f",
-        static_cast<double>(current[2]),
-        static_cast<double>(maximum[2]),
-        static_cast<double>(current[3]),
-        static_cast<double>(maximum[3]));
-    const bool forward_aft_drawn = draw_identity_text(
-        forward_aft, panel_rectangle(PanelElement::DirectionalShieldsForwardAftText, forward_aft_rectangle),
-        panel_colour(PanelElement::DirectionalShieldsForwardAftText, colour), text_component);
-    const bool port_starboard_drawn = draw_identity_text(
-        port_starboard, panel_rectangle(PanelElement::DirectionalShieldsPortStarboardText, port_starboard_rectangle),
-        panel_colour(PanelElement::DirectionalShieldsPortStarboardText, colour), text_component);
-    if ((forward_aft_drawn || port_starboard_drawn) &&
-        InterlockedCompareExchange(
-            &g_directional_shields_draw_report_count, 1, 0) == 0) {
-        char message[320]{};
-        std::snprintf(
-            message, sizeof(message),
-            "First directional-shield UI draw submitted: F/A=%s at %ld,%ld; P/S=%s at %ld,%ld",
-            forward_aft_drawn ? "yes" : "no",
-            static_cast<long>(forward_aft_rectangle.left),
-            static_cast<long>(forward_aft_rectangle.top),
-            port_starboard_drawn ? "yes" : "no",
-            static_cast<long>(port_starboard_rectangle.left),
-            static_cast<long>(port_starboard_rectangle.top));
-        log_line(message);
-    }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_draw_shield_rows(step, &context, 4);
 }
 
 using InsertCString = void* (__cdecl*)(void*, const char*);
@@ -4458,262 +5340,304 @@ const char* localized_directional_shield_text(
 bool format_directional_shield_tooltip(
     int facing, bool verbose, char* output,
     std::size_t output_size) noexcept {
-    const DirectionalShieldTooltipRuntime& runtime =
-        g_directional_shield_tooltip;
-    if (!output || output_size == 0 || facing < 0 || facing >= 4 ||
-        !runtime.active) {
-        return false;
-    }
-    const std::size_t index = static_cast<std::size_t>(facing);
-    const char* presentation = localized_directional_shield_text(
-        verbose ? kDirectionalShieldVerboseTooltipKeys[index]
-                : kDirectionalShieldTooltipKeys[index],
-        verbose ? kDirectionalShieldVerboseTooltipFallbacks[index]
-                : kDirectionalShieldTooltipFallbacks[index]);
-    const char* strength = localized_directional_shield_text(
-        kDirectionalShieldStrengthKey,
-        kDirectionalShieldStrengthFallback);
-    const int written = verbose
-        ? std::snprintf(
-            output, output_size, "%s\n%s: %.0f / %.0f",
-            presentation, strength,
-            static_cast<double>(runtime.current[index]),
-            static_cast<double>(runtime.maximum[index]))
-        : std::snprintf(
-            output, output_size, "%s: %.0f / %.0f",
-            presentation,
-            static_cast<double>(runtime.current[index]),
-            static_cast<double>(runtime.maximum[index]));
-    return written > 0 && static_cast<std::size_t>(written) < output_size;
+    struct Context {
+        int facing;
+        bool verbose;
+        char* output;
+        std::size_t output_size;
+        const char* presentation = nullptr;
+        const char* strength = nullptr;
+        int written = 0;
+    } context{facing, verbose, output, output_size};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        const auto& runtime = g_directional_shield_tooltip;
+        if (action == 0)
+            return ctx.output && ctx.output_size != 0 &&
+                ctx.facing >= 0 && ctx.facing < 4 && runtime.active;
+        if (action == 1) {
+            const std::size_t index = static_cast<std::size_t>(ctx.facing);
+            ctx.presentation = localized_directional_shield_text(
+                ctx.verbose ? kDirectionalShieldVerboseTooltipKeys[index]
+                            : kDirectionalShieldTooltipKeys[index],
+                ctx.verbose ? kDirectionalShieldVerboseTooltipFallbacks[index]
+                            : kDirectionalShieldTooltipFallbacks[index]);
+        } else if (action == 2) {
+            ctx.strength = localized_directional_shield_text(
+                kDirectionalShieldStrengthKey, kDirectionalShieldStrengthFallback);
+        } else if (action == 3) {
+            const std::size_t index = static_cast<std::size_t>(ctx.facing);
+            ctx.written = ctx.verbose
+                ? std::snprintf(ctx.output, ctx.output_size, "%s\n%s: %.0f / %.0f",
+                    ctx.presentation, ctx.strength,
+                    static_cast<double>(runtime.current[index]),
+                    static_cast<double>(runtime.maximum[index]))
+                : std::snprintf(ctx.output, ctx.output_size, "%s: %.0f / %.0f",
+                    ctx.presentation,
+                    static_cast<double>(runtime.current[index]),
+                    static_cast<double>(runtime.maximum[index]));
+        } else if (action == 4) {
+            return ctx.written > 0 &&
+                static_cast<std::size_t>(ctx.written) < ctx.output_size;
+        }
+        return 0;
+    };
+    return a2fo_rs_stage9_craft_format_directional_tip(step, &context);
 }
 
 bool format_ammunition_tooltip(
     std::size_t store_index, bool verbose, char* output,
     std::size_t output_size) noexcept {
-    constexpr std::array<const char*, 3> default_tooltips{{
+    static constexpr std::array<const char*, 3> default_tooltips{{
         "Photon Torpedo Ammunition",
         "Quantum Torpedo Ammunition",
         "Shuttle Craft",
     }};
-    constexpr std::array<const char*, 3> default_verbose_tooltips{{
+    static constexpr std::array<const char*, 3> default_verbose_tooltips{{
         "Photon torpedo magazine and recharge reserve.",
         "Quantum torpedo magazine and recharge reserve.",
         "Embarked shuttlecraft complement and replenishment reserve.",
     }};
-    const AmmunitionTooltipRuntime& runtime = g_ammunition_tooltip;
-    if (!output || output_size == 0 ||
-        store_index >= runtime.visible.size() ||
-        !runtime.active || !runtime.visible[store_index] || !runtime.craft) {
-        return false;
-    }
-
-    const AmmunitionUiPolicy* policy = ammunition_ui_policy(runtime.craft);
-    const AmmunitionPresentation* configured = policy
-        ? &policy->stores[store_index] : nullptr;
-    const std::string* configured_text = nullptr;
-    if (configured) {
-        if (verbose && !configured->verbose_tooltip.empty()) {
-            configured_text = &configured->verbose_tooltip;
-        } else if (!configured->tooltip.empty()) {
-            configured_text = &configured->tooltip;
+    struct Context {
+        std::size_t index;
+        bool verbose;
+        char* output;
+        std::size_t output_size;
+        const AmmunitionTooltipRuntime* runtime;
+        const AmmunitionPresentation* configured = nullptr;
+        const std::string* configured_text = nullptr;
+        const char* presentation = nullptr;
+    } context{store_index, verbose, output, output_size, &g_ammunition_tooltip,
+              nullptr, nullptr, nullptr};
+    const auto step = +[](void* opaque, std::uint32_t action, std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) return ctx.output && ctx.output_size != 0 &&
+            ctx.index < ctx.runtime->visible.size() && ctx.runtime->active &&
+            ctx.runtime->visible[ctx.index] && ctx.runtime->craft;
+        if (action == 1) {
+            const AmmunitionUiPolicy* policy = ammunition_ui_policy(ctx.runtime->craft);
+            ctx.configured = policy ? &policy->stores[ctx.index] : nullptr;
+        } else if (action == 2) {
+            if (ctx.configured && ctx.verbose && !ctx.configured->verbose_tooltip.empty()) {
+                ctx.configured_text = &ctx.configured->verbose_tooltip;
+                return 1;
+            }
+            return 0;
+        } else if (action == 3) {
+            if (ctx.configured && !ctx.configured->tooltip.empty())
+                ctx.configured_text = &ctx.configured->tooltip;
+        } else if (action == 4) {
+            const char* fallback = ctx.verbose
+                ? default_verbose_tooltips[ctx.index] : default_tooltips[ctx.index];
+            const char* key = ctx.configured_text ? ctx.configured_text->c_str() : fallback;
+            ctx.presentation = localized_directional_shield_text(key, key);
+        } else if (action == 5) {
+            const int written = ctx.verbose
+                ? std::snprintf(ctx.output, ctx.output_size, "%s\nAmmunition: %d/%d",
+                    ctx.presentation,
+                    whole_ammunition_amount(ctx.runtime->current[ctx.index]),
+                    whole_ammunition_amount(ctx.runtime->maximum[ctx.index]))
+                : std::snprintf(ctx.output, ctx.output_size, "%s: %d/%d",
+                    ctx.presentation,
+                    whole_ammunition_amount(ctx.runtime->current[ctx.index]),
+                    whole_ammunition_amount(ctx.runtime->maximum[ctx.index]));
+            return written > 0 && static_cast<std::size_t>(written) < ctx.output_size;
         }
-    }
-    const char* fallback = verbose
-        ? default_verbose_tooltips[store_index]
-        : default_tooltips[store_index];
-    const char* key = configured_text
-        ? configured_text->c_str() : fallback;
-    const char* presentation = localized_directional_shield_text(
-        key, key);
-    const int written = verbose
-        ? std::snprintf(
-            output, output_size, "%s\nAmmunition: %d/%d",
-            presentation,
-            whole_ammunition_amount(runtime.current[store_index]),
-            whole_ammunition_amount(runtime.maximum[store_index]))
-        : std::snprintf(
-            output, output_size, "%s: %d/%d", presentation,
-            whole_ammunition_amount(runtime.current[store_index]),
-            whole_ammunition_amount(runtime.maximum[store_index]));
-    return written > 0 && static_cast<std::size_t>(written) < output_size;
+        return 0;
+    };
+    return a2fo_rs_stage9_craft_format_ammunition_tip(step, &context);
 }
 
 bool format_selected_status_tooltip(
     std::size_t status_index, bool verbose, char* output,
     std::size_t output_size) noexcept {
-    const SelectedStatusTooltipRuntime& runtime =
-        g_selected_status_tooltip;
-    if (!output || output_size == 0 || status_index >= 2 ||
-        !runtime.active || !runtime.visible[status_index] ||
-        !runtime.craft) {
-        return false;
-    }
-
-    if (status_index ==
-        static_cast<std::size_t>(SelectedStatusIndex::shields)) {
+    struct Context {
+        std::size_t index;
+        bool verbose;
+        char* output;
+        std::size_t output_size;
+        const SelectedStatusTooltipRuntime* runtime;
         const SelectedStatusUiPolicy* policy = nullptr;
-        void* object_class = read_at<void*>(
-            runtime.craft, kObjectClassOffset, nullptr);
-        const auto found = g_selected_status_ui_policies.find(object_class);
-        if (found != g_selected_status_ui_policies.end()) {
-            policy = &found->second;
-        }
         const std::string* configured = nullptr;
-        if (policy) {
-            if (verbose && !policy->shield_verbose_tooltip.empty()) {
-                configured = &policy->shield_verbose_tooltip;
-            } else if (!policy->shield_tooltip.empty()) {
-                configured = &policy->shield_tooltip;
+        const char* presentation = nullptr;
+    } context{status_index, verbose, output, output_size,
+              &g_selected_status_tooltip, nullptr, nullptr, nullptr};
+    const auto step = +[](void* opaque, std::uint32_t action, std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) return ctx.output && ctx.output_size != 0 && ctx.index < 2 &&
+            ctx.runtime->active && ctx.runtime->visible[ctx.index] && ctx.runtime->craft;
+        if (action == 1) return ctx.index == static_cast<std::size_t>(SelectedStatusIndex::shields);
+        if (action == 2) {
+            void* object_class = read_at<void*>(ctx.runtime->craft, kObjectClassOffset, nullptr);
+            const auto found = g_selected_status_ui_policies.find(object_class);
+            if (found != g_selected_status_ui_policies.end()) ctx.policy = &found->second;
+        } else if (action == 3) {
+            if (ctx.policy && ctx.verbose && !ctx.policy->shield_verbose_tooltip.empty()) {
+                ctx.configured = &ctx.policy->shield_verbose_tooltip;
+                return 1;
             }
+            return 0;
+        } else if (action == 4) {
+            if (ctx.policy && !ctx.policy->shield_tooltip.empty())
+                ctx.configured = &ctx.policy->shield_tooltip;
+        } else if (action == 5) {
+            const char* default_key = ctx.verbose
+                ? "GUI_SD_SHIELD_VTOOLTIP" : "GUI_SD_SHIELD_TOOLTIP";
+            const char* key = ctx.configured ? ctx.configured->c_str() : default_key;
+            ctx.presentation = localized_directional_shield_text(
+                key, ctx.configured ? key : "Shield Integrity at");
+        } else if (action == 6) {
+            const int percentage = static_cast<int>(std::lround(
+                100.0f * clamped_ratio(ctx.runtime->current[ctx.index],
+                                        ctx.runtime->maximum[ctx.index])));
+            // Armada's second formatting pass consumes two percent bytes as one.
+            const int written = std::snprintf(ctx.output, ctx.output_size,
+                "%s %d%%%% %.0f/%.0f", ctx.presentation, percentage,
+                static_cast<double>(ctx.runtime->current[ctx.index]),
+                static_cast<double>(ctx.runtime->maximum[ctx.index]));
+            return written > 0 && static_cast<std::size_t>(written) < ctx.output_size;
+        } else if (action == 7) {
+            const char* key = ctx.verbose
+                ? "GUI_SD_EXPERIENCE_VTOOLTIP" : "GUI_SD_EXPERIENCE_TOOLTIP";
+            const char* fallback = ctx.verbose
+                ? "Experience progress toward the vessel's next rank." : "Experience";
+            ctx.presentation = localized_directional_shield_text(key, fallback);
+        } else if (action == 8) {
+            const int written = ctx.verbose
+                ? std::snprintf(ctx.output, ctx.output_size, "%s\nExperience: %.0f / %.0f",
+                    ctx.presentation,
+                    static_cast<double>(ctx.runtime->current[ctx.index]),
+                    static_cast<double>(ctx.runtime->maximum[ctx.index]))
+                : std::snprintf(ctx.output, ctx.output_size, "%s: %.0f / %.0f",
+                    ctx.presentation,
+                    static_cast<double>(ctx.runtime->current[ctx.index]),
+                    static_cast<double>(ctx.runtime->maximum[ctx.index]));
+            return written > 0 && static_cast<std::size_t>(written) < ctx.output_size;
         }
-        const char* default_key = verbose
-            ? "GUI_SD_SHIELD_VTOOLTIP" : "GUI_SD_SHIELD_TOOLTIP";
-        const char* fallback = "Shield Integrity at";
-        const char* key = configured ? configured->c_str() : default_key;
-        const char* presentation = localized_directional_shield_text(
-            key, configured ? key : fallback);
-        const int percentage = static_cast<int>(std::lround(
-            100.0f * clamped_ratio(
-                runtime.current[status_index],
-                runtime.maximum[status_index])));
-        const int written = std::snprintf(
-            // Armada's tooltip renderer performs a second formatting pass.
-            // Retain two percent bytes here so that pass displays one.
-            output, output_size, "%s %d%%%% %.0f/%.0f", presentation,
-            percentage,
-            static_cast<double>(runtime.current[status_index]),
-            static_cast<double>(runtime.maximum[status_index]));
-        return written > 0 &&
-            static_cast<std::size_t>(written) < output_size;
-    }
-
-    const char* key = verbose
-        ? "GUI_SD_EXPERIENCE_VTOOLTIP" : "GUI_SD_EXPERIENCE_TOOLTIP";
-    const char* fallback = verbose
-        ? "Experience progress toward the vessel's next rank."
-        : "Experience";
-    const char* presentation = localized_directional_shield_text(
-        key, fallback);
-    const int written = verbose
-        ? std::snprintf(
-            output, output_size, "%s\nExperience: %.0f / %.0f",
-            presentation,
-            static_cast<double>(runtime.current[status_index]),
-            static_cast<double>(runtime.maximum[status_index]))
-        : std::snprintf(
-            output, output_size, "%s: %.0f / %.0f", presentation,
-            static_cast<double>(runtime.current[status_index]),
-            static_cast<double>(runtime.maximum[status_index]));
-    return written > 0 && static_cast<std::size_t>(written) < output_size;
+        return 0;
+    };
+    return a2fo_rs_stage9_craft_format_selected_status_tip(step, &context);
 }
 
 bool configure_directional_shield_native_tooltip_provider(
     int facing) noexcept {
-    char normal[768]{};
-    char verbose[768]{};
-    if (!format_directional_shield_tooltip(
-            facing, false, normal, sizeof(normal)) ||
-        !format_directional_shield_tooltip(
-            facing, true, verbose, sizeof(verbose))) {
-        return false;
-    }
-    DirectionalShieldNativeTooltipProvider& provider =
-        g_directional_shield_native_tooltip_provider;
-    provider.vtable = at(g_armada, kStandardComponentVtableRva);
-    std::snprintf(provider.normal_storage.data(),
-                  provider.normal_storage.size(), "%s", normal);
-    std::snprintf(provider.verbose_storage.data(),
-                  provider.verbose_storage.size(), "%s", verbose);
-    provider.normal = provider.normal_storage.data();
-    provider.verbose = provider.verbose_storage.data();
-    return readable_range(provider.vtable, 0x08);
+    struct Context { int facing; char normal[768]{}, verbose[768]{}; } context{facing};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        auto& provider = g_directional_shield_native_tooltip_provider;
+        if (action == 0) return format_directional_shield_tooltip(
+            ctx.facing, false, ctx.normal, sizeof(ctx.normal));
+        if (action == 1) return format_directional_shield_tooltip(
+            ctx.facing, true, ctx.verbose, sizeof(ctx.verbose));
+        if (action == 2) {
+            provider.vtable = at(g_armada, kStandardComponentVtableRva);
+            std::snprintf(provider.normal_storage.data(),
+                provider.normal_storage.size(), "%s", ctx.normal);
+            std::snprintf(provider.verbose_storage.data(),
+                provider.verbose_storage.size(), "%s", ctx.verbose);
+            provider.normal = provider.normal_storage.data();
+            provider.verbose = provider.verbose_storage.data();
+        } else if (action == 3) return readable_range(provider.vtable, 0x08);
+        return 0;
+    };
+    return a2fo_rs_stage9_craft_configure_native_tip(step, &context);
 }
 
 void draw_directional_shield_hover_tooltip(
     void* info_display, void* craft, void* text_component,
     const NativeRectangle& live_anchor,
     const Colour& shared_colour) noexcept {
-    // When the WireframeIcon callbacks are linked, Armada's real tooltip
-    // manager owns timing, framing, placement, and normal/verbose switching.
-    // Do not also draw the old experimental text overlay.
-    if (g_directional_shield_wireframe_tooltips_available) return;
-    const DirectionalShieldTooltipRuntime& runtime =
-        g_directional_shield_tooltip;
-    if (!g_runtime_ready || !info_display || !craft || !text_component ||
-        !runtime.active || runtime.info_display != info_display ||
-        runtime.craft != craft ||
-        read_at<void*>(info_display,
-                       kInfoDisplaySelectedCraftOffset, nullptr) != craft) {
-        return;
-    }
-
-    const std::int32_t cursor_x = read_at<std::int32_t>(
-        at(g_armada, kCursorXRva), 0,
-        std::numeric_limits<std::int32_t>::min());
-    const std::int32_t cursor_y = read_at<std::int32_t>(
-        at(g_armada, kCursorYRva), 0,
-        std::numeric_limits<std::int32_t>::min());
-    const int facing =
-        a2fo::craft_identity::directional_shield_segment_at(
-            runtime.hit_rectangles,
-            static_cast<float>(cursor_x),
-            static_cast<float>(cursor_y));
-    if (facing < 0 || facing >= 4) return;
-
-    // Armada stores zero for its normal tooltip and one for the expanded
-    // verbose presentation.  Fleet Operations does not reliably submit a
-    // native tooltip object for the sprite-only shield arcs, so render the
-    // selected localization in the already-active selected-panel pass.
-    const std::int32_t tooltip_mode = read_at<std::int32_t>(
-        at(g_armada, kTooltipModeRva), 0, 0);
-    const bool verbose = tooltip_mode == 1;
-    char text[768]{};
-    if (!format_directional_shield_tooltip(
-            facing, verbose, text, sizeof(text))) {
-        return;
-    }
-
-    // Reuse the configured directional-shield text row.  Unlike the stock
-    // systems/name region, this row belongs to the selected panel's proven
-    // text clip and remains free while the graphical arc ring is active.
-    NativeRectangle tooltip_rectangle = live_anchor;
-    tooltip_rectangle.top += 108;
-    tooltip_rectangle.bottom += 108;
-    if (g_ui_configuration.captain_rectangle_found &&
-        g_ui_configuration.directional_forward_aft_rectangle_found) {
-        tooltip_rectangle = translated_rectangle(
-            live_anchor, g_ui_configuration.captain_rectangle,
-            g_ui_configuration.directional_forward_aft_rectangle);
-    }
-    tooltip_rectangle.right = tooltip_rectangle.left + 520;
-    if (verbose) tooltip_rectangle.top -= 20;
-    tooltip_rectangle.bottom = tooltip_rectangle.top +
-        (verbose ? 58 : 24);
-    const Colour shadow_colour{0.02f, 0.02f, 0.02f};
-    NativeRectangle shadow_rectangle = tooltip_rectangle;
-    ++shadow_rectangle.left;
-    ++shadow_rectangle.right;
-    ++shadow_rectangle.top;
-    ++shadow_rectangle.bottom;
-    draw_identity_text(
-        text, shadow_rectangle, shadow_colour, text_component);
-    const bool drawn = draw_identity_text(
-        text, tooltip_rectangle, shared_colour, text_component);
-    if (drawn && InterlockedCompareExchange(
-            &g_directional_shield_direct_tooltip_report_count,
-            1, 0) == 0) {
-        char message[320]{};
-        std::snprintf(
-            message, sizeof(message),
-            "First direct directional-shield tooltip draw submitted: facing=%d mode=%ld cursor=%ld,%ld rectangle=%ld,%ld,%ld,%ld text='%s'",
-            facing, static_cast<long>(tooltip_mode),
-            static_cast<long>(cursor_x), static_cast<long>(cursor_y),
-            static_cast<long>(tooltip_rectangle.left),
-            static_cast<long>(tooltip_rectangle.top),
-            static_cast<long>(tooltip_rectangle.right),
-            static_cast<long>(tooltip_rectangle.bottom), text);
-        log_line(message);
-    }
+    struct Context {
+        void* info_display;
+        void* craft;
+        void* text_component;
+        const NativeRectangle* live_anchor;
+        const Colour* shared_colour;
+        std::int32_t cursor_x = std::numeric_limits<std::int32_t>::min();
+        std::int32_t cursor_y = std::numeric_limits<std::int32_t>::min();
+        std::int32_t tooltip_mode = 0;
+        int facing = -1;
+        bool verbose = false;
+        bool drawn = false;
+        char text[768]{};
+        NativeRectangle tooltip_rectangle{};
+    } context{info_display, craft, text_component, &live_anchor, &shared_colour};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        const auto& runtime = g_directional_shield_tooltip;
+        if (action == 0) return !g_directional_shield_wireframe_tooltips_available;
+        if (action == 1) {
+            return g_runtime_ready && ctx.info_display && ctx.craft &&
+                ctx.text_component && runtime.active &&
+                runtime.info_display == ctx.info_display &&
+                runtime.craft == ctx.craft &&
+                read_at<void*>(ctx.info_display,
+                    kInfoDisplaySelectedCraftOffset, nullptr) == ctx.craft;
+        }
+        if (action == 2) {
+            ctx.cursor_x = read_at<std::int32_t>(
+                at(g_armada, kCursorXRva), 0, ctx.cursor_x);
+            ctx.cursor_y = read_at<std::int32_t>(
+                at(g_armada, kCursorYRva), 0, ctx.cursor_y);
+            ctx.facing = a2fo::craft_identity::directional_shield_segment_at(
+                runtime.hit_rectangles,
+                static_cast<float>(ctx.cursor_x), static_cast<float>(ctx.cursor_y));
+        } else if (action == 3) {
+            return ctx.facing >= 0 && ctx.facing < 4;
+        } else if (action == 4) {
+            ctx.tooltip_mode = read_at<std::int32_t>(
+                at(g_armada, kTooltipModeRva), 0, 0);
+            ctx.verbose = ctx.tooltip_mode == 1;
+            return format_directional_shield_tooltip(
+                ctx.facing, ctx.verbose, ctx.text, sizeof(ctx.text));
+        } else if (action == 5) {
+            ctx.tooltip_rectangle = *ctx.live_anchor;
+            ctx.tooltip_rectangle.top += 108;
+            ctx.tooltip_rectangle.bottom += 108;
+            if (g_ui_configuration.captain_rectangle_found &&
+                g_ui_configuration.directional_forward_aft_rectangle_found) {
+                ctx.tooltip_rectangle = translated_rectangle(
+                    *ctx.live_anchor, g_ui_configuration.captain_rectangle,
+                    g_ui_configuration.directional_forward_aft_rectangle);
+            }
+            ctx.tooltip_rectangle.right = ctx.tooltip_rectangle.left + 520;
+            if (ctx.verbose) ctx.tooltip_rectangle.top -= 20;
+            ctx.tooltip_rectangle.bottom = ctx.tooltip_rectangle.top +
+                (ctx.verbose ? 58 : 24);
+        } else if (action == 6) {
+            const Colour shadow_colour{0.02f, 0.02f, 0.02f};
+            NativeRectangle shadow_rectangle = ctx.tooltip_rectangle;
+            ++shadow_rectangle.left;
+            ++shadow_rectangle.right;
+            ++shadow_rectangle.top;
+            ++shadow_rectangle.bottom;
+            draw_identity_text(ctx.text, shadow_rectangle,
+                shadow_colour, ctx.text_component);
+        } else if (action == 7) {
+            ctx.drawn = draw_identity_text(ctx.text, ctx.tooltip_rectangle,
+                *ctx.shared_colour, ctx.text_component);
+        } else if (action == 8) {
+            if (ctx.drawn && InterlockedCompareExchange(
+                    &g_directional_shield_direct_tooltip_report_count,
+                    1, 0) == 0) {
+                char message[320]{};
+                std::snprintf(message, sizeof(message),
+                    "First direct directional-shield tooltip draw submitted: facing=%d mode=%ld cursor=%ld,%ld rectangle=%ld,%ld,%ld,%ld text='%s'",
+                    ctx.facing, static_cast<long>(ctx.tooltip_mode),
+                    static_cast<long>(ctx.cursor_x), static_cast<long>(ctx.cursor_y),
+                    static_cast<long>(ctx.tooltip_rectangle.left),
+                    static_cast<long>(ctx.tooltip_rectangle.top),
+                    static_cast<long>(ctx.tooltip_rectangle.right),
+                    static_cast<long>(ctx.tooltip_rectangle.bottom), ctx.text);
+                log_line(message);
+            }
+        }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_draw_directional_tip(step, &context);
 }
 
 void set_standard_component_text(
@@ -4730,249 +5654,275 @@ void set_standard_component_text(
 }
 
 void clear_directional_shield_native_tooltip() noexcept {
-    if (g_directional_shield_native_tooltip.presented &&
-        g_directional_shield_native_tooltip_available) {
-        a2fo_identity_call_thiscall_0(
-            at(g_armada, kTooltipManagerClearRva),
-            at(g_armada, kTooltipManagerObjectRva));
-    }
-    g_directional_shield_native_tooltip = {};
+    const auto step = +[](void*, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        if (action == 0) return g_directional_shield_native_tooltip.presented &&
+            g_directional_shield_native_tooltip_available;
+        if (action == 1) {
+            a2fo_identity_call_thiscall_0(
+                at(g_armada, kTooltipManagerClearRva),
+                at(g_armada, kTooltipManagerObjectRva));
+        } else if (action == 2) g_directional_shield_native_tooltip = {};
+        return 0;
+    };
+    a2fo_rs_stage9_craft_clear_native_tip(step, nullptr);
 }
 
 void present_directional_shield_native_tooltip(
     void* component, void* craft, int facing) noexcept {
-    if (!g_directional_shield_native_tooltip_available || !component ||
-        !craft || facing < 0 || facing >= 4 ||
-        !readable_range(component, 0x08)) {
-        clear_directional_shield_native_tooltip();
-        return;
-    }
-
-    DirectionalShieldNativeTooltip& native =
-        g_directional_shield_native_tooltip;
-    const DWORD now = GetTickCount();
-    if (native.component != component || native.craft != craft ||
-        native.facing != facing) {
-        clear_directional_shield_native_tooltip();
-        native.component = component;
-        native.craft = craft;
-        native.facing = facing;
-        native.hover_started = now;
-    }
-
-    void* owner = read_at<void*>(component, 0x04, nullptr);
-    void* standard_component_vtable =
-        at(g_armada, kStandardComponentVtableRva);
-    if (!owner ||
-        !readable_range(standard_component_vtable, 0x08) ||
-        g_directional_shield_native_tooltip_provider.vtable !=
-            standard_component_vtable ||
-        !g_directional_shield_native_tooltip_provider.normal ||
-        !g_directional_shield_native_tooltip_provider.verbose) {
-        clear_directional_shield_native_tooltip();
-        return;
-    }
-    // The selected-panel render happens after StandardComponent::Update has
-    // already reset the wireframe's native hover clock for the sprite-only
-    // arc.  Supplying a completed native hover age avoids that unrelated
-    // rectangle reset while the exact per-arc hit test above remains the
-    // authority for whether a tooltip may be shown.
-    constexpr float elapsed = 3600.0f;
-    std::uint32_t elapsed_bits = 0;
-    std::memcpy(&elapsed_bits, &elapsed, sizeof(elapsed_bits));
-    const bool presented =
-        (a2fo_identity_call_thiscall_3(
-             at(g_armada, kTooltipManagerShowRva),
-             at(g_armada, kTooltipManagerObjectRva),
-             elapsed_bits,
-             reinterpret_cast<std::uintptr_t>(
-                 &g_directional_shield_native_tooltip_provider),
-             reinterpret_cast<std::uintptr_t>(owner)) & 0xffu) != 0;
-    native.presented = presented;
-    if (presented && InterlockedCompareExchange(
-            &g_directional_shield_native_dispatch_report_count,
-            1, 0) == 0) {
-        char message[224]{};
-        std::snprintf(
-            message, sizeof(message),
-            "First directional-shield tooltip presented by Armada's native manager: facing=%d provider=%p owner=%p elapsed=%.2f normal='%s'",
-            facing,
-            static_cast<void*>(
-                &g_directional_shield_native_tooltip_provider), owner,
-            static_cast<double>(elapsed),
-            g_directional_shield_native_tooltip_provider.normal);
-        log_line(message);
-    }
+    struct Context {
+        void* component;
+        void* craft;
+        int facing;
+        DWORD now = 0;
+        void* owner = nullptr;
+        bool presented = false;
+    } context{component, craft, facing};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        auto& native = g_directional_shield_native_tooltip;
+        if (action == 0) {
+            return g_directional_shield_native_tooltip_available &&
+                ctx.component && ctx.craft && ctx.facing >= 0 &&
+                ctx.facing < 4 && readable_range(ctx.component, 0x08);
+        }
+        if (action == 1) clear_directional_shield_native_tooltip();
+        else if (action == 2) ctx.now = GetTickCount();
+        else if (action == 3) {
+            return native.component != ctx.component || native.craft != ctx.craft ||
+                native.facing != ctx.facing;
+        } else if (action == 4) {
+            clear_directional_shield_native_tooltip();
+            native.component = ctx.component;
+            native.craft = ctx.craft;
+            native.facing = ctx.facing;
+            native.hover_started = ctx.now;
+        } else if (action == 5) {
+            ctx.owner = read_at<void*>(ctx.component, 0x04, nullptr);
+            void* standard_component_vtable =
+                at(g_armada, kStandardComponentVtableRva);
+            return ctx.owner && readable_range(standard_component_vtable, 0x08) &&
+                g_directional_shield_native_tooltip_provider.vtable ==
+                    standard_component_vtable &&
+                g_directional_shield_native_tooltip_provider.normal &&
+                g_directional_shield_native_tooltip_provider.verbose;
+        } else if (action == 6) {
+            // Keep the native manager's proven completed-hover age bits.
+            constexpr float elapsed = 3600.0f;
+            std::uint32_t elapsed_bits = 0;
+            std::memcpy(&elapsed_bits, &elapsed, sizeof(elapsed_bits));
+            ctx.presented = (a2fo_identity_call_thiscall_3(
+                at(g_armada, kTooltipManagerShowRva),
+                at(g_armada, kTooltipManagerObjectRva), elapsed_bits,
+                reinterpret_cast<std::uintptr_t>(
+                    &g_directional_shield_native_tooltip_provider),
+                reinterpret_cast<std::uintptr_t>(ctx.owner)) & 0xffu) != 0;
+            native.presented = ctx.presented;
+        } else if (action == 7) {
+            if (ctx.presented && InterlockedCompareExchange(
+                    &g_directional_shield_native_dispatch_report_count,
+                    1, 0) == 0) {
+                char message[224]{};
+                std::snprintf(message, sizeof(message),
+                    "First directional-shield tooltip presented by Armada's native manager: facing=%d provider=%p owner=%p elapsed=%.2f normal='%s'",
+                    ctx.facing,
+                    static_cast<void*>(
+                        &g_directional_shield_native_tooltip_provider),
+                    ctx.owner, static_cast<double>(3600.0f),
+                    g_directional_shield_native_tooltip_provider.normal);
+                log_line(message);
+            }
+        }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_present_native_tip(step, &context);
 }
 
 void update_directional_shield_component_tooltip(
     void* info_display) noexcept {
-    if (!g_directional_shield_component_tooltips_available ||
-        !info_display) {
-        return;
-    }
-    void* component = read_at<void*>(
-        info_display, kInfoDisplayWireframeOffset, nullptr);
-    if (!component || !readable_range(component, 0x28)) {
-        g_directional_shield_tooltip_binding = {};
-        return;
-    }
-
-    DirectionalShieldTooltipBinding& binding =
-        g_directional_shield_tooltip_binding;
-    if (binding.info_display != info_display ||
-        binding.component != component) {
-        // The previous component may have belonged to a discarded interface.
-        // Never dereference it merely to clear our old copied text.
-        binding = {};
-        binding.info_display = info_display;
-        binding.component = component;
-    }
-
-    const DirectionalShieldTooltipRuntime& runtime =
-        g_directional_shield_tooltip;
-    int facing = -1;
-    std::int32_t cursor_x = std::numeric_limits<std::int32_t>::min();
-    std::int32_t cursor_y = std::numeric_limits<std::int32_t>::min();
-    if (runtime.active && runtime.info_display == info_display &&
-        runtime.craft &&
-        read_at<void*>(info_display,
-                       kInfoDisplaySelectedCraftOffset, nullptr) ==
-            runtime.craft) {
-        cursor_x = read_at<std::int32_t>(
-            at(g_armada, kCursorXRva), 0, cursor_x);
-        cursor_y = read_at<std::int32_t>(
-            at(g_armada, kCursorYRva), 0, cursor_y);
-        facing = a2fo::craft_identity::directional_shield_segment_at(
-            runtime.hit_rectangles,
-            static_cast<float>(cursor_x),
-            static_cast<float>(cursor_y));
-    }
-
-    if (facing < 0 || facing >= 4) {
-        if (binding.facing >= 0) {
-            set_standard_component_text(
-                component, kStandardComponentSetTooltipTextRva, nullptr);
-            set_standard_component_text(
-                component, kStandardComponentSetVerboseTooltipTextRva,
-                nullptr);
+    struct Context {
+        void* info_display;
+        void* component = nullptr;
+        int facing = -1;
+        std::int32_t cursor_x = std::numeric_limits<std::int32_t>::min();
+        std::int32_t cursor_y = std::numeric_limits<std::int32_t>::min();
+        char normal[768]{}, verbose[768]{};
+    } context{info_display};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        auto& binding = g_directional_shield_tooltip_binding;
+        const auto& runtime = g_directional_shield_tooltip;
+        if (action == 0)
+            return g_directional_shield_component_tooltips_available && ctx.info_display;
+        if (action == 1) {
+            ctx.component = read_at<void*>(
+                ctx.info_display, kInfoDisplayWireframeOffset, nullptr);
+            if (!ctx.component || !readable_range(ctx.component, 0x28)) {
+                binding = {};
+                return 0;
+            }
+            return 1;
         }
-        binding.craft = runtime.craft;
-        binding.facing = -1;
-        binding.current = -1.0f;
-        binding.maximum = -1.0f;
-        return;
-    }
-
-    const std::size_t index = static_cast<std::size_t>(facing);
-    if (binding.craft == runtime.craft && binding.facing == facing &&
-        binding.current == runtime.current[index] &&
-        binding.maximum == runtime.maximum[index]) {
-        return;
-    }
-    char normal[768]{};
-    char verbose[768]{};
-    if (!format_directional_shield_tooltip(
-            facing, false, normal, sizeof(normal)) ||
-        !format_directional_shield_tooltip(
-            facing, true, verbose, sizeof(verbose))) {
-        return;
-    }
-    set_standard_component_text(
-        component, kStandardComponentSetTooltipTextRva, normal);
-    set_standard_component_text(
-        component, kStandardComponentSetVerboseTooltipTextRva, verbose);
-    binding.craft = runtime.craft;
-    binding.facing = facing;
-    binding.current = runtime.current[index];
-    binding.maximum = runtime.maximum[index];
-    if (InterlockedCompareExchange(
-            &g_directional_shield_component_assignment_report_count,
-            1, 0) == 0) {
-        char message[224]{};
-        std::snprintf(
-            message, sizeof(message),
-            "First directional-shield component tooltip assigned: facing=%lu cursor=%ld,%ld component=%p",
-            static_cast<unsigned long>(index),
-            static_cast<long>(cursor_x), static_cast<long>(cursor_y),
-            component);
-        log_line(message);
-    }
+        if (action == 2) {
+            if (binding.info_display != ctx.info_display ||
+                binding.component != ctx.component) {
+                // The discarded component is never dereferenced to clear old text.
+                binding = {};
+                binding.info_display = ctx.info_display;
+                binding.component = ctx.component;
+            }
+        } else if (action == 3) {
+            if (runtime.active && runtime.info_display == ctx.info_display &&
+                runtime.craft &&
+                read_at<void*>(ctx.info_display,
+                    kInfoDisplaySelectedCraftOffset, nullptr) == runtime.craft) {
+                ctx.cursor_x = read_at<std::int32_t>(
+                    at(g_armada, kCursorXRva), 0, ctx.cursor_x);
+                ctx.cursor_y = read_at<std::int32_t>(
+                    at(g_armada, kCursorYRva), 0, ctx.cursor_y);
+                ctx.facing = a2fo::craft_identity::directional_shield_segment_at(
+                    runtime.hit_rectangles,
+                    static_cast<float>(ctx.cursor_x),
+                    static_cast<float>(ctx.cursor_y));
+            }
+        } else if (action == 4) {
+            return ctx.facing >= 0 && ctx.facing < 4;
+        } else if (action == 5) {
+            if (binding.facing >= 0) {
+                set_standard_component_text(
+                    ctx.component, kStandardComponentSetTooltipTextRva, nullptr);
+                set_standard_component_text(
+                    ctx.component, kStandardComponentSetVerboseTooltipTextRva, nullptr);
+            }
+        } else if (action == 6) {
+            binding.craft = runtime.craft;
+            binding.facing = -1;
+            binding.current = -1.0f;
+            binding.maximum = -1.0f;
+        } else if (action == 7) {
+            const std::size_t index = static_cast<std::size_t>(ctx.facing);
+            return binding.craft == runtime.craft && binding.facing == ctx.facing &&
+                binding.current == runtime.current[index] &&
+                binding.maximum == runtime.maximum[index];
+        } else if (action == 8) {
+            return format_directional_shield_tooltip(
+                ctx.facing, false, ctx.normal, sizeof(ctx.normal));
+        } else if (action == 9) {
+            return format_directional_shield_tooltip(
+                ctx.facing, true, ctx.verbose, sizeof(ctx.verbose));
+        } else if (action == 10) {
+            set_standard_component_text(
+                ctx.component, kStandardComponentSetTooltipTextRva, ctx.normal);
+        } else if (action == 11) {
+            set_standard_component_text(
+                ctx.component, kStandardComponentSetVerboseTooltipTextRva,
+                ctx.verbose);
+        } else if (action == 12) {
+            const std::size_t index = static_cast<std::size_t>(ctx.facing);
+            binding.craft = runtime.craft;
+            binding.facing = ctx.facing;
+            binding.current = runtime.current[index];
+            binding.maximum = runtime.maximum[index];
+            if (InterlockedCompareExchange(
+                    &g_directional_shield_component_assignment_report_count,
+                    1, 0) == 0) {
+                char message[224]{};
+                std::snprintf(message, sizeof(message),
+                    "First directional-shield component tooltip assigned: facing=%lu cursor=%ld,%ld component=%p",
+                    static_cast<unsigned long>(index),
+                    static_cast<long>(ctx.cursor_x), static_cast<long>(ctx.cursor_y),
+                    ctx.component);
+                log_line(message);
+            }
+        }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_component_tooltip(step, &context);
 }
 
 bool append_directional_shield_tooltip(
     void* stream_wrapper, bool verbose) noexcept {
-    const DirectionalShieldTooltipRuntime& runtime =
-        g_directional_shield_tooltip;
-    if (!g_runtime_ready || !runtime.active || !runtime.info_display ||
-        !runtime.craft || !stream_wrapper ||
-        read_at<void*>(runtime.info_display,
-                       kInfoDisplaySelectedCraftOffset, nullptr) !=
-            runtime.craft) {
-        return false;
-    }
-
-    const std::int32_t cursor_x = read_at<std::int32_t>(
-        at(g_armada, kCursorXRva), 0,
-        std::numeric_limits<std::int32_t>::min());
-    const std::int32_t cursor_y = read_at<std::int32_t>(
-        at(g_armada, kCursorYRva), 0,
-        std::numeric_limits<std::int32_t>::min());
-    const int facing =
-        a2fo::craft_identity::directional_shield_segment_at(
-            runtime.hit_rectangles,
-            static_cast<float>(cursor_x), static_cast<float>(cursor_y));
-    if (InterlockedCompareExchange(
-            &g_directional_shield_tooltip_query_report_count, 1, 0) == 0) {
-        char message[640]{};
-        std::snprintf(
-            message, sizeof(message),
-            "First directional-shield tooltip query: cursor=%ld,%ld facing=%d; F=%.0f,%.0f,%.0f,%.0f A=%.0f,%.0f,%.0f,%.0f P=%.0f,%.0f,%.0f,%.0f S=%.0f,%.0f,%.0f,%.0f",
-            static_cast<long>(cursor_x), static_cast<long>(cursor_y), facing,
-            static_cast<double>(runtime.hit_rectangles[0].x),
-            static_cast<double>(runtime.hit_rectangles[0].y),
-            static_cast<double>(runtime.hit_rectangles[0].width),
-            static_cast<double>(runtime.hit_rectangles[0].height),
-            static_cast<double>(runtime.hit_rectangles[1].x),
-            static_cast<double>(runtime.hit_rectangles[1].y),
-            static_cast<double>(runtime.hit_rectangles[1].width),
-            static_cast<double>(runtime.hit_rectangles[1].height),
-            static_cast<double>(runtime.hit_rectangles[2].x),
-            static_cast<double>(runtime.hit_rectangles[2].y),
-            static_cast<double>(runtime.hit_rectangles[2].width),
-            static_cast<double>(runtime.hit_rectangles[2].height),
-            static_cast<double>(runtime.hit_rectangles[3].x),
-            static_cast<double>(runtime.hit_rectangles[3].y),
-            static_cast<double>(runtime.hit_rectangles[3].width),
-            static_cast<double>(runtime.hit_rectangles[3].height));
-        log_line(message);
-    }
-    if (facing < 0 || facing >= 4) return false;
-    const std::size_t index = static_cast<std::size_t>(facing);
-    if (InterlockedCompareExchange(
-            &g_directional_shield_tooltip_hit_report_count, 1, 0) == 0) {
-        char message[192]{};
-        std::snprintf(
-            message, sizeof(message),
-            "First directional-shield tooltip hit: facing=%lu cursor=%ld,%ld",
-            static_cast<unsigned long>(index),
-            static_cast<long>(cursor_x), static_cast<long>(cursor_y));
-        log_line(message);
-    }
-
-    char text[768]{};
-    if (!format_directional_shield_tooltip(
-            facing, verbose, text, sizeof(text))) return false;
-
-    InsertCString insert = insert_c_string();
-    if (!insert || !readable_range(stream_wrapper, 0x0c)) {
-        return false;
-    }
-    // WireframeIcon::GetTooltip and GetVerboseTooltip receive Armada's stream
-    // wrapper. The actual ostream subobject consumed by operator<< begins at
-    // +8, exactly as it does in the stock WireframeIcon implementations.
-    insert(static_cast<std::uint8_t*>(stream_wrapper) + 0x08, text);
-    return true;
+    struct Context {
+        void* stream_wrapper;
+        bool verbose;
+        std::int32_t cursor_x = std::numeric_limits<std::int32_t>::min();
+        std::int32_t cursor_y = std::numeric_limits<std::int32_t>::min();
+        int facing = -1;
+        char text[768]{};
+        InsertCString insert = nullptr;
+    } context{stream_wrapper, verbose};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        const auto& runtime = g_directional_shield_tooltip;
+        if (action == 0) {
+            return g_runtime_ready && runtime.active && runtime.info_display &&
+                runtime.craft && ctx.stream_wrapper &&
+                read_at<void*>(runtime.info_display,
+                    kInfoDisplaySelectedCraftOffset, nullptr) == runtime.craft;
+        }
+        if (action == 1) {
+            ctx.cursor_x = read_at<std::int32_t>(
+                at(g_armada, kCursorXRva), 0, ctx.cursor_x);
+            ctx.cursor_y = read_at<std::int32_t>(
+                at(g_armada, kCursorYRva), 0, ctx.cursor_y);
+            ctx.facing = a2fo::craft_identity::directional_shield_segment_at(
+                runtime.hit_rectangles,
+                static_cast<float>(ctx.cursor_x), static_cast<float>(ctx.cursor_y));
+        } else if (action == 2) {
+            if (InterlockedCompareExchange(
+                    &g_directional_shield_tooltip_query_report_count, 1, 0) == 0) {
+                char message[640]{};
+                std::snprintf(message, sizeof(message),
+                    "First directional-shield tooltip query: cursor=%ld,%ld facing=%d; F=%.0f,%.0f,%.0f,%.0f A=%.0f,%.0f,%.0f,%.0f P=%.0f,%.0f,%.0f,%.0f S=%.0f,%.0f,%.0f,%.0f",
+                    static_cast<long>(ctx.cursor_x), static_cast<long>(ctx.cursor_y), ctx.facing,
+                    static_cast<double>(runtime.hit_rectangles[0].x),
+                    static_cast<double>(runtime.hit_rectangles[0].y),
+                    static_cast<double>(runtime.hit_rectangles[0].width),
+                    static_cast<double>(runtime.hit_rectangles[0].height),
+                    static_cast<double>(runtime.hit_rectangles[1].x),
+                    static_cast<double>(runtime.hit_rectangles[1].y),
+                    static_cast<double>(runtime.hit_rectangles[1].width),
+                    static_cast<double>(runtime.hit_rectangles[1].height),
+                    static_cast<double>(runtime.hit_rectangles[2].x),
+                    static_cast<double>(runtime.hit_rectangles[2].y),
+                    static_cast<double>(runtime.hit_rectangles[2].width),
+                    static_cast<double>(runtime.hit_rectangles[2].height),
+                    static_cast<double>(runtime.hit_rectangles[3].x),
+                    static_cast<double>(runtime.hit_rectangles[3].y),
+                    static_cast<double>(runtime.hit_rectangles[3].width),
+                    static_cast<double>(runtime.hit_rectangles[3].height));
+                log_line(message);
+            }
+        } else if (action == 3) {
+            return ctx.facing >= 0 && ctx.facing < 4;
+        } else if (action == 4) {
+            const std::size_t index = static_cast<std::size_t>(ctx.facing);
+            if (InterlockedCompareExchange(
+                    &g_directional_shield_tooltip_hit_report_count, 1, 0) == 0) {
+                char message[192]{};
+                std::snprintf(message, sizeof(message),
+                    "First directional-shield tooltip hit: facing=%lu cursor=%ld,%ld",
+                    static_cast<unsigned long>(index),
+                    static_cast<long>(ctx.cursor_x), static_cast<long>(ctx.cursor_y));
+                log_line(message);
+            }
+        } else if (action == 5) {
+            return format_directional_shield_tooltip(
+                ctx.facing, ctx.verbose, ctx.text, sizeof(ctx.text));
+        } else if (action == 6) {
+            ctx.insert = insert_c_string();
+            return ctx.insert && readable_range(ctx.stream_wrapper, 0x0c);
+        } else if (action == 7) {
+            // Armada's ostream subobject begins at +8 in this wrapper.
+            ctx.insert(static_cast<std::uint8_t*>(ctx.stream_wrapper) + 0x08,
+                ctx.text);
+        }
+        return 0;
+    };
+    return a2fo_rs_stage9_craft_append_directional_tip(step, &context);
 }
 
 [[maybe_unused]] void __attribute__((fastcall)) wireframe_tooltip_hook(
@@ -4997,112 +5947,134 @@ bool append_directional_shield_tooltip(
 
 bool apply_directional_shield_hover_rectangle(
     void* wireframe_icon, NativeRectangle* saved_rectangle) noexcept {
-    const DirectionalShieldTooltipRuntime& runtime =
-        g_directional_shield_tooltip;
-    if (!wireframe_icon || !saved_rectangle || !runtime.active ||
-        !runtime.info_display || !runtime.craft ||
-        read_at<void*>(runtime.info_display,
-                       kInfoDisplayWireframeOffset, nullptr) !=
-            wireframe_icon ||
-        read_at<void*>(runtime.info_display,
-                       kInfoDisplaySelectedCraftOffset, nullptr) !=
-            runtime.craft ||
-        !readable_range(wireframe_icon, 0x28)) {
-        return false;
-    }
-
-    const std::int32_t cursor_x = read_at<std::int32_t>(
-        at(g_armada, kCursorXRva), 0,
-        std::numeric_limits<std::int32_t>::min());
-    const std::int32_t cursor_y = read_at<std::int32_t>(
-        at(g_armada, kCursorYRva), 0,
-        std::numeric_limits<std::int32_t>::min());
-    const int facing =
-        a2fo::craft_identity::directional_shield_segment_at(
-            runtime.hit_rectangles,
-            static_cast<float>(cursor_x),
-            static_cast<float>(cursor_y));
-    if (facing < 0 || facing >= 4) return false;
-
-    void* owner = read_at<void*>(wireframe_icon, 0x04, nullptr);
-    void* owner_vtable = read_at<void*>(owner, 0, nullptr);
-    void* get_owner_rectangle = read_at<void*>(
-        owner_vtable, 0x64, nullptr);
-    if (!owner || !owner_vtable || !get_owner_rectangle) return false;
-    const void* owner_rectangle = reinterpret_cast<const void*>(
-        a2fo_identity_call_thiscall_0(get_owner_rectangle, owner));
-    if (!readable_range(owner_rectangle, 0x08)) return false;
-    const std::int32_t owner_x = read_at<std::int32_t>(
-        owner_rectangle, 0, 0);
-    const std::int32_t owner_y = read_at<std::int32_t>(
-        owner_rectangle, 4, 0);
-
-    *saved_rectangle = read_at<NativeRectangle>(
-        wireframe_icon, 0x08, NativeRectangle{});
-    const FloatRectangle& hit = runtime.hit_rectangles[
-        static_cast<std::size_t>(facing)];
-    const NativeRectangle hover_rectangle{
-        static_cast<std::int32_t>(std::floor(hit.x)) - owner_x,
-        static_cast<std::int32_t>(std::floor(hit.y)) - owner_y,
-        static_cast<std::int32_t>(std::ceil(hit.x + hit.width)) -
-            owner_x - 1,
-        static_cast<std::int32_t>(std::ceil(hit.y + hit.height)) -
-            owner_y - 1,
+    struct Context {
+        void* wireframe_icon;
+        NativeRectangle* saved_rectangle;
+        std::int32_t cursor_x = std::numeric_limits<std::int32_t>::min();
+        std::int32_t cursor_y = std::numeric_limits<std::int32_t>::min();
+        int facing = -1;
+        void* owner = nullptr;
+        void* owner_vtable = nullptr;
+        void* get_owner_rectangle = nullptr;
+        std::int32_t owner_x = 0, owner_y = 0;
+        NativeRectangle hover_rectangle{};
+    } context{wireframe_icon, saved_rectangle};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        const auto& runtime = g_directional_shield_tooltip;
+        if (action == 0) {
+            return ctx.wireframe_icon && ctx.saved_rectangle && runtime.active &&
+                runtime.info_display && runtime.craft &&
+                read_at<void*>(runtime.info_display,
+                    kInfoDisplayWireframeOffset, nullptr) == ctx.wireframe_icon &&
+                read_at<void*>(runtime.info_display,
+                    kInfoDisplaySelectedCraftOffset, nullptr) == runtime.craft &&
+                readable_range(ctx.wireframe_icon, 0x28);
+        }
+        if (action == 1) {
+            ctx.cursor_x = read_at<std::int32_t>(
+                at(g_armada, kCursorXRva), 0, ctx.cursor_x);
+            ctx.cursor_y = read_at<std::int32_t>(
+                at(g_armada, kCursorYRva), 0, ctx.cursor_y);
+            ctx.facing = a2fo::craft_identity::directional_shield_segment_at(
+                runtime.hit_rectangles,
+                static_cast<float>(ctx.cursor_x),
+                static_cast<float>(ctx.cursor_y));
+        } else if (action == 2) {
+            return ctx.facing >= 0 && ctx.facing < 4;
+        } else if (action == 3) {
+            ctx.owner = read_at<void*>(ctx.wireframe_icon, 0x04, nullptr);
+            ctx.owner_vtable = read_at<void*>(ctx.owner, 0, nullptr);
+            ctx.get_owner_rectangle = read_at<void*>(
+                ctx.owner_vtable, 0x64, nullptr);
+            return ctx.owner && ctx.owner_vtable && ctx.get_owner_rectangle;
+        } else if (action == 4) {
+            const void* owner_rectangle = reinterpret_cast<const void*>(
+                a2fo_identity_call_thiscall_0(ctx.get_owner_rectangle, ctx.owner));
+            if (!readable_range(owner_rectangle, 0x08)) return 0;
+            ctx.owner_x = read_at<std::int32_t>(owner_rectangle, 0, 0);
+            ctx.owner_y = read_at<std::int32_t>(owner_rectangle, 4, 0);
+            return 1;
+        } else if (action == 5) {
+            *ctx.saved_rectangle = read_at<NativeRectangle>(
+                ctx.wireframe_icon, 0x08, NativeRectangle{});
+            const FloatRectangle& hit = runtime.hit_rectangles[
+                static_cast<std::size_t>(ctx.facing)];
+            ctx.hover_rectangle = NativeRectangle{
+                static_cast<std::int32_t>(std::floor(hit.x)) - ctx.owner_x,
+                static_cast<std::int32_t>(std::floor(hit.y)) - ctx.owner_y,
+                static_cast<std::int32_t>(std::ceil(hit.x + hit.width)) -
+                    ctx.owner_x - 1,
+                static_cast<std::int32_t>(std::ceil(hit.y + hit.height)) -
+                    ctx.owner_y - 1};
+            std::memcpy(static_cast<std::uint8_t*>(ctx.wireframe_icon) + 0x08,
+                &ctx.hover_rectangle, sizeof(ctx.hover_rectangle));
+        } else if (action == 6) {
+            if (InterlockedCompareExchange(
+                    &g_directional_shield_hover_rectangle_report_count,
+                    1, 0) == 0) {
+                char message[320]{};
+                std::snprintf(message, sizeof(message),
+                    "First directional-shield arc routed through WireframeIcon's native hover rectangle: facing=%d cursor=%ld,%ld ownerOrigin=%ld,%ld local=%ld,%ld,%ld,%ld",
+                    ctx.facing, static_cast<long>(ctx.cursor_x),
+                    static_cast<long>(ctx.cursor_y), static_cast<long>(ctx.owner_x),
+                    static_cast<long>(ctx.owner_y),
+                    static_cast<long>(ctx.hover_rectangle.left),
+                    static_cast<long>(ctx.hover_rectangle.top),
+                    static_cast<long>(ctx.hover_rectangle.right),
+                    static_cast<long>(ctx.hover_rectangle.bottom));
+                log_line(message);
+            }
+        }
+        return 0;
     };
-    std::memcpy(
-        static_cast<std::uint8_t*>(wireframe_icon) + 0x08,
-        &hover_rectangle, sizeof(hover_rectangle));
-
-    if (InterlockedCompareExchange(
-            &g_directional_shield_hover_rectangle_report_count,
-            1, 0) == 0) {
-        char message[320]{};
-        std::snprintf(
-            message, sizeof(message),
-            "First directional-shield arc routed through WireframeIcon's native hover rectangle: facing=%d cursor=%ld,%ld ownerOrigin=%ld,%ld local=%ld,%ld,%ld,%ld",
-            facing, static_cast<long>(cursor_x),
-            static_cast<long>(cursor_y), static_cast<long>(owner_x),
-            static_cast<long>(owner_y),
-            static_cast<long>(hover_rectangle.left),
-            static_cast<long>(hover_rectangle.top),
-            static_cast<long>(hover_rectangle.right),
-            static_cast<long>(hover_rectangle.bottom));
-        log_line(message);
-    }
-    return true;
+    return a2fo_rs_stage9_craft_apply_hover_rectangle(step, &context);
 }
 
 [[maybe_unused]] void __attribute__((fastcall)) wireframe_update_hook(
     void* wireframe_icon, void*) noexcept {
-    NativeRectangle saved_rectangle{};
-    const bool rectangle_overridden =
-        apply_directional_shield_hover_rectangle(
-            wireframe_icon, &saved_rectangle);
-    if (g_wireframe_update_original) {
-        a2fo_identity_call_thiscall_0(
-            g_wireframe_update_original, wireframe_icon);
-    }
-    if (rectangle_overridden &&
-        readable_range(wireframe_icon, 0x18)) {
-        std::memcpy(
-            static_cast<std::uint8_t*>(wireframe_icon) + 0x08,
-            &saved_rectangle, sizeof(saved_rectangle));
-    }
+    struct Context {
+        void* wireframe_icon;
+        NativeRectangle saved_rectangle{};
+        bool overridden = false;
+    } context{wireframe_icon};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) {
+            ctx.overridden = apply_directional_shield_hover_rectangle(
+                ctx.wireframe_icon, &ctx.saved_rectangle);
+        } else if (action == 1) {
+            if (g_wireframe_update_original)
+                a2fo_identity_call_thiscall_0(
+                    g_wireframe_update_original, ctx.wireframe_icon);
+        } else if (action == 2) {
+            return ctx.overridden && readable_range(ctx.wireframe_icon, 0x18);
+        } else if (action == 3) {
+            std::memcpy(static_cast<std::uint8_t*>(ctx.wireframe_icon) + 0x08,
+                &ctx.saved_rectangle, sizeof(ctx.saved_rectangle));
+        }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_wireframe_update(step, &context);
 }
 
 void reset_directional_shield_hover_components() noexcept {
-    bool presented = false;
-    for (const DirectionalShieldHoverComponent& component :
-         g_directional_shield_hover_components.components) {
-        presented = presented || component.presented != 0;
-    }
-    if (presented && readable_range(
-            at(g_armada, kTooltipManagerClearRva), 1)) {
-        a2fo_identity_call_thiscall_0(
-            at(g_armada, kTooltipManagerClearRva),
-            at(g_armada, kTooltipManagerObjectRva));
-    }
-    g_directional_shield_hover_components = {};
+    const auto step = +[](void*, std::uint32_t action,
+                          std::uintptr_t index) noexcept -> std::uintptr_t {
+        if (action == 0)
+            return g_directional_shield_hover_components.components[index].presented != 0;
+        if (action == 1 && readable_range(
+                at(g_armada, kTooltipManagerClearRva), 1)) {
+            a2fo_identity_call_thiscall_0(
+                at(g_armada, kTooltipManagerClearRva),
+                at(g_armada, kTooltipManagerObjectRva));
+        } else if (action == 2) g_directional_shield_hover_components = {};
+        return 0;
+    };
+    a2fo_rs_stage9_craft_reset_hover(step, nullptr,
+        g_directional_shield_hover_components.components.size());
 }
 
 void update_directional_shield_hover_components(
@@ -5159,7 +6131,9 @@ void update_directional_shield_hover_components(
         hover.owner = owner;
     }
 
-    for (std::size_t index = 0; index < hover.components.size(); ++index) {
+    auto visit = [&](std::uint32_t operation,
+                     std::size_t index) noexcept -> std::uint32_t {
+        if (operation == 0) return 1;
         DirectionalShieldHoverComponent& component =
             hover.components[index];
         component.vtable = at(g_armada, kStandardComponentVtableRva);
@@ -5184,14 +6158,23 @@ void update_directional_shield_hover_components(
                     static_cast<int>(index), true,
                     component.verbose_storage.data(),
                     component.verbose_storage.size())) {
-                reset_directional_shield_hover_components();
-                return;
+                return 0;
             }
             component.normal = component.normal_storage.data();
             component.verbose = component.verbose_storage.data();
             hover.current[index] = runtime.current[index];
             hover.maximum[index] = runtime.maximum[index];
         }
+        return 1;
+    };
+    const auto visit_step = +[](void* opaque, std::uint32_t operation,
+                          std::size_t index) noexcept -> std::uint32_t {
+        return (*static_cast<decltype(visit)*>(opaque))(operation, index);
+    };
+    if (!a2fo_rs_stage10_identity_each_visible(
+            hover.components.size(), visit_step, &visit)) {
+        reset_directional_shield_hover_components();
+        return;
     }
 
     const std::int32_t cursor_x = read_at<std::int32_t>(
@@ -5257,61 +6240,66 @@ void update_directional_shield_hover_components(
 
     void* update = g_standard_component_update_hook.gateway;
     if (!update) return;
-    for (std::size_t index = 0; index < hover.components.size(); ++index) {
-        if (static_cast<int>(index) == facing) continue;
-        a2fo_identity_call_thiscall_0(
-            update, &hover.components[index]);
-    }
-    if (facing >= 0 && facing < 4) {
-        DirectionalShieldHoverComponent& component =
-            hover.components[static_cast<std::size_t>(facing)];
-        a2fo_identity_call_thiscall_0(update, &component);
-        if (component.presented != 0 &&
-            InterlockedCompareExchange(
-                &g_directional_shield_hover_presented_report_count,
-                1, 0) == 0) {
+    struct UpdateContext { DirectionalShieldHoverComponents* hover; void* update; int facing; };
+    UpdateContext update_context{&hover, update, facing};
+    const auto step = +[](void* opaque, std::uint32_t action, std::uintptr_t index) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<UpdateContext*>(opaque);
+        if (action == 0) return 1;
+        DirectionalShieldHoverComponent& component = ctx.hover->components[index];
+        a2fo_identity_call_thiscall_0(ctx.update, &component);
+        if (action == 2 && component.presented != 0 &&
+            InterlockedCompareExchange(&g_directional_shield_hover_presented_report_count,
+                                       1, 0) == 0) {
             char message[256]{};
-            std::snprintf(
-                message, sizeof(message),
+            std::snprintf(message, sizeof(message),
                 "First directional-shield native hover component accepted by TooltipManager: facing=%d normal='%s'",
-                facing, component.normal ? component.normal : "");
+                ctx.facing, component.normal ? component.normal : "");
             log_line(message);
         }
-    }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_hover_update(step, &update_context, hover.components.size(), facing);
 }
 
 void reset_ammunition_hover_components() noexcept {
-    bool presented = false;
-    for (const DirectionalShieldHoverComponent& component :
-         g_ammunition_hover_components.components) {
-        presented = presented || component.presented != 0;
-    }
-    if (presented && readable_range(
-            at(g_armada, kTooltipManagerClearRva), 1)) {
-        a2fo_identity_call_thiscall_0(
-            at(g_armada, kTooltipManagerClearRva),
-            at(g_armada, kTooltipManagerObjectRva));
-    }
-    g_ammunition_hover_components = {};
+    const auto step = +[](void*, std::uint32_t action,
+                          std::uintptr_t index) noexcept -> std::uintptr_t {
+        if (action == 0)
+            return g_ammunition_hover_components.components[index].presented != 0;
+        if (action == 1 && readable_range(
+                at(g_armada, kTooltipManagerClearRva), 1)) {
+            a2fo_identity_call_thiscall_0(
+                at(g_armada, kTooltipManagerClearRva),
+                at(g_armada, kTooltipManagerObjectRva));
+        } else if (action == 2) g_ammunition_hover_components = {};
+        return 0;
+    };
+    a2fo_rs_stage9_craft_reset_hover(step, nullptr,
+        g_ammunition_hover_components.components.size());
 }
 
 int ammunition_store_at(
     const AmmunitionTooltipRuntime& runtime,
     float cursor_x, float cursor_y) noexcept {
     if (!std::isfinite(cursor_x) || !std::isfinite(cursor_y)) return -1;
-    for (std::size_t index = 0; index < runtime.hit_rectangles.size();
-         ++index) {
-        if (!runtime.visible[index]) continue;
-        const FloatRectangle& rectangle = runtime.hit_rectangles[index];
-        if (usable_float_rectangle(rectangle) &&
-            cursor_x >= rectangle.x &&
-            cursor_x <= rectangle.x + rectangle.width &&
-            cursor_y >= rectangle.y &&
-            cursor_y <= rectangle.y + rectangle.height) {
-            return static_cast<int>(index);
-        }
-    }
-    return -1;
+    struct Context {
+        const AmmunitionTooltipRuntime& runtime;
+        float cursor_x;
+        float cursor_y;
+    } context{runtime, cursor_x, cursor_y};
+    const auto step = +[](void* opaque, std::uint32_t,
+                          std::uintptr_t index) noexcept -> std::uintptr_t {
+        const auto& ctx = *static_cast<Context*>(opaque);
+        if (!ctx.runtime.visible[index]) return 0;
+        const FloatRectangle& rectangle = ctx.runtime.hit_rectangles[index];
+        return usable_float_rectangle(rectangle) &&
+            ctx.cursor_x >= rectangle.x &&
+            ctx.cursor_x <= rectangle.x + rectangle.width &&
+            ctx.cursor_y >= rectangle.y &&
+            ctx.cursor_y <= rectangle.y + rectangle.height;
+    };
+    return a2fo_rs_stage9_craft_find_hover_row(step, &context,
+        runtime.hit_rectangles.size());
 }
 
 void update_ammunition_hover_components(void* info_display) noexcept {
@@ -5355,8 +6343,9 @@ void update_ammunition_hover_components(void* info_display) noexcept {
         hover.owner = owner;
     }
 
-    for (std::size_t index = 0; index < hover.components.size(); ++index) {
-        if (!runtime.visible[index]) continue;
+    auto visit = [&](std::uint32_t operation,
+                     std::size_t index) noexcept -> std::uint32_t {
+        if (operation == 0) return runtime.visible[index];
         DirectionalShieldHoverComponent& component = hover.components[index];
         component.vtable = at(g_armada, kStandardComponentVtableRva);
         component.owner = owner;
@@ -5378,14 +6367,23 @@ void update_ammunition_hover_components(void* info_display) noexcept {
                 !format_ammunition_tooltip(
                     index, true, component.verbose_storage.data(),
                     component.verbose_storage.size())) {
-                reset_ammunition_hover_components();
-                return;
+                return 0;
             }
             component.normal = component.normal_storage.data();
             component.verbose = component.verbose_storage.data();
             hover.current[index] = runtime.current[index];
             hover.maximum[index] = runtime.maximum[index];
         }
+        return 1;
+    };
+    const auto visit_step = +[](void* opaque, std::uint32_t operation,
+                          std::size_t index) noexcept -> std::uint32_t {
+        return (*static_cast<decltype(visit)*>(opaque))(operation, index);
+    };
+    if (!a2fo_rs_stage10_identity_each_visible(
+            hover.components.size(), visit_step, &visit)) {
+        reset_ammunition_hover_components();
+        return;
     }
 
     const std::int32_t cursor_x = read_at<std::int32_t>(
@@ -5423,60 +6421,69 @@ void update_ammunition_hover_components(void* info_display) noexcept {
 
     void* update = g_standard_component_update_hook.gateway;
     if (!update) return;
-    for (std::size_t index = 0; index < hover.components.size(); ++index) {
-        if (!runtime.visible[index] ||
-            static_cast<int>(index) == selected) continue;
-        a2fo_identity_call_thiscall_0(update, &hover.components[index]);
-    }
-    if (selected >= 0 && selected < 2) {
-        DirectionalShieldHoverComponent& component =
-            hover.components[static_cast<std::size_t>(selected)];
-        a2fo_identity_call_thiscall_0(update, &component);
-        if (component.presented != 0 &&
-            InterlockedCompareExchange(
-                &g_ammunition_hover_presented_report_count, 1, 0) == 0) {
+    struct UpdateContext {
+        AmmunitionHoverComponents* hover;
+        const AmmunitionTooltipRuntime* runtime;
+        void* update;
+        int selected;
+    } update_context{&hover, &runtime, update, selected};
+    const auto step = +[](void* opaque, std::uint32_t action, std::uintptr_t index) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<UpdateContext*>(opaque);
+        if (action == 0) return ctx.runtime->visible[index];
+        DirectionalShieldHoverComponent& component = ctx.hover->components[index];
+        a2fo_identity_call_thiscall_0(ctx.update, &component);
+        if (action == 2 && component.presented != 0 &&
+            InterlockedCompareExchange(&g_ammunition_hover_presented_report_count, 1, 0) == 0) {
             char message[256]{};
-            std::snprintf(
-                message, sizeof(message),
+            std::snprintf(message, sizeof(message),
                 "First ammunition native hover component accepted by TooltipManager: store=%d normal='%s'",
-                selected, component.normal ? component.normal : "");
+                ctx.selected, component.normal ? component.normal : "");
             log_line(message);
         }
-    }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_hover_update(step, &update_context, hover.components.size(), selected);
 }
 
 void reset_selected_status_hover_components() noexcept {
-    bool presented = false;
-    for (const DirectionalShieldHoverComponent& component :
-         g_selected_status_hover_components.components) {
-        presented = presented || component.presented != 0;
-    }
-    if (presented && readable_range(
-            at(g_armada, kTooltipManagerClearRva), 1)) {
-        a2fo_identity_call_thiscall_0(
-            at(g_armada, kTooltipManagerClearRva),
-            at(g_armada, kTooltipManagerObjectRva));
-    }
-    g_selected_status_hover_components = {};
+    const auto step = +[](void*, std::uint32_t action,
+                          std::uintptr_t index) noexcept -> std::uintptr_t {
+        if (action == 0)
+            return g_selected_status_hover_components.components[index].presented != 0;
+        if (action == 1 && readable_range(
+                at(g_armada, kTooltipManagerClearRva), 1)) {
+            a2fo_identity_call_thiscall_0(
+                at(g_armada, kTooltipManagerClearRva),
+                at(g_armada, kTooltipManagerObjectRva));
+        } else if (action == 2) g_selected_status_hover_components = {};
+        return 0;
+    };
+    a2fo_rs_stage9_craft_reset_hover(step, nullptr,
+        g_selected_status_hover_components.components.size());
 }
 
 int selected_status_at(
     const SelectedStatusTooltipRuntime& runtime,
     float cursor_x, float cursor_y) noexcept {
     if (!std::isfinite(cursor_x) || !std::isfinite(cursor_y)) return -1;
-    for (std::size_t index = 0; index < runtime.hit_rectangles.size();
-         ++index) {
-        if (!runtime.visible[index]) continue;
-        const FloatRectangle& rectangle = runtime.hit_rectangles[index];
-        if (usable_float_rectangle(rectangle) &&
-            cursor_x >= rectangle.x &&
-            cursor_x <= rectangle.x + rectangle.width &&
-            cursor_y >= rectangle.y &&
-            cursor_y <= rectangle.y + rectangle.height) {
-            return static_cast<int>(index);
-        }
-    }
-    return -1;
+    struct Context {
+        const SelectedStatusTooltipRuntime& runtime;
+        float cursor_x;
+        float cursor_y;
+    } context{runtime, cursor_x, cursor_y};
+    const auto step = +[](void* opaque, std::uint32_t,
+                          std::uintptr_t index) noexcept -> std::uintptr_t {
+        const auto& ctx = *static_cast<Context*>(opaque);
+        if (!ctx.runtime.visible[index]) return 0;
+        const FloatRectangle& rectangle = ctx.runtime.hit_rectangles[index];
+        return usable_float_rectangle(rectangle) &&
+            ctx.cursor_x >= rectangle.x &&
+            ctx.cursor_x <= rectangle.x + rectangle.width &&
+            ctx.cursor_y >= rectangle.y &&
+            ctx.cursor_y <= rectangle.y + rectangle.height;
+    };
+    return a2fo_rs_stage9_craft_find_hover_row(step, &context,
+        runtime.hit_rectangles.size());
 }
 
 void update_selected_status_hover_components(void* info_display) noexcept {
@@ -5524,8 +6531,9 @@ void update_selected_status_hover_components(void* info_display) noexcept {
         hover.visible = runtime.visible;
     }
 
-    for (std::size_t index = 0; index < hover.components.size(); ++index) {
-        if (!runtime.visible[index]) continue;
+    auto visit = [&](std::uint32_t operation,
+                     std::size_t index) noexcept -> std::uint32_t {
+        if (operation == 0) return runtime.visible[index];
         DirectionalShieldHoverComponent& component = hover.components[index];
         component.vtable = at(g_armada, kStandardComponentVtableRva);
         component.owner = owner;
@@ -5547,14 +6555,23 @@ void update_selected_status_hover_components(void* info_display) noexcept {
                 !format_selected_status_tooltip(
                     index, true, component.verbose_storage.data(),
                     component.verbose_storage.size())) {
-                reset_selected_status_hover_components();
-                return;
+                return 0;
             }
             component.normal = component.normal_storage.data();
             component.verbose = component.verbose_storage.data();
             hover.current[index] = runtime.current[index];
             hover.maximum[index] = runtime.maximum[index];
         }
+        return 1;
+    };
+    const auto visit_step = +[](void* opaque, std::uint32_t operation,
+                          std::size_t index) noexcept -> std::uint32_t {
+        return (*static_cast<decltype(visit)*>(opaque))(operation, index);
+    };
+    if (!a2fo_rs_stage10_identity_each_visible(
+            hover.components.size(), visit_step, &visit)) {
+        reset_selected_status_hover_components();
+        return;
     }
 
     const std::int32_t cursor_x = read_at<std::int32_t>(
@@ -5569,27 +6586,29 @@ void update_selected_status_hover_components(void* info_display) noexcept {
 
     void* update = g_standard_component_update_hook.gateway;
     if (!update) return;
-    for (std::size_t index = 0; index < hover.components.size(); ++index) {
-        if (!runtime.visible[index] ||
-            static_cast<int>(index) == selected) continue;
-        a2fo_identity_call_thiscall_0(update, &hover.components[index]);
-    }
-    if (selected >= 0 && selected < 2) {
-        DirectionalShieldHoverComponent& component =
-            hover.components[static_cast<std::size_t>(selected)];
-        a2fo_identity_call_thiscall_0(update, &component);
-        if (component.presented != 0 &&
-            InterlockedCompareExchange(
-                &g_selected_status_hover_presented_report_count,
-                1, 0) == 0) {
+    struct UpdateContext {
+        SelectedStatusHoverComponents* hover;
+        const SelectedStatusTooltipRuntime* runtime;
+        void* update;
+        int selected;
+    } update_context{&hover, &runtime, update, selected};
+    const auto step = +[](void* opaque, std::uint32_t action, std::uintptr_t index) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<UpdateContext*>(opaque);
+        if (action == 0) return ctx.runtime->visible[index];
+        DirectionalShieldHoverComponent& component = ctx.hover->components[index];
+        a2fo_identity_call_thiscall_0(ctx.update, &component);
+        if (action == 2 && component.presented != 0 &&
+            InterlockedCompareExchange(&g_selected_status_hover_presented_report_count,
+                                       1, 0) == 0) {
             char message[256]{};
-            std::snprintf(
-                message, sizeof(message),
+            std::snprintf(message, sizeof(message),
                 "First selected-status tooltip accepted: status=%d normal='%s'",
-                selected, component.normal ? component.normal : "");
+                ctx.selected, component.normal ? component.normal : "");
             log_line(message);
         }
-    }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_hover_update(step, &update_context, hover.components.size(), selected);
 }
 
 void __attribute__((fastcall)) standard_component_update_hook(
@@ -5602,118 +6621,144 @@ void __attribute__((fastcall)) standard_component_update_hook(
 
 void update_directional_shield_native_tooltip_phase(
     void* info_display) noexcept {
-    if (g_directional_shield_wireframe_tooltips_available) return;
-    const DirectionalShieldTooltipRuntime& runtime =
-        g_directional_shield_tooltip;
-    if (!g_runtime_ready || !info_display || !runtime.active ||
-        runtime.info_display != info_display || !runtime.craft ||
-        read_at<void*>(info_display,
-                       kInfoDisplaySelectedCraftOffset, nullptr) !=
-            runtime.craft) {
-        clear_directional_shield_native_tooltip();
-        return;
-    }
-
-    const std::int32_t cursor_x = read_at<std::int32_t>(
-        at(g_armada, kCursorXRva), 0,
-        std::numeric_limits<std::int32_t>::min());
-    const std::int32_t cursor_y = read_at<std::int32_t>(
-        at(g_armada, kCursorYRva), 0,
-        std::numeric_limits<std::int32_t>::min());
-    const int facing =
-        a2fo::craft_identity::directional_shield_segment_at(
-            runtime.hit_rectangles,
-            static_cast<float>(cursor_x),
-            static_cast<float>(cursor_y));
-    void* component = read_at<void*>(
-        info_display, kInfoDisplayWireframeOffset, nullptr);
-    if (facing < 0 || facing >= 4 || !component) {
-        clear_directional_shield_native_tooltip();
-        return;
-    }
-    if (!configure_directional_shield_native_tooltip_provider(facing)) {
-        clear_directional_shield_native_tooltip();
-        return;
-    }
-    DirectionalShieldNativeTooltipProvider& provider =
-        g_directional_shield_native_tooltip_provider;
-    set_standard_component_text(
-        component, kStandardComponentSetTooltipTextRva, provider.normal);
-    set_standard_component_text(
-        component, kStandardComponentSetVerboseTooltipTextRva,
-        provider.verbose);
-    present_directional_shield_native_tooltip(
-        component, runtime.craft, facing);
+    struct Context {
+        void* info_display;
+        int facing = -1;
+        void* component = nullptr;
+    } context{info_display};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        const auto& runtime = g_directional_shield_tooltip;
+        if (action == 0) return !g_directional_shield_wireframe_tooltips_available;
+        if (action == 1) {
+            return g_runtime_ready && ctx.info_display && runtime.active &&
+                runtime.info_display == ctx.info_display && runtime.craft &&
+                read_at<void*>(ctx.info_display,
+                    kInfoDisplaySelectedCraftOffset, nullptr) == runtime.craft;
+        }
+        if (action == 2) clear_directional_shield_native_tooltip();
+        else if (action == 3) {
+            const std::int32_t cursor_x = read_at<std::int32_t>(
+                at(g_armada, kCursorXRva), 0,
+                std::numeric_limits<std::int32_t>::min());
+            const std::int32_t cursor_y = read_at<std::int32_t>(
+                at(g_armada, kCursorYRva), 0,
+                std::numeric_limits<std::int32_t>::min());
+            ctx.facing = a2fo::craft_identity::directional_shield_segment_at(
+                runtime.hit_rectangles,
+                static_cast<float>(cursor_x), static_cast<float>(cursor_y));
+            ctx.component = read_at<void*>(
+                ctx.info_display, kInfoDisplayWireframeOffset, nullptr);
+        } else if (action == 4) {
+            return ctx.facing >= 0 && ctx.facing < 4 && ctx.component;
+        } else if (action == 5) {
+            return configure_directional_shield_native_tooltip_provider(
+                ctx.facing);
+        } else if (action == 6) {
+            set_standard_component_text(ctx.component,
+                kStandardComponentSetTooltipTextRva,
+                g_directional_shield_native_tooltip_provider.normal);
+        } else if (action == 7) {
+            set_standard_component_text(ctx.component,
+                kStandardComponentSetVerboseTooltipTextRva,
+                g_directional_shield_native_tooltip_provider.verbose);
+        } else if (action == 8) {
+            present_directional_shield_native_tooltip(
+                ctx.component, runtime.craft, ctx.facing);
+        }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_native_tip_phase(step, &context);
 }
 
 [[maybe_unused]] std::uintptr_t __attribute__((fastcall)) tooltip_manager_show_hook(
     void* tooltip_manager, void*, std::uintptr_t elapsed,
     void* provider, void* owner) noexcept {
-    const DirectionalShieldTooltipRuntime& runtime =
-        g_directional_shield_tooltip;
-    int facing = -1;
-    if (tooltip_manager == at(g_armada, kTooltipManagerObjectRva) &&
-        runtime.active && runtime.info_display && runtime.craft &&
-        read_at<void*>(runtime.info_display,
-                       kInfoDisplaySelectedCraftOffset, nullptr) ==
-            runtime.craft) {
-        const std::int32_t cursor_x = read_at<std::int32_t>(
-            at(g_armada, kCursorXRva), 0,
-            std::numeric_limits<std::int32_t>::min());
-        const std::int32_t cursor_y = read_at<std::int32_t>(
-            at(g_armada, kCursorYRva), 0,
-            std::numeric_limits<std::int32_t>::min());
-        facing = a2fo::craft_identity::directional_shield_segment_at(
-            runtime.hit_rectangles,
-            static_cast<float>(cursor_x),
-            static_cast<float>(cursor_y));
-        if (facing >= 0 && facing < 4 &&
-            configure_directional_shield_native_tooltip_provider(facing)) {
-            provider = &g_directional_shield_native_tooltip_provider;
+    struct Context {
+        void* tooltip_manager;
+        std::uintptr_t elapsed;
+        void* provider;
+        void* owner;
+        int facing = -1;
+    } context{tooltip_manager, elapsed, provider, owner};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        const auto& runtime = g_directional_shield_tooltip;
+        if (action == 0) {
+            return ctx.tooltip_manager == at(g_armada, kTooltipManagerObjectRva) &&
+                runtime.active && runtime.info_display && runtime.craft &&
+                read_at<void*>(runtime.info_display,
+                    kInfoDisplaySelectedCraftOffset, nullptr) == runtime.craft;
+        }
+        if (action == 1) {
+            const std::int32_t cursor_x = read_at<std::int32_t>(
+                at(g_armada, kCursorXRva), 0,
+                std::numeric_limits<std::int32_t>::min());
+            const std::int32_t cursor_y = read_at<std::int32_t>(
+                at(g_armada, kCursorYRva), 0,
+                std::numeric_limits<std::int32_t>::min());
+            ctx.facing = a2fo::craft_identity::directional_shield_segment_at(
+                runtime.hit_rectangles,
+                static_cast<float>(cursor_x), static_cast<float>(cursor_y));
+        } else if (action == 2) {
+            return ctx.facing >= 0 && ctx.facing < 4;
+        } else if (action == 3) {
+            return configure_directional_shield_native_tooltip_provider(ctx.facing);
+        } else if (action == 4) {
+            ctx.provider = &g_directional_shield_native_tooltip_provider;
             if (InterlockedCompareExchange(
                     &g_directional_shield_show_substitution_report_count,
                     1, 0) == 0) {
                 char message[256]{};
-                std::snprintf(
-                    message, sizeof(message),
+                std::snprintf(message, sizeof(message),
                     "First stock tooltip request replaced at creation: facing=%d provider=%p normal='%s'",
-                    facing, provider,
+                    ctx.facing, ctx.provider,
                     g_directional_shield_native_tooltip_provider.normal);
                 log_line(message);
             }
+        } else if (action == 5) {
+            return g_tooltip_manager_show_hook.gateway != nullptr;
+        } else if (action == 6) {
+            return a2fo_identity_call_thiscall_3(
+                g_tooltip_manager_show_hook.gateway, ctx.tooltip_manager,
+                ctx.elapsed, reinterpret_cast<std::uintptr_t>(ctx.provider),
+                reinterpret_cast<std::uintptr_t>(ctx.owner));
         }
-    }
-    if (!g_tooltip_manager_show_hook.gateway) return 0;
-    return a2fo_identity_call_thiscall_3(
-        g_tooltip_manager_show_hook.gateway, tooltip_manager,
-        elapsed, reinterpret_cast<std::uintptr_t>(provider),
-        reinterpret_cast<std::uintptr_t>(owner));
+        return 0;
+    };
+    return a2fo_rs_stage9_craft_tooltip_show(step, &context);
 }
 
 [[maybe_unused]] void __attribute__((fastcall)) tooltip_manager_render_hook(
     void* tooltip_manager, void*) noexcept {
-    const DirectionalShieldTooltipRuntime& runtime =
-        g_directional_shield_tooltip;
-    if (tooltip_manager == at(g_armada, kTooltipManagerObjectRva) &&
-        runtime.active && runtime.info_display) {
-        // Acquire/update the arc tooltip immediately before Armada's own
-        // top-level tooltip render. This is the global screen-space context;
-        // drawing it from InfoDisplay leaves the tooltip inside that panel's
-        // origin and scissor and Fleet Operations clips it away.
-        update_directional_shield_native_tooltip_phase(
-            runtime.info_display);
-    }
-    if (g_tooltip_manager_render_hook.gateway) {
-        a2fo_identity_call_thiscall_0(
-            g_tooltip_manager_render_hook.gateway, tooltip_manager);
-    }
-    if (g_directional_shield_native_tooltip.presented &&
-        InterlockedCompareExchange(
-            &g_directional_shield_native_render_report_count,
-            1, 0) == 0) {
-        log_line(
-            "First directional-shield tooltip passed through Armada's top-level framed render stage");
-    }
+    struct Context { void* tooltip_manager; } context{tooltip_manager};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        const auto& runtime = g_directional_shield_tooltip;
+        if (action == 0) return ctx.tooltip_manager ==
+            at(g_armada, kTooltipManagerObjectRva) && runtime.active &&
+            runtime.info_display;
+        if (action == 1) {
+            // Native manager owns the global framing, placement and render pass.
+            update_directional_shield_native_tooltip_phase(runtime.info_display);
+        } else if (action == 2) {
+            return g_tooltip_manager_render_hook.gateway != nullptr;
+        } else if (action == 3) {
+            a2fo_identity_call_thiscall_0(
+                g_tooltip_manager_render_hook.gateway, ctx.tooltip_manager);
+        } else if (action == 4) {
+            if (g_directional_shield_native_tooltip.presented &&
+                InterlockedCompareExchange(
+                    &g_directional_shield_native_render_report_count,
+                    1, 0) == 0)
+                log_line("First directional-shield tooltip passed through Armada's top-level framed render stage");
+        }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_tooltip_render(step, &context);
 }
 
 std::uintptr_t __attribute__((fastcall)) selected_info_update_hook(
@@ -5755,26 +6800,48 @@ SelectedPanelTextAnchor selected_panel_text_anchor(
     const RawRectangle* class_rectangle = builder
         ? (ui.builder_class_rectangle_found ? &ui.builder_class_rectangle : nullptr)
         : (ui.single_class_rectangle_found ? &ui.single_class_rectangle : nullptr);
-    auto result = a2fo::craft_identity::resolve_selected_panel_anchor(
+    // Keep the original native argument expressions together. The three
+    // candidates are fully captured before Rust selects/rebases an anchor.
+    std::array<a2fo::craft_identity::SelectedPanelAnchorCandidate, 3> native{};
+    const RawRectangle* configured_captain = nullptr;
+    const auto capture = [&](const a2fo::craft_identity::SelectedPanelAnchorCandidate& captain,
+                             const RawRectangle* configured,
+                             const std::array<a2fo::craft_identity::SelectedPanelAnchorCandidate, 2>& fallbacks) {
+        native[0] = captain; configured_captain = configured;
+        native[1] = fallbacks[0]; native[2] = fallbacks[1];
+    };
+    capture(
         candidate(kInfoDisplayCaptainTextOffset, nullptr),
         ui.captain_rectangle_found ? &ui.captain_rectangle : nullptr,
         {{candidate(builder ? kInfoDisplayBuilderNameTextOffset
                             : kInfoDisplayNameTextOffsets[0], name_rectangle),
           candidate(builder ? kInfoDisplayBuilderClassTextOffset
                             : kInfoDisplayClassTextOffset, class_rectangle)}});
-    if (result.component) return result;
-    // Hiding the captain rectangle must not hide independently configured
-    // ammunition/registry/XP. The native captain still supplies font/display
-    // state even when its own rectangle is empty.
-    void* captain = read_at<void*>(info_display, kInfoDisplayCaptainTextOffset, nullptr);
-    if (captain && ui.captain_rectangle_found) {
-        const auto& raw = ui.captain_rectangle;
-        const auto offset = read_at<std::int32_t>(info_display, 0x1f0, 0);
-        return {captain, {raw.x, raw.y - offset,
-            raw.x + std::max<std::int32_t>(2, raw.width) - 1,
-            raw.y - offset + std::max<std::int32_t>(2, raw.height) - 1}};
-    }
-    return {};
+    static_assert(sizeof(RawRectangle) == 4 * sizeof(std::int32_t), "anchor POD rectangle");
+    static_assert(sizeof(NativeRectangle) == 4 * sizeof(std::int32_t), "anchor POD output");
+    const auto pod = [](const a2fo::craft_identity::SelectedPanelAnchorCandidate& value) {
+        return A2foRsAnchorCandidate{reinterpret_cast<std::uintptr_t>(value.component),
+            {value.rectangle.left, value.rectangle.top, value.rectangle.right, value.rectangle.bottom},
+            value.configured_rectangle ? &value.configured_rectangle->x : nullptr};
+    };
+    const auto captain = pod(native[0]);
+    const A2foRsAnchorCandidate fallbacks[]{pod(native[1]), pod(native[2])};
+    SelectedPanelTextAnchor result{};
+    result.component = reinterpret_cast<void*>(a2fo_rs_stage9_craft_anchor(&captain,
+        configured_captain ? &configured_captain->x : nullptr, fallbacks, &result.captain_rectangle.left));
+    struct Context { SelectedPanelTextAnchor& result; void* captain = nullptr; const RawRectangle* raw = nullptr; std::int32_t offset = 0; } c{result};
+    craft_sprite_policy(3, c, [&](Context& ctx, std::uint32_t op, std::uintptr_t) -> std::uintptr_t {
+        switch (op) {
+        case 0: return ctx.result.component != nullptr;
+        case 1: ctx.captain = read_at<void*>(info_display, kInfoDisplayCaptainTextOffset, nullptr); return 0;
+        case 2: return ctx.captain != nullptr;
+        case 3: return ui.captain_rectangle_found;
+        case 4: ctx.raw = &ui.captain_rectangle; ctx.offset = read_at<std::int32_t>(info_display, 0x1f0, 0); return 0;
+        case 5: ctx.result.component = ctx.captain; a2fo_rs_stage9_craft_anchor_fallback(&ctx.raw->x, ctx.offset, &ctx.result.captain_rectangle.left); return 0;
+        default: return 0;
+        }
+    });
+    return result;
 }
 
 void render_selected_info_panel(
@@ -5791,173 +6858,139 @@ void render_selected_info_panel(
     g_ammunition_tooltip = {};
     g_selected_status_tooltip = {};
 
-    std::array<TextColourOverride, 2> ship_name_colour_overrides{};
-    if (g_runtime_ready && info_display) {
-        void* parameter_db = gui_parameter_db();
-        if (!g_ui_configuration.loaded ||
-            g_ui_configuration.parameter_db != parameter_db) {
-            refresh_ui_configuration(parameter_db);
-        }
-        if (g_ui_configuration.ship_name_colour_found) {
-            bool applied = false;
-            for (std::size_t index = 0;
-                 index < kInfoDisplayNameTextOffsets.size(); ++index) {
-                ship_name_colour_overrides[index] =
-                    override_text_component_colour(
-                        info_display, kInfoDisplayNameTextOffsets[index],
-                        g_ui_configuration.ship_name_colour);
-                applied = applied ||
-                    ship_name_colour_overrides[index].address != nullptr;
+    struct RenderContext {
+        void* info_display;
+        void* native_renderer;
+        SelectedPanelKind panel_kind;
+        std::array<TextColourOverride, 2> overrides{};
+        bool name_colour_applied = false;
+        void* craft = nullptr;
+        SelectedPanelTextAnchor anchor{};
+        void* text_component = nullptr;
+        NativeRectangle captain_rectangle{}, registry_rectangle{};
+        Colour native_colour{}, shared_colour{}, captain_colour{}, registry_colour{};
+        const CraftIdentity* identity = nullptr;
+        bool captain_drawn = false, registry_drawn = false;
+    } render{info_display, native_renderer, panel_kind};
+    const auto step = +[](void* opaque, std::uint32_t action, std::uintptr_t index) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<RenderContext*>(opaque);
+        if (action == 1 || action == 8) return g_runtime_ready && ctx.info_display;
+        if (action == 2 || action == 11) {
+            void* parameter_db = gui_parameter_db();
+            if (!g_ui_configuration.loaded || g_ui_configuration.parameter_db != parameter_db)
+                refresh_ui_configuration(parameter_db);
+        } else if (action == 3) return g_ui_configuration.ship_name_colour_found;
+        else if (action == 4) {
+            ctx.overrides[index] = override_text_component_colour(
+                ctx.info_display, kInfoDisplayNameTextOffsets[index],
+                g_ui_configuration.ship_name_colour);
+            ctx.name_colour_applied = ctx.name_colour_applied || ctx.overrides[index].address != nullptr;
+        } else if (action == 5) {
+            if (ctx.name_colour_applied && InterlockedCompareExchange(
+                    &g_ship_name_colour_report_count, 1, 0) == 0)
+                log_line("shipNameColor applied to the native selected ship-name text components");
+        } else if (action == 6) {
+            if (ctx.native_renderer)
+                a2fo_identity_call_thiscall_0(ctx.native_renderer, ctx.info_display);
+        } else if (action == 7) restore_text_component_colour(ctx.overrides[index]);
+        else if (action == 9) {
+            ctx.craft = read_at<void*>(ctx.info_display, kInfoDisplaySelectedCraftOffset, nullptr);
+            return ctx.craft != nullptr;
+        } else if (action == 10) {
+            reset_directional_shield_hover_components();
+            reset_ammunition_hover_components();
+            reset_selected_status_hover_components();
+            update_directional_shield_component_tooltip(ctx.info_display);
+        } else if (action == 12) {
+            ctx.anchor = selected_panel_text_anchor(ctx.info_display, ctx.panel_kind);
+            if (!ctx.anchor.component || !usable_native_rectangle(ctx.anchor.captain_rectangle))
+                return 0;
+            ctx.text_component = ctx.anchor.component;
+            ctx.captain_rectangle = ctx.anchor.captain_rectangle;
+            return 1;
+        } else if (action == 13) {
+            update_directional_shield_hover_components(ctx.info_display);
+            update_ammunition_hover_components(ctx.info_display);
+            reset_selected_status_hover_components();
+            update_directional_shield_component_tooltip(ctx.info_display);
+        } else if (action == 14) {
+            if (ctx.panel_kind == SelectedPanelKind::builder &&
+                InterlockedCompareExchange(&g_builder_panel_anchor_report_count, 1, 0) == 0) {
+                char message[288]{};
+                std::snprintf(message, sizeof(message),
+                    "Tall producer selected-panel extension anchor active: component=%p captain-relative rectangle=%ld,%ld,%ld,%ld",
+                    ctx.text_component,
+                    static_cast<long>(ctx.captain_rectangle.left),
+                    static_cast<long>(ctx.captain_rectangle.top),
+                    static_cast<long>(ctx.captain_rectangle.right),
+                    static_cast<long>(ctx.captain_rectangle.bottom));
+                log_line(message);
             }
-            if (applied && InterlockedCompareExchange(
-                    &g_ship_name_colour_report_count, 1, 0) == 0) {
-                log_line(
-                    "shipNameColor applied to the native selected ship-name text components");
+            ctx.native_colour = text_component_colour(ctx.text_component);
+            ctx.shared_colour = g_ui_configuration.shared_text_colour_found
+                ? g_ui_configuration.shared_text_colour : ctx.native_colour;
+            ctx.captain_colour = g_ui_configuration.captain_colour_found
+                ? g_ui_configuration.captain_colour : ctx.shared_colour;
+            ctx.registry_colour = g_ui_configuration.registry_colour_found
+                ? g_ui_configuration.registry_colour : ctx.shared_colour;
+        } else if (action == 15) draw_ammunition_rows(
+            ctx.info_display, ctx.craft, ctx.text_component,
+            ctx.captain_rectangle, ctx.shared_colour);
+        else if (action == 16) draw_directional_shield_rows(
+            ctx.info_display, ctx.craft, ctx.text_component,
+            ctx.captain_rectangle, ctx.shared_colour);
+        else if (action == 17) draw_selected_status_bars(
+            ctx.info_display, ctx.craft, ctx.text_component, ctx.captain_rectangle);
+        else if (action == 18) update_ammunition_hover_components(ctx.info_display);
+        else if (action == 19) update_selected_status_hover_components(ctx.info_display);
+        else if (action == 20) update_directional_shield_hover_components(ctx.info_display);
+        else if (action == 21) update_directional_shield_component_tooltip(ctx.info_display);
+        else if (action == 22) {
+            ctx.identity = ensure_craft_identity(ctx.craft);
+            return ctx.identity != nullptr;
+        } else if (action == 23 || action == 28) {
+            draw_directional_shield_hover_tooltip(ctx.info_display, ctx.craft,
+                ctx.text_component, ctx.captain_rectangle, ctx.shared_colour);
+        } else if (action == 24) {
+            ctx.registry_rectangle = ctx.captain_rectangle;
+            if (g_ui_configuration.captain_rectangle_found &&
+                g_ui_configuration.registry_rectangle_found)
+                ctx.registry_rectangle = translated_rectangle(ctx.captain_rectangle,
+                    g_ui_configuration.captain_rectangle, g_ui_configuration.registry_rectangle);
+        } else if (action == 25) {
+            if (g_ui_configuration.captain_rectangle_found ||
+                panel_style(PanelElement::CaptainText).area_found)
+                ctx.captain_drawn = draw_identity_text(ctx.identity->captain_name,
+                    panel_rectangle(PanelElement::CaptainText, ctx.captain_rectangle),
+                    panel_colour(PanelElement::CaptainText, ctx.captain_colour), ctx.text_component);
+        } else if (action == 26) {
+            if ((g_ui_configuration.captain_rectangle_found &&
+                 g_ui_configuration.registry_rectangle_found) ||
+                panel_style(PanelElement::RegistryText).area_found)
+                ctx.registry_drawn = draw_identity_text(ctx.identity->craft_registry,
+                    panel_rectangle(PanelElement::RegistryText, ctx.registry_rectangle),
+                    panel_colour(PanelElement::RegistryText, ctx.registry_colour), ctx.text_component);
+        } else if (action == 27) {
+            if ((ctx.captain_drawn || ctx.registry_drawn) &&
+                InterlockedCompareExchange(&g_draw_report_count, 1, 0) == 0) {
+                char message[320]{};
+                std::snprintf(message, sizeof(message),
+                    "First selected identity draw submitted on %s panel for native name row %ld: "
+                    "captain=%s at %ld,%ld; registry=%s at %ld,%ld",
+                    ctx.panel_kind == SelectedPanelKind::builder ? "builder" : "single",
+                    static_cast<long>(ctx.identity->craft_name_index),
+                    ctx.captain_drawn ? "yes" : "no",
+                    static_cast<long>(ctx.captain_rectangle.left),
+                    static_cast<long>(ctx.captain_rectangle.top),
+                    ctx.registry_drawn ? "yes" : "no",
+                    static_cast<long>(ctx.registry_rectangle.left),
+                    static_cast<long>(ctx.registry_rectangle.top));
+                log_line(message);
             }
         }
-    }
-    if (native_renderer) {
-        a2fo_identity_call_thiscall_0(native_renderer, info_display);
-    }
-    for (auto iterator = ship_name_colour_overrides.rbegin();
-         iterator != ship_name_colour_overrides.rend(); ++iterator) {
-        restore_text_component_colour(*iterator);
-    }
-    if (!g_runtime_ready || !info_display) return;
-
-    // The selected-info render pass resolves the one selected object into
-    // +0x1e8 before drawing its middle/tall panel. Multiple selection and no
-    // selection both leave this null, so identities never leak back into
-    // SDInfoBar mouseover. Drawing here also retains the selected panel's live
-    // display/scissor state; the later generic info-display pass has already
-    // closed that context.
-    void* craft = read_at<void*>(
-        info_display, kInfoDisplaySelectedCraftOffset, nullptr);
-    if (!craft) {
-        reset_directional_shield_hover_components();
-        reset_ammunition_hover_components();
-        reset_selected_status_hover_components();
-        update_directional_shield_component_tooltip(info_display);
-        return;
-    }
-
-    void* parameter_db = gui_parameter_db();
-    if (!g_ui_configuration.loaded ||
-        g_ui_configuration.parameter_db != parameter_db) {
-        refresh_ui_configuration(parameter_db);
-    }
-
-    const SelectedPanelTextAnchor anchor = selected_panel_text_anchor(
-        info_display, panel_kind);
-    if (!anchor.component ||
-        !usable_native_rectangle(anchor.captain_rectangle)) {
-        update_directional_shield_hover_components(info_display);
-        update_ammunition_hover_components(info_display);
-        reset_selected_status_hover_components();
-        update_directional_shield_component_tooltip(info_display);
-        return;
-    }
-
-    void* text_component = anchor.component;
-    const NativeRectangle captain_native_rectangle =
-        anchor.captain_rectangle;
-    if (panel_kind == SelectedPanelKind::builder &&
-        InterlockedCompareExchange(
-            &g_builder_panel_anchor_report_count, 1, 0) == 0) {
-        char message[288]{};
-        std::snprintf(
-            message, sizeof(message),
-            "Tall producer selected-panel extension anchor active: component=%p captain-relative rectangle=%ld,%ld,%ld,%ld",
-            text_component,
-            static_cast<long>(captain_native_rectangle.left),
-            static_cast<long>(captain_native_rectangle.top),
-            static_cast<long>(captain_native_rectangle.right),
-            static_cast<long>(captain_native_rectangle.bottom));
-        log_line(message);
-    }
-    const Colour native_colour = text_component_colour(text_component);
-    const Colour shared_colour = g_ui_configuration.shared_text_colour_found
-        ? g_ui_configuration.shared_text_colour : native_colour;
-    const Colour captain_colour = g_ui_configuration.captain_colour_found
-        ? g_ui_configuration.captain_colour : shared_colour;
-    const Colour registry_colour = g_ui_configuration.registry_colour_found
-        ? g_ui_configuration.registry_colour : shared_colour;
-
-    draw_ammunition_rows(
-        info_display, craft, text_component,
-        captain_native_rectangle, shared_colour);
-    draw_directional_shield_rows(
-        info_display, craft, text_component,
-        captain_native_rectangle, shared_colour);
-    draw_selected_status_bars(
-        info_display, craft, text_component, captain_native_rectangle);
-    // Fleet Operations' selected wireframe uses its own Update override and
-    // therefore does not reliably pass through StandardComponent::Update.
-    // The shield ring is finalised in this proven selected-panel render pass,
-    // so update the four synthetic StandardComponents here while their live
-    // screen rectangles and owning interface are current. Armada's native
-    // manager still owns hover timing, normal/verbose selection and drawing.
-    update_ammunition_hover_components(info_display);
-    update_selected_status_hover_components(info_display);
-    update_directional_shield_hover_components(info_display);
-    update_directional_shield_component_tooltip(info_display);
-    // Producers (including repair-only shipyards) are still Craft. Their
-    // native name row and optional identity strings use the same selection
-    // policy and configured rectangles as the ordinary selected panel.
-    const CraftIdentity* identity = ensure_craft_identity(craft);
-    if (!identity) {
-        draw_directional_shield_hover_tooltip(
-            info_display, craft, text_component,
-            captain_native_rectangle, shared_colour);
-        return;
-    }
-
-    NativeRectangle registry_native_rectangle = captain_native_rectangle;
-    if (g_ui_configuration.captain_rectangle_found &&
-        g_ui_configuration.registry_rectangle_found) {
-        registry_native_rectangle = translated_rectangle(
-            captain_native_rectangle,
-            g_ui_configuration.captain_rectangle,
-            g_ui_configuration.registry_rectangle);
-    }
-    bool captain_drawn = false;
-    bool registry_drawn = false;
-
-    if (g_ui_configuration.captain_rectangle_found ||
-        panel_style(PanelElement::CaptainText).area_found) {
-        captain_drawn = draw_identity_text(
-            identity->captain_name,
-            panel_rectangle(PanelElement::CaptainText, captain_native_rectangle),
-            panel_colour(PanelElement::CaptainText, captain_colour), text_component);
-    }
-    if ((g_ui_configuration.captain_rectangle_found &&
-         g_ui_configuration.registry_rectangle_found) ||
-        panel_style(PanelElement::RegistryText).area_found) {
-        registry_drawn = draw_identity_text(
-            identity->craft_registry,
-            panel_rectangle(PanelElement::RegistryText, registry_native_rectangle),
-            panel_colour(PanelElement::RegistryText, registry_colour), text_component);
-    }
-    if ((captain_drawn || registry_drawn) &&
-        InterlockedCompareExchange(&g_draw_report_count, 1, 0) == 0) {
-        char message[320]{};
-        std::snprintf(
-            message, sizeof(message),
-            "First selected identity draw submitted on %s panel for native name row %ld: "
-            "captain=%s at %ld,%ld; registry=%s at %ld,%ld",
-            panel_kind == SelectedPanelKind::builder ? "builder" : "single",
-            static_cast<long>(identity->craft_name_index),
-            captain_drawn ? "yes" : "no",
-            static_cast<long>(captain_native_rectangle.left),
-            static_cast<long>(captain_native_rectangle.top),
-            registry_drawn ? "yes" : "no",
-            static_cast<long>(registry_native_rectangle.left),
-            static_cast<long>(registry_native_rectangle.top));
-        log_line(message);
-    }
-    draw_directional_shield_hover_tooltip(
-        info_display, craft, text_component,
-        captain_native_rectangle, shared_colour);
+        return 0;
+    };
+    a2fo_rs_stage9_craft_render_panel(step, &render, kInfoDisplayNameTextOffsets.size());
 }
 
 void __attribute__((fastcall)) selected_builder_info_render_hook(
@@ -5997,20 +7030,9 @@ bool patch_exact_bytes(
     const std::array<std::uint8_t, Size>& expected,
     const std::array<std::uint8_t, Size>& replacement) noexcept {
     void* address = at(module, rva);
-    if (!address || !exact_bytes_match(module, rva, expected)) return false;
-    DWORD old_protect = 0;
-    if (!VirtualProtect(
-            address, Size, PAGE_EXECUTE_READWRITE, &old_protect)) {
-        return false;
-    }
-    bool changed = std::memcmp(address, expected.data(), Size) == 0;
-    if (changed) {
-        std::memcpy(address, replacement.data(), Size);
-        FlushInstructionCache(GetCurrentProcess(), address, Size);
-    }
-    DWORD restored = 0;
-    VirtualProtect(address, Size, old_protect, &restored);
-    return changed;
+    if (!address || !readable_range(address, Size)) return false;
+    // Both byte checks, including the reread after VirtualProtect, are Rust-owned.
+    return a2fo_rs_windows_patch_double(address,replacement.data(),expected.data(),Size)!=0;
 }
 
 template <std::size_t Size>
@@ -6251,81 +7273,110 @@ bool preflight_signatures() noexcept {
 
 bool install_craft_class_constructor_hook(
     const A2FO_ModuleApi* api) noexcept {
-    void* site = at(g_armada, kCraftClassConstructorRva);
-    if (signature_matches(
-            g_armada, kCraftClassConstructorRva,
-            kExpectedCraftClassConstructor)) {
-        if (!api->install_inline_hook(
-                site,
+    struct Context {
+        const A2FO_ModuleApi* api;
+        void* site = nullptr;
+        void* destination = nullptr;
+        std::size_t patch_length = 0;
+        std::uint8_t expected_detour[6]{};
+    } context{api};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) {
+            ctx.site = at(g_armada, kCraftClassConstructorRva);
+            return signature_matches(g_armada, kCraftClassConstructorRva,
+                kExpectedCraftClassConstructor);
+        }
+        if (action == 1) {
+            return ctx.api->install_inline_hook(ctx.site,
                 reinterpret_cast<void*>(&craft_class_constructor_hook),
                 sizeof(kExpectedCraftClassConstructor),
                 kExpectedCraftClassConstructor,
-                &g_craft_class_constructor_hook)) {
-            return false;
+                &g_craft_class_constructor_hook);
         }
-        g_craft_class_constructor_original =
-            g_craft_class_constructor_hook.gateway;
-        g_chained_fo_craft_class_constructor = false;
-        return g_craft_class_constructor_original != nullptr;
-    }
-
-    void* destination = nullptr;
-    std::size_t patch_length = 0;
-    if (!supported_fleet_ops_craft_class_detour(
-            &destination, &patch_length) || patch_length > 6) {
-        return false;
-    }
-    std::uint8_t expected_detour[6]{};
-    std::memcpy(expected_detour, site, patch_length);
-    if (!api->patch_jump(
-            site, reinterpret_cast<void*>(&craft_class_constructor_hook),
-            expected_detour, patch_length)) {
-        return false;
-    }
-    g_craft_class_constructor_original = destination;
-    g_chained_fo_craft_class_constructor = true;
-    return true;
+        if (action == 2) {
+            g_craft_class_constructor_original =
+                g_craft_class_constructor_hook.gateway;
+            g_chained_fo_craft_class_constructor = false;
+            return g_craft_class_constructor_original != nullptr;
+        }
+        if (action == 3) {
+            return supported_fleet_ops_craft_class_detour(
+                    &ctx.destination, &ctx.patch_length) &&
+                ctx.patch_length <= 6;
+        }
+        if (action == 4) {
+            std::memcpy(ctx.expected_detour, ctx.site, ctx.patch_length);
+        } else if (action == 5) {
+            return ctx.api->patch_jump(ctx.site,
+                reinterpret_cast<void*>(&craft_class_constructor_hook),
+                ctx.expected_detour, ctx.patch_length);
+        } else if (action == 6) {
+            g_craft_class_constructor_original = ctx.destination;
+            g_chained_fo_craft_class_constructor = true;
+        }
+        return 0;
+    };
+    return a2fo_rs_stage9_craft_install_constructor(step, &context);
 }
 
 bool install_system_icon_colour_hooks(
     const A2FO_ModuleApi* api) noexcept {
-    if (!api || !api->patch_call) return false;
-    bool installed = true;
-    for (const CheckedCallSite& site : kSystemIconColourCallSites) {
-        installed = api->patch_call(
-            at(g_armada, site.rva),
-            reinterpret_cast<void*>(
-                &a2fo_identity_system_icon_set_colour_bridge),
-            site.expected.data(), site.expected.size()) && installed;
-    }
-    for (const CheckedCallSite& site : kWeaponIconColourCallSites) {
-        installed = api->patch_call(
-            at(g_fleet_ops, site.rva),
-            reinterpret_cast<void*>(
-                &a2fo_identity_weapon_icon_set_colour_bridge),
-            site.expected.data(), site.expected.size()) && installed;
-    }
-    installed = api->patch_call(
-        at(g_armada, kSystemValueIconColourCallSite.rva),
-        reinterpret_cast<void*>(
-            &a2fo_identity_system_text_set_colour_bridge),
-        kSystemValueIconColourCallSite.expected.data(),
-        kSystemValueIconColourCallSite.expected.size()) && installed;
-    std::array<std::uint8_t, 5> value_text_expected{};
-    const void* value_text_site = at(
-        g_armada, kValueTextDrawCallSite.rva);
-    if (!readable_range(value_text_site, value_text_expected.size()) ||
-        !a2fo_identity_value_text_draw_original) {
-        return false;
-    }
-    std::memcpy(value_text_expected.data(), value_text_site,
-                value_text_expected.size());
-    installed = api->patch_call(
-        const_cast<void*>(value_text_site),
-        reinterpret_cast<void*>(
-            &a2fo_identity_value_text_draw_bridge),
-        value_text_expected.data(), value_text_expected.size()) && installed;
-    return installed;
+    struct Context {
+        const A2FO_ModuleApi* api;
+        std::array<std::uint8_t, 5> value_text_expected{};
+        const void* value_text_site = nullptr;
+    } context{api};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t index) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        if (action == 0) return ctx.api && ctx.api->patch_call;
+        if (action == 1) {
+            const CheckedCallSite& site = kSystemIconColourCallSites[index];
+            return ctx.api->patch_call(
+                at(g_armada, site.rva),
+                reinterpret_cast<void*>(
+                    &a2fo_identity_system_icon_set_colour_bridge),
+                site.expected.data(), site.expected.size());
+        }
+        if (action == 2) {
+            const CheckedCallSite& site = kWeaponIconColourCallSites[index];
+            return ctx.api->patch_call(
+                at(g_fleet_ops, site.rva),
+                reinterpret_cast<void*>(
+                    &a2fo_identity_weapon_icon_set_colour_bridge),
+                site.expected.data(), site.expected.size());
+        }
+        if (action == 3) {
+            return ctx.api->patch_call(
+                at(g_armada, kSystemValueIconColourCallSite.rva),
+                reinterpret_cast<void*>(
+                    &a2fo_identity_system_text_set_colour_bridge),
+                kSystemValueIconColourCallSite.expected.data(),
+                kSystemValueIconColourCallSite.expected.size());
+        }
+        if (action == 4) {
+            ctx.value_text_site = at(g_armada, kValueTextDrawCallSite.rva);
+            return readable_range(ctx.value_text_site,
+                    ctx.value_text_expected.size()) &&
+                a2fo_identity_value_text_draw_original;
+        }
+        if (action == 5) {
+            std::memcpy(ctx.value_text_expected.data(), ctx.value_text_site,
+                ctx.value_text_expected.size());
+        } else if (action == 6) {
+            return ctx.api->patch_call(
+                const_cast<void*>(ctx.value_text_site),
+                reinterpret_cast<void*>(
+                    &a2fo_identity_value_text_draw_bridge),
+                ctx.value_text_expected.data(),
+                ctx.value_text_expected.size());
+        }
+        return 0;
+    };
+    return a2fo_rs_stage9_craft_install_icon_hooks(step, &context,
+        kSystemIconColourCallSites.size(), kWeaponIconColourCallSites.size());
 }
 
 bool install_ship_system_icon_render_policy_hook() noexcept {
@@ -6377,87 +7428,87 @@ bool install_special_weapon_disabled_presentation_patch() noexcept {
 
 void install_directional_shield_tooltip_hooks(
     const A2FO_ModuleApi* api) noexcept {
-    // The older setter, synthetic TooltipManager::Show, and direct-render
-    // experiments must stay disabled when using the component's genuine
-    // tooltip callbacks. Otherwise they replace or clear the provider that
-    // Armada selected from the hovered weapon/wireframe icon.
-    g_directional_shield_native_tooltip_available = false;
-    g_directional_shield_component_tooltips_available = false;
-    g_directional_shield_wireframe_tooltips_available = false;
-    void* standard_component_vtable = at(
-        g_armada, kStandardComponentVtableRva);
-    if (!api || !api->install_inline_hook || !signature_matches(
-            g_armada, kStandardComponentUpdateRva,
-            kExpectedStandardComponentUpdate) ||
-        !readable_range(standard_component_vtable, 0x08) ||
-        read_at<void*>(standard_component_vtable, 0, nullptr) !=
-            at(g_armada, kStandardComponentTooltipRva) ||
-        read_at<void*>(standard_component_vtable, 4, nullptr) !=
-            at(g_armada, kStandardComponentVerboseTooltipRva) ||
-        !insert_c_string()) {
-        log_line(
-            "Armada StandardComponent hover path was unavailable; "
-            "directional-shield arc tooltips disabled");
-        return;
-    }
-    if (!api->install_inline_hook(
-            at(g_armada, kStandardComponentUpdateRva),
-            reinterpret_cast<void*>(&standard_component_update_hook),
-            sizeof(kExpectedStandardComponentUpdate),
-            kExpectedStandardComponentUpdate,
-            &g_standard_component_update_hook)) {
-        log_line(
-            "Armada StandardComponent update hook could not be installed; "
-            "directional-shield arc tooltips disabled");
-        return;
-    }
-    g_directional_shield_wireframe_tooltips_available = true;
-    log_line(
-        "Four directional-shield arcs registered through the selected-panel StandardComponent update path");
+    struct Context { const A2FO_ModuleApi* api; } context{api};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        const auto* api = static_cast<Context*>(opaque)->api;
+        if (action == 0) {
+            // Genuine component callbacks supersede experimental tooltip paths.
+            g_directional_shield_native_tooltip_available = false;
+            g_directional_shield_component_tooltips_available = false;
+            g_directional_shield_wireframe_tooltips_available = false;
+        } else if (action == 1) {
+            void* standard_component_vtable = at(
+                g_armada, kStandardComponentVtableRva);
+            return api && api->install_inline_hook && signature_matches(
+                    g_armada, kStandardComponentUpdateRva,
+                    kExpectedStandardComponentUpdate) &&
+                readable_range(standard_component_vtable, 0x08) &&
+                read_at<void*>(standard_component_vtable, 0, nullptr) ==
+                    at(g_armada, kStandardComponentTooltipRva) &&
+                read_at<void*>(standard_component_vtable, 4, nullptr) ==
+                    at(g_armada, kStandardComponentVerboseTooltipRva) &&
+                insert_c_string();
+        } else if (action == 2) {
+            log_line("Armada StandardComponent hover path was unavailable; directional-shield arc tooltips disabled");
+        } else if (action == 3) {
+            return api->install_inline_hook(
+                at(g_armada, kStandardComponentUpdateRva),
+                reinterpret_cast<void*>(&standard_component_update_hook),
+                sizeof(kExpectedStandardComponentUpdate),
+                kExpectedStandardComponentUpdate,
+                &g_standard_component_update_hook);
+        } else if (action == 4) {
+            log_line("Armada StandardComponent update hook could not be installed; directional-shield arc tooltips disabled");
+        } else if (action == 5) {
+            g_directional_shield_wireframe_tooltips_available = true;
+            log_line("Four directional-shield arcs registered through the selected-panel StandardComponent update path");
+        }
+        return 0;
+    };
+    a2fo_rs_stage9_craft_install_tooltip_hook(step, &context);
 }
 
 bool install_runtime_hooks(const A2FO_ModuleApi* api) noexcept {
-    if (!api || !api->install_inline_hook || !api->patch_jump ||
-        !api->patch_call ||
-        !g_armada || !g_fleet_ops) {
-        return false;
-    }
-    if (!preflight_signatures()) {
-        log_line("Supported ArmadaL signatures were not found; runtime disabled");
-        return false;
-    }
-    bool installed = install_craft_class_constructor_hook(api);
-    installed = install_system_icon_colour_hooks(api) && installed;
-    installed = api->install_inline_hook(
-        at(g_armada, kSelectedInfoUpdateRva),
-        reinterpret_cast<void*>(&selected_info_update_hook),
-        sizeof(kExpectedSelectedInfoUpdate), kExpectedSelectedInfoUpdate,
-        &g_selected_info_update_hook) && installed;
-    installed = api->install_inline_hook(
-        at(g_armada, kSelectedBuilderInfoRenderRva),
-        reinterpret_cast<void*>(&selected_builder_info_render_hook),
-        sizeof(kExpectedSelectedInfoRender), kExpectedSelectedInfoRender,
-        &g_selected_builder_info_render_hook) && installed;
-    installed = api->install_inline_hook(
-        at(g_armada, kSelectedInfoRenderRva),
-        reinterpret_cast<void*>(&selected_info_render_hook),
-        sizeof(kExpectedSelectedInfoRender), kExpectedSelectedInfoRender,
-        &g_selected_info_render_hook) && installed;
-    installed = a2fo::craft_identity::install_extended_weapon_icons(
-        api, g_armada, g_fleet_ops) && installed;
-    installed = install_ship_system_icon_render_policy_hook() && installed;
-    // This is the final required mutation. If an earlier hook failed, leave
-    // the native special-weapon early exit untouched rather than exposing a
-    // partial policy.
-    if (installed) {
-        installed =
-            install_special_weapon_disabled_presentation_patch();
-    }
-    if (installed) install_directional_shield_tooltip_hooks(api);
-    if (!installed) {
-        log_line("A craft identity hook could not be installed; hooks fail closed");
-    }
-    return installed;
+    struct Context { const A2FO_ModuleApi* api; } context{api};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        const auto* api = static_cast<Context*>(opaque)->api;
+        if (action == 0) {
+            return api && api->install_inline_hook && api->patch_jump &&
+                api->patch_call && g_armada && g_fleet_ops;
+        }
+        if (action == 1) return preflight_signatures();
+        if (action == 2) {
+            log_line("Supported ArmadaL signatures were not found; runtime disabled");
+        } else if (action == 3) return install_craft_class_constructor_hook(api);
+        else if (action == 4) return install_system_icon_colour_hooks(api);
+        else if (action == 5) return api->install_inline_hook(
+            at(g_armada, kSelectedInfoUpdateRva),
+            reinterpret_cast<void*>(&selected_info_update_hook),
+            sizeof(kExpectedSelectedInfoUpdate), kExpectedSelectedInfoUpdate,
+            &g_selected_info_update_hook);
+        else if (action == 6) return api->install_inline_hook(
+            at(g_armada, kSelectedBuilderInfoRenderRva),
+            reinterpret_cast<void*>(&selected_builder_info_render_hook),
+            sizeof(kExpectedSelectedInfoRender), kExpectedSelectedInfoRender,
+            &g_selected_builder_info_render_hook);
+        else if (action == 7) return api->install_inline_hook(
+            at(g_armada, kSelectedInfoRenderRva),
+            reinterpret_cast<void*>(&selected_info_render_hook),
+            sizeof(kExpectedSelectedInfoRender), kExpectedSelectedInfoRender,
+            &g_selected_info_render_hook);
+        else if (action == 8) return a2fo::craft_identity::install_extended_weapon_icons(
+            api, g_armada, g_fleet_ops);
+        else if (action == 9) return install_ship_system_icon_render_policy_hook();
+        else if (action == 10)
+            return install_special_weapon_disabled_presentation_patch();
+        else if (action == 11) install_directional_shield_tooltip_hooks(api);
+        else if (action == 12)
+            log_line("A craft identity hook could not be installed; hooks fail closed");
+        return 0;
+    };
+    return a2fo_rs_stage9_craft_install_hooks(step, &context);
 }
 
 }  // namespace
@@ -6487,49 +7538,70 @@ extern "C" void __cdecl a2fo_identity_value_text_colour_hook_cpp(
 
 extern "C" __declspec(dllexport)
 bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
-    if (!api || api->struct_size < A2FO_MODULE_API_V4_BASE_SIZE ||
-        api->api_version != A2FO_MODULE_API_VERSION || !api->log ||
-        !api->armada_module || !api->fleetops_module ||
-        !api->install_inline_hook || !api->patch_jump || !api->patch_call ||
-        !api->extension_root_count || !api->extension_root) {
-        return false;
-    }
-    g_api = api;
-    g_armada = static_cast<HMODULE>(api->armada_module());
-    g_fleet_ops = static_cast<HMODULE>(api->fleetops_module());
-    if (!g_armada || !g_fleet_ops) return false;
-
-    constexpr const char* kPassiveWeaponFields[]{"classLabel"};
-    const bool passive_weapon_registration =
-        A2FO_MODULE_API_HAS(api, register_weapon_class_loaded_handler) &&
-        api->register_weapon_class_loaded_handler &&
-        (api->capabilities & A2FO_CAP_WEAPON_CLASS_LOADED) != 0 &&
-        api->register_weapon_class_loaded_handler(
-            kModuleName, kPassiveWeaponFields,
-            static_cast<std::uint32_t>(
-                sizeof(kPassiveWeaponFields) /
-                sizeof(kPassiveWeaponFields[0])),
-            &weapon_class_loaded_handler, nullptr);
-    if (!passive_weapon_registration) {
-        log_line(
-            "Shared WeaponClass loader is unavailable; UtilityWeapon icons cannot use passive neutral presentation");
-    }
-
-    load_directional_shield_display_config();
-    resolve_shield_class_observer();
-    g_runtime_ready = install_runtime_hooks(api);
-    if (g_runtime_ready) {
-        a2fo::object_editor::initialize(api, g_armada, &read_editor_identity_defaults);
-        log_line(g_chained_fo_craft_class_constructor
-            ? "Selected-panel craft identity runtime initialized and chained "
-              "through Fleet Operations CraftClass construction"
-            : "Selected-panel craft identity runtime initialized");
-    } else {
-        log_line("Craft identity module loaded with runtime disabled");
-    }
-    // Inline hooks are process-lifetime patches. Keep a partially installed
-    // module resident and make each hook a pass-through when setup failed.
-    return true;
+    struct Context {
+        const A2FO_ModuleApi* api;
+        std::exception_ptr failure;
+    } context{api, {}};
+    const auto step = +[](void* opaque, std::uint32_t action,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& ctx = *static_cast<Context*>(opaque);
+        const auto* api = ctx.api;
+        try {
+        if (action == 0) {
+            return api && api->struct_size >= A2FO_MODULE_API_V4_BASE_SIZE &&
+                api->api_version == A2FO_MODULE_API_VERSION && api->log &&
+                api->armada_module && api->fleetops_module &&
+                api->install_inline_hook && api->patch_jump && api->patch_call &&
+                api->extension_root_count && api->extension_root;
+        }
+        if (action == 1) {
+            g_api = api;
+            g_armada = static_cast<HMODULE>(api->armada_module());
+            g_fleet_ops = static_cast<HMODULE>(api->fleetops_module());
+            return g_armada && g_fleet_ops;
+        }
+        if (action == 2) {
+            constexpr const char* kPassiveWeaponFields[]{"classLabel"};
+            return A2FO_MODULE_API_HAS(api, register_weapon_class_loaded_handler) &&
+                api->register_weapon_class_loaded_handler &&
+                (api->capabilities & A2FO_CAP_WEAPON_CLASS_LOADED) != 0 &&
+                api->register_weapon_class_loaded_handler(
+                    kModuleName, kPassiveWeaponFields,
+                    static_cast<std::uint32_t>(
+                        sizeof(kPassiveWeaponFields) /
+                        sizeof(kPassiveWeaponFields[0])),
+                    &weapon_class_loaded_handler, nullptr);
+        }
+        if (action == 3) {
+            log_line("Shared WeaponClass loader is unavailable; UtilityWeapon icons cannot use passive neutral presentation");
+        } else if (action == 4) load_directional_shield_display_config();
+        else if (action == 5) resolve_shield_class_observer();
+        else if (action == 6) {
+            g_runtime_ready = install_runtime_hooks(api);
+            return g_runtime_ready;
+        } else if (action == 7) {
+            a2fo::object_editor::initialize(
+                api, g_armada, &read_editor_identity_defaults);
+        } else if (action == 8) {
+            log_line("Directional-shield ODF rectangles retain native UI placement; only built-in defaults scale");
+        } else if (action == 9) {
+            log_line(g_chained_fo_craft_class_constructor
+                ? "Selected-panel craft identity runtime initialized and chained "
+                  "through Fleet Operations CraftClass construction"
+                : "Selected-panel craft identity runtime initialized");
+        } else if (action == 10) {
+            log_line("Craft identity module loaded with runtime disabled");
+        }
+        return 0;
+        } catch (...) {
+            ctx.failure = std::current_exception();
+            return 3;
+        }
+    };
+    // Core-owned inline hooks remain installed for process lifetime after failure.
+    const bool initialized = a2fo_rs_stage9_craft_module_init(step, &context);
+    if (context.failure) std::rethrow_exception(context.failure);
+    return initialized;
 }
 
 extern "C" __declspec(dllexport)

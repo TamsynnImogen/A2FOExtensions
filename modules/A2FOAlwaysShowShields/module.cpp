@@ -12,8 +12,12 @@
  * independently optional.
  */
 
+#ifdef A2FO_BUILTIN_FEATURE
+#include "../../core/builtin_modules.hpp"
+#endif
 #include "../../sdk/include/a2fo_module_api.h"
-#include "shield_visibility.hpp"
+#include "../../rust/stage8_a_ffi.h"
+#include "../../rust/stage10_visibility_swarm_ffi.h"
 
 #include <windows.h>
 
@@ -24,6 +28,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <fstream>
 #include <optional>
 #include <sstream>
@@ -47,7 +52,6 @@ std::uintptr_t __cdecl a2fo_shields_call_thiscall_4(
 
 namespace {
 
-using a2fo::shields::EffectAction;
 using CreateShieldHit = std::int32_t (__cdecl *)(
     void* object, const void* shield_matrix, std::int32_t shield_type,
     float duration, std::int32_t flags);
@@ -57,7 +61,6 @@ using PublishGameObject = std::uintptr_t (__cdecl *)(
 
 constexpr const char* kModuleName = "A2FOAlwaysShowShields";
 constexpr char kOdfCommand[] = "alwaysShowShields";
-constexpr std::size_t kMaximumOdfDirectoryDepth = 24;
 constexpr std::size_t kMaximumOdfSize = 4u * 1024u * 1024u;
 
 // ArmadaL.exe 1.1 / Fleet Operations Roots RVAs.
@@ -80,8 +83,6 @@ constexpr std::int32_t kContinuousShieldType = 7;
 constexpr std::int32_t kNativeEffectColour = 0;
 constexpr std::size_t kObjectClassOffset = 0x40;
 constexpr std::size_t kCurrentShieldsOffset = 0x1c8;
-constexpr std::uint32_t kConfiguredGlobalScanIntervalMs = 100;
-constexpr std::uint32_t kIdleGlobalScanIntervalMs = 1000;
 
 constexpr std::array<std::uint8_t, 10> kExpectedCreateShieldHit{
     0x55, 0x8b, 0xec, 0x6a, 0xff,
@@ -120,6 +121,7 @@ bool g_global_scan_completed = false;
 const char* class_odf_name(void* object_class) noexcept;
 void update_craft(void* craft) noexcept;
 void update_all_crafts() noexcept;
+bool runtime_enabled() noexcept;
 
 void* at(std::uintptr_t rva) noexcept {
     return g_armada
@@ -226,95 +228,137 @@ bool publication_site_supported() noexcept {
 }
 
 std::string lower_ascii(std::string value) {
-    for (char& character : value) {
-        character = static_cast<char>(
-            std::tolower(static_cast<unsigned char>(character)));
-    }
+    struct Context {
+        std::string* value;
+        std::exception_ptr error{};
+        std::uint8_t failed{};
+    } context{&value};
+    const auto step = +[](void* opaque, std::size_t index) noexcept {
+        auto& state = *static_cast<Context*>(opaque);
+        try {
+            char& character = (*state.value)[index];
+            character = static_cast<char>(
+                std::tolower(static_cast<unsigned char>(character)));
+        } catch (...) {
+            state.error = std::current_exception();
+            state.failed = 1;
+        }
+    };
+    a2fo_rs_stage10_visibility_lower(value.size(), &context, step, &context.failed);
+    if (context.error) std::rethrow_exception(context.error);
     return value;
 }
 
-std::string trim_copy(std::string value) {
-    const std::size_t first = value.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return {};
-    const std::size_t last = value.find_last_not_of(" \t\r\n");
-    return value.substr(first, last - first + 1);
-}
-
 std::string join_path(const std::string& left, const std::string& right) {
-    if (left.empty()) return right;
-    if (right.empty()) return left;
-    const char last = left.back();
-    if (last == '\\' || last == '/') return left + right;
-    return left + "\\" + right;
+    const auto last = +[](const void* opaque) noexcept -> std::uint8_t {
+        const auto& value = *static_cast<const std::string*>(opaque);
+        return static_cast<std::uint8_t>(value.back());
+    };
+    switch (a2fo_rs_stage10_visibility_join(
+        left.size(), right.size(), &left, last)) {
+    case 0: return right;
+    case 1: return left;
+    case 2: return left + right;
+    default: return left + "\\" + right;
+    }
 }
 
-bool has_odf_extension(const std::string& name) {
-    const std::string normalized = lower_ascii(name);
-    return normalized.size() > 4 &&
-        normalized.compare(normalized.size() - 4, 4, ".odf") == 0;
-}
-
-std::string normalize_odf_name(std::string name) {
-    name = trim_copy(std::move(name));
-    std::replace(name.begin(), name.end(), '/', '\\');
-    const std::size_t slash = name.find_last_of('\\');
-    if (slash != std::string::npos) name.erase(0, slash + 1);
-    name = lower_ascii(std::move(name));
-    if (!name.empty() && !has_odf_extension(name)) name += ".odf";
-    return name;
-}
-
-void index_odf_directory(const std::string& directory,
-                         std::size_t depth) {
-    if (directory.empty() || depth > kMaximumOdfDirectoryDepth) return;
+struct IndexChild {
+    std::string name;
+    DWORD attributes;
+};
+struct IndexContext {
+    std::vector<IndexChild> selected;
     WIN32_FIND_DATAA data{};
-    HANDLE search = FindFirstFileA(join_path(directory, "*").c_str(), &data);
-    if (search == INVALID_HANDLE_VALUE) return;
-
-    std::vector<std::pair<std::string, bool>> children;
-    do {
-        const std::string name = data.cFileName;
-        if (name == "." || name == "..") continue;
-        const bool is_directory =
-            (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-        if (is_directory &&
-            (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
-            continue;
+    HANDLE search = INVALID_HANDLE_VALUE;
+    std::optional<std::string> current_name;
+    std::exception_ptr error;
+};
+std::uint8_t index_step(void* opaque, std::uint32_t operation,
+                        std::uint32_t index, A2foStage8Bytes first,
+                        A2foStage8Bytes second, A2foStage8Bytes* output,
+                        std::uint32_t* value) noexcept {
+    auto& context = *static_cast<IndexContext*>(opaque);
+    if (context.error || !output || !value) return 0;
+    *output = {nullptr, 0};
+    *value = 0;
+    try {
+        switch (operation) {
+        case 0:
+            g_loose_odf_paths.clear();
+            *value = g_api && g_api->extension_root_count && g_api->extension_root
+                ? g_api->extension_root_count() : 0;
+            return 1;
+        case 1: {
+            const char* root = g_api->extension_root(index);
+            if (root && *root) {
+                *output = {reinterpret_cast<const std::uint8_t*>(root),
+                           std::strlen(root)};
+            }
+            return 1;
         }
-        if (is_directory || has_odf_extension(name)) {
-            children.emplace_back(name, is_directory);
+        case 2: {
+            context.selected.clear();
+            const std::string directory(
+                reinterpret_cast<const char*>(first.data), first.size);
+            context.search = FindFirstFileA(
+                join_path(directory, "*").c_str(), &context.data);
+            *value = context.search != INVALID_HANDLE_VALUE;
+            return 1;
         }
-    } while (FindNextFileA(search, &data));
-    FindClose(search);
-
-    std::sort(children.begin(), children.end(),
-              [](const auto& left, const auto& right) {
-                  return lower_ascii(left.first) < lower_ascii(right.first);
-              });
-    for (const auto& child : children) {
-        const std::string path = join_path(directory, child.first);
-        if (child.second) {
-            index_odf_directory(path, depth + 1);
-        } else {
-            // Roots are visited from parent to child, so later active-mod
-            // files intentionally replace a same-named parent ODF.
-            g_loose_odf_paths[lower_ascii(child.first)] = path;
+        case 3:
+            if (context.search == INVALID_HANDLE_VALUE) return 0;
+            context.current_name.emplace(context.data.cFileName);
+            *output = {reinterpret_cast<const std::uint8_t*>(context.current_name->data()),
+                       context.current_name->size()};
+            *value = context.data.dwFileAttributes;
+            return 1;
+        case 4:
+            context.selected.push_back(
+                {*context.current_name, context.data.dwFileAttributes});
+            return 1;
+        case 5:
+            FindClose(context.search);
+            context.search = INVALID_HANDLE_VALUE;
+            // Frozen libstdc++ std::sort is retained as the exact ordering
+            // primitive when distinct filenames have equal folded keys.
+            std::sort(context.selected.begin(), context.selected.end(),
+                      [](const IndexChild& left, const IndexChild& right) {
+                          return lower_ascii(left.name) < lower_ascii(right.name);
+                      });
+            *value = static_cast<std::uint32_t>(context.selected.size());
+            return 1;
+        case 6:
+            if (index >= context.selected.size()) return 0;
+            *output = {reinterpret_cast<const std::uint8_t*>(
+                           context.selected[index].name.data()),
+                       context.selected[index].name.size()};
+            *value = context.selected[index].attributes;
+            return 1;
+        case 7:
+            g_loose_odf_paths[std::string(
+                reinterpret_cast<const char*>(first.data), first.size)] =
+                std::string(reinterpret_cast<const char*>(second.data), second.size);
+            return 1;
+        case 8:
+            context.current_name.reset();
+            *value = FindNextFileA(context.search, &context.data) != 0;
+            return 1;
+        default: return 0;
         }
+    } catch (...) {
+        context.error = std::current_exception();
+        return 0;
     }
 }
-
 void index_loose_odfs() {
-    g_loose_odf_paths.clear();
-    if (!g_api || !g_api->extension_root_count || !g_api->extension_root) {
-        return;
-    }
-    const std::uint32_t count = g_api->extension_root_count();
-    for (std::uint32_t index = 0; index < count; ++index) {
-        const char* root = g_api->extension_root(index);
-        if (root && *root) {
-            index_odf_directory(join_path(root, "odf"), 0);
-        }
-    }
+    IndexContext context{};
+    const auto lower = [](void*, std::uint8_t value) noexcept -> std::uint8_t {
+        return static_cast<std::uint8_t>(
+            std::tolower(static_cast<unsigned char>(value)));
+    };
+    a2fo_rs_stage8_shield_index(lower, index_step, &context);
+    if (context.error) std::rethrow_exception(context.error);
 }
 
 bool read_small_text_file(const std::string& path, std::string* contents) {
@@ -333,128 +377,88 @@ bool read_small_text_file(const std::string& path, std::string* contents) {
     return input.good() || input.eof();
 }
 
-std::string strip_line_comment(const std::string& line) {
-    bool quoted = false;
-    for (std::size_t index = 0; index + 1 < line.size(); ++index) {
-        if (line[index] == '"') quoted = !quoted;
-        if (!quoted && line[index] == '/' && line[index + 1] == '/') {
-            return line.substr(0, index);
-        }
-    }
-    return line;
-}
-
-std::optional<bool> parse_bool_value(std::string value) {
-    value = lower_ascii(trim_copy(std::move(value)));
-    if (!value.empty() && value.back() == ';') {
-        value.pop_back();
-        value = trim_copy(std::move(value));
-    }
-    if (value == "true" || value == "yes" || value == "on") return true;
-    if (value == "false" || value == "no" || value == "off") return false;
-    char* end = nullptr;
-    const long parsed = std::strtol(value.c_str(), &end, 10);
-    if (end != value.c_str()) {
-        while (*end && std::isspace(static_cast<unsigned char>(*end))) ++end;
-        if (*end == '\0') return parsed != 0;
-    }
-    return std::nullopt;
-}
-
-std::optional<bool> find_local_flag(
-    const std::string& contents, std::vector<std::string>* includes) {
-    std::optional<bool> result;
-    std::istringstream lines(contents);
-    std::string line;
-    while (std::getline(lines, line)) {
-        line = trim_copy(strip_line_comment(line));
-        if (line.empty()) continue;
-        const std::string normalized = lower_ascii(line);
-        if (normalized.rfind("#include", 0) == 0) {
-            const std::size_t first_quote = line.find('"');
-            const std::size_t last_quote = line.find_last_of('"');
-            if (includes && first_quote != std::string::npos &&
-                last_quote > first_quote) {
-                includes->push_back(normalize_odf_name(line.substr(
-                    first_quote + 1, last_quote - first_quote - 1)));
-            }
-            continue;
-        }
-        const std::size_t equals = line.find('=');
-        if (equals == std::string::npos) continue;
-        if (lower_ascii(trim_copy(line.substr(0, equals))) !=
-            lower_ascii(kOdfCommand)) {
-            continue;
-        }
-        const std::optional<bool> parsed = parse_bool_value(
-            line.substr(equals + 1));
-        if (parsed.has_value()) result = parsed;
-    }
-    return result;
-}
-
 std::optional<bool> resolve_loose_flag(
-    const std::string& requested_name,
-    std::unordered_set<std::string>* visiting) {
-    if (!visiting) return std::nullopt;
-    const std::string key = normalize_odf_name(requested_name);
-    if (key.empty() || !visiting->insert(key).second) return std::nullopt;
-    const auto selected = g_loose_odf_paths.find(key);
-    if (selected == g_loose_odf_paths.end()) {
-        visiting->erase(key);
-        return std::nullopt;
-    }
-    std::string contents;
-    if (!read_small_text_file(selected->second, &contents)) {
-        visiting->erase(key);
-        return std::nullopt;
-    }
-    std::vector<std::string> includes;
-    const std::optional<bool> local = find_local_flag(contents, &includes);
-    if (local.has_value()) {
-        visiting->erase(key);
-        return local;
-    }
-    for (auto include = includes.rbegin(); include != includes.rend();
-         ++include) {
-        const std::optional<bool> inherited =
-            resolve_loose_flag(*include, visiting);
-        if (inherited.has_value()) {
-            visiting->erase(key);
-            return inherited;
+    const std::string& requested_name) {
+    struct Context {
+        std::string contents;
+        std::exception_ptr error;
+    } context;
+    const auto lower = [](void*, std::uint8_t value) noexcept -> std::uint8_t {
+        return static_cast<std::uint8_t>(
+            std::tolower(static_cast<unsigned char>(value)));
+    };
+    const auto space = [](void*, std::uint8_t value) noexcept -> std::uint8_t {
+        return std::isspace(static_cast<unsigned char>(value)) != 0;
+    };
+    const auto load = [](void* opaque, A2foStage8Bytes name,
+                         A2foStage8Bytes* result) noexcept -> std::uint8_t {
+        auto& state = *static_cast<Context*>(opaque);
+        if (state.error || !result) return 0;
+        try {
+            const auto selected = g_loose_odf_paths.find(std::string(
+                reinterpret_cast<const char*>(name.data), name.size));
+            if (selected == g_loose_odf_paths.end() ||
+                !read_small_text_file(selected->second, &state.contents)) return 0;
+            *result = {reinterpret_cast<const std::uint8_t*>(state.contents.data()),
+                       state.contents.size()};
+            return 1;
+        } catch (...) {
+            state.error = std::current_exception();
+            return 0;
         }
-    }
-    visiting->erase(key);
-    return std::nullopt;
+    };
+    const auto result = a2fo_rs_stage8_shield_resolve(
+        reinterpret_cast<const std::uint8_t*>(requested_name.data()),
+        requested_name.size(), lower, space, load, &context);
+    if (context.error) std::rethrow_exception(context.error);
+    return result == 0 ? std::nullopt : std::optional<bool>(result == 2);
 }
 
 bool class_policy_enabled(void* object_class) noexcept {
-    if (!object_class) return false;
-    if (g_enabled_classes.find(object_class) != g_enabled_classes.end()) {
-        return true;
-    }
     // A completed ParameterDB callback that did not find the command is not
     // sufficient to suppress the loose-ODF fallback. Fleet Operations can
     // invoke that callback before an active-mod override is fully represented
     // in the class database. Resolve each otherwise-disabled class once from
     // the indexed Data/parent/active-mod hierarchy.
-    if (g_loose_resolved_classes.find(object_class) !=
-        g_loose_resolved_classes.end()) {
-        return false;
-    }
-    try {
-        g_loose_resolved_classes.insert(object_class);
-        const char* native_name = class_odf_name(object_class);
-        const std::string odf_name = native_name ? native_name : "";
-        std::unordered_set<std::string> visiting;
-        const std::optional<bool> enabled =
-            resolve_loose_flag(odf_name, &visiting);
-        if (enabled.value_or(false)) g_enabled_classes.insert(object_class);
-        return enabled.value_or(false);
-    } catch (...) {
+    struct Context {
+        std::string name;
+        std::exception_ptr error;
+    } context;
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t object, A2foStage8Bytes* name) -> std::uintptr_t {
+        auto& state = *static_cast<Context*>(opaque);
+        auto* object_class = reinterpret_cast<void*>(object);
+        if (state.error) return UINTPTR_MAX;
+        try {
+            switch (operation) {
+                case 0: return g_enabled_classes.find(object_class) != g_enabled_classes.end();
+                case 1: return g_loose_resolved_classes.find(object_class) != g_loose_resolved_classes.end();
+                case 2: g_loose_resolved_classes.insert(object_class); return 0;
+                case 3: {
+                    const char* native_name = class_odf_name(object_class);
+                    state.name = native_name ? native_name : "";
+                    *name = {reinterpret_cast<const std::uint8_t*>(state.name.data()), state.name.size()};
+                    return 0;
+                }
+                case 4: {
+                    const std::string odf_name(reinterpret_cast<const char*>(name->data), name->size);
+                    return resolve_loose_flag(odf_name).value_or(false);
+                }
+                case 5: g_enabled_classes.insert(object_class); return 0;
+                default: return UINTPTR_MAX;
+            }
+        } catch (...) {
+            state.error = std::current_exception();
+            return UINTPTR_MAX;
+        }
+    };
+    const bool enabled = a2fo_rs_stage8_shield_class_policy(
+        reinterpret_cast<std::uintptr_t>(object_class), step, &context) != 0;
+    if (context.error) {
         log_line("Could not resolve a preloaded shield class policy");
         return false;
     }
+    return enabled;
 }
 
 bool signatures_supported() noexcept {
@@ -492,9 +496,23 @@ void __attribute__((fastcall)) starbase_simulate_hook(
     static_assert(sizeof(elapsed_bits) == sizeof(elapsed_seconds),
                   "Armada float arguments must occupy four bytes");
     std::memcpy(&elapsed_bits, &elapsed_seconds, sizeof(elapsed_bits));
-    a2fo_shields_call_thiscall_1(
-        g_starbase_simulate_hook.gateway, starbase, elapsed_bits);
-    if (g_runtime_ready) update_craft(starbase);
+    struct Context { void* starbase; std::uint32_t elapsed_bits; } context{
+        starbase, elapsed_bits};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t argument) noexcept -> std::uintptr_t {
+        const auto& state = *static_cast<Context*>(opaque);
+        switch (operation) {
+        case 0:
+            return a2fo_shields_call_thiscall_1(
+                g_starbase_simulate_hook.gateway,
+                state.starbase, state.elapsed_bits);
+        case 1: return g_runtime_ready;
+        case 2: update_craft(reinterpret_cast<void*>(argument)); return 0;
+        default: return 0;
+        }
+    };
+    a2fo_rs_stage8_shield_after_gateway(
+        reinterpret_cast<std::uintptr_t>(starbase), 0, step, &context);
 }
 
 void __attribute__((fastcall)) render_game_objects_hook(
@@ -502,77 +520,115 @@ void __attribute__((fastcall)) render_game_objects_hook(
     // This stock render pass is the one authoritative traversal of Armada's
     // complete GameObject list. Run immediately before it builds the frame so
     // hidden Fleet Operations subclasses cannot bypass shield observation.
-    if (g_runtime_ready) {
-        const std::uint32_t now = GetTickCount();
-        const std::uint32_t interval = g_enabled_classes.empty()
-            ? kIdleGlobalScanIntervalMs
-            : kConfiguredGlobalScanIntervalMs;
-        if (a2fo::shields::global_scan_due(
-                now, g_last_global_scan_tick, g_global_scan_completed,
-                interval)) {
-            g_last_global_scan_tick = now;
+    struct Context { void* renderer; std::uintptr_t argument; } context{
+        renderer, render_argument};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t argument) noexcept -> std::uintptr_t {
+        const auto& state = *static_cast<Context*>(opaque);
+        switch (operation) {
+        case 0: return runtime_enabled();
+        case 1: return GetTickCount();
+        case 2: return g_enabled_classes.empty();
+        case 3: return g_last_global_scan_tick;
+        case 4: return g_global_scan_completed;
+        case 5:
+            g_last_global_scan_tick = static_cast<std::uint32_t>(argument);
             g_global_scan_completed = true;
             update_all_crafts();
+            return 0;
+        case 6:
+            a2fo_shields_call_thiscall_1(g_render_game_objects_hook.gateway,
+                                        state.renderer, state.argument);
+            return 0;
+        default: return 0;
         }
-    }
-    a2fo_shields_call_thiscall_1(
-        g_render_game_objects_hook.gateway, renderer, render_argument);
+    };
+    a2fo_rs_stage8_shield_render(g_runtime_ready, step, &context);
 }
 
 std::uintptr_t __cdecl game_object_publish_hook(
     void* mission, void* object) noexcept {
-    const std::uintptr_t result =
-        reinterpret_cast<PublishGameObject>(
-            g_game_object_publish_original)(mission, object);
     // Both AiMission::AddObject and the native object-creation path enter this
     // dispatcher after construction. Observing it avoids relying on either a
     // convenience wrapper or a hidden subclass' virtual methods.
-    if (g_runtime_ready && object) update_craft(object);
-    return result;
+    struct Context { void* mission; void* object; } context{mission, object};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t argument) noexcept -> std::uintptr_t {
+        const auto& state = *static_cast<Context*>(opaque);
+        switch (operation) {
+        case 0: return reinterpret_cast<PublishGameObject>(
+            g_game_object_publish_original)(state.mission, state.object);
+        case 1: return g_runtime_ready;
+        case 2: update_craft(reinterpret_cast<void*>(argument)); return 0;
+        default: return 0;
+        }
+    };
+    return a2fo_rs_stage8_shield_after_gateway(
+        reinterpret_cast<std::uintptr_t>(object), 1, step, &context);
 }
 
 bool install_publication_hook(const A2FO_ModuleApi* api) noexcept {
-    if (!api || !api->install_inline_hook || !api->patch_jump) return false;
-    void* site = at(kGameObjectPublishRva);
-    if (readable_range(site, kExpectedGameObjectPublish.size()) &&
-        std::memcmp(site, kExpectedGameObjectPublish.data(),
-                    kExpectedGameObjectPublish.size()) == 0) {
-        if (!api->install_inline_hook(
-                site, reinterpret_cast<void*>(&game_object_publish_hook),
+    struct Context {
+        const A2FO_ModuleApi* api;
+        void* site = nullptr;
+        void* destination = nullptr;
+        std::size_t patch_length = 0;
+        bool fatal = false;
+    } context{api};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& state = *static_cast<Context*>(opaque);
+        const auto* api = state.api;
+        if (state.fatal) return 0;
+        try {
+            switch (operation) {
+            case 0: return api && api->install_inline_hook && api->patch_jump;
+            case 1:
+                state.site = at(kGameObjectPublishRva);
+                return readable_range(state.site, kExpectedGameObjectPublish.size()) &&
+                    std::memcmp(state.site, kExpectedGameObjectPublish.data(),
+                                kExpectedGameObjectPublish.size()) == 0;
+            case 2: return api->install_inline_hook(
+                state.site, reinterpret_cast<void*>(&game_object_publish_hook),
                 kExpectedGameObjectPublish.size(),
-                kExpectedGameObjectPublish.data(),
-                &g_game_object_publish_hook)) {
-            return false;
+                kExpectedGameObjectPublish.data(), &g_game_object_publish_hook);
+            case 3:
+                g_game_object_publish_original = g_game_object_publish_hook.gateway;
+                return g_game_object_publish_original != nullptr;
+            case 4:
+                state.destination = existing_detour_destination(
+                    state.site, &state.patch_length);
+                return state.patch_length >= 5 && state.patch_length <= 6 &&
+                    fleet_ops_executable_address(state.destination);
+            case 5: {
+                std::array<std::uint8_t, 6> expected_detour{};
+                std::memcpy(expected_detour.data(), state.site, state.patch_length);
+                return api->patch_jump(
+                    state.site, reinterpret_cast<void*>(&game_object_publish_hook),
+                    expected_detour.data(), state.patch_length);
+            }
+            case 6: {
+                g_game_object_publish_original = state.destination;
+                const auto handler_rva =
+                    reinterpret_cast<std::uintptr_t>(state.destination) -
+                    reinterpret_cast<std::uintptr_t>(g_fleet_ops);
+                char message[224]{};
+                std::snprintf(message, sizeof(message),
+                    "Chained Fleet Operations GameObject publication detour at RVA "
+                    "0x%08lX", static_cast<unsigned long>(handler_rva));
+                log_line(message);
+                return 0;
+            }
+            default: return 0;
+            }
+        } catch (...) {
+            state.fatal = true;
+            return 0;
         }
-        g_game_object_publish_original =
-            g_game_object_publish_hook.gateway;
-        return g_game_object_publish_original != nullptr;
-    }
-
-    std::size_t patch_length = 0;
-    void* destination = existing_detour_destination(site, &patch_length);
-    if (patch_length < 5 || patch_length > 6 ||
-        !fleet_ops_executable_address(destination)) {
-        return false;
-    }
-    std::array<std::uint8_t, 6> expected_detour{};
-    std::memcpy(expected_detour.data(), site, patch_length);
-    if (!api->patch_jump(
-            site, reinterpret_cast<void*>(&game_object_publish_hook),
-            expected_detour.data(), patch_length)) {
-        return false;
-    }
-    g_game_object_publish_original = destination;
-    const auto handler_rva = reinterpret_cast<std::uintptr_t>(destination) -
-        reinterpret_cast<std::uintptr_t>(g_fleet_ops);
-    char message[224]{};
-    std::snprintf(
-        message, sizeof(message),
-        "Chained Fleet Operations GameObject publication detour at RVA "
-        "0x%08lX",
-        static_cast<unsigned long>(handler_rva));
-    log_line(message);
-    return true;
+    };
+    const bool result = a2fo_rs_stage8_shield_install_publish(step, &context) != 0;
+    if (context.fatal) std::terminate();
+    return result;
 }
 
 bool parameter_flag_enabled(void* parameter_db) noexcept {
@@ -588,18 +644,16 @@ bool parameter_flag_enabled(void* parameter_db) noexcept {
     value.back() = '\0';
     if ((found & 0xffu) == 0) return false;
 
-    std::string normalized(value.data());
-    for (char& character : normalized) {
-        character = static_cast<char>(
-            std::tolower(static_cast<unsigned char>(character)));
-    }
-    const std::size_t first = normalized.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return false;
-    const std::size_t last = normalized.find_last_not_of(" \t\r\n");
-    normalized = normalized.substr(first, last - first + 1);
-    return normalized == "true" || normalized == "yes" ||
-        normalized == "on" ||
-        std::strtol(normalized.c_str(), nullptr, 10) != 0;
+    const auto lower = [](void*, std::uint8_t byte) noexcept -> std::uint8_t {
+        return static_cast<std::uint8_t>(
+            std::tolower(static_cast<unsigned char>(byte)));
+    };
+    const auto space = [](void*, std::uint8_t byte) noexcept -> std::uint8_t {
+        return std::isspace(static_cast<unsigned char>(byte)) != 0;
+    };
+    return a2fo_rs_stage8_shield_parameter(
+        reinterpret_cast<const std::uint8_t*>(value.data()),
+        std::strlen(value.data()), lower, space, nullptr) != 0;
 }
 
 template <typename T>
@@ -623,126 +677,223 @@ void stop_effect(std::int32_t effect_id) noexcept {
 }
 
 void remove_continuous_effect(void* craft) noexcept {
-    const auto found = g_effect_ids.find(craft);
-    if (found == g_effect_ids.end()) return;
-    const std::int32_t effect_id = found->second;
-    g_effect_ids.erase(found);
-    stop_effect(effect_id);
+    struct Context {
+        decltype(g_effect_ids)::iterator found;
+        std::int32_t effect = -1;
+    } context{};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t argument) noexcept -> std::uintptr_t {
+        auto& state = *static_cast<Context*>(opaque);
+        switch (operation) {
+        case 0:
+            state.found = g_effect_ids.find(reinterpret_cast<void*>(argument));
+            return state.found != g_effect_ids.end();
+        case 1:
+            state.effect = state.found->second;
+            g_effect_ids.erase(state.found);
+            return static_cast<std::uint32_t>(state.effect);
+        case 2: stop_effect(static_cast<std::int32_t>(argument)); return 0;
+        default: return 0;
+        }
+    };
+    a2fo_rs_stage8_shield_remove(
+        reinterpret_cast<std::uintptr_t>(craft), step, &context);
+}
+
+bool runtime_enabled() noexcept {
+#ifdef A2FO_BUILTIN_FEATURE
+    static std::uint64_t previous = 0;
+    const auto activation = a2fo::builtin_module_activation(A2FO_BUILTIN_FEATURE);
+    struct Context {
+        std::uint64_t* previous;
+        std::uint64_t activation;
+        std::optional<decltype(g_effect_ids)> effects;
+        decltype(g_effect_ids)::iterator current;
+    } context{&previous, activation, std::nullopt, {}};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t argument) noexcept -> std::uintptr_t {
+        auto& state = *static_cast<Context*>(opaque);
+        switch (operation) {
+        case 0: *state.previous = state.activation; return 0;
+        case 1:
+            // Only game observers enter here; never run native effect cleanup
+            // from a module-menu policy change or CRT teardown.
+            state.effects.emplace(std::move(g_effect_ids));
+            g_effect_ids.clear();
+            state.current = state.effects->begin();
+            return state.effects->size();
+        case 2: {
+            const auto id = state.current->second;
+            ++state.current;
+            return static_cast<std::uint32_t>(id);
+        }
+        case 3: stop_effect(static_cast<std::int32_t>(argument)); return 0;
+        case 4:
+            g_observed_crafts.clear();
+            g_logged_creation_failures.clear();
+            g_global_scan_completed = false;
+            g_last_global_scan_tick = 0;
+            return 0;
+        default: return 0;
+        }
+    };
+    return a2fo_rs_stage8_shield_activation(
+        activation, previous, step, &context) != 0;
+#else
+    return g_runtime_ready;
+#endif
 }
 
 void create_continuous_effect(void* craft) noexcept {
-    const std::int32_t effect_id =
-        reinterpret_cast<CreateShieldHit>(at(kCreateShieldHitRva))(
-            craft, at(kIdentityMatrixRva), kContinuousShieldType,
-            -1.0f, kNativeEffectColour);
-    if (effect_id < 0) {
+    struct Context {
+        void* craft;
+        std::int32_t effect = -1;
+        bool fatal = false;
+    } context{craft};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t argument) noexcept -> std::uintptr_t {
+        auto& state = *static_cast<Context*>(opaque);
+        if (state.fatal) return UINTPTR_MAX;
         try {
-            if (g_logged_creation_failures.insert(craft).second) {
-                log_line(
-                    "Armada rejected a continuous shield-effect creation");
+            switch (operation) {
+            case 0:
+                state.effect = reinterpret_cast<CreateShieldHit>(
+                    at(kCreateShieldHitRva))(
+                        state.craft, at(kIdentityMatrixRva),
+                        kContinuousShieldType, -1.0f, kNativeEffectColour);
+                return static_cast<std::uint32_t>(state.effect);
+            case 1: return g_logged_creation_failures.insert(state.craft).second;
+            case 2:
+                log_line("Armada rejected a continuous shield-effect creation");
+                return 0;
+            case 3: return g_effect_ids.emplace(state.craft, state.effect).second;
+            case 4: stop_effect(static_cast<std::int32_t>(argument)); return 0;
+            case 5: g_logged_creation_failures.erase(state.craft); return 0;
+            case 6: {
+                char message[256]{};
+                const char* odf_name = class_odf_name(
+                    read_at<void*>(state.craft, kObjectClassOffset));
+                std::snprintf(message, sizeof(message),
+                    "Created continuous shield effect %ld for '%s'",
+                    static_cast<long>(state.effect),
+                    odf_name && *odf_name ? odf_name : "<unknown>");
+                log_line(message);
+                return 0;
+            }
+            case 7:
+                log_line("Could not retain a persistent shield-effect identifier");
+                return 0;
+            default: return UINTPTR_MAX;
             }
         } catch (...) {
+            if (operation == 0 || operation == 4) state.fatal = true;
+            return UINTPTR_MAX;
         }
-        return;
-    }
-    try {
-        const auto inserted = g_effect_ids.emplace(craft, effect_id);
-        if (!inserted.second) {
-            stop_effect(effect_id);
-            return;
-        }
-        g_logged_creation_failures.erase(craft);
-        char message[256]{};
-        const char* odf_name = class_odf_name(
-            read_at<void*>(craft, kObjectClassOffset));
-        std::snprintf(
-            message, sizeof(message),
-            "Created continuous shield effect %ld for '%s'",
-            static_cast<long>(effect_id),
-            odf_name && *odf_name ? odf_name : "<unknown>");
-        log_line(message);
-    } catch (...) {
-        stop_effect(effect_id);
-        log_line("Could not retain a persistent shield-effect identifier");
-    }
+    };
+    a2fo_rs_stage8_shield_create(
+        reinterpret_cast<std::uintptr_t>(craft), step, &context);
+    if (context.fatal) std::terminate();
 }
 
+struct ShieldUpdateContext {
+    void* craft;
+    void* object_class;
+    float current_shields;
+};
+std::uintptr_t shield_update_step(void* opaque, std::uint32_t operation,
+                                  std::uintptr_t argument) noexcept {
+    auto& context = *static_cast<ShieldUpdateContext*>(opaque);
+    switch (operation) {
+    case 0: return runtime_enabled();
+    case 1:
+        context.object_class = read_at<void*>(reinterpret_cast<void*>(argument),
+                                             kObjectClassOffset);
+        return reinterpret_cast<std::uintptr_t>(context.object_class);
+    case 2: return class_policy_enabled(reinterpret_cast<void*>(argument));
+    case 3: {
+        context.current_shields = read_at<float>(reinterpret_cast<void*>(argument),
+                                                kCurrentShieldsOffset);
+        std::uint32_t bits = 0;
+        std::memcpy(&bits, &context.current_shields, sizeof(bits));
+        return bits;
+    }
+    case 4:
+        try {
+            if (g_observed_crafts.insert(context.craft).second) {
+                char message[256]{};
+                const char* odf_name = class_odf_name(context.object_class);
+                std::snprintf(message, sizeof(message),
+                    "Observed configured craft '%s' with %.1f shields",
+                    odf_name && *odf_name ? odf_name : "<unknown>",
+                    static_cast<double>(context.current_shields));
+                log_line(message);
+            }
+        } catch (...) {}
+        return 0;
+    case 5: {
+        const auto effect = g_effect_ids.find(context.craft);
+        const std::int32_t id = effect == g_effect_ids.end() ? -1 : effect->second;
+        return static_cast<std::uint32_t>(id);
+    }
+    case 6: create_continuous_effect(context.craft); return 0;
+    case 7: remove_continuous_effect(context.craft); return 0;
+    default: return 0;
+    }
+}
 void update_craft(void* craft) noexcept {
-    if (!g_runtime_ready || !craft) return;
-
-    void* object_class = read_at<void*>(craft, kObjectClassOffset);
-    if (!class_policy_enabled(object_class)) return;
-    const float current_shields =
-        read_at<float>(craft, kCurrentShieldsOffset);
-    try {
-        if (g_observed_crafts.insert(craft).second) {
-            char message[256]{};
-            const char* odf_name = class_odf_name(object_class);
-            std::snprintf(
-                message, sizeof(message),
-                "Observed configured craft '%s' with %.1f shields",
-                odf_name && *odf_name ? odf_name : "<unknown>",
-                static_cast<double>(current_shields));
-            log_line(message);
-        }
-    } catch (...) {
-    }
-    const auto effect = g_effect_ids.find(craft);
-    const std::int32_t effect_id = effect == g_effect_ids.end()
-        ? -1 : effect->second;
-    switch (a2fo::shields::choose_effect_action(
-                true, current_shields, effect_id)) {
-        case EffectAction::show:
-            create_continuous_effect(craft);
-            break;
-        case EffectAction::hide:
-            remove_continuous_effect(craft);
-            break;
-        case EffectAction::none:
-            break;
-    }
+    ShieldUpdateContext context{craft, nullptr, 0.0f};
+    a2fo_rs_stage8_shield_update(g_runtime_ready,
+        reinterpret_cast<std::uintptr_t>(craft), shield_update_step, &context);
 }
 
 void update_all_crafts() noexcept {
-    void* list_global = at(kGameObjectListRva);
-    if (!readable_range(list_global, sizeof(void*))) return;
-    void* list_owner = read_at<void*>(list_global, 0);
-    if (list_owner != g_cached_list_owner) {
-        if (!readable_range(list_owner, sizeof(void*) * 2)) return;
-        g_cached_list_owner = list_owner;
-    }
-    void* current_sentinel = read_at<void*>(list_owner, sizeof(void*));
-    if (current_sentinel != g_cached_list_sentinel) {
-        if (!readable_range(current_sentinel, sizeof(void*) * 3)) return;
-        g_cached_list_sentinel = current_sentinel;
-    }
-    void* sentinel = g_cached_list_sentinel;
-    if (!sentinel) return;
-
     // This hook runs immediately before Armada traverses this same live list
     // for rendering. Validate the owner/sentinel only when they change, then
     // use direct reads for the nodes Armada is about to consume itself. A
     // VirtualQuery for every node and object was a large Wine-side cost.
-    void* node = read_at<void*>(sentinel, 0);
-    std::size_t visited = 0;
-    constexpr std::size_t kMaximumObjectsPerPass = 65536;
-    while (node && node != sentinel && visited < kMaximumObjectsPerPass) {
-        void* next = read_at<void*>(node, 0);
-        void* object = read_at<void*>(node, sizeof(void*) * 2);
-        if (object) update_craft(object);
-        ++visited;
-        if (next == node) break;
-        node = next;
-    }
-    if (!g_logged_object_list_scan) {
-        g_logged_object_list_scan = true;
-        char message[160]{};
-        std::snprintf(
-            message, sizeof(message),
-            "Render pass reached the global GameObject list (%lu object(s))",
-            static_cast<unsigned long>(visited));
-        log_line(message);
-    }
+    const auto step = [](void*, std::uint32_t operation,
+                         std::uintptr_t argument) noexcept -> std::uintptr_t {
+        switch (operation) {
+        case 0: {
+            void* list_global = at(kGameObjectListRva);
+            if (!readable_range(list_global, sizeof(void*))) return UINTPTR_MAX;
+            void* owner = read_at<void*>(list_global, 0);
+            if (owner != g_cached_list_owner) {
+                if (!readable_range(owner, sizeof(void*) * 2)) return UINTPTR_MAX;
+                g_cached_list_owner = owner;
+            }
+            return reinterpret_cast<std::uintptr_t>(owner);
+        }
+        case 1: {
+            void* owner = reinterpret_cast<void*>(argument);
+            void* current = read_at<void*>(owner, sizeof(void*));
+            if (current != g_cached_list_sentinel) {
+                if (!readable_range(current, sizeof(void*) * 3)) return 0;
+                g_cached_list_sentinel = current;
+            }
+            return reinterpret_cast<std::uintptr_t>(g_cached_list_sentinel);
+        }
+        case 2: return reinterpret_cast<std::uintptr_t>(
+            read_at<void*>(reinterpret_cast<void*>(argument), 0));
+        case 3: return reinterpret_cast<std::uintptr_t>(
+            read_at<void*>(reinterpret_cast<void*>(argument), 0));
+        case 4: return reinterpret_cast<std::uintptr_t>(
+            read_at<void*>(reinterpret_cast<void*>(argument), sizeof(void*) * 2));
+        case 5: update_craft(reinterpret_cast<void*>(argument)); return 0;
+        case 6:
+            if (!g_logged_object_list_scan) {
+                g_logged_object_list_scan = true;
+                char message[160]{};
+                std::snprintf(message, sizeof(message),
+                    "Render pass reached the global GameObject list (%lu object(s))",
+                    static_cast<unsigned long>(argument));
+                log_line(message);
+            }
+            return 0;
+        default: return 0;
+        }
+    };
+    a2fo_rs_stage8_shield_scan(step, nullptr);
 }
 
 }  // namespace
@@ -750,22 +901,37 @@ void update_all_crafts() noexcept {
 extern "C" __declspec(dllexport)
 void A2FO_CALL A2FOAlwaysShowShields_RegisterClass(
     void* object_class, void* parameter_db) noexcept {
-    if (!g_runtime_ready || !object_class || !parameter_db) return;
-    try {
-        if (parameter_flag_enabled(parameter_db)) {
-            if (g_enabled_classes.insert(object_class).second) {
+    struct Context { std::exception_ptr error; } context;
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t argument) noexcept -> std::uintptr_t {
+        auto& state = *static_cast<Context*>(opaque);
+        if (state.error) return UINTPTR_MAX;
+        try {
+            switch (operation) {
+            case 0: return parameter_flag_enabled(reinterpret_cast<void*>(argument));
+            case 1:
+                if (g_enabled_classes.insert(reinterpret_cast<void*>(argument)).second) {
                 char message[256]{};
-                const char* odf_name = class_odf_name(object_class);
+                const char* odf_name = class_odf_name(reinterpret_cast<void*>(argument));
                 std::snprintf(
                     message, sizeof(message),
                     "Registered alwaysShowShields on '%s'",
                     odf_name && *odf_name ? odf_name : "<unknown>");
                 log_line(message);
+                }
+                return 0;
+            case 2: g_enabled_classes.erase(reinterpret_cast<void*>(argument)); return 0;
+            default: return UINTPTR_MAX;
             }
-        } else {
-            g_enabled_classes.erase(object_class);
+        } catch (...) {
+            state.error = std::current_exception();
+            return UINTPTR_MAX;
         }
-    } catch (...) {
+    };
+    a2fo_rs_stage8_shield_register(g_runtime_ready,
+        reinterpret_cast<std::uintptr_t>(object_class),
+        reinterpret_cast<std::uintptr_t>(parameter_db), step, &context);
+    if (context.error) {
         log_line("Could not retain an alwaysShowShields class policy");
     }
 }
@@ -777,92 +943,122 @@ void A2FO_CALL A2FOAlwaysShowShields_UpdateCraft(void* craft) noexcept {
 
 extern "C" __declspec(dllexport)
 void A2FO_CALL A2FOAlwaysShowShields_CleanupCraft(void* craft) noexcept {
-    if (!g_runtime_ready || !craft) return;
-    remove_continuous_effect(craft);
-    g_observed_crafts.erase(craft);
-    g_logged_creation_failures.erase(craft);
+    const auto step = [](void*, std::uint32_t operation,
+                         std::uintptr_t argument) noexcept -> std::uintptr_t {
+        void* craft = reinterpret_cast<void*>(argument);
+        switch (operation) {
+        case 0: remove_continuous_effect(craft); break;
+        case 1: g_observed_crafts.erase(craft); break;
+        case 2: g_logged_creation_failures.erase(craft); break;
+        default: break;
+        }
+        return 0;
+    };
+    a2fo_rs_stage8_shield_cleanup(g_runtime_ready,
+        reinterpret_cast<std::uintptr_t>(craft), step, nullptr);
 }
 
 extern "C" __declspec(dllexport)
 bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
-    if (!api || api->struct_size < A2FO_MODULE_API_V4_BASE_SIZE ||
-        api->api_version != A2FO_MODULE_API_VERSION || !api->log ||
-        !api->armada_module || !api->fleetops_module ||
-        !api->install_inline_hook || !api->patch_jump ||
-        !api->extension_root_count ||
-        !api->extension_root) {
-        return false;
-    }
-    g_api = api;
-    g_armada = static_cast<HMODULE>(api->armada_module());
-    g_fleet_ops = static_cast<HMODULE>(api->fleetops_module());
-    if (!g_armada || !g_fleet_ops) {
-        g_api = nullptr;
-        g_armada = nullptr;
-        g_fleet_ops = nullptr;
-        return false;
-    }
-    if (!signatures_supported()) {
-        g_api = nullptr;
-        g_armada = nullptr;
-        g_fleet_ops = nullptr;
-        return false;
-    }
-    if (!api->install_inline_hook(
-            at(kStarbaseSimulateRva),
-            reinterpret_cast<void*>(&starbase_simulate_hook),
-            kExpectedStarbaseSimulate.size(),
-            kExpectedStarbaseSimulate.data(),
-            &g_starbase_simulate_hook)) {
-        log_line("Could not install the Starbase::Simulate observer");
-        // Earlier inline hooks cannot be safely removed. Keep this DLL loaded
-        // as a pass-through if a post-preflight installation unexpectedly
-        // fails.
-        return true;
-    }
-    if (!api->install_inline_hook(
-            at(kRenderGameObjectsRva),
-            reinterpret_cast<void*>(&render_game_objects_hook),
-            kExpectedRenderGameObjects.size(),
-            kExpectedRenderGameObjects.data(),
-            &g_render_game_objects_hook)) {
-        log_line("Could not install the RenderGameObjects observer");
-        return true;
-    }
-    if (!install_publication_hook(api)) {
-        log_line("Could not install the GameObject publication observer");
-        return true;
-    }
-    try {
-        index_loose_odfs();
-    } catch (...) {
-        log_line("Could not index loose ODFs for preloaded class fallback");
-    }
-    g_runtime_ready = true;
-    char message[192]{};
-    std::snprintf(
-        message, sizeof(message),
-        "alwaysShowShields policy initialized with global object-list, "
-        "mission-publication, and Starbase coverage; missing commands "
-        "default to 0; indexed %lu "
-        "loose ODF basename(s)",
-        static_cast<unsigned long>(g_loose_odf_paths.size()));
-    log_line(message);
-    return true;
+    struct Context {
+        const A2FO_ModuleApi* api;
+        std::exception_ptr error;
+    } context{api, nullptr};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& state = *static_cast<Context*>(opaque);
+        const auto* api = state.api;
+        if (state.error) return UINTPTR_MAX;
+        try {
+            switch (operation) {
+            case 0:
+                return api && api->struct_size >= A2FO_MODULE_API_V4_BASE_SIZE &&
+                    api->api_version == A2FO_MODULE_API_VERSION && api->log &&
+                    api->armada_module && api->fleetops_module &&
+                    api->install_inline_hook && api->patch_jump &&
+                    api->extension_root_count && api->extension_root;
+            case 1:
+                g_api = api;
+                g_armada = static_cast<HMODULE>(api->armada_module());
+                g_fleet_ops = static_cast<HMODULE>(api->fleetops_module());
+                return g_armada && g_fleet_ops;
+            case 2:
+                g_api = nullptr;
+                g_armada = nullptr;
+                g_fleet_ops = nullptr;
+                return 0;
+            case 3: return signatures_supported();
+            case 4:
+                return api->install_inline_hook(
+                    at(kStarbaseSimulateRva),
+                    reinterpret_cast<void*>(&starbase_simulate_hook),
+                    kExpectedStarbaseSimulate.size(),
+                    kExpectedStarbaseSimulate.data(), &g_starbase_simulate_hook);
+            case 5:
+                log_line("Could not install the Starbase::Simulate observer");
+                return 0;
+            case 6:
+                return api->install_inline_hook(
+                    at(kRenderGameObjectsRva),
+                    reinterpret_cast<void*>(&render_game_objects_hook),
+                    kExpectedRenderGameObjects.size(),
+                    kExpectedRenderGameObjects.data(), &g_render_game_objects_hook);
+            case 7:
+                log_line("Could not install the RenderGameObjects observer");
+                return 0;
+            case 8: return install_publication_hook(api);
+            case 9:
+                log_line("Could not install the GameObject publication observer");
+                return 0;
+            case 10:
+                try { index_loose_odfs(); }
+                catch (...) {
+                    log_line("Could not index loose ODFs for preloaded class fallback");
+                }
+                return 0;
+            case 11: {
+                g_runtime_ready = true;
+                char message[192]{};
+                std::snprintf(message, sizeof(message),
+                    "alwaysShowShields policy initialized with global object-list, "
+                    "mission-publication, and Starbase coverage; missing commands "
+                    "default to 0; indexed %lu loose ODF basename(s)",
+                    static_cast<unsigned long>(g_loose_odf_paths.size()));
+                log_line(message);
+                return 0;
+            }
+            default: return UINTPTR_MAX;
+            }
+        } catch (...) {
+            state.error = std::current_exception();
+            return UINTPTR_MAX;
+        }
+    };
+    const bool result = a2fo_rs_stage8_shield_init(step, &context) != 0;
+    if (context.error) std::rethrow_exception(context.error);
+    return result;
 }
 
 extern "C" __declspec(dllexport)
 void A2FO_CALL A2FO_ModuleShutdown() {
-    g_runtime_ready = false;
-    g_enabled_classes.clear();
-    g_loose_resolved_classes.clear();
-    g_effect_ids.clear();
-    g_observed_crafts.clear();
-    g_logged_creation_failures.clear();
-    g_loose_odf_paths.clear();
-    g_logged_object_list_scan = false;
-    g_cached_list_owner = nullptr;
-    g_cached_list_sentinel = nullptr;
-    g_last_global_scan_tick = 0;
-    g_global_scan_completed = false;
+    const auto step = [](void*, std::uint32_t operation,
+                         std::uintptr_t) noexcept -> std::uintptr_t {
+        switch (operation) {
+        case 0: g_runtime_ready = false; break;
+        case 1: g_enabled_classes.clear(); break;
+        case 2: g_loose_resolved_classes.clear(); break;
+        case 3: g_effect_ids.clear(); break;
+        case 4: g_observed_crafts.clear(); break;
+        case 5: g_logged_creation_failures.clear(); break;
+        case 6: g_loose_odf_paths.clear(); break;
+        case 7: g_logged_object_list_scan = false; break;
+        case 8: g_cached_list_owner = nullptr; break;
+        case 9: g_cached_list_sentinel = nullptr; break;
+        case 10: g_last_global_scan_tick = 0; break;
+        case 11: g_global_scan_completed = false; break;
+        default: break;
+        }
+        return 0;
+    };
+    a2fo_rs_stage8_shield_shutdown(step, nullptr);
 }

@@ -3,8 +3,29 @@
 This package preserves the proven startup chain while separating checked engine
 hooks, reusable semantic dispatch, and optional native feature modules.
 
+Track the native DX11 renderer and Nexus work in the
+[completion checklist](docs/renderer/native11-progress.md).
+
+The [Rust migration](docs/rust-migration.md) now includes a Rust-owned DLL root,
+bounded MMM loader/handoff work, and a production
+[Rust media backend](docs/rust-media-replacement.md) replacing FFmpeg for the
+used movie formats. Native adapters and retained MMM internals still remain.
+The first [adapter retirement pass](docs/rust-adapter-retirement.md) removes
+redundant hook/geometry C++ units and their build inputs. Historical unit-census
+counts measure individual porting slices, not complete
+Rust ownership. Candidates are staged; deployment and in-game acceptance remain
+separate. The current census credits all **151 portable implementation units**;
+[combined checks and manual test instructions](docs/rust-rewrite-acceptance.md)
+keep this distinct from full Rust ownership and in-game acceptance.
+
 ## User-facing features
 
+- Refit menu scene pacing, Instant Action camera handover and loading animation:
+  [current implementation and validation](docs/refit-handoff-2026-10-20.md).
+- Experimental opt-in [collective faction XP](docs/collective-xp.md): independent
+  player pools, native rank chains/promotion, and ranked queue admission through
+  the updated FeaturePack. Native fixtures are provided; live-game acceptance,
+  ranked build-menu presentation, and safe capture demotion remain outstanding.
 - Recursive ODF discovery from arbitrary subdirectories.
 - Recursive ODF indexing inside active loose roots and `odf.fpq` archives.
 - Correct Data → `ParentMod` → active-mod file precedence.
@@ -43,7 +64,7 @@ hooks, reusable semantic dispatch, and optional native feature modules.
   pitch, slew rates, ownership changes, and save/load reconnection.
 - Optional `A1Compat.dll` support for the Armada 1 `wingman` classlabel,
   mapped safely to `craft` only through the `STA1 Classic` mod chain.
-- Optional `A1Fallbacks.dll` missing-wireframe presentation, preserving native
+- Optional `A1Fallbacks` missing-wireframe presentation, preserving native
   wireframes before trying the object's build button and current faction icon.
 - Armada 1 `Addon` ODF overlay support through `A1Compat.dll`, preserving A1's
   within-root rule that `Addon` wins over a same-basename structured ODF.
@@ -110,6 +131,11 @@ hooks, reusable semantic dispatch, and optional native feature modules.
 - Central logging for the core and native modules.
 - Checked hook signatures and supported-binary validation.
 
+An optional [ArmadaL recovery test module](modules/A2FORecoveryTests/README.md)
+captures original context/node-transform results and compares recovered C++ on
+isolated snapshots. Build it explicitly with `make recovery-tests`; it is
+disabled by default and its live-game acceptance is pending.
+
 ## Current modding commands
 
 - [SOD event animations](modules/A2FOAnimations/README.md): numbered frame-range
@@ -171,6 +197,43 @@ specific mod. Existing mods without a `[modules]` section retain legacy
 load-all behaviour until a selection is saved. Native DLLs must be installed
 centrally under `Data/modules`; a mod's own `modules` folder is never loaded.
 
+`A2FOWreckage`, `A2FONormalWeaponTech`, `A2FOBuildTooltips`, `A2FOInfoIni`,
+`A2FOMuzzleFlashes`, `A2FOTeamChangeWeapons`, `A2FOWeaponDamageControls`,
+`A1Fallbacks`, `A2FOAnimatedHardpoints`, `A2FOCameraControls`,
+`A2FOViewDistance`, `A2FOInstantActionSettings`, `A2FOEditMenu`, `A2FOM3D`,
+`A2FOBreeders`, `A2FOInfestation`, `A2FOSwarmSystem`, `A2FOODFVariants`,
+`A2FOFireArcs`, `A2FOAnimations`, `A2FOAlwaysShowShields`,
+`A2FOStationRotation`, `A2FORadarDiagnostics`, and `A2FORecoveryTests` are
+built into the core DLL and retain their existing module selections. Stage 9
+adds `A2FOCheats`, `A2FOCollectiveXP`, `A2FODirectionalShields`,
+`A2FOEnergySystems`, `A2FOHybridBuild`, `A2FOMultiYardBuild`,
+`A2FONebulaRenderer`, `A2FOPointDefenseCycles`, `A2FORefitYards`,
+`A2FOTurrets`, `A2FORGBTextures`, and `A2FOTextureVariants`, bringing the
+core-provided inventory to thirty-six of the existing forty-eight module
+names. Stage 10 adds `A1Compat`, `A2FOCraftIdentity`, `A2FOFeaturePack`,
+`A2FOLogMailer`, `A2FOMissionSelector`, `A2FOMissions`, `A2FORefitMenus`,
+`A2FOResources`, `A2FOSOLMaps`, `A2FOShellDisplay`, `A2FOSquadrons`, and
+`A2FOVideo`, completing the core-provided inventory of forty-eight module
+names. The first twenty-four built-ins retain their live policy gates. The
+twelve added in
+stage 9 use startup-only selection: only selected or required features
+initialize, and saving a menu selection reports that a restart is pending
+without changing current callbacks or native hooks. Stage 10's twelve modules
+also use startup-only selection; existing `requiredX`, `rejectX`, and `activeX`
+policy remains in force, and consolidation does not auto-enable a feature.
+The core DLL still relies on optional support utilities: the log-mailer helper
+EXE, the MMM loader compatibility shim, and the optional Rust Refit scene
+provider remain separate files. It is therefore not a self-contained single
+file distribution. See the [first](docs/builtin-modules-stage1.md),
+[second](docs/builtin-modules-stage2.md), [third](docs/builtin-modules-stage3.md),
+[fourth](docs/builtin-modules-stage4.md), [fifth](docs/builtin-modules-stage5.md),
+[sixth](docs/builtin-modules-stage6.md), [seventh](docs/builtin-modules-stage7.md),
+[eighth](docs/builtin-modules-stage8.md), and
+[ninth](docs/builtin-modules-stage9.md)
+built-in module milestones, and the
+[tenth](docs/builtin-modules-stage10.md) milestone for availability,
+compatibility, and verification limits.
+
 ### Edit-menu ODF commands
 
 The stock `editmenu.odf` and first category level remain unchanged. A category
@@ -189,6 +252,17 @@ one remains a native object-list leaf. Each visible page retains the native
 12-entry limit, recursive depth is capped at 32, cycles are rejected, and Back
 returns one level at a time. See
 [`modules/A2FOEditMenu/README.md`](modules/A2FOEditMenu/README.md).
+
+### Shell display
+
+`A2FOShellDisplay.dll` makes the primary shell game window use the selected
+graphics resolution and Window Mode preference, with a borderless shell when
+Window Mode is unchecked. Version 5 scales registered native shell backgrounds
+and controls to fill the actual window client, keeping native hit testing
+aligned and VCL's cached layout dimensions logical across Options transitions.
+It also adapts custom checkboxes' release-time cursor queries.
+See [`A2FOShellDisplay`](modules/A2FOShellDisplay/README.md)
+for binary support, headless validation and manual acceptance.
 
 ### Single-player mission selector
 
@@ -680,6 +754,11 @@ Queue controls and their current validation status are documented in
 ledger—including supported binary identities, every direct patch and byte
 signature, helper/global RVAs, startup-loader provenance, and object-layout
 offsets—is in [`docs/addresses.md`](docs/addresses.md).
+Reviewed PE-layout-bound profiles can admit qualified engine updates without
+rebuilding the DLL when their hook assumptions and signatures remain valid.
+They do not supply new addresses or signatures, and code or ABI changes can
+still require a rebuild. See [`docs/engine-update-profiles.md`](docs/engine-update-profiles.md)
+for the Oct 23 staged profiles, proposal commands, and audit limits.
 The two optional Fleet Ops mod-information fields are documented in
 [`docs/fleetops-info-defaults.md`](docs/fleetops-info-defaults.md).
 The complete modder command and feature index is in
@@ -751,8 +830,6 @@ Armada II/
 │       └── d3d9.dll             (32-bit DXVK payload)
 ├── modules/
 │   ├── A2FOAlwaysShowShields.dll
-│   ├── A2FOAnimatedHardpoints.dll
-│   ├── A2FOBuildTooltips.dll
 │   ├── A2FOCheats.dll
 │   ├── A2FOCraftIdentity.dll
 │   ├── A2FOEditMenu.dll
@@ -763,9 +840,7 @@ Armada II/
 │   ├── A2FOFireArcs.dll
 │   ├── A2FOFeaturePack.dll
 │   ├── A2FOHybridBuild.dll
-│   ├── A2FOInfoIni.dll
 │   ├── A2FONebulaRenderer.dll
-│   ├── A2FONormalWeaponTech.dll
 │   ├── A2FOPointDefenseCycles.dll
 │   ├── A2FOResources.dll
 │   ├── A2FORGBTextures.dll
@@ -773,10 +848,7 @@ Armada II/
 │   ├── A2FOSwarmSystem.dll
 │   ├── A2FOTextureVariants.dll
 │   ├── A2FOTurrets.dll
-│   ├── A2FOWeaponDamageControls.dll
-│   ├── A2FOWreckage.dll
 │   ├── A1Compat.dll
-│   └── A1Fallbacks.dll
 ├── Shaders/
 │   ├── dot3_amd.nvv
 │   ├── dot3_amd9.nvv
@@ -803,6 +875,9 @@ Install the toolchain:
 sudo dnf install mingw32-gcc-c++ mingw32-binutils make
 ```
 
+The core also requires Rust/Cargo (initially verified with 1.96.0) and its
+32-bit Windows GNU target: `rustup target add i686-pc-windows-gnu`.
+
 Build the release artifacts:
 
 ```bash
@@ -825,14 +900,10 @@ build/A2FOExtensions.dll
 build/A2FORendererHelper.exe
 build/Win2kDisableTaskSwitch.dll
 build/modules/A2FOAlwaysShowShields.dll
-build/modules/A2FOAnimatedHardpoints.dll
-build/modules/A2FOBuildTooltips.dll
 build/modules/A1Compat.dll
-build/modules/A1Fallbacks.dll
 build/modules/A2FOCheats.dll
 build/modules/A2FOFeaturePack.dll
 build/modules/A2FOHybridBuild.dll
-build/modules/A2FOInfoIni.dll
 build/modules/A2FOCraftIdentity.dll
 build/modules/A2FOEditMenu.dll
 build/modules/A2FODirectionalShields.dll
@@ -841,7 +912,6 @@ build/modules/A2FOInstantActionSettings.dll
 build/modules/A2FOMissionSelector.dll
 build/modules/A2FOFireArcs.dll
 build/modules/A2FONebulaRenderer.dll
-build/modules/A2FONormalWeaponTech.dll
 build/modules/A2FOPointDefenseCycles.dll
 build/modules/A2FOResources.dll
 build/modules/A2FORGBTextures.dll
@@ -849,8 +919,6 @@ build/modules/A2FOStationRotation.dll
 build/modules/A2FOSwarmSystem.dll
 build/modules/A2FOTextureVariants.dll
 build/modules/A2FOTurrets.dll
-build/modules/A2FOWeaponDamageControls.dll
-build/modules/A2FOWreckage.dll
 build/Shaders/dot3_amd.nvv
 build/Shaders/dot3_amd9.nvv
 build/Shaders/dx8/pixel/ps.nvv
@@ -924,6 +992,13 @@ cinematic-display path.
 
 ## Renderer selection
 
+The October 15 restoration reconnects the Graphics Options installer during
+deferred startup, uses the verified VCL form HWND at `+0x1b4`, and places the
+added controls using the native form layout. It covers the clean 800x600 and
+Roots 1200x900 menus. See
+[`docs/graphics-options-roots-2026-10-15.md`](docs/graphics-options-roots-2026-10-15.md)
+for the October Roots engine approval, tests, deployment and manual checks.
+
 A2FOExtensions adds a **Renderer** list to Fleet Operations' native Graphics
 Options screen:
 
@@ -990,8 +1065,11 @@ immediately, default to enabled, and are persisted in the `[Effects]` section
 of `Data/A2FORenderer.ini`; changing them does not require a restart. With the
 managed DXVK backend, emissive maps also receive selective native framebuffer
 bloom. It defaults on and can be disabled for the next start with
-`EmissiveBloom=0` in the same section; the system renderer retains sharp
-emissive centres without the private bloom targets.
+`EmissiveBloom=0` in the same section. The current system-renderer safety
+policy disables A2FO mapped-material hooks, including these emissive/specular
+effects. The switches retain the requested effect settings for managed DXVK.
+The implemented renderer choices are System Direct3D 9 (WineD3D under Wine)
+and DXVK/Vulkan; this package does not implement a separate OpenGL backend.
 
 DXVK is optional and is not produced by this source build. Install the 32-bit
 DXVK D3D9 DLL in the payload location above before selecting it. Wine launchers
@@ -1044,3 +1122,13 @@ sorted rendering. GPU shader handles follow the core device-reset lifecycle.
 The runtime log reports `Single-pass textured cloak lighting active; opaque
 DOT3 light draws suppressed` when the new composition actually executes.
 Visual appearance and frame-rate changes still need an in-game comparison.
+
+An additional **opt-in Refit cloak prototype** uses the underlying D3D9 device
+on the managed DXVK route for background refraction, shimmer and travelling
+cloak/decloak bands. It defaults off. Eligible draws retain the current cloak
+when device access, shaders or scene copying are unavailable. It uses existing
+opaque DOT3 hull geometry and engine cloak progression; it does not enumerate
+or reveal objects culled by the game. See
+[`docs/renderer/cloak-refraction-prototype-20261022.md`](docs/renderer/cloak-refraction-prototype-20261022.md)
+for activation, source provenance, reproducible headless fixtures and current
+visual/renderer limits. The installed game is not changed by building it.

@@ -1,6 +1,6 @@
 # Team-change weapon activation
 
-`A2FOTeamChangeWeapons.dll` adds this opt-in **weapon ODF** command:
+`A2FOTeamChangeWeapons` adds this opt-in **weapon ODF** command:
 
 ```text
 activateOnTeamChange = 1
@@ -50,11 +50,36 @@ Native `replacementInstantDelay`/`replacementInstantCycle` govern the separate
 automatic replacement path; this command submits a normal manual-style
 activation, without adding a team-change delay.
 
-## Installation
+## Built-in availability
 
-Install the DLL in the game's central `Data/modules` directory and select
-`A2FOTeamChangeWeapons` for the mod in the Modules menu. An `info.ini` selection
-can use an unused `activeX` index, or require the feature:
+`A2FOTeamChangeWeapons` is built into `A2FOExtensions.dll`. Keep the module's
+original name in the Modules menu and in `requiredX`/`rejectX`/`activeX`
+selections; do not install or release a separate DLL. The legacy standalone
+build target remains available for SDK compatibility, but the core ignores a
+stale standalone DLL during module discovery.
+
+The core prepares this module once for each non-rejected mod, including when
+initially disabled. `requiredX` locks it on, `rejectX` excludes it, and
+existing inheritance and live Save selection rules remain unchanged. It is
+unavailable for the process unless its own ready state, the weapon-class
+dispatcher, and the craft dispatcher are all available.
+
+Team metadata is captured during preparation even while the module is off.
+The live flag gates only future ownership-change requests. Turning it off
+cancels queued requests; activation tokens ensure requests queued before an
+off/on transition are canceled even if no simulation pass ran between those
+changes. Cleanup and successful PostLoad retain the existing pending-request
+cleanup behavior. Already-activated native effects and countdowns are not
+reversed. See [built-in module stage three](../../docs/builtin-modules-stage3.md)
+for selection and acceptance details.
+
+## Standalone SDK compatibility
+
+For standalone SDK compatibility builds only, a module consumer can install
+the DLL in central `Data/modules` and select `A2FOTeamChangeWeapons` for the
+mod. For core releases, use the built-in selection and do not install the
+standalone DLL. An `info.ini` selection can use an unused `activeX` index, or
+require the feature:
 
 ```ini
 [modules]
@@ -62,9 +87,8 @@ required0 = "A2FOTeamChangeWeapons"
 ```
 
 Do not overwrite another existing `required0` entry; choose the next free
-index. The current core already supplies the required API (v4 revision 15 or
-newer); this feature does not require rebuilding the core or other modules.
-Every multiplayer peer must enable the same module and ODF settings.
+index. The standalone consumer needs the required API (v4 revision 15 or
+newer). Every multiplayer peer must enable the same module and ODF settings.
 
 ## Lifecycle and validation
 

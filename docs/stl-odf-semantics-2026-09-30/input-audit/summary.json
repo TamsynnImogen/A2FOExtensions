@@ -1,0 +1,60 @@
+{
+  "corpora": {
+    "STL": {
+      "files": 1685,
+      "assignments": 26301,
+      "exact_keys": 1335,
+      "families": 1096,
+      "commented_assignments": 1408,
+      "classlabels": 160,
+      "anomalies": 35,
+      "archives": 0
+    },
+    "STA1 Classic Mod": {
+      "files": 494,
+      "assignments": 7983,
+      "exact_keys": 631,
+      "families": 572,
+      "commented_assignments": 216,
+      "classlabels": 197,
+      "anomalies": 3,
+      "archives": 3
+    },
+    "STA2 Classic Mod": {
+      "files": 1097,
+      "assignments": 17498,
+      "exact_keys": 1180,
+      "families": 1002,
+      "commented_assignments": 698,
+      "classlabels": 311,
+      "anomalies": 24,
+      "archives": 1
+    },
+    "Fleet Ops 4.0": {
+      "files": 9364,
+      "assignments": 384513,
+      "exact_keys": 2072,
+      "families": 1468,
+      "commented_assignments": 97,
+      "classlabels": 9125,
+      "anomalies": 18,
+      "archives": 0
+    },
+    "FO_ROOT": {
+      "files": 1696,
+      "assignments": 82699,
+      "exact_keys": 1466,
+      "families": 1026,
+      "commented_assignments": 2030,
+      "classlabels": 1519,
+      "anomalies": 38,
+      "archives": 2
+    }
+  },
+  "stl_exact_keys": 1335,
+  "candidate_occurrences": 14616,
+  "candidate_keys": 541,
+  "candidate_families": 416,
+  "comment_only_occurrences": 329,
+  "stl_classlabels_absent_baselines": 7
+}

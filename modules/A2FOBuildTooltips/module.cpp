@@ -1,3 +1,4 @@
+#include "../../sdk/include/a2fo_module_provider.hpp"
 /*
  * Build-time text for build-button tooltips.
  *
@@ -11,9 +12,13 @@
  */
 
 #include "../../sdk/include/a2fo_module_api.h"
+#include "../../rust/module_runtime_a5_ffi.h"
 #include "../../sdk/include/a2fo_supported_armada.hpp"
 #include "../A2FOResources/api.hpp"
 #include "build_time_text.hpp"
+#ifdef A2FO_BUILTIN_FEATURE
+#include "../../core/builtin_modules.hpp"
+#endif
 
 #include <windows.h>
 
@@ -97,9 +102,9 @@ HMODULE g_armada = nullptr;
 A2FO_InlineHook g_button_text_hook{};
 A2FO_InlineHook g_button_verbose_hook{};
 bool g_runtime_ready = false;
-bool g_inside_tooltip = false;
+thread_local bool g_inside_tooltip = false;
 bool g_logged_modifier_observation = false;
-char g_end_extra_override[512]{};
+thread_local char g_end_extra_override[512]{};
 
 void* at(std::uintptr_t rva) noexcept {
     return g_armada
@@ -170,40 +175,6 @@ float current_global_build_time_modifier() noexcept {
             at(kGameSetupGetBuildTimeModifierRva), game_setup));
 }
 
-bool adjusted_build_time(void* object_class, std::int32_t team,
-                         float* output) noexcept {
-    if (!output || !object_class ||
-        !readable_range(object_class, sizeof(void*))) {
-        return false;
-    }
-    const std::uint32_t duration_bits =
-        a2fo_build_tooltips_call_thiscall_float_1_bits(
-            at(kGameObjectClassGetBuildTimeRva), object_class,
-            static_cast<std::uintptr_t>(team));
-    const float native_duration = float_from_bits(duration_bits);
-    const float raw_duration = read_value<float>(
-        object_class, kGameObjectClassRawBuildTimeOffset, native_duration);
-    const float global_modifier = current_global_build_time_modifier();
-    const float duration = a2fo::build_tooltips::reconcile_global_build_time(
-        raw_duration, native_duration, global_modifier);
-    if (!g_logged_modifier_observation && global_modifier != 1.0f) {
-        g_logged_modifier_observation = true;
-        char message[192]{};
-        std::snprintf(
-            message, sizeof(message),
-            "Live IA Ship Build Time: raw=%.3f, native=%.3f, "
-            "modifier=%.3f, displayed=%.3f (%s)",
-            static_cast<double>(raw_duration),
-            static_cast<double>(native_duration),
-            static_cast<double>(global_modifier),
-            static_cast<double>(duration),
-            duration == native_duration ? "native" : "reconciled");
-        log_line(message);
-    }
-    *output = duration;
-    return true;
-}
-
 const char* localize(const char* key, const char* fallback) noexcept {
     void* manager = read_value<void*>(
         at(kLocalizationManagerPointerRva), 0, nullptr);
@@ -215,122 +186,28 @@ const char* localize(const char* key, const char* fallback) noexcept {
     return translated && *translated ? translated : fallback;
 }
 
-bool append_buffer(char* output, std::size_t output_size,
-                   const char* text) noexcept {
-    if (!output || output_size == 0 || !text) return false;
-    const std::size_t used = std::strlen(output);
-    const std::size_t added = std::strlen(text);
-    if (used >= output_size || added >= output_size - used) return false;
-    std::memcpy(output + used, text, added + 1);
-    return true;
-}
-
-bool prepare_cost_suffix(void* mode_info, bool verbose) noexcept {
-    g_end_extra_override[0] = '\0';
-    if (!mode_info ||
-        read_value<std::int32_t>(mode_info, kModeInfoTypeOffset, -1) !=
-            kBuildItemType) {
-        return false;
-    }
-    void* object_class = read_value<void*>(
-        mode_info, kModeInfoTargetClassOffset, nullptr);
-    HMODULE resources = GetModuleHandleA("A2FOResources.dll");
-    FARPROC exported = resources
-        ? GetProcAddress(resources, "A2FOResources_GetCost") : nullptr;
-    A2FOResourcesGetCostFn get_cost = nullptr;
-    static_assert(sizeof(exported) == sizeof(get_cost),
-                  "unexpected function-pointer size");
-    std::memcpy(&get_cost, &exported, sizeof(get_cost));
-    FARPROC presentation_export = resources
-        ? GetProcAddress(resources, "A2FOResources_GetPresentationText")
-        : nullptr;
-    A2FOResourcesGetPresentationTextFn get_presentation = nullptr;
-    static_assert(sizeof(presentation_export) == sizeof(get_presentation),
-                  "unexpected function-pointer size");
-    std::memcpy(&get_presentation, &presentation_export,
-                sizeof(get_presentation));
-    if (!object_class) return false;
-
-    constexpr const char* fallback_names[] = {
-        "Tritanium", "Supply", "Credits", "Collective connections"};
-    const auto local_team = reinterpret_cast<LocalTeam>(at(kLocalTeamRva));
-    const auto team_for_team = reinterpret_cast<TeamForTeam>(
-        at(kTeamForTeamRva));
-    const std::int32_t team_index = local_team ? local_team() : -1;
-    void* team = team_for_team && team_index >= 0 && team_index < 16
-        ? team_for_team(team_index) : nullptr;
-    const char* separator = localize("GUI_CP_AMOUNT_SEPARATE", "/");
-    if (get_cost) {
-        for (std::uint32_t index = 0; index < 4; ++index) {
-            const std::uint32_t resource = A2FO_RESOURCE_TRITANIUM + index;
-            const std::int32_t cost = get_cost(object_class, resource);
-            if (cost <= 0) continue;
-            const std::uint32_t presentation = verbose
-                ? A2FO_RESOURCE_PRESENTATION_RES
-                : A2FO_RESOURCE_PRESENTATION_ICON;
-            const char* name = get_presentation
-                ? get_presentation(team, resource,
-                                   presentation)
-                : nullptr;
-            if (!name || !*name) name = fallback_names[index];
-            char token[128]{};
-            if (!a2fo::build_tooltips::format_resource_cost_token(
-                    separator, name, cost, !verbose, token,
-                    sizeof(token)) ||
-                !append_buffer(g_end_extra_override,
-                               sizeof(g_end_extra_override), token)) {
-                g_end_extra_override[0] = '\0';
-                return false;
-            }
-        }
-    }
-    float duration = 0.0f;
-    char build_time[64]{};
-    if (!adjusted_build_time(object_class, team_index, &duration) ||
-        !a2fo::build_tooltips::format_build_time_token(
-            separator, duration, !verbose, build_time,
-            sizeof(build_time)) ||
-        !append_buffer(g_end_extra_override,
-                       sizeof(g_end_extra_override), build_time) ||
-        !append_buffer(
-            g_end_extra_override, sizeof(g_end_extra_override),
-            localize("GUI_CP_END_EXTRA", ")"))) {
-        g_end_extra_override[0] = '\0';
-        return false;
-    }
-    return true;
-}
+struct TooltipContext {
+    const A2FO_ModuleApi* supplied=nullptr;
+    A2FO_InlineHook* hook=nullptr;
+    void* mode_info=nullptr;
+    void* string_stream=nullptr;
+    void* object_class=nullptr;
+    void* team=nullptr;
+    A2FOResourcesGetCostFn get_cost=nullptr;
+    A2FOResourcesGetPresentationTextFn get_presentation=nullptr;
+    bool verbose=false;
+};
+std::uintptr_t tooltip_step(void*,std::uint32_t,std::uint32_t,A2foRsTooltipMeasure*) noexcept;
 
 std::uintptr_t __attribute__((fastcall)) end_extra_lookup(
     void* manager, void*, const char* key) noexcept {
-    if (g_inside_tooltip && g_end_extra_override[0] && key &&
-        std::strcmp(key, "GUI_CP_END_EXTRA") == 0) {
+    if (a2fo_rs_runtime_tooltip_override(g_inside_tooltip,
+        g_end_extra_override[0] != '\0',key)) {
         return reinterpret_cast<std::uintptr_t>(g_end_extra_override);
     }
     return a2fo_build_tooltips_call_thiscall_1(
         at(kLocalizationLookupRva), manager,
         reinterpret_cast<std::uintptr_t>(key));
-}
-
-bool call_original_and_append(A2FO_InlineHook& hook, void* mode_info,
-                              void* string_stream) noexcept {
-    if (!hook.gateway) return false;
-    if (!g_runtime_ready || g_inside_tooltip) {
-        return a2fo_build_tooltips_call_thiscall_1(
-                   hook.gateway, mode_info,
-                   reinterpret_cast<std::uintptr_t>(string_stream)) != 0;
-    }
-
-    g_inside_tooltip = true;
-    prepare_cost_suffix(
-        mode_info, &hook == &g_button_verbose_hook);
-    const bool result = a2fo_build_tooltips_call_thiscall_1(
-                            hook.gateway, mode_info,
-                            reinterpret_cast<std::uintptr_t>(string_stream)) !=
-        0;
-    g_end_extra_override[0] = '\0';
-    g_inside_tooltip = false;
-    return result;
 }
 
 bool preflight() noexcept {
@@ -373,44 +250,104 @@ bool preflight() noexcept {
     return true;
 }
 
-bool install_hooks() noexcept {
-    if (!g_api || !g_api->install_inline_hook || !g_api->patch_call ||
-        !preflight()) {
-        return false;
+std::uintptr_t tooltip_step(void* opaque,std::uint32_t operation,std::uint32_t argument,
+                            A2foRsTooltipMeasure* value) noexcept {
+    auto& context=*static_cast<TooltipContext*>(opaque);
+    switch(operation) {
+    case 0:g_end_extra_override[0]='\0';return 1;
+    case 1:return read_value<std::int32_t>(context.mode_info,kModeInfoTypeOffset,-1);
+    case 2:context.object_class=read_value<void*>(context.mode_info,kModeInfoTargetClassOffset,nullptr);
+        return reinterpret_cast<std::uintptr_t>(context.object_class);
+    case 3: {
+        HMODULE resources=a2fo::startup_module_provider("A2FOResources.dll",
+            {"A2FOResources_GetCost","A2FOResources_GetPresentationText"});
+        FARPROC exported=resources?GetProcAddress(resources,"A2FOResources_GetCost"):nullptr;
+        static_assert(sizeof(exported)==sizeof(context.get_cost));
+        std::memcpy(&context.get_cost,&exported,sizeof(exported));
+        exported=resources?GetProcAddress(resources,"A2FOResources_GetPresentationText"):nullptr;
+        std::memcpy(&context.get_presentation,&exported,sizeof(exported));
+        return context.get_cost!=nullptr;
     }
-    const bool text_installed = g_api->install_inline_hook(
-        at(kModeInfoButtonTextRva),
+    case 4: {
+        const auto team=reinterpret_cast<LocalTeam>(at(kLocalTeamRva));
+        return static_cast<std::uintptr_t>(team?team():-1);
+    }
+    case 5: {
+        const auto function=reinterpret_cast<TeamForTeam>(at(kTeamForTeamRva));
+        const auto team=static_cast<std::int32_t>(argument);
+        context.team=function&&team>=0&&team<16?function(team):nullptr;
+        return reinterpret_cast<std::uintptr_t>(context.team);
+    }
+    case 6:return reinterpret_cast<std::uintptr_t>(localize("GUI_CP_AMOUNT_SEPARATE","/"));
+    case 7:return context.get_cost?static_cast<std::uintptr_t>(context.get_cost(
+        context.object_class,A2FO_RESOURCE_TRITANIUM+argument)):0;
+    case 8:return reinterpret_cast<std::uintptr_t>(context.get_presentation
+        ?context.get_presentation(context.team,A2FO_RESOURCE_TRITANIUM+argument,
+            context.verbose?A2FO_RESOURCE_PRESENTATION_RES:A2FO_RESOURCE_PRESENTATION_ICON)
+        :nullptr);
+    case 9: {
+        if(!context.object_class||!readable_range(context.object_class,sizeof(void*)))return 0;
+        const auto bits=a2fo_build_tooltips_call_thiscall_float_1_bits(
+            at(kGameObjectClassGetBuildTimeRva),context.object_class,argument);
+        value->native_duration=float_from_bits(bits);
+        value->raw=read_value<float>(context.object_class,kGameObjectClassRawBuildTimeOffset,
+                                     value->native_duration);
+        value->modifier=current_global_build_time_modifier();
+        return 1;
+    }
+    case 10:return reinterpret_cast<std::uintptr_t>(localize("GUI_CP_END_EXTRA",")"));
+    case 11:
+        if(!value->bytes||value->size>=sizeof(g_end_extra_override))return 0;
+        std::memcpy(g_end_extra_override,value->bytes,value->size);
+        g_end_extra_override[value->size]='\0';return 1;
+    case 12: {
+        g_logged_modifier_observation=true;
+        char message[192]{};
+        std::snprintf(message,sizeof(message),
+            "Live IA Ship Build Time: raw=%.3f, native=%.3f, "
+            "modifier=%.3f, displayed=%.3f (%s)",
+            static_cast<double>(value->raw),static_cast<double>(value->native_duration),
+            static_cast<double>(value->modifier),static_cast<double>(value->displayed),
+            value->displayed==value->native_duration?"native":"reconciled");
+        log_line(message);return 1;
+    }
+    case 13:return g_logged_modifier_observation;
+    case 19:return context.verbose;
+    case 21:return a2fo_build_tooltips_call_thiscall_1(context.hook->gateway,
+        context.mode_info,reinterpret_cast<std::uintptr_t>(context.string_stream));
+    case 22:g_inside_tooltip=true;return 1;
+    case 23:g_end_extra_override[0]='\0';return 1;
+    case 24:g_inside_tooltip=false;return 1;
+    case 30:g_api=context.supplied;g_armada=static_cast<HMODULE>(g_api->armada_module());
+        return g_armada!=nullptr;
+    case 31:return preflight();
+    case 32:return g_api->install_inline_hook(at(kModeInfoButtonTextRva),
         reinterpret_cast<void*>(&a2fo_build_tooltips_button_text_bridge),
-        kExpectedButtonText.size(), kExpectedButtonText.data(),
-        &g_button_text_hook);
-    const bool verbose_installed = g_api->install_inline_hook(
-        at(kModeInfoButtonVerboseRva),
+        kExpectedButtonText.size(),kExpectedButtonText.data(),&g_button_text_hook);
+    case 33:return g_api->install_inline_hook(at(kModeInfoButtonVerboseRva),
         reinterpret_cast<void*>(&a2fo_build_tooltips_button_verbose_bridge),
-        kExpectedButtonVerbose.size(), kExpectedButtonVerbose.data(),
-        &g_button_verbose_hook);
-    std::size_t patched = 0;
-    for (const CheckedCallPatch& call_site : kEndExtraCallSites) {
-        if (g_api->patch_call(
-                at(call_site.rva), reinterpret_cast<void*>(&end_extra_lookup),
-                call_site.expected.data(), call_site.expected.size())) {
-            ++patched;
-        }
+        kExpectedButtonVerbose.size(),kExpectedButtonVerbose.data(),&g_button_verbose_hook);
+    case 34: {
+        const auto& site=kEndExtraCallSites[argument];
+        return g_api->patch_call(at(site.rva),reinterpret_cast<void*>(&end_extra_lookup),
+            site.expected.data(),site.expected.size());
     }
-    if (!text_installed || !verbose_installed ||
-        patched != kEndExtraCallSites.size()) {
+    case 36: {
         char message[160]{};
-        std::snprintf(
-            message, sizeof(message),
+        std::snprintf(message,sizeof(message),
             "Build-tooltip integration partial: text=%s verbose=%s "
             "end-bracket=%lu/%lu; installed hooks remain pass-through",
-            text_installed ? "yes" : "no",
-            verbose_installed ? "yes" : "no",
-            static_cast<unsigned long>(patched),
+            argument&1?"yes":"no",argument&2?"yes":"no",
+            static_cast<unsigned long>(argument>>2),
             static_cast<unsigned long>(kEndExtraCallSites.size()));
-        log_line(message);
+        log_line(message);return 1;
     }
-    return text_installed && verbose_installed &&
-        patched == kEndExtraCallSites.size();
+    case 37:g_runtime_ready=argument!=0;
+        log_line(g_runtime_ready?"Build-time tooltip text initialized":
+            "Build-time tooltip module loaded with runtime disabled");return 1;
+    case 38:g_runtime_ready=false;return 1;
+    default:return 0;
+    }
 }
 
 }  // namespace
@@ -418,39 +355,44 @@ bool install_hooks() noexcept {
 extern "C" std::uintptr_t __cdecl
 a2fo_build_tooltips_button_text_hook_cpp(void* mode_info,
                                          void* string_stream) noexcept {
-    return call_original_and_append(
-        g_button_text_hook, mode_info, string_stream);
+    TooltipContext context{nullptr,&g_button_text_hook,mode_info,string_stream,
+        nullptr,nullptr,nullptr,nullptr,false};
+#ifdef A2FO_BUILTIN_FEATURE
+    const bool enabled=g_button_text_hook.gateway&&
+        a2fo::builtin_module_enabled(A2FO_BUILTIN_FEATURE);
+#else
+    const bool enabled=true;
+#endif
+    return a2fo_rs_runtime_tooltip_call(g_button_text_hook.gateway!=nullptr,
+        enabled,g_runtime_ready,g_inside_tooltip,tooltip_step,&context);
 }
 
 extern "C" std::uintptr_t __cdecl
 a2fo_build_tooltips_button_verbose_hook_cpp(void* mode_info,
                                             void* string_stream) noexcept {
-    return call_original_and_append(
-        g_button_verbose_hook, mode_info, string_stream);
+    TooltipContext context{nullptr,&g_button_verbose_hook,mode_info,string_stream,
+        nullptr,nullptr,nullptr,nullptr,true};
+#ifdef A2FO_BUILTIN_FEATURE
+    const bool enabled=g_button_verbose_hook.gateway&&
+        a2fo::builtin_module_enabled(A2FO_BUILTIN_FEATURE);
+#else
+    const bool enabled=true;
+#endif
+    return a2fo_rs_runtime_tooltip_call(g_button_verbose_hook.gateway!=nullptr,
+        enabled,g_runtime_ready,g_inside_tooltip,tooltip_step,&context);
 }
 
 extern "C" __declspec(dllexport)
 bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
-    if (!api || api->struct_size < A2FO_MODULE_API_V4_BASE_SIZE ||
-        api->api_version != A2FO_MODULE_API_VERSION || !api->log ||
-        !api->armada_module || !api->install_inline_hook ||
-        !api->patch_call) {
-        return false;
-    }
-    g_api = api;
-    g_armada = static_cast<HMODULE>(api->armada_module());
-    if (!g_armada) return false;
-
-    g_runtime_ready = install_hooks();
-    log_line(g_runtime_ready
-                 ? "Build-time tooltip text initialized"
-                 : "Build-time tooltip module loaded with runtime disabled");
-    // Hooks are process-lifetime patches. Keep the DLL resident after a
-    // partial installation so an installed entry remains a safe pass-through.
-    return true;
+    const bool valid=api&&api->struct_size>=A2FO_MODULE_API_V4_BASE_SIZE&&
+        api->api_version==A2FO_MODULE_API_VERSION&&api->log&&api->armada_module&&
+        api->install_inline_hook&&api->patch_call;
+    TooltipContext context{};context.supplied=api;
+    return a2fo_rs_runtime_tooltip_init(valid,tooltip_step,&context)!=0;
 }
 
 extern "C" __declspec(dllexport)
 void A2FO_CALL A2FO_ModuleShutdown() {
-    g_runtime_ready = false;
+    TooltipContext context{};
+    a2fo_rs_runtime_tooltip_shutdown(tooltip_step,&context);
 }

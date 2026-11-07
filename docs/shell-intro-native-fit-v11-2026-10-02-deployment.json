@@ -1,0 +1,42 @@
+{
+  "created_utc": "2026-10-02T13:09:40.821043+00:00",
+  "module": "A2FOShellDisplay",
+  "version": "v11",
+  "source_root": "/home/tamsynn/A2FOHookExtensions",
+  "artifact": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOShellDisplay.dll",
+  "installed": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOShellDisplay.dll",
+  "sha256": "f4b6f6bdfd5225f820f9cc9cac041a2a0444b8388489175ac27a4e9b7dab835a",
+  "installed_mtime_utc": "2026-10-02T13:09:40.669152+00:00",
+  "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/intro-native-fit-v11-20261002T125556Z",
+  "previous_dll_sha256": "419e8d8cf145276058d4f90f45ce92fff4dac81478f626e1812b44b58162e1c4",
+  "unchanged_inputs_sha256": {
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.dll": "74b3274a19f8ca1370b37ee2b8834b9634a638994e83507fd160387efc9bb035",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe": "470bf8f4b0196e22fe179d3845cab671e74d9af19cf90a7dafed0b0bbd394318",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll": "d2a0829e87aaa927e27146b90be61fc6359c6cbf3d81aed2c644019dd375b9b6",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/info.ini": "42639e533412cd47a27ab23bdcd16a3a7f3fc23d48c3bbd49f53ccf834bd3da6",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/info.ini": "09c1552037754797e05cf994a61f4b5145794302074de44c4edacb613f7a2211",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/settings_saves_logs/mods/A2FO Settings Test/Settings.xml": "c1251fe5f87df0550f52560dfd3e83fc7668669712c1b7eb93705dc9cda04051",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/animations/Intro.bik": "567f13968e6cb3a31a4884f135f3f04a236a775f511d8371f93f700deb92b9ae",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/animations/Paramount.bik": "ebcf5dbd49075fa85463eeb871be78a5932152f96d86f37a5d8083e0b749c9c6",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/animations/MadDocSoftware.bik": "1221fb6be1e3a4d14402002e5d2ae42bf774fe1f1a8c9ed95b8c4ea4b11c4166",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/animations/Activision.bik": "8f3338b7a5aa1b8ffe54a24a1c3ed38e77de74e13631f099756897420bf087fc"
+  },
+  "target_mod": "STA2 Classic: Test (Mods/test)",
+  "intro_assets": "Four official A2 videos present as loose mod-local BIKs, each 640x480; unchanged",
+  "live_v10_evidence": "Saved intro client1920x1080 confirmed in log; user reported better, picture remained at top left with unused space",
+  "correction": "Scoped native Bink decoded-frame capture and aspect-fit GDI presentation with native flip fallback",
+  "validation": [
+    "make shell-display-test: all five suites passed, including actual module smoke",
+    "Memory-DIB raster:640x480 to1920x1080,1600x900,800x600; black bars, orientation, padded stride",
+    "Scoped forwarding, original result/repeats, unsupported format/DC/invalid pitch/null pixels fallback; failed copy no flip",
+    "Bad signature/foreign slot/foreign import cause zero patch attempts; CALL failure skips slot; slot failure keeps drawing disabled",
+    "Actual DLL smoke and movie-start synthetic tests passed with installed Armada/FleetOps pair mapped as data",
+    "Independent installed disassembly review verified synchronous play frame call, native show flag gates only post-release flip, copy ABI and success condition"
+  ],
+  "live_acceptance": "v11 pending manual full restart: centred official intros, correct saved client size, sound/skipping and shell transition",
+  "limitations": [
+    "Memory GDI output and synthetic callbacks do not establish live Wine presentation visibility",
+    "Unsupported pixel formats retain original native presentation",
+    "No game startup or GUI/input automation executed"
+  ]
+}

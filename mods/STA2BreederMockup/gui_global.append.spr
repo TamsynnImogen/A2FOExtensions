@@ -1,0 +1,48 @@
+# Noxter breeder mock-up: reuse existing 8472 artwork.
+@reference=64
+@tmaterial=default
+b_nox_breeder			gb8472_FluidicGate		0	0	64	64		
+b_nox_breeder_scout			gb8472_FluidicGate		0	0	64	64		
+b_nox_breeder_destroy			gb8472_FluidicGate		0	0	64	64		
+b_nox_seed_scout				gb8472_active			0	0	64	64		
+b_nox_seed_destroy				gb8472_active			0	0	64	64		
+b_nox_scout				gb8472_scout			0	0	64	64		
+b_nox_destroy				gb8472_destroy			0	0	64	64		
+
+@reference=256
+@tmaterial=default
+nox_breederw1		8472wireframe04	0	48	48	48		
+nox_breederw2		8472wireframe04	48	48	48	48		
+nox_breederw3		8472wireframe04	96	48	48	48		
+nox_breederw4		8472wireframe04	144	48	48	48		
+nox_breederw5		8472wireframe04	192	48	48	48	
+nox_breeder_scoutw1		8472wireframe04	0	48	48	48		
+nox_breeder_scoutw2		8472wireframe04	48	48	48	48		
+nox_breeder_scoutw3		8472wireframe04	96	48	48	48		
+nox_breeder_scoutw4		8472wireframe04	144	48	48	48		
+nox_breeder_scoutw5		8472wireframe04	192	48	48	48	
+nox_breeder_destroyw1		8472wireframe04	0	48	48	48		
+nox_breeder_destroyw2		8472wireframe04	48	48	48	48		
+nox_breeder_destroyw3		8472wireframe04	96	48	48	48		
+nox_breeder_destroyw4		8472wireframe04	144	48	48	48		
+nox_breeder_destroyw5		8472wireframe04	192	48	48	48	
+nox_seed_scoutw1			8472wireframe03	0	0	48	48		
+nox_seed_scoutw2			8472wireframe03	48	0	48	48		
+nox_seed_scoutw3			8472wireframe03	96	0	48	48		
+nox_seed_scoutw4			8472wireframe03	144	0	48	48		
+nox_seed_scoutw5			8472wireframe03	192	0	48	48
+nox_seed_destroyw1			8472wireframe03	0	0	48	48		
+nox_seed_destroyw2			8472wireframe03	48	0	48	48		
+nox_seed_destroyw3			8472wireframe03	96	0	48	48		
+nox_seed_destroyw4			8472wireframe03	144	0	48	48		
+nox_seed_destroyw5			8472wireframe03	192	0	48	48
+nox_scoutw1			8472wireframe02	0	48	48	48		
+nox_scoutw2			8472wireframe02	48	48	48	48		
+nox_scoutw3			8472wireframe02	96	48	48	48		
+nox_scoutw4			8472wireframe02	144	48	48	48		
+nox_scoutw5			8472wireframe02	192	48	48	48	
+nox_destroyw1			8472wireframe02	0	0	48	48		
+nox_destroyw2			8472wireframe02	48	0	48	48		
+nox_destroyw3			8472wireframe02	96	0	48	48		
+nox_destroyw4			8472wireframe02	144	0	48	48		
+nox_destroyw5			8472wireframe02	192	0	48	48

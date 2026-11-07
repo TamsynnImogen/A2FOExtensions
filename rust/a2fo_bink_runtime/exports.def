@@ -1,0 +1,14 @@
+EXPORTS
+    "_BinkOpen@8" = a2fo_bink_open@8
+    "_BinkClose@4" = a2fo_bink_close@4
+    "_BinkDoFrame@4" = a2fo_bink_do_frame@4
+    "_BinkNextFrame@4" = a2fo_bink_next_frame@4
+    "_BinkWait@4" = a2fo_bink_wait@4
+    "_BinkCopyToBuffer@28" = a2fo_bink_copy@28
+    "_BinkGoto@12" = a2fo_bink_goto@12
+    "_BinkSetVolume@8" = a2fo_bink_set_volume@12
+    "_BinkSetSoundSystem@8" = a2fo_bink_set_sound_system@8
+    "_BinkOpenDirectSound@4" = a2fo_bink_open_direct_sound@4
+    "_BinkGetError@0" = a2fo_bink_get_error@0
+    "_BinkDDSurfaceType@4" = a2fo_bink_dd_surface_type@4
+    "_BinkDDSurfaceTypeLegacy@4" = a2fo_bink_dd_surface_type_legacy@4

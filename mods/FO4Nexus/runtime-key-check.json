@@ -1,0 +1,17 @@
+{
+  "observed_strings": {
+    "directionalShields": true,
+    "forwardShieldStrength": true,
+    "maxPhotonTorpedoes": true,
+    "photonTorpedoCost": true,
+    "quantumTorpedoCost": true,
+    "possibleCaptainNames": true,
+    "possibleCraftRegistry": true,
+    "infoSingleExperienceBarArea": true,
+    "infoSinglePhotonTorpedoesTextArea": true,
+    "infoSingleDirectionalShieldsForwardAftTextArea": true,
+    "infoSingleRegistryTextArea": true,
+    "fireArcYawAngle": true
+  },
+  "limitation": "String presence only; does not prove engine policy or game execution"
+}

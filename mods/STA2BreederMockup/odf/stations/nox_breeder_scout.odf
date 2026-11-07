@@ -1,0 +1,6 @@
+#include "nox_breeder_base.odf"
+
+unitName = "Scout Breeder"
+tooltip = "Scout Breeder"
+verboseTooltip = "Committed Scout strain. Automatically produces Scouts at their normal biomatter cost and build time while resources and capacity permit."
+breederProduces = "nox_scout"

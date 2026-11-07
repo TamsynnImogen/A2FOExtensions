@@ -1,7 +1,25 @@
 # Weapon damage controls
 
-`A2FOWeaponDamageControls.dll` adds optional shield/hull controls to ordinary
-weapon ODFs:
+`A2FOWeaponDamageControls` adds optional shield/hull controls to ordinary
+weapon ODFs. It is built into `A2FOExtensions.dll`; keep its original module
+name in menu and `info.ini` selections, and do not install or release a
+separate DLL. The legacy standalone target remains available for SDK
+compatibility, while the core ignores a stale standalone copy during module
+discovery.
+
+The core prepares it once for each non-rejected mod, including when initially
+disabled. Existing `requiredX`, `rejectX`, inheritance, and live Save rules
+apply. It is unavailable unless its own ready state and weapon-class
+dispatcher are available. Weapon metadata is collected while the
+feature is off, but custom `canDamageShields`, `canDamageHull`,
+`shieldDamageModifier`, and `hullDamageModifier` settings are applied only
+when enabled. The original `CraftDamage` path and shared DirectionalShields
+bridge remain active independently. Existing DirectionalShields builds must
+be rebuilt for discovery of the core bridge; the older standalone fallback
+is preserved. See [built-in module stage three](../../docs/builtin-modules-stage3.md)
+for selection and acceptance details.
+
+The standalone SDK module provides the following commands:
 
 ```cpp
 canDamageShields = true

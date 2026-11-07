@@ -35,6 +35,8 @@ enum class WeaponIconPresentation : std::uint8_t {
     disabled,
     hidden,
     passive_neutral,
+    // A2FOEnergySystems resupplyweapon with a valid receiver in range.
+    resupply_ready,
 };
 
 enum class WeaponIconColourSource : std::uint8_t {

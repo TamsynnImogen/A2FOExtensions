@@ -1,0 +1,33 @@
+[package]
+name = "a2fo-dll"
+version = "0.1.0"
+edition = "2024"
+publish = false
+build = "build.rs"
+
+[lib]
+name = "a2fo_dll"
+crate-type = ["cdylib"]
+doctest = false
+
+[dependencies]
+a2fo-core = { path = "../a2fo_core" }
+a2fo-bink-runtime = { path = "../a2fo_bink_runtime", optional = true }
+
+[features]
+default = []
+bink-runtime = ["dep:a2fo-bink-runtime", "a2fo-core/std-host"]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+
+[profile.bink]
+inherits = "release"
+panic = "unwind"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

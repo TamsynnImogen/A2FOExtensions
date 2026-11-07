@@ -1,0 +1,6 @@
+#include "nox_breeder_base.odf"
+
+unitName = "Destroyer Breeder"
+tooltip = "Destroyer Breeder"
+verboseTooltip = "Committed Destroyer strain. Automatically produces Destroyers at their normal biomatter cost and build time while resources and capacity permit."
+breederProduces = "nox_destroy"

@@ -1,0 +1,4 @@
+# SHA-256: 3fd18eeee4201a9a1297ac26b3eb88f78c5f72e8c55a62c25179f1d4932e4c11
+# Reviewed 2026-10-23: byte-identical to the previously reviewed October 12 FleetOpsHook.dll.
+A2FO_FLEETOPS_PROFILES_V1
+roots_fleetops 51F6475C 00322000 002E7200 7CD6661E

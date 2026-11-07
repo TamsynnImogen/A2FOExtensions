@@ -1,0 +1,32 @@
+{
+  "created_utc": "2026-10-15T18:26:06.295562+00:00",
+  "fix": "ammunition selected-hover bound includes store2",
+  "source": "/home/tamsynn/A2FOHookExtensions/modules/A2FOCraftIdentity/module.cpp",
+  "artifact": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOCraftIdentity.dll",
+  "artifact_sha256": "18ccf44392d405e80f7a3ba4d00f3ff05bb506d9962ba7fe2a3a060841d74221",
+  "package": "/home/tamsynn/A2FOHookExtensions/dist/A2FOCraftIdentity-shuttle-tooltip-fix-20261015-182605.zip",
+  "package_sha256": "ac1dec76c7a580a73ac3be54eca1d52920eb2fc7ba4b97a4c41cdc4333787543",
+  "validation": {
+    "dll_build_exit": 0,
+    "module_init_shutdown_exports_present": true,
+    "focused_headless_test_exit": 0,
+    "old_guard_mutant_exit": 3,
+    "mutant_failure": "Shuttle selected index2 received no update",
+    "in_game_acceptance": "pending"
+  },
+  "deployment": {
+    "status": "installed_for_next_launch",
+    "target": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOCraftIdentity.dll",
+    "sha256_before": "b6b8cc88db2cae5e3c8809bb8f61edf024ba011e02c21e2258321e4889a3c69a",
+    "sha256_after": "18ccf44392d405e80f7a3ba4d00f3ff05bb506d9962ba7fe2a3a060841d74221",
+    "backup": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/.deployment-backups/shuttle-tooltip-20261015-182634/modules/A2FOCraftIdentity.dll",
+    "atomic_replacement": true,
+    "engine_inputs_unchanged": {
+      "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe": "817b1ddb9876cfb9c5d781b42d2513de48fef9cbdbc408aa43c878c573581a18",
+      "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll": "3fd18eeee4201a9a1297ac26b3eb88f78c5f72e8c55a62c25179f1d4932e4c11"
+    },
+    "game_launched": false,
+    "in_game_acceptance": "pending"
+  },
+  "test": "/home/tamsynn/A2FOHookExtensions/tests/craft_identity_ammunition_hover_test.cpp"
+}

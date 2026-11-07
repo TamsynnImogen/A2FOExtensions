@@ -1,0 +1,109 @@
+{
+  "created_utc": "2026-10-15T20:07:29.765317+00:00",
+  "features": [
+    "canResupplySelf with compatibility default true",
+    "receiver type tags and provider target/ODF filters"
+  ],
+  "artifacts": {
+    "A2FOEnergySystems.dll": {
+      "source": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOEnergySystems.dll",
+      "sha256": "5588629bda7a4a2aa691077614fba6c495d0c71fe6d2e4e7b626ba7e04f4bab6"
+    },
+    "A2FOCraftIdentity.dll": {
+      "source": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOCraftIdentity.dll",
+      "sha256": "18ccf44392d405e80f7a3ba4d00f3ff05bb506d9962ba7fe2a3a060841d74221"
+    }
+  },
+  "package": "/home/tamsynn/A2FOHookExtensions/dist/A2FOExtensions-ammunition-update-20261015-200729.zip",
+  "package_sha256": "18f465c200f7949b852b20be2f53a6ca135dda39f57fa23d62f950c63c8208c7",
+  "source_sha256": {
+    "modules/A2FOEnergySystems/module.cpp": "1947aca178c666323d527c4d29fccc6ca2e9b859fa004ce2db1e9819e5bfca5b",
+    "modules/A2FOEnergySystems/resupply_policy.cpp": "41de7001d853452fc7766c4c55ca96e6149a9daf78008315f850a26b8d3e03ce",
+    "modules/A2FOEnergySystems/resupply_policy.hpp": "2c55dfbc9377562fec498a975491b66dd911776d737ca51b2c413648495f406d",
+    "tests/resupply_policy_test.cpp": "b3a874749393abcc4e92078ddaaac0fa5f0f30c671a7214c9dc8467ad0cdbf48",
+    "tests/resupply_runtime_test.cpp": "4916998dd5fc8b03911a7ebffd2494516e265cdce1b04835ca33ada69bb2f1fc",
+    "tests/support/energy_systems_host/windows.h": "f2e76577f22f081c81a97a7beb9e28479944d97a83afa03c0bef8eed4ddbe5dc"
+  },
+  "verification": {
+    "scope": "headless synthetic resupply callback regression",
+    "commands": [
+      {
+        "command": "make build/resupply_policy_test",
+        "workdir": "/home/tamsynn/A2FOHookExtensions",
+        "exit_code": 0,
+        "output": "g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Imodules/A2FOEnergySystems -o build/resupply_policy_test tests/resupply_policy_test.cpp modules/A2FOEnergySystems/resupply_policy.cpp"
+      },
+      {
+        "command": "build/resupply_policy_test",
+        "workdir": "/home/tamsynn/A2FOHookExtensions",
+        "exit_code": 0,
+        "output": "resupply policy: normalization, precedence, fail-closed parsing and self override PASS"
+      },
+      {
+        "command": "make build/resupply_runtime_test.exe",
+        "workdir": "/home/tamsynn/A2FOHookExtensions",
+        "exit_code": 0,
+        "output": "MinGW compiled build/modules/A2FOEnergySystems.dll and build/resupply_runtime_test.exe; no compiler diagnostics"
+      },
+      {
+        "command": "env -u DISPLAY -u WAYLAND_DISPLAY WINEDEBUG=-all timeout 30s wine build/resupply_runtime_test.exe",
+        "workdir": "/home/tamsynn/A2FOHookExtensions",
+        "exit_code": 124,
+        "output": "No test output before timeout; default Wine service appeared blocked"
+      },
+      {
+        "command": "env -u DISPLAY -u WAYLAND_DISPLAY WINEDEBUG=-all timeout 60s wine build/resupply_runtime_test.exe",
+        "workdir": "/home/tamsynn/A2FOHookExtensions",
+        "sandbox_permissions": "require_escalated",
+        "exit_code": 124,
+        "output": "No test output before timeout"
+      },
+      {
+        "command": "env -u DISPLAY -u WAYLAND_DISPLAY WINEPREFIX=/tmp/a2fo-resupply-runtime/wineprefix WINEDEBUG=-all timeout 60s wine build/resupply_runtime_test.exe",
+        "workdir": "/home/tamsynn/A2FOHookExtensions",
+        "sandbox_permissions": "require_escalated",
+        "exit_code": 124,
+        "output": "Created isolated prefix; Mesa-EGL warnings; no test output before timeout"
+      },
+      {
+        "command": "g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Itests/support/energy_systems_host -ffunction-sections -fdata-sections -Wl,--gc-sections -o /tmp/a2fo-resupply-runtime/resupply_runtime_host_test tests/resupply_runtime_test.cpp modules/A2FOEnergySystems/energy_systems.cpp modules/A2FOEnergySystems/resupply_policy.cpp",
+        "workdir": "/home/tamsynn/A2FOHookExtensions",
+        "exit_code": 0,
+        "output": "Compiled with warnings that x64 ignores fastcall attributes in unused native hook functions"
+      },
+      {
+        "command": "/tmp/a2fo-resupply-runtime/resupply_runtime_host_test",
+        "workdir": "/home/tamsynn/A2FOHookExtensions",
+        "exit_code": 0,
+        "output": "resupply runtime: selective providers, ODF precedence, self, limits, reload and cleanup PASS"
+      },
+      {
+        "command": "nm -u /tmp/a2fo-resupply-runtime/resupply_runtime_host_test",
+        "exit_code": 0,
+        "output": "Only standard POSIX/C++ runtime symbols unresolved; no VirtualQuery, GetModuleHandleA, GetProcAddress or A2FO native bridge reference"
+      }
+    ],
+    "boundary": "The same production C++ callbacks passed the host synthetic fixture; Win32 ABI and native game acceptance remain unverified because Wine never reached the test executable",
+    "game_binary_executed": false,
+    "gui_or_input_automation": false
+  },
+  "lead_make_host_targets_passed": true,
+  "module_exports_checked": true,
+  "review": "passed; native runtime acceptance pending",
+  "deployment": {
+    "status": "installed_for_next_launch",
+    "target": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOEnergySystems.dll",
+    "sha256_before": "ef8ea906ee7b6b39bc870d04f7832d2d28cea0740ce1ce52dfc1168ccd64cf09",
+    "sha256_after": "5588629bda7a4a2aa691077614fba6c495d0c71fe6d2e4e7b626ba7e04f4bab6",
+    "backup": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/.deployment-backups/resupply-controls-20261015-200758/modules/A2FOEnergySystems.dll",
+    "atomic_replacement": true,
+    "craft_identity_already_current": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOCraftIdentity.dll",
+    "engine_and_core_unchanged": {
+      "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe": "817b1ddb9876cfb9c5d781b42d2513de48fef9cbdbc408aa43c878c573581a18",
+      "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll": "3fd18eeee4201a9a1297ac26b3eb88f78c5f72e8c55a62c25179f1d4932e4c11",
+      "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.dll": "45be55e79afe53365dc26f1e4238bfcd9d74120299215b52bca6458f072d4b05"
+    },
+    "game_launched": false,
+    "in_game_acceptance": "pending"
+  }
+}

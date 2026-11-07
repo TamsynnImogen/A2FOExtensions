@@ -1,0 +1,57 @@
+{
+  "status": "deployed for next full restart; actual GPU worker responsiveness/appearance pending",
+  "timestamp": "20261019-003158",
+  "target": "/home/tamsynn/NVMeData/Fleet Ops Roots",
+  "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/refit-scene-style-worker-20261019-003158",
+  "installed": {
+    "Data/modules/A2FORefitMenus.dll": "9fa4e5d0b5ea53d7fd79c02cd5b6a992e4c1277d86b05f32a7d30f51bbc38d8c",
+    "Data/modules/refit/licenses/noto-sans-condensed-OFL.txt": "cee9892f9f0cc8fe882c9e9537ee6a89621d86ee7ceaf70b02e2b2b1c25c061a",
+    "Data/modules/refit/licenses/noto-sans-condensed-SOURCE.txt": "2449c7043de655fe9faaa36ef115d9a1c85dd5d07768440bfa6c772d60da8ac9"
+  },
+  "previous_files": {
+    "Data/modules/A2FORefitMenus.dll": "acda0f91b8f6458253cead3aadc4d346909dce7f273659a6de8a66c842b1df0d",
+    "Data/modules/refit/licenses/noto-sans-condensed-OFL.txt": null,
+    "Data/modules/refit/licenses/noto-sans-condensed-SOURCE.txt": null
+  },
+  "protected_unchanged": {
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOShellDisplay.dll": "c364fa31788d6c1a08769d93ed9db56c93c6a218e4bb626eb3ff25711dc5bd19",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe": "817b1ddb9876cfb9c5d781b42d2513de48fef9cbdbc408aa43c878c573581a18",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll": "3fd18eeee4201a9a1297ac26b3eb88f78c5f72e8c55a62c25179f1d4932e4c11",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.dll": "45be55e79afe53365dc26f1e4238bfcd9d74120299215b52bca6458f072d4b05",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.ini": "8830d04dbcd3d5c45671748cc8a3999cbb5e52f5ff19636d3f01a42c8bb9abdd",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/info.ini": "d40efd9f80bc8e07d95186ede2ddd2a44277c758f45ac58171712f8eaa9a7192",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/info.ini": "68cef7963cf436691dc775dae6efc07d9ed4a9545d1b71f596b1d3b8a76061ac",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/STA2 Classic Mod/info.ini": "9f599f3f5217d0219d80ef0dd8a01990a72e9995b51a0b5cc372ff709cf77976",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/settings_saves_logs/Settings.xml": "71b25b86c867398e4aa12b5676e58faed6809e67d8aacf380f4b329e027add77",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOArmadaProfiles.txt": "08ffa42a487354a7959fa5d4b184eb8120b331d2bca62284ac59f0da1cb52dac",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FORefitMenus.ini": "e83915c19036e31a7c3b42b35480b9eaa2a9b22ea0bc2e8513a0e433d0ed5ae7",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/RefitScene/Menu/map.ini": "cc370d017744facc01eecb91dca2b9d1f02461de9794fab60149c46b1dde7b2d",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/licenses/armada2-refit.txt": "35a427baddf84b00c8925cb5604fb20a93d667dabd952a105ceefe62a23465b7",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/licenses/libm-0.2.16.txt": "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/A2FORefitScene.dll": "21de74ba7f72b80ce9409f78f5ff6596f863425f15b0a4494c9e8871c49757dc",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/RefitScene/Render3D.ini": "5329219c6489cf21698305aeef73cc3d0727437f8a5d8a2e7fca6b1a5d3134dd"
+  },
+  "preserved_logs": {
+    "Data/A2FOExtensions.log": "375af6be79490df883c2cde7a32adb23ef8db370cd501713d9895f5a66b28a2d",
+    "Data/RefitScene/A2FORefitScene.log": "a7ccb02b3cf5fce063bf3b7ceb743e42821de0f00157b85eb6f39b2ea341bf7a"
+  },
+  "evidence": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/refit-scene-style-worker-20261019-003158/evidence",
+  "font_sha256": {
+    "NotoSans-CondensedMedium.ttf": "e367c9cff3acf134f7f12a6ae7ce876d6dbe3aaa2f70121bb1f9ab66457a7196",
+    "NotoSans-CondensedSemiBold.ttf": "55ebf2188d1b9ff6b09affe3783c7704f8bd627586bf0a097ea4f6a8842f8cce"
+  },
+  "font_license": "SIL OFL 1.1; unchanged Noto Project Authors fonts",
+  "tests": {
+    "build": "MinGW -Werror passed",
+    "portable": "6 suites passed, including threaded mailbox and retry/wraparound policy",
+    "native_console": "52/52 passed after final DLL build",
+    "bindings": "4 profiles x 30 signatures passed",
+    "offscreen_gdi": "passed; private selected face, open rows, states, title, uppercase and interpolation",
+    "review": "independent static thread/lifetime/retry review; no concrete blocker",
+    "sanitizer": "optional GCC ASan unavailable: missing host libasan.so.8.0.0; not claimed",
+    "actual_gpu_worker": "unverified; no game launch or input automation"
+  },
+  "retained": "renderer provider/profile, faction mappings, native actions and accepted ShellDisplay",
+  "known_limits": "first-use background preparation may remain slow; Instant Action full Refit layout unfinished",
+  "input_automation": false
+}

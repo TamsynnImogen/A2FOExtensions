@@ -1,0 +1,77 @@
+{
+  "deployed_at_utc": "2026-10-01T07:52:15.257771+00:00",
+  "backup": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/rollback/roots-engine-compat-20261001-014654",
+  "build_id": "20261001-roots-september30-engine-compat-1",
+  "files": [
+    {
+      "file": "A2FOExtensions.dll",
+      "sha256": "8d6c7d0425304d846d9599596cbda540238c64db44e92ec9e78e0646925f1850",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/A2FOExtensions.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.dll",
+      "mtime_ns": 1790840638641893651
+    },
+    {
+      "file": "A2FORendererHelper.exe",
+      "sha256": "61d646296d7f4579ee9e32011155d92067829985c70ebcfb70bbcfcf3637cad7",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/A2FORendererHelper.exe",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FORendererHelper.exe",
+      "mtime_ns": 1790815689999731213
+    },
+    {
+      "file": "modules/A2FOAnimations.dll",
+      "sha256": "66178b3d1e4808bd10872340461144d38ca0e49a319652587acd59b28fba0018",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOAnimations.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOAnimations.dll",
+      "mtime_ns": 1790840617481033337
+    },
+    {
+      "file": "modules/A2FOAnimatedHardpoints.dll",
+      "sha256": "95847fac141e83b7e1072d08a858afef144808a093a463ec599ce3136ac0b528",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOAnimatedHardpoints.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOAnimatedHardpoints.dll",
+      "mtime_ns": 1790840614598052368
+    },
+    {
+      "file": "modules/A2FOBuildTooltips.dll",
+      "sha256": "b75d4b4b44810e1d58e2955359f953bec0a63a50abcd1d041418b302faf73669",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOBuildTooltips.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOBuildTooltips.dll",
+      "mtime_ns": 1790840614573052533
+    },
+    {
+      "file": "modules/A2FOCollectiveXP.dll",
+      "sha256": "1703f4c5265d8dcd0081a00cfcedf884badacb5184ebae6589d3b39ea8bb6567",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOCollectiveXP.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOCollectiveXP.dll",
+      "mtime_ns": 1790840619224021831
+    },
+    {
+      "file": "modules/A2FOCraftIdentity.dll",
+      "sha256": "865a76b9b7a253d9935174f3ba727d7d62dbe7528288a0a405359559c9efa93c",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOCraftIdentity.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOCraftIdentity.dll",
+      "mtime_ns": 1790840624004990271
+    },
+    {
+      "file": "modules/A2FOInstantActionSettings.dll",
+      "sha256": "52fd69c4a1af0cd1a9fe2eba7c9ef92b155ff3a5d4dddeca9b7d6d36e4cbf4ea",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOInstantActionSettings.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOInstantActionSettings.dll",
+      "mtime_ns": 1790840618397027290
+    },
+    {
+      "file": "modules/A2FORGBTextures.dll",
+      "sha256": "20b096c371ffa7340feef82a7401ed312a4f2c26df2bc1df56d9b036229f2097",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FORGBTextures.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FORGBTextures.dll",
+      "mtime_ns": 1790840622281001651
+    },
+    {
+      "file": "modules/A2FOStationRotation.dll",
+      "sha256": "eea70c6f005ffd7e6b11f60343dfe7fdffe3972a782f901fad31a8788ef435cf",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOStationRotation.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOStationRotation.dll",
+      "mtime_ns": 1790840619953017019
+    }
+  ]
+}

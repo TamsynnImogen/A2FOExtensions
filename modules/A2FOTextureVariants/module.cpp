@@ -1,3 +1,4 @@
+#include "../../rust/stage10_texture_completion_ffi.h"
 /*
  * Ownership-aware hull texture variants and the native Borg DDS preflight
  * repair for Armada II / Fleet Operations Roots.
@@ -8,7 +9,10 @@
  */
 
 #include "../../sdk/include/a2fo_module_api.h"
+#include "../../sdk/include/a2fo_module_provider.hpp"
 #include "texture_variants.hpp"
+#include "../../rust/stage8_texture_runtime_ffi.h"
+#include "../../rust/stage9_texture_visuals_ffi.h"
 
 #include <windows.h>
 
@@ -16,6 +20,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <exception>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -443,11 +448,25 @@ bool copy_normalized_node_name(void* node, std::string* normalized) noexcept {
 
 void rebuild_known_race_node_names() {
     g_known_race_node_names.clear();
-    for (const auto& policy : g_race_node_names) {
-        if (!policy.second.empty()) {
-            g_known_race_node_names.insert(policy.second);
-        }
-    }
+    struct Context {
+        decltype(g_race_node_names)::const_iterator cursor;
+        std::exception_ptr error{};
+    } context{g_race_node_names.cbegin()};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& state = *static_cast<Context*>(opaque);
+        if (state.error) return 0;
+        try {
+            if (operation == 0)
+                return state.cursor != g_race_node_names.cend();
+            if (!state.cursor->second.empty())
+                g_known_race_node_names.insert(state.cursor->second);
+            ++state.cursor;
+        } catch (...) { state.error = std::current_exception(); }
+        return 0;
+    };
+    a2fo_rs_stage9_texture_iterate(step, &context);
+    if (context.error) std::rethrow_exception(context.error);
     // A Race can be registered after a CraftClass was first encountered.
     // Re-enumerate class nodes when the known-name set changes.
     g_class_faction_nodes.clear();
@@ -455,36 +474,49 @@ void rebuild_known_race_node_names() {
 
 void collect_class_faction_nodes(void* object_class) {
     if (!object_class || g_class_faction_nodes.find(object_class) !=
-            g_class_faction_nodes.end()) {
-        return;
-    }
+            g_class_faction_nodes.end()) return;
 
     std::vector<FactionNodeRecord> faction_nodes;
-    void* geometry = read_at<void*>(
-        object_class, kCraftClassGeometryOffset, nullptr);
+    void* geometry = read_at<void*>(object_class, kCraftClassGeometryOffset, nullptr);
     void* root = read_at<void*>(geometry, kGeometryRootNodeOffset, nullptr);
     std::vector<void*> pending;
     std::unordered_set<void*> visited;
     if (root) pending.push_back(root);
-
-    while (!pending.empty() && visited.size() < kMaximumNodeCount) {
-        void* node = pending.back();
-        pending.pop_back();
-        if (!node || !visited.insert(node).second) continue;
-
-        void* child = read_at<void*>(node, kNodeChildOffset, nullptr);
-        void* sibling = read_at<void*>(node, kNodeSiblingOffset, nullptr);
-        if (child) pending.push_back(child);
-        if (sibling) pending.push_back(sibling);
-
-        std::string name;
-        if (copy_normalized_node_name(node, &name) && name != "borg" &&
-            g_known_race_node_names.find(name) !=
-                g_known_race_node_names.end()) {
-            faction_nodes.push_back({node, std::move(name)});
-        }
-    }
-
+    struct Context {
+        std::vector<void*>& pending;
+        std::unordered_set<void*>& visited;
+        std::vector<FactionNodeRecord>& faction_nodes;
+        void* node = nullptr;
+        std::exception_ptr error{};
+    } context{pending, visited, faction_nodes};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& state = *static_cast<Context*>(opaque);
+        if (state.error) return 0;
+        try {
+            if (operation == 0) {
+                if (state.pending.empty() || state.visited.size() >= kMaximumNodeCount)
+                    return 0;
+                state.node = state.pending.back();
+                state.pending.pop_back();
+                if (!state.node || !state.visited.insert(state.node).second)
+                    return 1;
+                void* child = read_at<void*>(state.node, kNodeChildOffset, nullptr);
+                void* sibling = read_at<void*>(state.node, kNodeSiblingOffset, nullptr);
+                if (child) state.pending.push_back(child);
+                if (sibling) state.pending.push_back(sibling);
+                return 2;
+            }
+            std::string name;
+            if (copy_normalized_node_name(state.node, &name) && name != "borg" &&
+                g_known_race_node_names.find(name) !=
+                    g_known_race_node_names.end())
+                state.faction_nodes.push_back({state.node, std::move(name)});
+        } catch (...) { state.error = std::current_exception(); }
+        return 0;
+    };
+    a2fo_rs_stage9_texture_walk(step, &context);
+    if (context.error) std::rethrow_exception(context.error);
     g_class_faction_nodes.emplace(object_class, std::move(faction_nodes));
 }
 
@@ -494,85 +526,129 @@ std::vector<void*> collect_node_subtree(void* root) {
 
     std::vector<void*> pending{root};
     std::unordered_set<void*> queued{root};
-    while (!pending.empty() && nodes.size() < kMaximumNodeCount) {
-        void* node = pending.back();
-        pending.pop_back();
-        if (!node) continue;
-        nodes.push_back(node);
-
-        // A node's sibling belongs to its parent's child list, not to the
-        // node's own subtree. Walk sibling links only while enumerating this
-        // node's direct children so the configured part cannot claim an
-        // unrelated sibling branch.
-        void* child = read_at<void*>(node, kNodeChildOffset, nullptr);
-        std::size_t sibling_count = 0;
-        while (child && queued.size() < kMaximumNodeCount &&
-               sibling_count++ < kMaximumNodeCount) {
-            if (queued.insert(child).second) pending.push_back(child);
-            child = read_at<void*>(child, kNodeSiblingOffset, nullptr);
-        }
-    }
+    struct Context {
+        std::vector<void*>& nodes;
+        std::vector<void*>& pending;
+        std::unordered_set<void*>& queued;
+        void* child = nullptr;
+        std::exception_ptr error{};
+    } context{nodes, pending, queued};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& state = *static_cast<Context*>(opaque);
+        if (state.error) return 0;
+        try {
+            switch (operation) {
+            case 0: {
+                if (state.pending.empty() || state.nodes.size() >= kMaximumNodeCount)
+                    return 0;
+                void* node = state.pending.back();
+                state.pending.pop_back();
+                if (!node) return 1;
+                state.nodes.push_back(node);
+                // Siblings belong to the parent child list, not this subtree.
+                state.child = read_at<void*>(node, kNodeChildOffset, nullptr);
+                return 2;
+            }
+            case 2:
+                return state.child && state.queued.size() < kMaximumNodeCount;
+            case 3: {
+                void* child = state.child;
+                if (state.queued.insert(child).second)
+                    state.pending.push_back(child);
+                state.child = read_at<void*>(child, kNodeSiblingOffset, nullptr);
+                break;
+            }
+            }
+        } catch (...) { state.error = std::current_exception(); }
+        return 0;
+    };
+    a2fo_rs_stage9_texture_subtree(step, &context);
+    if (context.error) std::rethrow_exception(context.error);
     return nodes;
 }
 
 void resolve_class_damage_nodes(void* object_class) {
     if (!object_class) return;
     const auto found = g_class_damage_visuals.find(object_class);
-    if (found == g_class_damage_visuals.end() ||
-        found->second.nodes_resolved) {
+    if (found == g_class_damage_visuals.end() || found->second.nodes_resolved)
         return;
-    }
 
     ClassDamageVisualPolicy& policy = found->second;
-    void* geometry = read_at<void*>(
-        object_class, kCraftClassGeometryOffset, nullptr);
+    void* geometry = read_at<void*>(object_class, kCraftClassGeometryOffset, nullptr);
     void* root = read_at<void*>(geometry, kGeometryRootNodeOffset, nullptr);
     if (!root) return;
 
     std::vector<void*> pending{root};
     std::unordered_set<void*> visited;
-    while (!pending.empty() && visited.size() < kMaximumNodeCount) {
-        void* node = pending.back();
-        pending.pop_back();
-        if (!node || !visited.insert(node).second) continue;
-
-        void* child = read_at<void*>(node, kNodeChildOffset, nullptr);
-        void* sibling = read_at<void*>(node, kNodeSiblingOffset, nullptr);
-        if (child) pending.push_back(child);
-        if (sibling) pending.push_back(sibling);
-
+    struct Context {
+        void* object_class;
+        ClassDamageVisualPolicy& policy;
+        std::vector<void*>& pending;
+        std::unordered_set<void*>& visited;
+        void* node = nullptr;
         std::string name;
-        if (!copy_normalized_node_name(node, &name)) continue;
-        for (auto& system : policy.systems) {
-            for (SubsystemMeshEntry& entry : system) {
-                if (!entry.node && entry.node_name == name) {
-                    entry.node = node;
-                    entry.subtree_nodes = collect_node_subtree(node);
-                    const float scale = read_at<float>(
-                        node, kNodeScaleOffset, 1.0f);
-                    entry.original_scale =
-                        std::isfinite(scale) && scale > 0.0001f
+        std::size_t system_index = 0;
+        std::exception_ptr error{};
+    } context{object_class, policy, pending, visited, nullptr, {}, 0, {}};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t argument) noexcept -> std::uintptr_t {
+        auto& state = *static_cast<Context*>(opaque);
+        if (state.error) return 0;
+        try {
+            switch (operation) {
+            case 0: {
+                if (state.pending.empty() || state.visited.size() >= kMaximumNodeCount)
+                    return 0;
+                state.node = state.pending.back();
+                state.pending.pop_back();
+                if (!state.node || !state.visited.insert(state.node).second)
+                    return 1;
+                void* child = read_at<void*>(state.node, kNodeChildOffset, nullptr);
+                void* sibling = read_at<void*>(state.node, kNodeSiblingOffset, nullptr);
+                if (child) state.pending.push_back(child);
+                if (sibling) state.pending.push_back(sibling);
+                return 2;
+            }
+            case 1:
+                return copy_normalized_node_name(state.node, &state.name);
+            case 2:
+                state.system_index = static_cast<std::size_t>(argument);
+                return state.policy.systems[state.system_index].size();
+            case 3: {
+                SubsystemMeshEntry& entry = state.policy.systems[state.system_index][argument];
+                if (!entry.node && entry.node_name == state.name) {
+                    entry.node = state.node;
+                    entry.subtree_nodes = collect_node_subtree(state.node);
+                    const float scale = read_at<float>(state.node, kNodeScaleOffset, 1.0f);
+                    entry.original_scale = std::isfinite(scale) && scale > 0.0001f
                         ? scale : 1.0f;
                 }
+                break;
             }
-        }
-    }
-    policy.nodes_resolved = true;
-
-    for (std::size_t system_index = 0;
-         system_index < kSubsystemCount; ++system_index) {
-        for (const SubsystemMeshEntry& entry :
-             policy.systems[system_index]) {
-            if (entry.node) continue;
-            char message[256]{};
-            std::snprintf(
-                message, sizeof(message),
-                "Could not find %s damage mesh node '%s' on CraftClass %p",
-                kSubsystemDefinitions[system_index].display_name,
-                entry.node_name.c_str(), object_class);
-            log_line(message);
-        }
-    }
+            case 4:
+                state.policy.nodes_resolved = true;
+                break;
+            case 5:
+                state.system_index = static_cast<std::size_t>(argument);
+                return state.policy.systems[state.system_index].size();
+            case 6: {
+                const SubsystemMeshEntry& entry = state.policy.systems[state.system_index][argument];
+                if (entry.node) break;
+                char message[256]{};
+                std::snprintf(message, sizeof(message),
+                              "Could not find %s damage mesh node '%s' on CraftClass %p",
+                              kSubsystemDefinitions[state.system_index].display_name,
+                              entry.node_name.c_str(), state.object_class);
+                log_line(message);
+                break;
+            }
+            }
+        } catch (...) { state.error = std::current_exception(); }
+        return 0;
+    };
+    a2fo_rs_stage9_texture_resolve(step, &context);
+    if (context.error) std::rethrow_exception(context.error);
 }
 
 void begin_subsystem_mesh_render_override(
@@ -598,80 +674,113 @@ void begin_subsystem_mesh_render_override(
         };
         std::unordered_map<void*, PendingNodeOverride> pending;
 
-        for (std::size_t system_index = 0;
-             system_index < kSubsystemCount; ++system_index) {
-            const SubsystemDamageVisualState& visual =
-                craft_state.systems[system_index];
-            const std::int32_t selected = visual.selected_entry;
-            const auto& entries = policy->second.systems[system_index];
-            if (selected < 0 ||
-                static_cast<std::size_t>(selected) >= entries.size()) {
-                continue;
-            }
-            const SubsystemMeshEntry& entry =
-                entries[static_cast<std::size_t>(selected)];
-            if (!entry.node) continue;
-
-            const float rebuild_scale = std::clamp(
-                visual.rebuild_scale, 0.0f, 1.0f);
-            const auto& subtree = entry.subtree_nodes;
-            if (subtree.empty()) continue;
-            for (std::size_t index = 0; index < subtree.size(); ++index) {
-                void* node = subtree[index];
-                if (!node) continue;
-                PendingNodeOverride& node_override = pending[node];
-                // The selected part itself may grow back. Every attachment
-                // below it stays suppressed until reconstruction completes:
-                // otherwise hardpoint sprites, emitters, Borg geometry, and
-                // native damage geometry can hang in the missing space.
-                node_override.force_hidden =
-                    node_override.force_hidden || index != 0 ||
-                    rebuild_scale <= 0.0001f;
-            }
-            PendingNodeOverride& root_override = pending[entry.node];
-            const float desired_scale =
-                entry.original_scale * rebuild_scale;
-            if (!root_override.change_scale) {
-                root_override.change_scale = true;
-                root_override.desired_scale = desired_scale;
-            } else {
-                root_override.desired_scale = std::min(
-                    root_override.desired_scale, desired_scale);
-            }
-        }
+        struct Context {
+            const CraftDamageVisualState& craft_state;
+            const ClassDamageVisualPolicy& policy;
+            std::unordered_map<void*, PendingNodeOverride>& pending;
+            const SubsystemMeshEntry* entry = nullptr;
+            float rebuild_scale = 0.0f;
+            std::exception_ptr error{};
+        } context{craft_state, policy->second, pending};
+        const auto step = [](void* opaque, std::uint32_t operation,
+                             std::uintptr_t argument) noexcept -> std::uintptr_t {
+            auto& state = *static_cast<Context*>(opaque);
+            if (state.error) return 0;
+            try {
+                switch (operation) {
+                case 0: {
+                    const auto system_index = static_cast<std::size_t>(argument);
+                    const SubsystemDamageVisualState& visual =
+                        state.craft_state.systems[system_index];
+                    const std::int32_t selected = visual.selected_entry;
+                    const auto& entries = state.policy.systems[system_index];
+                    state.entry = nullptr;
+                    if (selected < 0 ||
+                        static_cast<std::size_t>(selected) >= entries.size())
+                        return 0;
+                    const SubsystemMeshEntry& entry =
+                        entries[static_cast<std::size_t>(selected)];
+                    if (!entry.node) return 0;
+                    state.rebuild_scale = std::clamp(visual.rebuild_scale, 0.0f, 1.0f);
+                    if (entry.subtree_nodes.empty()) return 0;
+                    state.entry = &entry;
+                    return 1;
+                }
+                case 1: {
+                    const auto index = static_cast<std::size_t>(argument);
+                    void* node = state.entry->subtree_nodes[index];
+                    if (!node) return 0;
+                    PendingNodeOverride& node_override = state.pending[node];
+                    node_override.force_hidden =
+                        node_override.force_hidden || index != 0 ||
+                        state.rebuild_scale <= 0.0001f;
+                    break;
+                }
+                case 2: {
+                    PendingNodeOverride& root_override =
+                        state.pending[state.entry->node];
+                    const float desired_scale =
+                        state.entry->original_scale * state.rebuild_scale;
+                    if (!root_override.change_scale) {
+                        root_override.change_scale = true;
+                        root_override.desired_scale = desired_scale;
+                    } else {
+                        root_override.desired_scale = std::min(
+                            root_override.desired_scale, desired_scale);
+                    }
+                    break;
+                }
+                case 3:
+                    return static_cast<std::size_t>(argument) <
+                        state.entry->subtree_nodes.size();
+                }
+            } catch (...) { state.error = std::current_exception(); }
+            return 0;
+        };
+        a2fo_rs_stage9_texture_render_plan(step, &context);
+        if (context.error) std::rethrow_exception(context.error);
 
         render_override->nodes.reserve(pending.size());
-        for (const auto& row : pending) {
-            void* node = row.first;
-            const PendingNodeOverride& node_override = row.second;
-            SavedNodeRenderState saved;
-            saved.node = node;
-            saved.flags = read_at<std::uint32_t>(
-                node, kNodeFlagsOffset, 0);
-            saved.restore_scale = node_override.change_scale;
-            if (saved.restore_scale) {
-                saved.scale = read_at<float>(
-                    node, kNodeScaleOffset, 1.0f);
-            }
-            render_override->nodes.push_back(saved);
+        struct ApplyContext {
+            const std::unordered_map<void*, PendingNodeOverride>& pending;
+            std::unordered_map<void*, PendingNodeOverride>::const_iterator cursor;
+            DamageRenderOverride* render_override;
+            std::exception_ptr error{};
+        } apply{pending, pending.cbegin(), render_override};
+        const auto apply_step = [](void* opaque, std::uint32_t operation,
+                                   std::uintptr_t) noexcept -> std::uintptr_t {
+            auto& state = *static_cast<ApplyContext*>(opaque);
+            if (state.error) return 0;
+            try {
+                if (operation == 0) return state.cursor != state.pending.cend();
+                const auto& row = *state.cursor;
+                void* node = row.first;
+                const PendingNodeOverride& node_override = row.second;
+                SavedNodeRenderState saved;
+                saved.node = node;
+                saved.flags = read_at<std::uint32_t>(node, kNodeFlagsOffset, 0);
+                saved.restore_scale = node_override.change_scale;
+                if (saved.restore_scale)
+                    saved.scale = read_at<float>(node, kNodeScaleOffset, 1.0f);
+                state.render_override->nodes.push_back(saved);
 
-            if (node_override.force_hidden) {
-                const std::uint32_t hidden = faction_node_flags(
-                    saved.flags, false);
-                if (hidden != saved.flags) {
-                    write_at(node, kNodeFlagsOffset, hidden);
+                if (node_override.force_hidden) {
+                    const std::uint32_t hidden = faction_node_flags(saved.flags, false);
+                    if (hidden != saved.flags)
+                        write_at(node, kNodeFlagsOffset, hidden);
                 }
-            }
-            if (node_override.change_scale &&
-                std::isfinite(node_override.desired_scale) &&
-                node_override.desired_scale >= 0.0f &&
-                (!std::isfinite(saved.scale) ||
-                 std::fabs(saved.scale - node_override.desired_scale) >
-                     0.0001f)) {
-                write_at(
-                    node, kNodeScaleOffset, node_override.desired_scale);
-            }
-        }
+                if (node_override.change_scale &&
+                    std::isfinite(node_override.desired_scale) &&
+                    node_override.desired_scale >= 0.0f &&
+                    (!std::isfinite(saved.scale) ||
+                     std::fabs(saved.scale - node_override.desired_scale) > 0.0001f))
+                    write_at(node, kNodeScaleOffset, node_override.desired_scale);
+                ++state.cursor;
+            } catch (...) { state.error = std::current_exception(); }
+            return 0;
+        };
+        a2fo_rs_stage9_texture_iterate(apply_step, &apply);
+        if (apply.error) std::rethrow_exception(apply.error);
     } catch (...) {
         log_line("Could not apply subsystem damage-subtree visibility");
     }
@@ -680,14 +789,24 @@ void begin_subsystem_mesh_render_override(
 void restore_subsystem_mesh_render_override(
     DamageRenderOverride* render_override) noexcept {
     if (!render_override) return;
-    for (auto iterator = render_override->nodes.rbegin();
-         iterator != render_override->nodes.rend(); ++iterator) {
-        if (!iterator->node) continue;
-        write_at(iterator->node, kNodeFlagsOffset, iterator->flags);
-        if (iterator->restore_scale) {
-            write_at(iterator->node, kNodeScaleOffset, iterator->scale);
+    struct Context {
+        DamageRenderOverride* render_override;
+        std::vector<SavedNodeRenderState>::reverse_iterator cursor;
+    } context{render_override, render_override->nodes.rbegin()};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& state = *static_cast<Context*>(opaque);
+        if (operation == 0)
+            return state.cursor != state.render_override->nodes.rend();
+        if (state.cursor->node) {
+            write_at(state.cursor->node, kNodeFlagsOffset, state.cursor->flags);
+            if (state.cursor->restore_scale)
+                write_at(state.cursor->node, kNodeScaleOffset, state.cursor->scale);
         }
-    }
+        ++state.cursor;
+        return 0;
+    };
+    a2fo_rs_stage9_texture_iterate(step, &context);
     render_override->nodes.clear();
 }
 
@@ -706,41 +825,53 @@ std::uintptr_t __attribute__((fastcall)) craft_instance_render_call_hook(
 
 void collect_class_meshes(void* object_class) {
     if (!object_class || g_class_meshes.find(object_class) !=
-            g_class_meshes.end()) {
-        return;
-    }
+            g_class_meshes.end()) return;
 
     std::vector<MeshRecord> meshes;
-    void* geometry = read_at<void*>(
-        object_class, kCraftClassGeometryOffset, nullptr);
+    void* geometry = read_at<void*>(object_class, kCraftClassGeometryOffset, nullptr);
     void* root = read_at<void*>(geometry, kGeometryRootNodeOffset, nullptr);
     std::vector<void*> pending;
     std::unordered_set<void*> visited;
     if (root) pending.push_back(root);
-
-    while (!pending.empty() && visited.size() < kMaximumNodeCount) {
-        void* node = pending.back();
-        pending.pop_back();
-        if (!node || !visited.insert(node).second) continue;
-
-        void* child = read_at<void*>(node, kNodeChildOffset, nullptr);
-        void* sibling = read_at<void*>(node, kNodeSiblingOffset, nullptr);
-        if (child) pending.push_back(child);
-        if (sibling) pending.push_back(sibling);
-
-        void* vtable = read_at<void*>(node, 0, nullptr);
-        void* get_type = read_at<void*>(vtable, sizeof(void*), nullptr);
-        if (!get_type || !readable_range(get_type, 1)) continue;
-        const std::uintptr_t node_type =
-            a2fo_texture_variants_call_thiscall_0(get_type, node);
-        if (node_type != 1) continue;
-
-        void* texture = reinterpret_cast<void*>(
-            a2fo_texture_variants_call_thiscall_1(
-                g_get_mesh_texture, node, 0));
-        if (texture) meshes.push_back({node, texture});
-    }
-
+    struct Context {
+        std::vector<void*>& pending;
+        std::unordered_set<void*>& visited;
+        std::vector<MeshRecord>& meshes;
+        void* node = nullptr;
+        std::exception_ptr error{};
+    } context{pending, visited, meshes};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& state = *static_cast<Context*>(opaque);
+        if (state.error) return 0;
+        try {
+            if (operation == 0) {
+                if (state.pending.empty() || state.visited.size() >= kMaximumNodeCount)
+                    return 0;
+                state.node = state.pending.back();
+                state.pending.pop_back();
+                if (!state.node || !state.visited.insert(state.node).second)
+                    return 1;
+                void* child = read_at<void*>(state.node, kNodeChildOffset, nullptr);
+                void* sibling = read_at<void*>(state.node, kNodeSiblingOffset, nullptr);
+                if (child) state.pending.push_back(child);
+                if (sibling) state.pending.push_back(sibling);
+                return 2;
+            }
+            void* vtable = read_at<void*>(state.node, 0, nullptr);
+            void* get_type = read_at<void*>(vtable, sizeof(void*), nullptr);
+            if (!get_type || !readable_range(get_type, 1)) return 0;
+            const std::uintptr_t node_type =
+                a2fo_texture_variants_call_thiscall_0(get_type, state.node);
+            if (node_type != 1) return 0;
+            void* texture = reinterpret_cast<void*>(
+                a2fo_texture_variants_call_thiscall_1(g_get_mesh_texture, state.node, 0));
+            if (texture) state.meshes.push_back({state.node, texture});
+        } catch (...) { state.error = std::current_exception(); }
+        return 0;
+    };
+    a2fo_rs_stage9_texture_walk(step, &context);
+    if (context.error) std::rethrow_exception(context.error);
     g_class_meshes.emplace(object_class, std::move(meshes));
 }
 
@@ -765,15 +896,39 @@ void apply_faction_node_visibility(void* craft_instance,
             }
         }
 
-        for (const FactionNodeRecord& record : nodes->second) {
-            const std::uint32_t current = read_at<std::uint32_t>(
-                record.node, kNodeFlagsOffset, 0);
-            const std::uint32_t selected = faction_node_flags(
-                current, !owner_name.empty() && record.name == owner_name);
-            if (selected != current) {
-                write_at(record.node, kNodeFlagsOffset, selected);
-            }
-        }
+        struct Context {
+            const std::vector<FactionNodeRecord>* rows;
+            std::string owner;
+            std::size_t index = 0;
+            std::exception_ptr error{};
+        } context{&nodes->second, std::move(owner_name), 0, {}};
+        const auto step = [](void* opaque, std::uint32_t operation,
+                             std::uintptr_t argument) noexcept -> std::uintptr_t {
+            auto& state = *static_cast<Context*>(opaque);
+            if (state.error) return 0;
+            try {
+                switch (operation) {
+                case 0: {
+                    if (argument >= state.rows->size()) return 0;
+                    const FactionNodeRecord& row = (*state.rows)[argument];
+                    return !state.owner.empty() && row.name == state.owner;
+                }
+                case 1:
+                    if (argument >= state.rows->size()) return 0;
+                    state.index = argument;
+                    return read_at<std::uint32_t>(
+                        (*state.rows)[state.index].node, kNodeFlagsOffset, 0);
+                case 2:
+                    write_at((*state.rows)[state.index].node, kNodeFlagsOffset,
+                             static_cast<std::uint32_t>(argument));
+                    return 0;
+                }
+            } catch (...) { state.error = std::current_exception(); }
+            return 0;
+        };
+        a2fo_rs_stage8_texture_apply_nodes(
+            step, &context, context.rows->size());
+        if (context.error) std::rethrow_exception(context.error);
     } catch (...) {
         log_line("Could not apply faction model-node visibility");
     }
@@ -783,37 +938,67 @@ void* find_variant_texture(void* original_texture,
                            const std::string& suffix) noexcept {
     if (!original_texture || suffix.empty() || !g_texture_find) return nullptr;
     try {
-        auto& by_suffix = g_variant_textures[original_texture];
-        const auto cached = by_suffix.find(suffix);
-        if (cached != by_suffix.end()) return cached->second;
-
-        const char* original_name = read_at<const char*>(
-            original_texture, kTextureNameOffset, nullptr);
-        std::string variant_name = original_name
-            ? faction_texture_name(original_name, suffix)
-            : std::string{};
-        void* variant = nullptr;
-        const bool dds_exists = texture_exists(variant_name, ".dds");
-        const bool tga_exists = !dds_exists &&
-            texture_exists(variant_name, ".tga");
-        if (!variant_name.empty() && (dds_exists || tga_exists)) {
-            void* database = read_at<void*>(
-                original_texture, kTextureDatabaseOffset, nullptr);
-            const std::uint32_t flags = read_at<std::uint32_t>(
-                original_texture, kTextureFlagsOffset, 0);
-            variant = g_texture_find(
-                database, variant_name.c_str(), flags);
-            if (variant) {
-                char message[512]{};
-                std::snprintf(
-                    message, sizeof(message),
-                    "Resolved faction texture '%s' from %s",
-                    variant_name.c_str(), dds_exists ? "DDS" : "TGA");
-                log_line(message);
-            }
-        }
-        by_suffix.emplace(suffix, variant);
-        return variant;
+        struct Context {
+            void* original_texture;
+            const std::string& suffix;
+            std::unordered_map<std::string, void*>* by_suffix = nullptr;
+            std::unordered_map<std::string, void*>::const_iterator cached;
+            std::string variant_name;
+            void* variant = nullptr;
+            std::exception_ptr error{};
+        } context{original_texture, suffix, nullptr, {}, {}, nullptr, {}};
+        const auto step = [](void* opaque, std::uint32_t operation,
+                             std::uintptr_t argument) noexcept -> std::uintptr_t {
+            auto& state = *static_cast<Context*>(opaque);
+            if (state.error) return 0;
+            try {
+                switch (operation) {
+                case 0: {
+                    state.by_suffix = &g_variant_textures[state.original_texture];
+                    state.cached = state.by_suffix->find(state.suffix);
+                    return state.cached != state.by_suffix->end();
+                }
+                case 1:
+                    return reinterpret_cast<std::uintptr_t>(
+                        state.cached->second);
+                case 2: {
+                    const char* original_name = read_at<const char*>(
+                        state.original_texture, kTextureNameOffset, nullptr);
+                    state.variant_name = original_name
+                        ? faction_texture_name(original_name, state.suffix)
+                        : std::string{};
+                    return !state.variant_name.empty();
+                }
+                case 3:
+                    return texture_exists(state.variant_name, ".dds");
+                case 4:
+                    return texture_exists(state.variant_name, ".tga");
+                case 5: {
+                    void* database = read_at<void*>(
+                        state.original_texture, kTextureDatabaseOffset, nullptr);
+                    const std::uint32_t flags = read_at<std::uint32_t>(
+                        state.original_texture, kTextureFlagsOffset, 0);
+                    state.variant = g_texture_find(
+                        database, state.variant_name.c_str(), flags);
+                    if (state.variant) {
+                        char message[512]{};
+                        std::snprintf(message, sizeof(message),
+                            "Resolved faction texture '%s' from %s",
+                            state.variant_name.c_str(), argument ? "DDS" : "TGA");
+                        log_line(message);
+                    }
+                    break;
+                }
+                case 6:
+                    state.by_suffix->emplace(state.suffix, state.variant);
+                    return reinterpret_cast<std::uintptr_t>(state.variant);
+                }
+            } catch (...) { state.error = std::current_exception(); }
+            return 0;
+        };
+        const auto result = a2fo_rs_stage9_texture_find_variant(step, &context);
+        if (context.error) std::rethrow_exception(context.error);
+        return reinterpret_cast<void*>(result);
     } catch (...) {
         return nullptr;
     }
@@ -839,24 +1024,42 @@ void apply_faction_textures(void* craft_instance,
             }
         }
 
-        for (const MeshRecord& record : meshes->second) {
-            void* variant = suffix.empty()
-                ? nullptr
-                : find_variant_texture(record.original_texture, suffix);
-            if (variant) {
-                set_mesh_texture(record.mesh, variant);
-                continue;
-            }
-
-            // Native SetBorgMeshTextures has just selected the correct base or
-            // Borg texture for meshes with a Borg alternate. Meshes outside
-            // that native table must be explicitly restored after another
-            // owner's faction variant was rendered from the shared model.
-            if (!read_at<void*>(
-                    record.mesh, kMeshBorgTextureOffset, nullptr)) {
-                set_mesh_texture(record.mesh, record.original_texture);
-            }
-        }
+        struct Context {
+            const std::vector<MeshRecord>* rows;
+            std::string suffix;
+            std::size_t index = 0;
+            std::exception_ptr error{};
+        } context{&meshes->second, std::move(suffix), 0, {}};
+        const auto step = [](void* opaque, std::uint32_t operation,
+                             std::uintptr_t argument) noexcept -> std::uintptr_t {
+            auto& state = *static_cast<Context*>(opaque);
+            if (state.error) return 0;
+            try {
+                switch (operation) {
+                case 0:
+                    if (argument >= state.rows->size()) return 0;
+                    state.index = argument;
+                    return state.suffix.empty() ? 0 :
+                        reinterpret_cast<std::uintptr_t>(find_variant_texture(
+                            (*state.rows)[state.index].original_texture,
+                            state.suffix));
+                case 1:
+                    set_mesh_texture((*state.rows)[state.index].mesh,
+                        reinterpret_cast<void*>(argument));
+                    return 0;
+                case 2:
+                    return read_at<void*>((*state.rows)[state.index].mesh,
+                        kMeshBorgTextureOffset, nullptr) != nullptr;
+                case 3:
+                    return reinterpret_cast<std::uintptr_t>(
+                        (*state.rows)[state.index].original_texture);
+                }
+            } catch (...) { state.error = std::current_exception(); }
+            return 0;
+        };
+        a2fo_rs_stage8_texture_apply_meshes(
+            step, &context, context.rows->size());
+        if (context.error) std::rethrow_exception(context.error);
     } catch (...) {
         log_line("Could not apply a faction texture variant; native textures retained");
     }
@@ -1024,126 +1227,161 @@ void register_class_damage_visuals(void* object_class,
         return;
     }
     try {
-        ClassDamageVisualPolicy policy;
-        std::string raw_threshold;
-        if (parameter_db_string(parameter_db, "damageThreshold", &raw_threshold)) {
+        struct Context {
+            void* object_class;
+            void* parameter_db;
+            ClassDamageVisualPolicy policy;
+            std::size_t total_entries = 0;
+            std::exception_ptr error{};
+        } context{object_class, parameter_db, {}, 0, {}};
+        const auto step = [](void* opaque, std::uint32_t operation,
+                             std::uintptr_t argument) noexcept -> std::uintptr_t {
+            auto& state = *static_cast<Context*>(opaque);
+            if (state.error) return 0;
             try {
-                const float value = std::stof(raw_threshold);
-                if (std::isfinite(value) && value > 0.0f && value <= 1.0f) {
-                    policy.damage_threshold = value;
+                switch (operation) {
+                case 0: {
+                    std::string raw_threshold;
+                    if (parameter_db_string(state.parameter_db, "damageThreshold",
+                                            &raw_threshold)) {
+                        try {
+                            const float value = std::stof(raw_threshold);
+                            if (std::isfinite(value) && value > 0.0f && value <= 1.0f)
+                                state.policy.damage_threshold = value;
+                        } catch (...) {}
+                    }
+                    break;
                 }
-            } catch (...) {}
-        }
-        for (std::size_t system_index = 0; system_index < kSubsystemCount; ++system_index) {
-            const char* prefix = kSubsystemDefinitions[system_index].command_prefix;
-            const std::string command = std::string(prefix) + "TargetHardpoints";
-            std::string raw;
-            if (parameter_db_string(parameter_db, command.c_str(), &raw)) {
-                std::string token;
-                for (char ch : raw) {
-                    if (ch == ' ' || ch == ',' || ch == '\t') {
+                case 1: {
+                    const auto system_index = static_cast<std::size_t>(argument);
+                    const char* prefix = kSubsystemDefinitions[system_index].command_prefix;
+                    const std::string command = std::string(prefix) + "TargetHardpoints";
+                    std::string raw;
+                    if (parameter_db_string(state.parameter_db, command.c_str(), &raw)) {
+                        std::string token;
+                        struct TokenContext {
+                            const std::string& raw;
+                            std::string& token;
+                            std::vector<std::string>& targets;
+                            std::exception_ptr error{};
+                        } tokens{raw, token, state.policy.target_hardpoints[system_index], {}};
+                        const auto token_step = [](void* opaque, std::uint32_t,
+                                                   std::uintptr_t index) noexcept -> std::uintptr_t {
+                            auto& row = *static_cast<TokenContext*>(opaque);
+                            if (row.error) return 0;
+                            try {
+                                const char ch = row.raw[index];
+                                if (ch == ' ' || ch == ',' || ch == '\t') {
+                                    std::string normalized;
+                                    if (!row.token.empty() &&
+                                        normalize_faction_node_name(row.token, &normalized))
+                                        row.targets.push_back(std::move(normalized));
+                                    row.token.clear();
+                                } else row.token.push_back(ch);
+                            } catch (...) { row.error = std::current_exception(); }
+                            return 0;
+                        };
+                        a2fo_rs_stage9_texture_repeat(token_step, &tokens, raw.size());
+                        if (tokens.error) std::rethrow_exception(tokens.error);
                         std::string normalized;
                         if (!token.empty() && normalize_faction_node_name(token, &normalized))
-                            policy.target_hardpoints[system_index].push_back(std::move(normalized));
-                        token.clear();
-                    } else token.push_back(ch);
+                            state.policy.target_hardpoints[system_index].push_back(std::move(normalized));
+                    }
+                    break;
                 }
-                std::string normalized;
-                if (!token.empty() && normalize_faction_node_name(token, &normalized))
-                    policy.target_hardpoints[system_index].push_back(std::move(normalized));
-            }
-        }
-        for (std::size_t index = 1; index <= kMaximumScorchEntries; ++index) {
-            std::string raw;
-            const std::string command = "scorchTexture" + std::to_string(index);
-            if (!parameter_db_string(parameter_db, command.c_str(), &raw)) continue;
-            if (!raw.empty()) policy.scorch_effects.push_back(raw);
-        }
-        // Numeric ODF fields are not exposed by the string accessor on some
-        // Fleet Ops builds. If scorch settings are present but the numeric
-        // read was unavailable, use the documented 10% default.
-        if (policy.damage_threshold <= 0.0f &&
-            !policy.scorch_effects.empty()) {
-            policy.damage_threshold = 0.1f;
-        }
-        std::size_t total_entries = 0;
-        for (std::size_t system_index = 0;
-             system_index < kSubsystemCount; ++system_index) {
-            const SubsystemDefinition& definition =
-                kSubsystemDefinitions[system_index];
-            auto& entries = policy.systems[system_index];
-            for (std::size_t index = 1;
-                 index <= kMaximumSubsystemMeshEntries; ++index) {
-                const std::string command =
-                    std::string(definition.command_prefix) + "Mesh" +
-                    std::to_string(index);
-                std::string raw_name;
-                if (!parameter_db_string(
-                        parameter_db, command.c_str(), &raw_name)) {
-                    continue;
+                case 2: {
+                    std::string raw;
+                    const std::string command = "scorchTexture" + std::to_string(argument);
+                    if (parameter_db_string(state.parameter_db, command.c_str(), &raw) && !raw.empty())
+                        state.policy.scorch_effects.push_back(raw);
+                    break;
                 }
-
-                std::string node_name;
-                if (!normalize_faction_node_name(raw_name, &node_name)) {
-                    char message[256]{};
-                    std::snprintf(
-                        message, sizeof(message),
-                        "Rejected invalid %s value '%s' on CraftClass %p",
-                        command.c_str(), raw_name.c_str(), object_class);
+                case 3:
+                    // Numeric ODF fields are unavailable through the string
+                    // accessor on some Fleet Ops builds.
+                    if (state.policy.damage_threshold <= 0.0f &&
+                        !state.policy.scorch_effects.empty())
+                        state.policy.damage_threshold = 0.1f;
+                    break;
+                case 4: {
+                    const auto system_index = (static_cast<std::size_t>(argument) - 1) / kMaximumSubsystemMeshEntries;
+                    const auto index = (static_cast<std::size_t>(argument) - 1) % kMaximumSubsystemMeshEntries + 1;
+                    const SubsystemDefinition& definition = kSubsystemDefinitions[system_index];
+                    auto& entries = state.policy.systems[system_index];
+                    const std::string command = std::string(definition.command_prefix) +
+                        "Mesh" + std::to_string(index);
+                    std::string raw_name;
+                    if (!parameter_db_string(state.parameter_db, command.c_str(), &raw_name))
+                        break;
+                    std::string node_name;
+                    if (!normalize_faction_node_name(raw_name, &node_name)) {
+                        char message[256]{};
+                        std::snprintf(message, sizeof(message),
+                                      "Rejected invalid %s value '%s' on CraftClass %p",
+                                      command.c_str(), raw_name.c_str(), state.object_class);
+                        log_line(message);
+                        break;
+                    }
+                    std::uint32_t explosion_project_id = 0;
+                    const std::string explosion_command = command + "explosion";
+                    parameter_db_project_id(state.parameter_db,
+                                            explosion_command.c_str(), &explosion_project_id);
+                    entries.push_back({std::move(node_name), nullptr, {}, explosion_project_id});
+                    ++state.total_entries;
+                    break;
+                }
+                case 5: {
+                    const auto count_step = [](void* opaque, std::uint32_t,
+                                               std::uintptr_t index) noexcept -> std::uintptr_t {
+                        const auto& policy = *static_cast<ClassDamageVisualPolicy*>(opaque);
+                        return policy.target_hardpoints[index].size();
+                    };
+                    const std::size_t target_hardpoint_count =
+                        a2fo_rs_stage9_texture_sum(count_step, &state.policy, kSubsystemCount);
+                    const bool has_scorch_policy =
+                        std::isfinite(state.policy.damage_threshold) &&
+                        state.policy.damage_threshold > 0.0f &&
+                        !state.policy.scorch_effects.empty() &&
+                        target_hardpoint_count != 0;
+                    if (!subsystem_damage_policy_active(
+                            state.total_entries, state.policy.damage_threshold,
+                            state.policy.scorch_effects.size(), target_hardpoint_count)) {
+                        g_class_damage_visuals.erase(state.object_class);
+                        break;
+                    }
+                    if (!has_scorch_policy) {
+                        state.policy.damage_threshold = 0.0f;
+                        std::vector<std::string>().swap(state.policy.scorch_effects);
+                        const auto clear_step = [](void* opaque, std::uint32_t,
+                                                   std::uintptr_t index) noexcept -> std::uintptr_t {
+                            auto& policy = *static_cast<ClassDamageVisualPolicy*>(opaque);
+                            std::vector<std::string>().swap(policy.target_hardpoints[index]);
+                            return 0;
+                        };
+                        a2fo_rs_stage9_texture_repeat(clear_step, &state.policy, kSubsystemCount);
+                    } else {
+                        char message[192]{};
+                        std::snprintf(message, sizeof(message),
+                                      "Registered damage threshold %.3f with %u scorch effect(s)",
+                                      state.policy.damage_threshold,
+                                      static_cast<unsigned>(state.policy.scorch_effects.size()));
+                        log_line(message);
+                    }
+                    g_class_damage_visuals[state.object_class] = std::move(state.policy);
+                    char message[192]{};
+                    std::snprintf(message, sizeof(message),
+                                  "Registered %lu subsystem damage mesh%s on CraftClass %p",
+                                  static_cast<unsigned long>(state.total_entries),
+                                  state.total_entries == 1 ? "" : "es", state.object_class);
                     log_line(message);
-                    continue;
+                    break;
                 }
-
-                std::uint32_t explosion_project_id = 0;
-                const std::string explosion_command =
-                    command + "explosion";
-                parameter_db_project_id(
-                    parameter_db, explosion_command.c_str(),
-                    &explosion_project_id);
-                entries.push_back({
-                    std::move(node_name), nullptr, {},
-                    explosion_project_id});
-                ++total_entries;
-            }
-        }
-
-        std::size_t target_hardpoint_count = 0;
-        for (const auto& targets : policy.target_hardpoints) {
-            target_hardpoint_count += targets.size();
-        }
-        const bool has_scorch_policy =
-            std::isfinite(policy.damage_threshold) &&
-            policy.damage_threshold > 0.0f &&
-            !policy.scorch_effects.empty() &&
-            target_hardpoint_count != 0;
-        if (!subsystem_damage_policy_active(
-                total_entries, policy.damage_threshold,
-                policy.scorch_effects.size(), target_hardpoint_count)) {
-            g_class_damage_visuals.erase(object_class);
-            return;
-        }
-        if (!has_scorch_policy) {
-            policy.damage_threshold = 0.0f;
-            std::vector<std::string>().swap(policy.scorch_effects);
-            for (auto& targets : policy.target_hardpoints) {
-                std::vector<std::string>().swap(targets);
-            }
-        } else {
-            char message[192]{};
-            std::snprintf(message, sizeof(message),
-                          "Registered damage threshold %.3f with %u scorch effect(s)",
-                          policy.damage_threshold,
-                          static_cast<unsigned>(policy.scorch_effects.size()));
-            log_line(message);
-        }
-        g_class_damage_visuals[object_class] = std::move(policy);
-        char message[192]{};
-        std::snprintf(
-            message, sizeof(message),
-            "Registered %lu subsystem damage mesh%s on CraftClass %p",
-            static_cast<unsigned long>(total_entries),
-            total_entries == 1 ? "" : "es", object_class);
-        log_line(message);
+                }
+            } catch (...) { state.error = std::current_exception(); }
+            return 0;
+        };
+        a2fo_rs_stage9_texture_register(step, &context);
+        if (context.error) std::rethrow_exception(context.error);
     } catch (...) {
         log_line("Could not retain subsystem damage-mesh ODF commands");
     }
@@ -1156,37 +1394,85 @@ SubsystemMeshEntry* select_damage_mesh(
     if (!policy || !state || system_index >= kSubsystemCount) return nullptr;
     auto& entries = policy->systems[system_index];
     std::vector<std::size_t> available;
-    try {
-        for (std::size_t index = 0; index < entries.size(); ++index) {
-            if (entries[index].node) available.push_back(index);
+    struct Context {
+        std::vector<SubsystemMeshEntry>& entries;
+        std::vector<std::size_t>& available;
+        // GNU++17/O2 frozen scan snapshots the initial data/size across
+        // available-vector allocation. Preserve that native observation.
+        SubsystemMeshEntry* scan_data;
+        std::size_t scan_count;
+        std::size_t index = 0;
+        std::exception_ptr error{};
+    } context{entries, available, entries.data(), entries.size()};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& row = *static_cast<Context*>(opaque);
+        if (row.error) return 0;
+        try {
+            if (operation == 0) return row.index < row.scan_count;
+            if (row.scan_data[row.index].node) row.available.push_back(row.index);
+            ++row.index;
+        } catch (...) { row.error = std::current_exception(); }
+        return 0;
+    };
+    a2fo_rs_stage9_texture_iterate(step, &context);
+    if (context.error) return nullptr;
+    struct ChoiceContext {
+        std::vector<SubsystemMeshEntry>& entries;
+        const std::vector<std::size_t>& available;
+        SubsystemDamageVisualState* state;
+        std::uint32_t craft_handle;
+        std::size_t system_index;
+    } choice_context{entries, available, state, craft_handle, system_index};
+    const auto choose_step = [](void* opaque, std::uint32_t operation,
+                                std::uintptr_t argument) noexcept -> std::uintptr_t {
+        auto& row = *static_cast<ChoiceContext*>(opaque);
+        switch (operation) {
+        case 0: return row.available.size();
+        case 1: row.state->selected_entry = -1; break;
+        case 2: return subsystem_mesh_choice(
+            row.craft_handle, row.system_index, row.state->destruction_count,
+            argument);
+        case 3: ++row.state->destruction_count; break;
+        case 4: {
+            const std::size_t selected = row.available[argument];
+            row.state->selected_entry = static_cast<std::int32_t>(selected);
+            return reinterpret_cast<std::uintptr_t>(&row.entries[selected]);
         }
-    } catch (...) {
-        return nullptr;
-    }
-    if (available.empty()) {
-        state->selected_entry = -1;
-        return nullptr;
-    }
-    const std::size_t choice = subsystem_mesh_choice(
-        craft_handle, system_index, state->destruction_count,
-        available.size());
-    ++state->destruction_count;
-    const std::size_t selected = available[choice];
-    state->selected_entry = static_cast<std::int32_t>(selected);
-    return &entries[selected];
+        }
+        return 0;
+    };
+    return reinterpret_cast<SubsystemMeshEntry*>(
+        a2fo_rs_stage9_texture_select_mesh(choose_step, &choice_context));
 }
 
 SubsystemMeshEntry* selected_damage_mesh(
     ClassDamageVisualPolicy* policy, std::size_t system_index,
     const SubsystemDamageVisualState& state) noexcept {
-    if (!policy || system_index >= kSubsystemCount ||
-        state.selected_entry < 0) {
-        return nullptr;
-    }
-    auto& entries = policy->systems[system_index];
-    const std::size_t selected =
-        static_cast<std::size_t>(state.selected_entry);
-    return selected < entries.size() ? &entries[selected] : nullptr;
+    struct Context {
+        ClassDamageVisualPolicy* policy;
+        std::size_t system_index;
+        const SubsystemDamageVisualState& state;
+    } context{policy, system_index, state};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t argument) noexcept -> std::uintptr_t {
+        const auto& row = *static_cast<Context*>(opaque);
+        switch (operation) {
+        case 0:
+            return row.policy && row.system_index < kSubsystemCount &&
+                row.state.selected_entry >= 0;
+        case 1:
+            return static_cast<std::size_t>(row.state.selected_entry);
+        case 2:
+            return row.policy->systems[row.system_index].size();
+        case 3:
+            return reinterpret_cast<std::uintptr_t>(
+                &row.policy->systems[row.system_index][argument]);
+        }
+        return 0;
+    };
+    return reinterpret_cast<SubsystemMeshEntry*>(
+        a2fo_rs_stage9_texture_selected_mesh(step, &context));
 }
 
 void spawn_damage_explosion(void* craft,
@@ -1429,31 +1715,70 @@ void add_scorch_marker(void* craft, void* object_class,
                        std::uint32_t handle, std::size_t system_index,
                        double current_hitpoints,
                        std::int32_t maximum_hitpoints) noexcept {
-    if (!craft || !object_class || policy.damage_threshold <= 0.0f ||
-        policy.target_hardpoints[system_index].empty() ||
-        policy.scorch_effects.empty() || maximum_hitpoints <= 0) return;
-    const double fraction = std::clamp(
-        current_hitpoints / static_cast<double>(maximum_hitpoints), 0.0, 1.0);
-    const std::uint32_t band = static_cast<std::uint32_t>(
-        std::floor((1.0 - fraction) / policy.damage_threshold));
-    if (band <= visual.scorch_count || band == 0) return;
-    const std::string& wanted = policy.target_hardpoints[system_index][
-        (band - 1u) % policy.target_hardpoints[system_index].size()];
+    struct Admission {void* craft;void* object_class;ClassDamageVisualPolicy& policy;
+        SubsystemDamageVisualState& visual;std::size_t system;double current;std::int32_t maximum;};
+    Admission admission{craft,object_class,policy,visual,system_index,current_hitpoints,maximum_hitpoints};
+    const auto admit=+[](void* opaque,std::uint32_t operation) noexcept -> std::uintptr_t {
+        const auto& c=*static_cast<Admission*>(opaque);
+        switch(operation){
+        case 0:return c.craft!=nullptr;
+        case 1:return c.object_class!=nullptr;
+        case 2:return c.policy.damage_threshold<=0.0f;
+        case 3:return c.policy.target_hardpoints[c.system].empty();
+        case 4:return c.policy.scorch_effects.empty();
+        case 5:return c.maximum<=0;
+        case 6:{
+            // Keep the original unspilled GNU/x87 quotient and floor primitive.
+            const double fraction=std::clamp(c.current/static_cast<double>(c.maximum),0.0,1.0);
+            return static_cast<std::uint32_t>(std::floor((1.0-fraction)/c.policy.damage_threshold));
+        }
+        case 7:return c.visual.scorch_count;
+        case 8:return c.policy.target_hardpoints[c.system].size();
+        default:return 0;
+        }
+    };
+    std::uint32_t band=0;std::size_t hardpoint_index=0;
+    if(!a2fo_rs_stage10_texture_scorch(&admission,admit,&band,&hardpoint_index))return;
+    const std::string& wanted=policy.target_hardpoints[system_index][hardpoint_index];
     void* geometry = read_at<void*>(object_class, kCraftClassGeometryOffset, nullptr);
     void* root = read_at<void*>(geometry, kGeometryRootNodeOffset, nullptr);
     std::vector<void*> pending{root};
     std::unordered_set<void*> visited;
     void* target = nullptr;
-    while (!pending.empty() && visited.size() < kMaximumNodeCount) {
-        void* node = pending.back(); pending.pop_back();
-        if (!node || !visited.insert(node).second) continue;
-        void* child = read_at<void*>(node, kNodeChildOffset, nullptr);
-        void* sibling = read_at<void*>(node, kNodeSiblingOffset, nullptr);
-        if (child) pending.push_back(child);
-        if (sibling) pending.push_back(sibling);
-        std::string name;
-        if (copy_normalized_node_name(node, &name) && name == wanted) { target = node; break; }
-    }
+    struct Context {
+        std::vector<void*>& pending;
+        std::unordered_set<void*>& visited;
+        const std::string& wanted;
+        void*& target;
+        void* node = nullptr;
+        std::exception_ptr error{};
+    } context{pending, visited, wanted, target};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& state = *static_cast<Context*>(opaque);
+        if (state.error) return 0;
+        try {
+            if (operation == 0) {
+                if (state.target || state.pending.empty() ||
+                    state.visited.size() >= kMaximumNodeCount) return 0;
+                state.node = state.pending.back();
+                state.pending.pop_back();
+                if (!state.node || !state.visited.insert(state.node).second)
+                    return 1;
+                void* child = read_at<void*>(state.node, kNodeChildOffset, nullptr);
+                void* sibling = read_at<void*>(state.node, kNodeSiblingOffset, nullptr);
+                if (child) state.pending.push_back(child);
+                if (sibling) state.pending.push_back(sibling);
+                return 2;
+            }
+            std::string name;
+            if (copy_normalized_node_name(state.node, &name) && name == state.wanted)
+                state.target = state.node;
+        } catch (...) { state.error = std::current_exception(); }
+        return 0;
+    };
+    a2fo_rs_stage9_texture_walk(step, &context);
+    if (context.error) std::rethrow_exception(context.error);
     if (!target) return;
     SubsystemMeshEntry marker;
     marker.node = target;
@@ -1499,90 +1824,114 @@ void update_subsystem_damage_visuals(void* craft_instance,
             craft_state.handle = handle;
         }
 
-        for (std::size_t system_index = 0;
-             system_index < kSubsystemCount; ++system_index) {
-            auto* system = static_cast<std::uint8_t*>(systems) +
-                system_index * kCraftSystemSize;
-            const bool operational = read_at<std::uint8_t>(
-                system, kCraftSystemOperationalOffset, 1) != 0;
-            const bool forced_disabled = read_at<std::uint8_t>(
-                system, kCraftSystemForcedDisabledOffset, 0) != 0;
-            const std::int32_t maximum_hitpoints = read_at<std::int32_t>(
-                system, kCraftSystemMaximumHitpointsOffset, 0);
-            const double current_hitpoints = read_at<double>(
-                system, kCraftSystemCurrentHitpointsOffset, 0.0);
-            const float disable_time = read_at<float>(
-                system, kCraftSystemDisableTimeOffset, 0.0f);
-            const SubsystemCondition condition = subsystem_condition(
-                operational, forced_disabled, maximum_hitpoints,
-                current_hitpoints, disable_time);
-
-            SubsystemDamageVisualState& visual =
-                craft_state.systems[system_index];
-            if (policy.damage_threshold > 0.0f) {
-                add_scorch_marker(craft, object_class, policy, visual, handle,
-                                  system_index, current_hitpoints,
-                                  maximum_hitpoints);
-            }
-            if (!visual.initialized) {
-                visual.initialized = true;
-                visual.previous_condition = condition;
-                visual.previous_hitpoints = current_hitpoints;
-                if (condition == SubsystemCondition::destroyed) {
-                    select_damage_mesh(
-                        &policy, system_index, handle, &visual);
-                    visual.rebuild_scale = subsystem_rebuild_scale(
-                        maximum_hitpoints, current_hitpoints);
-                }
-                continue;
-            }
-
-            SubsystemMeshEntry* selected = selected_damage_mesh(
-                &policy, system_index, visual);
-            if (condition == SubsystemCondition::destroyed &&
-                visual.previous_condition !=
-                    SubsystemCondition::destroyed) {
-                selected = select_damage_mesh(
-                    &policy, system_index, handle, &visual);
-                visual.rebuild_scale = subsystem_rebuild_scale(
-                    maximum_hitpoints, current_hitpoints);
-                if (selected) spawn_damage_explosion(craft, *selected);
-            } else if (condition == SubsystemCondition::destroyed &&
-                       !selected) {
-                selected = select_damage_mesh(
-                    &policy, system_index, handle, &visual);
-                visual.rebuild_scale = subsystem_rebuild_scale(
-                    maximum_hitpoints, current_hitpoints);
-            }
-
-            if (selected) {
-                visual.rebuild_scale = subsystem_rebuild_scale(
-                    maximum_hitpoints, current_hitpoints);
-                if (std::isfinite(current_hitpoints) &&
-                    std::isfinite(visual.previous_hitpoints) &&
-                    current_hitpoints >
-                        visual.previous_hitpoints + 0.0001) {
-                    add_repair_particle(
-                        craft, *selected, handle, system_index,
-                        visual.repair_particle_sequence++,
-                        visual.rebuild_scale);
-                }
-            }
-            if (condition == SubsystemCondition::operational) {
-                if (selected && visual.previous_condition !=
-                        SubsystemCondition::operational) {
-                    for (std::size_t burst = 0; burst < 3; ++burst) {
-                        add_repair_particle(
-                            craft, *selected, handle, system_index,
-                            visual.repair_particle_sequence++, 1.0f);
+        struct Context {
+            void* craft;
+            void* object_class;
+            void* systems;
+            std::uint32_t handle;
+            ClassDamageVisualPolicy& policy;
+            CraftDamageVisualState& craft_state;
+            std::size_t system_index = 0;
+            std::int32_t maximum_hitpoints = 0;
+            double current_hitpoints = 0.0;
+            SubsystemCondition condition = SubsystemCondition::operational;
+            SubsystemDamageVisualState* visual = nullptr;
+            SubsystemMeshEntry* selected = nullptr;
+            std::exception_ptr error{};
+        } context{craft, object_class, systems, handle, policy, craft_state};
+        const auto step = [](void* opaque, std::uint32_t operation,
+                             std::uintptr_t argument) noexcept -> std::uintptr_t {
+            auto& state = *static_cast<Context*>(opaque);
+            if (state.error) return 0;
+            try {
+                switch (operation) {
+                case 0: {
+                    state.system_index = static_cast<std::size_t>(argument);
+                    auto* system = static_cast<std::uint8_t*>(state.systems) +
+                        state.system_index * kCraftSystemSize;
+                    const bool operational = read_at<std::uint8_t>(
+                        system, kCraftSystemOperationalOffset, 1) != 0;
+                    const bool forced_disabled = read_at<std::uint8_t>(
+                        system, kCraftSystemForcedDisabledOffset, 0) != 0;
+                    state.maximum_hitpoints = read_at<std::int32_t>(
+                        system, kCraftSystemMaximumHitpointsOffset, 0);
+                    state.current_hitpoints = read_at<double>(
+                        system, kCraftSystemCurrentHitpointsOffset, 0.0);
+                    const float disable_time = read_at<float>(
+                        system, kCraftSystemDisableTimeOffset, 0.0f);
+                    state.condition = subsystem_condition(
+                        operational, forced_disabled, state.maximum_hitpoints,
+                        state.current_hitpoints, disable_time);
+                    state.visual = &state.craft_state.systems[state.system_index];
+                    if (state.policy.damage_threshold > 0.0f) {
+                        add_scorch_marker(state.craft, state.object_class,
+                            state.policy, *state.visual, state.handle,
+                            state.system_index, state.current_hitpoints,
+                            state.maximum_hitpoints);
                     }
+                    return static_cast<std::uintptr_t>(state.condition) |
+                        (static_cast<std::uintptr_t>(state.visual->previous_condition) << 2) |
+                        (state.visual->initialized ? 16u : 0u);
                 }
-                visual.selected_entry = -1;
-                visual.rebuild_scale = 1.0f;
-            }
-            visual.previous_condition = condition;
-            visual.previous_hitpoints = current_hitpoints;
-        }
+                case 1:
+                    state.visual->initialized = true;
+                    state.visual->previous_condition = state.condition;
+                    state.visual->previous_hitpoints = state.current_hitpoints;
+                    break;
+                case 2:
+                    state.selected = select_damage_mesh(
+                        &state.policy, state.system_index, state.handle,
+                        state.visual);
+                    state.visual->rebuild_scale = subsystem_rebuild_scale(
+                        state.maximum_hitpoints, state.current_hitpoints);
+                    return state.selected != nullptr;
+                case 3:
+                    state.selected = selected_damage_mesh(
+                        &state.policy, state.system_index, *state.visual);
+                    return state.selected != nullptr;
+                case 4:
+                    if (state.selected)
+                        spawn_damage_explosion(state.craft, *state.selected);
+                    break;
+                case 5:
+                    state.visual->rebuild_scale = subsystem_rebuild_scale(
+                        state.maximum_hitpoints, state.current_hitpoints);
+                    if (std::isfinite(state.current_hitpoints) &&
+                        std::isfinite(state.visual->previous_hitpoints) &&
+                        state.current_hitpoints >
+                            state.visual->previous_hitpoints + 0.0001) {
+                        add_repair_particle(state.craft, *state.selected,
+                            state.handle, state.system_index,
+                            state.visual->repair_particle_sequence++,
+                            state.visual->rebuild_scale);
+                    }
+                    break;
+                case 6:
+                    if (state.selected && state.visual->previous_condition !=
+                            SubsystemCondition::operational) {
+                        const auto burst_step = [](void* opaque, std::uint32_t,
+                                                   std::uintptr_t) noexcept -> std::uintptr_t {
+                            auto& row = *static_cast<Context*>(opaque);
+                            add_repair_particle(row.craft, *row.selected,
+                                row.handle, row.system_index,
+                                row.visual->repair_particle_sequence++, 1.0f);
+                            return 0;
+                        };
+                        a2fo_rs_stage9_texture_repeat(burst_step, &state, 3);
+                    }
+                    state.visual->selected_entry = -1;
+                    state.visual->rebuild_scale = 1.0f;
+                    break;
+                case 7:
+                    state.visual->previous_condition = state.condition;
+                    state.visual->previous_hitpoints = state.current_hitpoints;
+                    break;
+                }
+            } catch (...) { state.error = std::current_exception(); }
+            return 0;
+        };
+        a2fo_rs_stage9_texture_update(step, &context);
+        if (context.error) std::rethrow_exception(context.error);
     } catch (...) {
         log_line("Could not update subsystem damage visuals");
     }
@@ -1624,7 +1973,9 @@ void* existing_detour_destination(const void* site,
 
 bool install_subsystem_class_registration(
     const A2FO_ModuleApi* api) noexcept {
-    if (GetModuleHandleA(kCraftIdentityModuleName)) {
+    if (a2fo::startup_module_provider(
+            kCraftIdentityModuleName,
+            {"A2FOCraftIdentity_TakeLoadedDirectionalShields"})) {
         g_subsystem_classes_use_identity_observer = true;
         return true;
     }
@@ -1672,16 +2023,44 @@ bool install_subsystem_class_registration(
 }
 
 void erase_race_node_name(void* race) {
-    if (g_race_node_names.erase(race) != 0) {
-        rebuild_known_race_node_names();
-    }
+    struct Context { void* race; std::exception_ptr error{}; } context{race};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& state = *static_cast<Context*>(opaque);
+        if (state.error) return 0;
+        try {
+            if (operation == 0) return g_race_node_names.erase(state.race) != 0;
+            rebuild_known_race_node_names();
+        } catch (...) { state.error = std::current_exception(); }
+        return 0;
+    };
+    a2fo_rs_stage9_texture_erase_race_name(step, &context);
+    if (context.error) std::rethrow_exception(context.error);
 }
 
 void set_race_node_name(void* race, const std::string& name) {
-    const auto current = g_race_node_names.find(race);
-    if (current != g_race_node_names.end() && current->second == name) return;
-    g_race_node_names[race] = name;
-    rebuild_known_race_node_names();
+    struct Context {
+        void* race;
+        const std::string& name;
+        std::exception_ptr error{};
+    } context{race, name};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& state = *static_cast<Context*>(opaque);
+        if (state.error) return 0;
+        try {
+            if (operation == 0) {
+                const auto current = g_race_node_names.find(state.race);
+                return current != g_race_node_names.end() &&
+                    current->second == state.name;
+            }
+            if (operation == 1) g_race_node_names[state.race] = state.name;
+            else rebuild_known_race_node_names();
+        } catch (...) { state.error = std::current_exception(); }
+        return 0;
+    };
+    a2fo_rs_stage9_texture_set_race_name(step, &context);
+    if (context.error) std::rethrow_exception(context.error);
 }
 
 }  // namespace
@@ -1697,12 +2076,27 @@ extern "C" int __cdecl a2fo_texture_variants_borg_filename_hook(
     if (!g_generate_texture_filename) return 1;
     const int native_result =
         g_generate_texture_filename(generated_filename, texture_name);
-    if (native_result == 0 || !g_runtime_alive || !g_borg_dds_enabled ||
-        !texture_name) {
-        return native_result;
-    }
     try {
-        return texture_exists(texture_name, ".dds") ? 0 : native_result;
+        struct Context { const char* texture_name; std::exception_ptr error{}; }
+            context{texture_name};
+        const auto step = [](void* opaque, std::uint32_t operation,
+                             std::uintptr_t) noexcept -> std::uintptr_t {
+            auto& state = *static_cast<Context*>(opaque);
+            if (state.error) return 0;
+            try {
+                switch (operation) {
+                case 0: return g_runtime_alive;
+                case 1: return g_borg_dds_enabled;
+                case 2: return state.texture_name != nullptr;
+                case 3: return texture_exists(state.texture_name, ".dds");
+                }
+            } catch (...) { state.error = std::current_exception(); }
+            return 0;
+        };
+        const int result = a2fo_rs_stage9_texture_borg_result(
+            step, &context, native_result);
+        if (context.error) std::rethrow_exception(context.error);
+        return result;
     } catch (...) {
         return native_result;
     }
@@ -1711,55 +2105,82 @@ extern "C" int __cdecl a2fo_texture_variants_borg_filename_hook(
 void apply_race_rendering_policy(
     void* race, bool name_found, const std::string& raw_name,
     bool suffix_found, const std::string& raw_suffix) {
+    struct Context {
+        void* race;
+        const std::string& raw_name;
+        const std::string& raw_suffix;
         std::string node_name;
-        if (name_found &&
-            normalize_faction_node_name(raw_name, &node_name)) {
-            set_race_node_name(race, node_name);
+        std::string suffix;
+        std::exception_ptr error{};
+    } context{race, raw_name, raw_suffix, {}, {}, {}};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t argument) noexcept -> std::uintptr_t {
+        auto& state = *static_cast<Context*>(opaque);
+        if (state.error) return 0;
+        try {
+            switch (operation) {
+            case 0:
+                return normalize_faction_node_name(
+                    state.raw_name, &state.node_name);
+            case 1: {
+            set_race_node_name(state.race, state.node_name);
             char message[192]{};
             std::snprintf(message, sizeof(message),
                           "Registered faction model node '%s' on Race %p",
-                          node_name.c_str(), race);
+                          state.node_name.c_str(), state.race);
             log_line(message);
-        } else {
-            erase_race_node_name(race);
-            if (name_found) {
+            return 0;
+            }
+            case 2: {
+            erase_race_node_name(state.race);
+            if (argument) {
                 char message[224]{};
                 std::snprintf(
                     message, sizeof(message),
                     "Rejected Race name '%s' for faction model nodes on "
                     "Race %p; use up to 63 ASCII letters, digits, '_' or '-'",
-                    raw_name.c_str(), race);
+                    state.raw_name.c_str(), state.race);
                 log_line(message);
             }
-        }
-
-        if (!suffix_found) {
-            g_race_suffixes.erase(race);
-            return;
-        }
-
-        std::string suffix;
-        if (!normalize_faction_suffix(raw_suffix, &suffix)) {
+            return 0;
+            }
+            case 3:
+                return normalize_faction_suffix(
+                    state.raw_suffix, &state.suffix);
+            case 4:
+                g_race_suffixes.erase(state.race);
+                return 0;
+            case 5: {
+            g_race_suffixes[state.race] = state.suffix;
+            char message[192]{};
+            std::snprintf(message, sizeof(message),
+                          "Registered factionTextureSuffix '%s' on Race %p",
+                          state.suffix.c_str(), state.race);
+            log_line(message);
+            return 0;
+            }
+            case 6: {
             char message[192]{};
             std::snprintf(
                 message, sizeof(message),
                 "Rejected invalid factionTextureSuffix on Race %p; use up "
                 "to 32 ASCII letters, digits, '_' or '-'",
-                race);
+                state.race);
             log_line(message);
-            g_race_suffixes.erase(race);
-            return;
+            g_race_suffixes.erase(state.race);
+            return 0;
+            }
+            case 7:
+                return !state.suffix.empty();
+            }
+        } catch (...) {
+            state.error = std::current_exception();
         }
-        if (suffix.empty()) {
-            g_race_suffixes.erase(race);
-            return;
-        }
-        g_race_suffixes[race] = suffix;
-        char message[192]{};
-        std::snprintf(message, sizeof(message),
-                      "Registered factionTextureSuffix '%s' on Race %p",
-                      suffix.c_str(), race);
-        log_line(message);
+        return 0;
+    };
+    a2fo_rs_stage8_texture_race_policy(
+        step, &context, name_found, suffix_found);
+    if (context.error) std::rethrow_exception(context.error);
 }
 
 bool race_event_field(const A2FO_OdfFieldView* fields,
@@ -1767,18 +2188,36 @@ bool race_event_field(const A2FO_OdfFieldView* fields,
                       std::string* value) {
     if (!fields || !name || !value) return false;
     const std::size_t name_size = std::strlen(name);
-    for (std::uint32_t index = 0; index < count; ++index) {
-        const A2FO_OdfFieldView& field = fields[index];
-        if (field.name.size != name_size || !field.name.data ||
-            _strnicmp(field.name.data, name, name_size) != 0 ||
-            (!field.value.data && field.value.size != 0)) {
-            continue;
-        }
-        value->assign(field.value.data ? field.value.data : "",
-                      field.value.size);
-        return true;
-    }
-    return false;
+    struct Context {
+        const A2FO_OdfFieldView* fields;
+        std::uint32_t count;
+        const char* name;
+        std::size_t name_size;
+        std::string* value;
+        std::uint32_t index = 0;
+        bool found = false;
+        std::exception_ptr error{};
+    } context{fields, count, name, name_size, value};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& state = *static_cast<Context*>(opaque);
+        if (state.error) return 0;
+        try {
+            if (operation == 0)
+                return !state.found && state.index < state.count;
+            const A2FO_OdfFieldView& field = state.fields[state.index++];
+            if (field.name.size != state.name_size || !field.name.data ||
+                _strnicmp(field.name.data, state.name, state.name_size) != 0 ||
+                (!field.value.data && field.value.size != 0)) return 0;
+            state.value->assign(field.value.data ? field.value.data : "",
+                                field.value.size);
+            state.found = true;
+        } catch (...) { state.error = std::current_exception(); }
+        return 0;
+    };
+    a2fo_rs_stage9_texture_iterate(step, &context);
+    if (context.error) std::rethrow_exception(context.error);
+    return context.found;
 }
 
 void A2FO_CALL race_loaded_handler(
@@ -1806,24 +2245,34 @@ void A2FO_CALL race_loaded_handler(
 void A2FO_CALL craft_cleanup_event_handler(
     const A2FO_CraftEvent* event, void*) {
     if (!event || event->struct_size < sizeof(*event) || !event->craft ||
-        event->kind != A2FO_CRAFT_EVENT_CLEANUP) {
-        return;
-    }
-    for (auto entry = g_craft_races.begin(); entry != g_craft_races.end();) {
-        if (entry->second.object == event->craft) {
-            entry = g_craft_races.erase(entry);
+        event->kind != A2FO_CRAFT_EVENT_CLEANUP) return;
+    struct Context {
+        void* craft;
+        decltype(g_craft_races)::iterator races;
+        decltype(g_craft_damage_visuals)::iterator visuals;
+        bool visual_phase = false;
+    } context{event->craft, g_craft_races.begin(), {}};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& state = *static_cast<Context*>(opaque);
+        if (operation == 0) return state.visual_phase
+            ? state.visuals != g_craft_damage_visuals.end()
+            : state.races != g_craft_races.end();
+        if (state.visual_phase) {
+            if (state.visuals->second.object == state.craft)
+                state.visuals = g_craft_damage_visuals.erase(state.visuals);
+            else ++state.visuals;
         } else {
-            ++entry;
+            if (state.races->second.object == state.craft)
+                state.races = g_craft_races.erase(state.races);
+            else ++state.races;
         }
-    }
-    for (auto entry = g_craft_damage_visuals.begin();
-         entry != g_craft_damage_visuals.end();) {
-        if (entry->second.object == event->craft) {
-            entry = g_craft_damage_visuals.erase(entry);
-        } else {
-            ++entry;
-        }
-    }
+        return 0;
+    };
+    a2fo_rs_stage9_texture_iterate(step, &context);
+    context.visuals = g_craft_damage_visuals.begin();
+    context.visual_phase = true;
+    a2fo_rs_stage9_texture_iterate(step, &context);
 }
 
 extern "C" void __cdecl a2fo_texture_variants_apply_render_textures(
@@ -1831,17 +2280,28 @@ extern "C" void __cdecl a2fo_texture_variants_apply_render_textures(
     std::uint32_t use_borg_textures) noexcept {
     if (object_class) {
         try {
-            if (g_faction_variants_enabled && !g_race_suffixes.empty()) {
-                collect_class_meshes(object_class);
-            }
-            if (g_faction_variants_enabled &&
-                !g_known_race_node_names.empty()) {
-                collect_class_faction_nodes(object_class);
-            }
-            if (g_subsystem_visuals_enabled &&
-                !g_class_damage_visuals.empty()) {
-                resolve_class_damage_nodes(object_class);
-            }
+            struct Context { void* object_class; std::exception_ptr error{}; }
+                context{object_class};
+            const auto step = [](void* opaque, std::uint32_t operation,
+                                 std::uintptr_t) noexcept -> std::uintptr_t {
+                auto& state = *static_cast<Context*>(opaque);
+                if (state.error) return 0;
+                try {
+                    switch (operation) {
+                    case 0: return g_faction_variants_enabled && !g_race_suffixes.empty();
+                    case 1: collect_class_meshes(state.object_class); break;
+                    case 2: return g_faction_variants_enabled &&
+                        !g_known_race_node_names.empty();
+                    case 3: collect_class_faction_nodes(state.object_class); break;
+                    case 4: return g_subsystem_visuals_enabled &&
+                        !g_class_damage_visuals.empty();
+                    case 5: resolve_class_damage_nodes(state.object_class); break;
+                    }
+                } catch (...) { state.error = std::current_exception(); }
+                return 0;
+            };
+            a2fo_rs_stage9_texture_prepare_render(step, &context);
+            if (context.error) std::rethrow_exception(context.error);
         } catch (...) {
             log_line("Could not enumerate a CraftClass model hierarchy");
         }
@@ -1872,18 +2332,37 @@ void __attribute__((fastcall)) craft_instance_update_hook(
     }
     if (!g_runtime_alive || !craft_instance) return;
     try {
-        if (g_capture_enabled &&
-            (!g_race_suffixes.empty() || !g_race_node_names.empty())) {
-            void* race = read_at<void*>(object, kObjectRaceOffset, nullptr);
-            if (race) {
-                g_craft_races[craft_instance] = CraftRaceState{object, race};
-            } else {
-                g_craft_races.erase(craft_instance);
-            }
-        }
-        if (!g_class_damage_visuals.empty()) {
-            update_subsystem_damage_visuals(craft_instance, object);
-        }
+        struct Context {
+            void* craft_instance;
+            void* object;
+            std::exception_ptr error{};
+        } context{craft_instance, object};
+        const auto step = [](void* opaque, std::uint32_t operation,
+                             std::uintptr_t) noexcept -> std::uintptr_t {
+            auto& state = *static_cast<Context*>(opaque);
+            if (state.error) return 0;
+            try {
+                switch (operation) {
+                case 0:
+                    return g_capture_enabled &&
+                        (!g_race_suffixes.empty() || !g_race_node_names.empty());
+                case 1: {
+                    void* race = read_at<void*>(state.object, kObjectRaceOffset, nullptr);
+                    if (race)
+                        g_craft_races[state.craft_instance] = CraftRaceState{state.object, race};
+                    else g_craft_races.erase(state.craft_instance);
+                    break;
+                }
+                case 2: return !g_class_damage_visuals.empty();
+                case 3:
+                    update_subsystem_damage_visuals(state.craft_instance, state.object);
+                    break;
+                }
+            } catch (...) { state.error = std::current_exception(); }
+            return 0;
+        };
+        a2fo_rs_stage9_texture_update_admission(step, &context);
+        if (context.error) std::rethrow_exception(context.error);
     } catch (...) {
         // The native update already completed; missing sidecar rows simply
         // leave this render on its ordinary intact/base appearance.
@@ -1922,55 +2401,72 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
     g_set_mesh_texture = at(g_armada, kMeshSetTextureRva);
     g_runtime_alive = true;
 
-    bool cleanup_registered = false;
-    if ((api->capabilities & A2FO_CAP_CRAFT_EVENTS) != 0 &&
-        A2FO_MODULE_API_HAS(
-            api, register_craft_event_handler_masked) &&
-        api->register_craft_event_handler_masked) {
-        cleanup_registered = api->register_craft_event_handler_masked(
-            kModuleName, A2FO_CRAFT_EVENT_MASK_CLEANUP,
-            &craft_cleanup_event_handler, nullptr);
-    } else if (A2FO_MODULE_API_HAS(api, register_craft_event_handler) &&
-               (api->capabilities & A2FO_CAP_CRAFT_EVENTS) != 0 &&
-               api->register_craft_event_handler) {
-        cleanup_registered = api->register_craft_event_handler(
-            kModuleName, &craft_cleanup_event_handler, nullptr);
-    }
-    if (!cleanup_registered) {
-        log_line("Craft cleanup dispatch unavailable; render sidecars use "
-                 "pointer-reuse replacement only");
-    }
-
-    if (install_borg_dds_fix(api)) {
-        log_line("Native Borg alternate preflight now accepts DDS as well as TGA");
-    } else {
-        log_line("Borg DDS preflight hook unavailable; native behaviour retained");
-    }
-    if (install_faction_variants(api)) {
-        log_line(
-            "Ownership-aware faction textures and Race-name model nodes "
-            "initialized");
-    } else {
-        log_line(
-            "Faction render hooks unavailable; native base/Borg rendering "
-            "retained");
-    }
-    if (subsystem_visual_signatures_supported() &&
-        install_subsystem_class_registration(api)) {
-        g_subsystem_visuals_enabled = true;
-        log_line(
-            "ODF-driven subsystem damage meshes, explosions, and repair "
-            "sparks initialized");
-        log_line(g_subsystem_classes_use_identity_observer
-            ? "Subsystem CraftClass policies use A2FOCraftIdentity's "
-              "cooperative observer"
-            : "Subsystem CraftClass policies use the validated fallback "
-              "constructor chain");
-    } else {
-        log_line(
-            "Subsystem damage visuals unavailable; configured meshes remain "
-            "intact");
-    }
+    struct Context {
+        const A2FO_ModuleApi* api;
+        std::exception_ptr error{};
+    } context{api};
+    const auto step = [](void* opaque, std::uint32_t operation,
+                         std::uintptr_t argument) noexcept -> std::uintptr_t {
+        auto& state = *static_cast<Context*>(opaque);
+        if (state.error) return 0;
+        try {
+            switch (operation) {
+            case 0:
+                if ((state.api->capabilities & A2FO_CAP_CRAFT_EVENTS) != 0 &&
+                    A2FO_MODULE_API_HAS(state.api, register_craft_event_handler_masked) &&
+                    state.api->register_craft_event_handler_masked)
+                    return state.api->register_craft_event_handler_masked(
+                        kModuleName, A2FO_CRAFT_EVENT_MASK_CLEANUP,
+                        &craft_cleanup_event_handler, nullptr);
+                if (A2FO_MODULE_API_HAS(state.api, register_craft_event_handler) &&
+                    (state.api->capabilities & A2FO_CAP_CRAFT_EVENTS) != 0 &&
+                    state.api->register_craft_event_handler)
+                    return state.api->register_craft_event_handler(
+                        kModuleName, &craft_cleanup_event_handler, nullptr);
+                return 0;
+            case 1:
+                log_line("Craft cleanup dispatch unavailable; render sidecars use "
+                         "pointer-reuse replacement only");
+                break;
+            case 2:
+                return install_borg_dds_fix(state.api);
+            case 3:
+                log_line(argument
+                    ? "Native Borg alternate preflight now accepts DDS as well as TGA"
+                    : "Borg DDS preflight hook unavailable; native behaviour retained");
+                break;
+            case 4:
+                return install_faction_variants(state.api);
+            case 5:
+                log_line(argument
+                    ? "Ownership-aware faction textures and Race-name model nodes initialized"
+                    : "Faction render hooks unavailable; native base/Borg rendering retained");
+                break;
+            case 6:
+                return subsystem_visual_signatures_supported();
+            case 7:
+                return install_subsystem_class_registration(state.api);
+            case 8:
+                if (argument) {
+                    g_subsystem_visuals_enabled = true;
+                    log_line("ODF-driven subsystem damage meshes, explosions, and repair "
+                             "sparks initialized");
+                    log_line(g_subsystem_classes_use_identity_observer
+                        ? "Subsystem CraftClass policies use A2FOCraftIdentity's "
+                          "cooperative observer"
+                        : "Subsystem CraftClass policies use the validated fallback "
+                          "constructor chain");
+                } else {
+                    log_line("Subsystem damage visuals unavailable; configured meshes remain "
+                             "intact");
+                }
+                break;
+            }
+        } catch (...) { state.error = std::current_exception(); }
+        return 0;
+    };
+    a2fo_rs_stage9_texture_init(step, &context);
+    if (context.error) std::rethrow_exception(context.error);
 
     // Hooks are process-lifetime patches. Keep a partially initialized module
     // resident so every installed route remains a safe native pass-through.
@@ -1979,18 +2475,25 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
 
 extern "C" __declspec(dllexport)
 void A2FO_CALL A2FO_ModuleShutdown() {
-    g_subsystem_visuals_enabled = false;
-    g_faction_variants_enabled = false;
-    g_borg_dds_enabled = false;
-    g_capture_enabled = false;
-    g_runtime_alive = false;
-    g_craft_races.clear();
-    g_craft_damage_visuals.clear();
-    g_race_suffixes.clear();
-    g_race_node_names.clear();
-    g_known_race_node_names.clear();
-    g_class_meshes.clear();
-    g_class_faction_nodes.clear();
-    g_variant_textures.clear();
-    g_class_damage_visuals.clear();
+    const auto step = [](void*, std::uint32_t operation,
+                         std::uintptr_t) noexcept -> std::uintptr_t {
+        switch (operation) {
+        case 0: g_subsystem_visuals_enabled = false; break;
+        case 1: g_faction_variants_enabled = false; break;
+        case 2: g_borg_dds_enabled = false; break;
+        case 3: g_capture_enabled = false; break;
+        case 4: g_runtime_alive = false; break;
+        case 5: g_craft_races.clear(); break;
+        case 6: g_craft_damage_visuals.clear(); break;
+        case 7: g_race_suffixes.clear(); break;
+        case 8: g_race_node_names.clear(); break;
+        case 9: g_known_race_node_names.clear(); break;
+        case 10: g_class_meshes.clear(); break;
+        case 11: g_class_faction_nodes.clear(); break;
+        case 12: g_variant_textures.clear(); break;
+        case 13: g_class_damage_visuals.clear(); break;
+        }
+        return 0;
+    };
+    a2fo_rs_stage9_texture_shutdown(step, nullptr);
 }

@@ -8,6 +8,7 @@
 
 #include "hybrid_bridge_client.hpp"
 #include "upgrade_pod_config.hpp"
+#include "../../rust/stage8_c_upgrade_ffi.h"
 
 #include <algorithm>
 #include <array>
@@ -15,8 +16,10 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -206,66 +209,91 @@ std::uint32_t configured_maximum_tier() noexcept {
 }
 
 std::string join_path(const std::string& left, const std::string& right) {
-    if (left.empty()) return right;
-    if (right.empty()) return left;
-    if (left.back() == '\\' || left.back() == '/') return left + right;
-    return left + "\\" + right;
+    const auto mode=a2fo_rs_c_upgrade_join_mode(
+        reinterpret_cast<const std::uint8_t*>(left.data()),left.size(),
+        reinterpret_cast<const std::uint8_t*>(right.data()),right.size());
+    if(mode==0)return right;
+    if(mode==1)return left;
+    if(mode==2)return left+right;
+    return left+"\\"+right;
 }
 
 bool read_small_text_file(const std::string& path, std::string& contents) {
-    contents.clear();
-    std::ifstream input(path, std::ios::binary);
-    if (!input) return false;
-    input.seekg(0, std::ios::end);
-    const std::streamoff size = input.tellg();
-    if (size < 0 || size > kMaximumRtsConfigSize) {
-        log_message("Ignored oversized RTS configuration: " + path);
-        return false;
-    }
-    input.seekg(0, std::ios::beg);
-    std::ostringstream stream;
-    stream << input.rdbuf();
-    contents = stream.str();
-    return input.good() || input.eof();
+    struct Context {
+        const std::string& path;
+        std::string& contents;
+        std::optional<std::ifstream> input{};
+        std::int64_t size{};
+        std::uint8_t failed{};
+        std::exception_ptr error{};
+    } context{path,contents};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:c.contents.clear();return 1;
+        case 1:c.input.emplace(c.path,std::ios::binary);
+            return static_cast<bool>(*c.input);
+        case 2:c.input->seekg(0,std::ios::end);
+            c.size=static_cast<std::int64_t>(c.input->tellg());return 1;
+        case 3:log_message("Ignored oversized RTS configuration: "+c.path);
+            return 1;
+        case 4:c.input->seekg(0,std::ios::beg);return 1;
+        case 5:{std::ostringstream stream;
+            stream<<c.input->rdbuf();
+            c.contents=stream.str();
+            return c.input->good()||c.input->eof();}
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();c.failed=1;return 0;}
+    };
+    const bool result=a2fo_rs_c_upgrade_read_file(&context,step,
+        &context.size,kMaximumRtsConfigSize,&context.failed);
+    if(context.error)std::rethrow_exception(context.error);
+    return result;
 }
 
 void load_upgrade_pod_maximum_tier() {
-    g_configured_maximum_tier = kDefaultMaximumTier;
-    bool configured = false;
-    const std::uint32_t root_count = g_api->extension_root_count();
-    if (root_count > 4096) {
-        log_message(
+    struct Context {
+        std::uint32_t root_count{};
+        const char* root{};
+        std::string path{};
+        std::string contents{};
+        std::uint32_t candidate{};
+        std::uint8_t failed{};
+        std::exception_ptr error{};
+    } context{};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t value) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:g_configured_maximum_tier=kDefaultMaximumTier;return 1;
+        case 1:c.root_count=g_api->extension_root_count();
+            return c.root_count;
+        case 2:log_message(
             "Extension-root count is invalid; upgrade-pod maximum remains 6");
-        return;
-    }
-    for (std::uint32_t index = 0; index < root_count; ++index) {
-        const char* root = g_api->extension_root(index);
-        if (!root || !*root) continue;
-        const std::string path = join_path(root, kRtsConfigFileName);
-        std::string contents;
-        if (!read_small_text_file(path, contents)) continue;
-
-        std::uint32_t candidate = g_configured_maximum_tier;
-        const auto status = a2fo::upgrade_pods::parse_maximum_tier_setting(
-            contents, &candidate);
-        if (status ==
-            a2fo::upgrade_pods::MaximumTierSettingStatus::valid) {
-            g_configured_maximum_tier = candidate;
-            configured = true;
-            log_message(
-                "Applied upgradePodMaximumTier=" +
-                std::to_string(g_configured_maximum_tier) + " from " + path);
-        } else if (status ==
-                   a2fo::upgrade_pods::MaximumTierSettingStatus::invalid) {
-            log_message(
-                "Ignored invalid upgradePodMaximumTier in " + path +
-                " (valid range 3-16)");
-        }
-    }
-    log_message(
-        "RTS_CFG.h upgrade-pod maximum: " +
-        std::to_string(g_configured_maximum_tier) +
-        (configured ? "" : " (default)"));
+            return 1;
+        case 3:c.root=g_api->extension_root(static_cast<std::uint32_t>(value));
+            return c.root&&*c.root;
+        case 4:c.path=join_path(c.root,kRtsConfigFileName);
+            return read_small_text_file(c.path,c.contents);
+        case 5:c.candidate=g_configured_maximum_tier;
+            return static_cast<std::uintptr_t>(
+                a2fo::upgrade_pods::parse_maximum_tier_setting(
+                    c.contents,&c.candidate));
+        case 6:g_configured_maximum_tier=c.candidate;
+            log_message("Applied upgradePodMaximumTier=" +
+                std::to_string(g_configured_maximum_tier)+" from "+c.path);
+            return 1;
+        case 7:log_message("Ignored invalid upgradePodMaximumTier in "+
+            c.path+" (valid range 3-16)");return 1;
+        case 8:log_message("RTS_CFG.h upgrade-pod maximum: "+
+            std::to_string(g_configured_maximum_tier)+
+            (value!=0?"":" (default)"));return 1;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();c.failed=1;return 0;}
+    };
+    a2fo_rs_c_upgrade_load_config(&context,step,&context.failed);
+    if(context.error)std::rethrow_exception(context.error);
 }
 
 template <std::size_t Size>
@@ -314,71 +342,100 @@ void set_effective_multiplier(void* manager, std::uint32_t system,
 }
 
 void recompute_multiplier(void* manager, std::uint32_t system) noexcept {
-    if (!manager || system > 4 || !g_upgrade_lock_ready) return;
-    PodInstanceState selected;
-    bool have_selected = false;
-    EnterCriticalSection(&g_upgrade_lock);
-    for (const auto& item : g_pod_instances) {
-        const PodInstanceState& candidate = item.second;
-        if (candidate.manager != manager || candidate.system != system) {
-            continue;
-        }
-        if (!have_selected || candidate.tier > selected.tier) {
-            selected = candidate;
-            have_selected = true;
-        }
-    }
-    LeaveCriticalSection(&g_upgrade_lock);
-    if (have_selected) {
-        set_effective_multiplier(manager, system, selected.multiplier);
-    }
+    struct Context {
+        void* manager;
+        std::uint32_t system;
+        decltype(g_pod_instances)::iterator item{};
+        PodInstanceState selected{};
+        std::uint8_t failed{};
+    } context{manager,system};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:EnterCriticalSection(&g_upgrade_lock);
+            c.item=g_pod_instances.begin();return 1;
+        case 1:return c.item!=g_pod_instances.end();
+        case 2:return reinterpret_cast<std::uintptr_t>(
+            c.item->second.manager);
+        case 3:return c.item->second.system;
+        case 4:return c.item->second.tier;
+        case 5:c.selected=c.item->second;return c.selected.tier;
+        case 6:++c.item;return 1;
+        case 7:LeaveCriticalSection(&g_upgrade_lock);return 1;
+        case 8:set_effective_multiplier(c.manager,c.system,
+            c.selected.multiplier);return 1;
+        default:return 0;
+        }}catch(...){c.failed=1;return 0;}
+    };
+    a2fo_rs_c_upgrade_recompute(&context,
+        reinterpret_cast<std::uintptr_t>(manager),system,
+        g_upgrade_lock_ready,step,&context.failed);
+    if(context.failed)std::terminate();
 }
 
 void remember_attached_pod(void* pod) noexcept {
-    if (!pod || !g_upgrade_lock_ready) return;
-    void* object_class = *reinterpret_cast<void**>(
-        bytes(pod) + kObjectClassOffset);
-    if (!is_research_upgrade_pod(object_class)) return;
-    const std::uint32_t tier = declared_class_tier(object_class);
-    if (tier < kNativeMaximumTier) return;
-    const std::uint32_t system = *reinterpret_cast<const std::uint32_t*>(
-        bytes(object_class) + kPodUpgradeSystemOffset);
-    if (system > 4) return;
-    const std::uint32_t team = *reinterpret_cast<const std::uint32_t*>(
-        bytes(pod) + kObjectTeamOffset);
-    auto team_manager = reinterpret_cast<TeamManagerFunction>(
-        at(g_armada, kTeamManagerForTeamRva));
-    void* manager = team_manager(team);
-    if (!manager) return;
-
-    PodInstanceState state;
-    state.manager = manager;
-    state.system = system;
-    state.tier = tier;
-    state.multiplier = *reinterpret_cast<const float*>(
-        bytes(object_class) + kPodUpgradeMultiplierOffset);
-    EnterCriticalSection(&g_upgrade_lock);
-    g_pod_instances[pod] = state;
-    LeaveCriticalSection(&g_upgrade_lock);
-    if (tier > kNativeMaximumTier) {
-        char message[160];
-        std::snprintf(message, sizeof(message),
-                      "Extended upgrade pod attached: upgradeLevel %lu, system %lu, multiplier %.3f",
-                      static_cast<unsigned long>(tier),
-                      static_cast<unsigned long>(system),
-                      static_cast<double>(state.multiplier));
-        log_message(message);
-    }
-    recompute_multiplier(manager, system);
+    struct Context {
+        void* pod;
+        void* object_class{};
+        std::uint32_t tier{};
+        std::uint32_t system{};
+        std::uint32_t team{};
+        void* manager{};
+        PodInstanceState state{};
+        std::uint8_t failed{};
+    } context{pod};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:c.object_class=*reinterpret_cast<void**>(
+            bytes(c.pod)+kObjectClassOffset);
+            return reinterpret_cast<std::uintptr_t>(c.object_class);
+        case 1:return is_research_upgrade_pod(c.object_class);
+        case 2:c.tier=declared_class_tier(c.object_class);return c.tier;
+        case 3:c.system=*reinterpret_cast<const std::uint32_t*>(
+            bytes(c.object_class)+kPodUpgradeSystemOffset);
+            return c.system;
+        case 4:c.team=*reinterpret_cast<const std::uint32_t*>(
+            bytes(c.pod)+kObjectTeamOffset);return c.team;
+        case 5:{auto team_manager=reinterpret_cast<TeamManagerFunction>(
+            at(g_armada,kTeamManagerForTeamRva));
+            c.manager=team_manager(c.team);
+            return reinterpret_cast<std::uintptr_t>(c.manager);}
+        case 6:c.state.manager=c.manager;
+            c.state.system=c.system;
+            c.state.tier=c.tier;
+            c.state.multiplier=*reinterpret_cast<const float*>(
+                bytes(c.object_class)+kPodUpgradeMultiplierOffset);
+            return 1;
+        case 7:EnterCriticalSection(&g_upgrade_lock);
+            g_pod_instances[c.pod]=c.state;
+            LeaveCriticalSection(&g_upgrade_lock);return 1;
+        case 8:{char message[160];
+            std::snprintf(message,sizeof(message),
+                "Extended upgrade pod attached: upgradeLevel %lu, "
+                "system %lu, multiplier %.3f",
+                static_cast<unsigned long>(c.tier),
+                static_cast<unsigned long>(c.system),
+                static_cast<double>(c.state.multiplier));
+            log_message(message);return 1;}
+        case 9:recompute_multiplier(c.manager,c.system);return 1;
+        default:return 0;
+        }}catch(...){c.failed=1;return 0;}
+    };
+    a2fo_rs_c_upgrade_attach_pod(&context,
+        reinterpret_cast<std::uintptr_t>(pod),g_upgrade_lock_ready,
+        step,&context.failed);
+    if(context.failed)std::terminate();
 }
 
 std::string trim_odf_name(std::string value) {
-    const std::size_t first = value.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return {};
-    const std::size_t last = value.find_last_not_of(" \t\r\n");
-    value = value.substr(first, last - first + 1);
-    const std::size_t slash = value.find_last_of("\\/");
-    if (slash != std::string::npos) value.erase(0, slash + 1);
+    A2foStage8UpgradeSpan span{};
+    if(!a2fo_rs_c_upgrade_trim_name(
+            reinterpret_cast<const std::uint8_t*>(value.data()),
+            value.size(),&span))return {};
+    value=value.substr(span.start,span.length);
     if (value.size() > 4 &&
         _stricmp(value.c_str() + value.size() - 4, ".odf") == 0) {
         value.resize(value.size() - 4);
@@ -413,345 +470,299 @@ bool read_parameter_project_id(void* parameter_db, const std::string& key,
 bool apply_indexed_tier_items(void** items, std::uint8_t* flags,
                               std::size_t capacity,
                               const StationTierList& tier_items) {
-    if (!items || capacity == 0 ||
-        !writable_range(items, capacity * sizeof(void*))) {
-        log_message("Upgrade station build-list storage is unavailable; "
-                    "existing list preserved");
-        return false;
-    }
-    if (flags && !writable_range(flags, capacity)) {
-        log_message("Upgrade station build-list flags are unavailable; "
-                    "existing list preserved");
-        return false;
-    }
-    for (std::size_t index = 0; index < capacity; ++index) {
-        if (!tier_items.present[index]) continue;
-        items[index] = tier_items.items[index];
-        if (flags) flags[index] = 0;
-    }
-    return true;
+    struct Context {
+        void** items;
+        std::uint8_t* flags;
+        std::size_t capacity;
+        const StationTierList& tier_items;
+        std::uint8_t failed{};
+        std::exception_ptr error{};
+    } context{items,flags,capacity,tier_items};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t index) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:return writable_range(c.items,c.capacity*sizeof(void*));
+        case 1:log_message("Upgrade station build-list storage is "
+            "unavailable; existing list preserved");return 1;
+        case 2:return writable_range(c.flags,c.capacity);
+        case 3:log_message("Upgrade station build-list flags are "
+            "unavailable; existing list preserved");return 1;
+        case 4:return c.tier_items.present[index];
+        case 5:c.items[index]=c.tier_items.items[index];
+            if(c.flags)c.flags[index]=0;
+            return 1;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();c.failed=1;return 0;}
+    };
+    const bool result=a2fo_rs_c_upgrade_apply_items(&context,
+        reinterpret_cast<std::uintptr_t>(items),flags!=nullptr,capacity,
+        step,&context.failed);
+    if(context.error)std::rethrow_exception(context.error);
+    return result;
 }
 
 void load_tier_build_items(void* station_class,
                            void* parameter_db) noexcept {
-    if (!station_class || !parameter_db) return;
-    if (!readable_range(
-            station_class,
-            kStationSecondaryFlagsOffset + sizeof(void*))) {
-        log_message("Upgrade station class storage is unavailable; "
-                    "tier build lists were not changed");
-        return;
-    }
-    // ProducerClassEnhancement publishes its 57-slot command-panel list at
-    // class+0x450.  Its allocation is exactly 0xe8 bytes, with the last bytes
-    // reserved for Producer state, so iteration must stop at index 56.
-    //
-    // Do not mirror these pointers into ResearchStationClassEnhancement's
-    // allocation at class+0x454.  Extension+0x04 is Fleet Ops' 58-entry
-    // providedBuildItem state table, not a GameObjectClass list; overwriting
-    // it makes pod completion and prerequisite bookkeeping fail.
-    void** producer_primary = *reinterpret_cast<void***>(
-        bytes(station_class) + kProducerBuildItemsOffset);
-    void** secondary = *reinterpret_cast<void***>(
-        bytes(station_class) + kStationSecondaryBuildItemsOffset);
-    std::uint8_t* secondary_flags = *reinterpret_cast<std::uint8_t**>(
-        bytes(station_class) + kStationSecondaryFlagsOffset);
-    auto find_class = reinterpret_cast<FindClassFunction>(
-        at(g_armada, kGameObjectClassFindRva));
-    auto find_class_by_project_id =
-        reinterpret_cast<FindClassByProjectIdFunction>(
-            at(g_armada, kGameObjectClassFindProjectIdRva));
-
-    StationClassState station_state;
-
-    const std::uint32_t maximum_upgrade_level = configured_maximum_tier();
-    // Station tier commands are zero-based additions beyond the vessel's
-    // built-in level-1 systems: tier0 -> upgradeLevel 2, tier1 -> level 3,
-    // tier2 -> level 4, and so on.
-    for (std::uint32_t command_tier = 0;
-         command_tier + 2 <= maximum_upgrade_level; ++command_tier) {
-        const std::uint32_t upgrade_level = command_tier + 2;
-        const std::size_t capacity = upgrade_level == 2
-            // The ResearchStation mirror has one more slot, but the Producer
-            // list that can actually publish buttons stops at index 56.
-            ? kProducerBuildItemCapacity
-            : kSecondaryBuildItemCapacity;
-        bool supplied = false;
-        std::vector<void*> replacements;
-        StationTierList tier_items;
-        for (std::size_t index = 0; index < capacity; ++index) {
-            char key[48];
-            std::snprintf(key, sizeof(key), "tier%luBuildItem%lu",
-                          static_cast<unsigned long>(command_tier),
-                          static_cast<unsigned long>(index));
-            std::string value;
-            if (!read_parameter_string(parameter_db, key, value)) continue;
-            supplied = true;
-            const std::string name = trim_odf_name(std::move(value));
-            if (name.empty()) {
-                tier_items.present[index] = true;
-                continue;
-            }
-            // Use the same ParameterDB -> cPrjID -> GameObjectClass path as
-            // Armada's native buildItem/secondaryBuildItem parser. Fleet Ops
-            // resolves the cPrjID through its live FOFS project array; the
-            // convenience name overload does not reliably lazy-load newly
-            // registered recursive ODF basenames.
-            std::uint32_t project_id = 0;
-            const bool have_project_id = read_parameter_project_id(
-                parameter_db, key, project_id);
-            void* item_class = have_project_id && project_id != 0
-                ? find_class_by_project_id(&project_id) : nullptr;
-            if (!item_class) item_class = find_class(name.c_str());
-            if (!item_class) {
-                log_message(std::string(key) + " ignored: " + name +
-                            " could not be loaded (project ID " +
-                            std::to_string(project_id) + ")");
-                continue;
-            }
-            if (!is_research_upgrade_pod(item_class)) {
-                log_message(std::string(key) + " ignored: " + name +
-                            " is not a ResearchPod ship upgrade");
-                continue;
-            }
-            if (declared_class_tier(item_class) != upgrade_level) {
-                log_message(std::string(key) + " ignored: " + name +
-                            " has a different upgradeLevel");
-                continue;
-            }
-            tier_items.present[index] = true;
-            tier_items.items[index] = item_class;
-            if (std::find(replacements.begin(), replacements.end(),
-                          item_class) == replacements.end()) {
-                replacements.push_back(item_class);
-            }
-        }
-        if (!supplied) continue;
-        const bool has_indexed_change = std::find(
-            tier_items.present.begin(), tier_items.present.end(), true) !=
-            tier_items.present.end();
-        if (!has_indexed_change) {
-            log_message("Upgrade station tier " +
-                        std::to_string(command_tier) +
-                        " had no valid items; existing list preserved");
-            continue;
-        }
-        tier_items.supplied = supplied;
-        bool replaced = false;
-        if (upgrade_level == 2) {
-            replaced = apply_indexed_tier_items(
-                producer_primary, nullptr, kProducerBuildItemCapacity,
-                tier_items);
-        } else if (upgrade_level == 3) {
-            replaced = apply_indexed_tier_items(
-                secondary, secondary_flags, kSecondaryBuildItemCapacity,
-                tier_items);
-        } else {
-            // Higher tiers are kept in the sidecar. Publishing them in the
-            // shared Fleet Ops secondary table either leaves the level-3
-            // item in front of them or moves unrelated research hardpoints.
-            replaced = true;
-        }
-        if (!replaced) continue;
-        if (command_tier < station_state.tiers.size()) {
-            station_state.tiers[command_tier] = tier_items;
-            if (command_tier >= 2 && !replacements.empty()) {
-                station_state.has_extended_tiers = true;
-            }
-        }
-        char message[144];
-        std::snprintf(message, sizeof(message),
-                      "Upgrade station tier %lu (upgradeLevel %lu) build list: %lu item%s",
-                      static_cast<unsigned long>(command_tier),
-                      static_cast<unsigned long>(upgrade_level),
-                      static_cast<unsigned long>(replacements.size()),
-                      replacements.size() == 1 ? "" : "s");
-        log_message(message);
-    }
-    if (station_state.has_extended_tiers) {
-        if (!secondary || !readable_range(
-                secondary,
-                kSecondaryBuildItemCapacity * sizeof(void*))) {
-            log_message("Upgrade station secondary table is unavailable; "
-                        "extended tier progression was not registered");
-            return;
-        }
-        std::copy_n(secondary, kSecondaryBuildItemCapacity,
-                    station_state.legacy_secondary.begin());
-        EnterCriticalSection(&g_upgrade_lock);
-        g_station_classes[station_class] = std::move(station_state);
-        LeaveCriticalSection(&g_upgrade_lock);
-        log_message("Upgrade station per-hardpoint tier progression registered");
-    }
+    struct Context {
+        void* station_class;
+        void* parameter_db;
+        void** producer_primary{};
+        void** secondary{};
+        std::uint8_t* secondary_flags{};
+        FindClassFunction find_class{};
+        FindClassByProjectIdFunction find_by_id{};
+        StationClassState station_state{};
+        StationTierList tier_items{};
+        std::vector<void*> replacements{};
+        std::uint32_t command_tier{};
+        std::uint32_t upgrade_level{};
+        std::uint32_t project_id{};
+        char key[48]{};
+        std::string value{};
+        std::string name{};
+        void* item_class{};
+        std::uint8_t failed{};
+    } context{station_class,parameter_db};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t index) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:return readable_range(c.station_class,
+            kStationSecondaryFlagsOffset+sizeof(void*));
+        case 1:log_message("Upgrade station class storage is unavailable; "
+            "tier build lists were not changed");return 1;
+        case 2:c.producer_primary=*reinterpret_cast<void***>(
+                bytes(c.station_class)+kProducerBuildItemsOffset);
+            c.secondary=*reinterpret_cast<void***>(
+                bytes(c.station_class)+kStationSecondaryBuildItemsOffset);
+            c.secondary_flags=*reinterpret_cast<std::uint8_t**>(
+                bytes(c.station_class)+kStationSecondaryFlagsOffset);
+            c.find_class=reinterpret_cast<FindClassFunction>(
+                at(g_armada,kGameObjectClassFindRva));
+            c.find_by_id=reinterpret_cast<FindClassByProjectIdFunction>(
+                at(g_armada,kGameObjectClassFindProjectIdRva));
+            return configured_maximum_tier();
+        case 3:c.command_tier=static_cast<std::uint32_t>(index);
+            c.upgrade_level=c.command_tier+2;
+            c.tier_items=StationTierList{};
+            std::vector<void*>{}.swap(c.replacements);
+            return 1;
+        case 4:std::snprintf(c.key,sizeof(c.key),"tier%luBuildItem%lu",
+                static_cast<unsigned long>(c.command_tier),
+                static_cast<unsigned long>(index));
+            std::string{}.swap(c.value);
+            return read_parameter_string(c.parameter_db,c.key,c.value);
+        case 5:c.name=trim_odf_name(std::move(c.value));
+            return !c.name.empty();
+        case 6:c.tier_items.present[index]=true;return 1;
+        case 7:return read_parameter_project_id(
+            c.parameter_db,c.key,c.project_id);
+        case 8:return c.project_id;
+        case 9:c.item_class=c.find_by_id(&c.project_id);
+            return reinterpret_cast<std::uintptr_t>(c.item_class);
+        case 10:c.item_class=c.find_class(c.name.c_str());
+            return reinterpret_cast<std::uintptr_t>(c.item_class);
+        case 11:log_message(std::string(c.key)+" ignored: "+c.name+
+            " could not be loaded (project ID "+
+            std::to_string(c.project_id)+")");return 1;
+        case 12:return is_research_upgrade_pod(c.item_class);
+        case 13:log_message(std::string(c.key)+" ignored: "+c.name+
+            " is not a ResearchPod ship upgrade");return 1;
+        case 14:return declared_class_tier(c.item_class);
+        case 15:log_message(std::string(c.key)+" ignored: "+c.name+
+            " has a different upgradeLevel");return 1;
+        case 16:c.tier_items.present[index]=true;
+            c.tier_items.items[index]=c.item_class;return 1;
+        case 17:c.replacements.push_back(c.item_class);return 1;
+        case 18:log_message("Upgrade station tier "+
+            std::to_string(c.command_tier)+
+            " had no valid items; existing list preserved");return 1;
+        case 19:c.tier_items.supplied=true;return 1;
+        case 20:return apply_indexed_tier_items(c.producer_primary,nullptr,
+            kProducerBuildItemCapacity,c.tier_items);
+        case 21:return apply_indexed_tier_items(c.secondary,
+            c.secondary_flags,kSecondaryBuildItemCapacity,c.tier_items);
+        case 22:c.station_state.tiers[c.command_tier]=c.tier_items;
+            if(index!=0)c.station_state.has_extended_tiers=true;
+            return 1;
+        case 23:{char message[144];
+            std::snprintf(message,sizeof(message),
+                "Upgrade station tier %lu (upgradeLevel %lu) build list: "
+                "%lu item%s",
+                static_cast<unsigned long>(c.command_tier),
+                static_cast<unsigned long>(c.upgrade_level),
+                static_cast<unsigned long>(index),
+                index==1?"":"s");
+            log_message(message);return 1;}
+        case 24:return c.secondary&&readable_range(c.secondary,
+            kSecondaryBuildItemCapacity*sizeof(void*));
+        case 25:log_message("Upgrade station secondary table is unavailable; "
+            "extended tier progression was not registered");return 1;
+        case 26:std::copy_n(c.secondary,kSecondaryBuildItemCapacity,
+                c.station_state.legacy_secondary.begin());
+            EnterCriticalSection(&g_upgrade_lock);
+            g_station_classes[c.station_class]=std::move(c.station_state);
+            LeaveCriticalSection(&g_upgrade_lock);return 1;
+        case 27:log_message(
+            "Upgrade station per-hardpoint tier progression registered");
+            return 1;
+        default:return 0;
+        }}catch(...){c.failed=1;return 0;}
+    };
+    a2fo_rs_c_upgrade_tier_lists(&context,
+        reinterpret_cast<std::uintptr_t>(station_class),
+        reinterpret_cast<std::uintptr_t>(parameter_db),step,
+        &context.failed);
+    if(context.failed)std::terminate();
 }
 
 void initialize_station_progression(void* station,
                                     void* station_class) noexcept {
-    if (!station || !g_upgrade_lock_ready ||
-        !writable_range(bytes(station) +
-                            kStationInstanceSecondaryItemsOffset,
-                        sizeof(void*)) || !station_class) {
-        return;
-    }
-
-    auto state = std::make_unique<StationInstanceState>();
-    state->station_class = station_class;
-    void** active_items = nullptr;
-    EnterCriticalSection(&g_upgrade_lock);
-    const auto class_found = g_station_classes.find(station_class);
-    if (class_found != g_station_classes.end()) {
-        const StationClassState& class_state = class_found->second;
-        state->base_secondary = class_state.legacy_secondary;
-        state->active_secondary = state->base_secondary;
-        active_items = state->active_secondary.data();
-        g_station_instances[station] = std::move(state);
-    }
-    LeaveCriticalSection(&g_upgrade_lock);
-    if (!active_items) return;
-
-    *reinterpret_cast<void***>(
-        bytes(station) + kStationInstanceSecondaryItemsOffset) =
-        active_items;
-    log_message("Upgrade station instance received a per-hardpoint tier list");
+    struct Context {
+        void* station;
+        void* station_class;
+        std::unique_ptr<StationInstanceState> state{};
+        void** active_items{};
+        std::uint8_t failed{};
+    } context{station,station_class};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:return writable_range(bytes(c.station)+
+            kStationInstanceSecondaryItemsOffset,sizeof(void*));
+        case 1:c.state=std::make_unique<StationInstanceState>();
+            c.state->station_class=c.station_class;return 1;
+        case 2:{EnterCriticalSection(&g_upgrade_lock);
+            const auto found=g_station_classes.find(c.station_class);
+            if(found!=g_station_classes.end()){
+                c.state->base_secondary=found->second.legacy_secondary;
+                c.state->active_secondary=c.state->base_secondary;
+                c.active_items=c.state->active_secondary.data();
+                g_station_instances[c.station]=std::move(c.state);
+            }
+            return c.active_items!=nullptr;}
+        case 3:LeaveCriticalSection(&g_upgrade_lock);return 1;
+        case 4:*reinterpret_cast<void***>(bytes(c.station)+
+            kStationInstanceSecondaryItemsOffset)=c.active_items;return 1;
+        case 5:log_message("Upgrade station instance received a "
+            "per-hardpoint tier list");return 1;
+        default:return 0;
+        }}catch(...){c.failed=1;return 0;}
+    };
+    a2fo_rs_c_upgrade_init_station(&context,
+        reinterpret_cast<std::uintptr_t>(station),
+        reinterpret_cast<std::uintptr_t>(station_class),
+        g_upgrade_lock_ready,step,&context.failed);
+    if(context.failed)std::terminate();
 }
 
 void refresh_station_progression(void* station) noexcept {
-    if (!station || !g_upgrade_lock_ready) return;
-    EnterCriticalSection(&g_upgrade_lock);
-    const bool tracked = g_station_instances.find(station) !=
-                         g_station_instances.end();
-    LeaveCriticalSection(&g_upgrade_lock);
-    if (!tracked ||
-        !readable_range(bytes(station) + kStationInstancePodsOffset,
-                        sizeof(void*)) ||
-        !readable_range(bytes(station) + kStationInstancePodCountOffset,
-                        sizeof(std::int32_t))) {
-        return;
-    }
-
-    const std::int32_t raw_count = *reinterpret_cast<const std::int32_t*>(
-        bytes(station) + kStationInstancePodCountOffset);
-    if (raw_count < 0) return;
-    const std::size_t count = std::min<std::size_t>(
-        static_cast<std::size_t>(raw_count),
-        kSecondaryBuildItemCapacity);
-    void** pods = *reinterpret_cast<void***>(
-        bytes(station) + kStationInstancePodsOffset);
-    if (count != 0 &&
-        (!pods || !readable_range(pods, count * sizeof(void*)))) {
-        return;
-    }
-
-    // ResearchStation's pod array is populated in construction order. It is
-    // not a stable hardpoint/build-item index: building shields first can put
-    // the shield pod at array index zero. Track the highest attached pod by
-    // its declared upgradeSystem instead.
-    std::array<void*, kShipUpgradeSystemCount> attached_classes{};
-    std::array<std::uint32_t, kShipUpgradeSystemCount> attached_tiers{};
-    for (std::size_t index = 0; index < count; ++index) {
-        void* pod = pods[index];
-        if (!pod || !readable_range(
-                bytes(pod) + kObjectClassOffset, sizeof(void*))) {
-            continue;
-        }
-        void* pod_class = *reinterpret_cast<void**>(
-            bytes(pod) + kObjectClassOffset);
-        if (!is_research_upgrade_pod(pod_class)) continue;
-        const std::uint32_t system =
-            *reinterpret_cast<const std::uint32_t*>(
-                bytes(pod_class) + kPodUpgradeSystemOffset);
-        if (system >= kShipUpgradeSystemCount) continue;
-        const std::uint32_t tier = declared_class_tier(pod_class);
-        if (!attached_classes[system] || tier > attached_tiers[system]) {
-            attached_classes[system] = pod_class;
-            attached_tiers[system] = tier;
-        }
-    }
-
-    std::size_t logged_slot = kSecondaryBuildItemCapacity;
-    std::uint32_t logged_from = 0;
-    std::uint32_t logged_to = 0;
-    EnterCriticalSection(&g_upgrade_lock);
-    const auto instance_found = g_station_instances.find(station);
-    if (instance_found != g_station_instances.end()) {
-        StationInstanceState& instance = *instance_found->second;
-        const auto class_found = g_station_classes.find(
-            instance.station_class);
-        if (class_found != g_station_classes.end()) {
-            const StationClassState& class_state = class_found->second;
-            for (std::size_t slot = 0;
-                 slot < kSecondaryBuildItemCapacity; ++slot) {
-                void* candidate = instance.base_secondary[slot];
-                std::uint32_t system = kShipUpgradeSystemCount;
-                if (is_research_upgrade_pod(candidate)) {
-                    system = *reinterpret_cast<const std::uint32_t*>(
-                        bytes(candidate) + kPodUpgradeSystemOffset);
-                }
-                if (system >= kShipUpgradeSystemCount) {
-                    for (const StationTierList& tier_list :
-                         class_state.tiers) {
-                        void* configured = tier_list.present[slot]
-                            ? tier_list.items[slot] : nullptr;
-                        if (!is_research_upgrade_pod(configured)) continue;
-                        system = *reinterpret_cast<const std::uint32_t*>(
-                            bytes(configured) + kPodUpgradeSystemOffset);
-                        break;
-                    }
-                }
-                const std::uint32_t attached_tier =
-                    system < kShipUpgradeSystemCount
-                    ? attached_tiers[system] : 0;
-                if (attached_tier >= 2) {
-                    if (attached_tier >= 3) candidate = nullptr;
-                    const std::size_t next_command_tier =
-                        static_cast<std::size_t>(attached_tier - 1);
-                    if (next_command_tier < class_state.tiers.size()) {
-                        const StationTierList& next =
-                            class_state.tiers[next_command_tier];
-                        if (next.present[slot]) candidate = next.items[slot];
-                    }
-                    if (!candidate && attached_tier >= 3) {
-                        candidate = attached_classes[system];
-                    }
-                }
-                instance.active_secondary[slot] = candidate;
-
-                std::uint32_t candidate_tier = 0;
-                const auto tier_found = g_declared_tiers.find(candidate);
-                if (tier_found != g_declared_tiers.end()) {
-                    candidate_tier = tier_found->second;
-                } else if (candidate) {
-                    candidate_tier = raw_class_tier(candidate);
-                }
-                if (candidate_tier > kNativeMaximumTier &&
-                    logged_slot == kSecondaryBuildItemCapacity) {
-                    logged_slot = slot;
-                    logged_from = attached_tier;
-                    logged_to = candidate_tier;
+    struct Context {
+        void* station;
+        void** pods{};
+        void* pod{};
+        void* pod_class{};
+        StationInstanceState* instance{};
+        const StationClassState* class_state{};
+        void* candidate{};
+        void* configured{};
+        std::size_t slot{};
+        std::size_t logged_slot{};
+        std::uint32_t logged_from{};
+        std::uint32_t logged_to{};
+        std::uint8_t failed{};
+    } context{station};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t value) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:{EnterCriticalSection(&g_upgrade_lock);
+            const bool tracked=g_station_instances.find(c.station)!=
+                g_station_instances.end();
+            LeaveCriticalSection(&g_upgrade_lock);return tracked;}
+        case 1:return readable_range(
+            bytes(c.station)+kStationInstancePodsOffset,sizeof(void*));
+        case 2:return readable_range(
+            bytes(c.station)+kStationInstancePodCountOffset,
+            sizeof(std::int32_t));
+        case 3:return static_cast<std::uint32_t>(
+            *reinterpret_cast<const std::int32_t*>(
+                bytes(c.station)+kStationInstancePodCountOffset));
+        case 4:c.pods=*reinterpret_cast<void***>(
+            bytes(c.station)+kStationInstancePodsOffset);
+            return reinterpret_cast<std::uintptr_t>(c.pods);
+        case 5:return readable_range(c.pods,value*sizeof(void*));
+        case 6:c.pod=c.pods[value];
+            return reinterpret_cast<std::uintptr_t>(c.pod);
+        case 7:return readable_range(bytes(c.pod)+kObjectClassOffset,
+            sizeof(void*));
+        case 8:c.pod_class=*reinterpret_cast<void**>(
+            bytes(c.pod)+kObjectClassOffset);
+            return reinterpret_cast<std::uintptr_t>(c.pod_class);
+        case 9:return is_research_upgrade_pod(c.pod_class);
+        case 10:return *reinterpret_cast<const std::uint32_t*>(
+            bytes(c.pod_class)+kPodUpgradeSystemOffset);
+        case 11:return declared_class_tier(c.pod_class);
+        case 12:{EnterCriticalSection(&g_upgrade_lock);
+            const auto instance_found=g_station_instances.find(c.station);
+            if(instance_found!=g_station_instances.end()){
+                c.instance=instance_found->second.get();
+                const auto class_found=g_station_classes.find(
+                    c.instance->station_class);
+                if(class_found!=g_station_classes.end()){
+                    c.class_state=&class_found->second;
                 }
             }
-            *reinterpret_cast<void***>(
-                bytes(station) +
-                kStationInstanceSecondaryItemsOffset) =
-                instance.active_secondary.data();
-        }
-    }
-    LeaveCriticalSection(&g_upgrade_lock);
-
-    if (logged_slot != kSecondaryBuildItemCapacity) {
-        const LONG log_number = InterlockedIncrement(
-            &g_station_progression_log_count);
-        if (log_number <= 12) {
-            char message[176];
-            std::snprintf(
-                message, sizeof(message),
+            return c.class_state!=nullptr;}
+        case 13:c.slot=value;
+            c.candidate=c.instance->base_secondary[value];
+            return reinterpret_cast<std::uintptr_t>(c.candidate);
+        case 14:return is_research_upgrade_pod(c.candidate);
+        case 15:return *reinterpret_cast<const std::uint32_t*>(
+            bytes(c.candidate)+kPodUpgradeSystemOffset);
+        case 16:{const auto tier=value/kSecondaryBuildItemCapacity;
+            const auto slot=value%kSecondaryBuildItemCapacity;
+            const auto& list=c.class_state->tiers[tier];
+            c.configured=list.present[slot]?list.items[slot]:nullptr;
+            return reinterpret_cast<std::uintptr_t>(c.configured);}
+        case 17:return is_research_upgrade_pod(c.configured);
+        case 18:return *reinterpret_cast<const std::uint32_t*>(
+            bytes(c.configured)+kPodUpgradeSystemOffset);
+        case 19:return c.class_state->tiers[value/kSecondaryBuildItemCapacity]
+            .present[value%kSecondaryBuildItemCapacity];
+        case 20:return reinterpret_cast<std::uintptr_t>(
+            c.class_state->tiers[value/kSecondaryBuildItemCapacity]
+                .items[value%kSecondaryBuildItemCapacity]);
+        case 21:c.candidate=reinterpret_cast<void*>(value);
+            c.instance->active_secondary[c.slot]=c.candidate;return 1;
+        case 22:{const auto found=g_declared_tiers.find(c.candidate);
+            if(found!=g_declared_tiers.end())return found->second;
+            return c.candidate?raw_class_tier(c.candidate):0;}
+        case 23:*reinterpret_cast<void***>(bytes(c.station)+
+            kStationInstanceSecondaryItemsOffset)=
+            c.instance->active_secondary.data();return 1;
+        case 24:LeaveCriticalSection(&g_upgrade_lock);return 1;
+        case 25:return static_cast<std::uint32_t>(InterlockedIncrement(
+            &g_station_progression_log_count));
+        case 26:c.logged_slot=value;return 1;
+        case 27:c.logged_from=static_cast<std::uint32_t>(value);return 1;
+        case 28:c.logged_to=static_cast<std::uint32_t>(value);return 1;
+        case 29:{char message[176];
+            std::snprintf(message,sizeof(message),
                 "Upgrade station slot %lu advanced from level %lu to level %lu",
-                static_cast<unsigned long>(logged_slot),
-                static_cast<unsigned long>(logged_from),
-                static_cast<unsigned long>(logged_to));
-            log_message(message);
-        }
-    }
+                static_cast<unsigned long>(c.logged_slot),
+                static_cast<unsigned long>(c.logged_from),
+                static_cast<unsigned long>(c.logged_to));
+            log_message(message);return 1;}
+        default:return 0;
+        }}catch(...){c.failed=1;return 0;}
+    };
+    a2fo_rs_c_upgrade_refresh_station(&context,
+        reinterpret_cast<std::uintptr_t>(station),g_upgrade_lock_ready,
+        step,&context.failed);
+    if(context.failed)std::terminate();
 }
 
 bool pod_belongs_to_extended_station(void* pod) noexcept {
@@ -782,46 +793,63 @@ std::uintptr_t __attribute__((fastcall)) pod_class_hook(
     const std::uintptr_t result = a2fo_call_thiscall_2(
         g_pod_class_hook.gateway, object_class, argument1,
         reinterpret_cast<std::uintptr_t>(parameter_db));
-    if (!object_class) return result;
-    try {
-        const std::uint32_t requested_tier = raw_class_tier(object_class);
-        const std::uint32_t maximum_tier = configured_maximum_tier();
-        std::uint32_t declared_tier = requested_tier;
-        if (requested_tier > maximum_tier) {
-            declared_tier = kNativeMaximumTier;
-            log_message("ResearchPod upgradeLevel " +
-                        std::to_string(requested_tier) +
-                        " exceeds configured maximum " +
-                        std::to_string(maximum_tier) +
-                        "; using tier 3");
-        }
-        if (requested_tier > kNativeMaximumTier) {
-            *reinterpret_cast<std::uint32_t*>(
-                bytes(object_class) + kPodUpgradeTierOffset) =
-                kNativeMaximumTier;
-        }
-        EnterCriticalSection(&g_upgrade_lock);
-        g_declared_tiers[object_class] = declared_tier;
-        LeaveCriticalSection(&g_upgrade_lock);
-        if (declared_tier > kNativeMaximumTier) {
-            log_message("Extended ResearchPod class loaded: upgradeLevel " +
-                        std::to_string(declared_tier));
-        }
-    } catch (...) {
-        log_message("Upgrade-pod class sidecar failed; using native tier");
-    }
+    struct Context {
+        void* object_class;
+        std::uint32_t requested{};
+        std::uint32_t maximum{};
+        std::uint8_t failed{};
+    } context{object_class};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t value) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        if(op==6){log_message(
+            "Upgrade-pod class sidecar failed; using native tier");return 1;}
+        try {switch(op){
+        case 0:c.requested=raw_class_tier(c.object_class);
+            return c.requested;
+        case 1:c.maximum=configured_maximum_tier();return c.maximum;
+        case 2:log_message("ResearchPod upgradeLevel "+
+            std::to_string(c.requested)+" exceeds configured maximum "+
+            std::to_string(c.maximum)+"; using tier 3");return 1;
+        case 3:*reinterpret_cast<std::uint32_t*>(
+            bytes(c.object_class)+kPodUpgradeTierOffset)=
+            kNativeMaximumTier;return 1;
+        case 4:EnterCriticalSection(&g_upgrade_lock);
+            g_declared_tiers[c.object_class]=
+                static_cast<std::uint32_t>(value);
+            LeaveCriticalSection(&g_upgrade_lock);return 1;
+        case 5:log_message("Extended ResearchPod class loaded: upgradeLevel "+
+            std::to_string(value));return 1;
+        default:return 0;
+        }}catch(...){c.failed=1;return 0;}
+    };
+    a2fo_rs_c_upgrade_pod_class(&context,
+        reinterpret_cast<std::uintptr_t>(object_class),step,
+        &context.failed);
     return result;
 }
 
 std::uintptr_t __attribute__((fastcall)) pod_class_dtor_hook(
     void* object_class, void*, std::uintptr_t flags) noexcept {
-    if (object_class && g_upgrade_lock_ready) {
-        EnterCriticalSection(&g_upgrade_lock);
-        g_declared_tiers.erase(object_class);
-        LeaveCriticalSection(&g_upgrade_lock);
-    }
-    return a2fo_call_thiscall_1(g_pod_class_dtor_hook.gateway,
-                                object_class, flags);
+    struct Context {void* object_class;std::uintptr_t flags;
+        std::uint8_t failed{};} context{object_class,flags};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:EnterCriticalSection(&g_upgrade_lock);
+            g_declared_tiers.erase(c.object_class);
+            LeaveCriticalSection(&g_upgrade_lock);return 1;
+        case 1:return a2fo_call_thiscall_1(
+            g_pod_class_dtor_hook.gateway,c.object_class,c.flags);
+        default:return 0;
+        }}catch(...){c.failed=1;return 0;}
+    };
+    const auto result=a2fo_rs_c_upgrade_class_dtor(&context,
+        reinterpret_cast<std::uintptr_t>(object_class),
+        g_upgrade_lock_ready,step,&context.failed);
+    if(context.failed)std::terminate();
+    return result;
 }
 
 std::uintptr_t __attribute__((fastcall)) station_class_hook(
@@ -830,48 +858,66 @@ std::uintptr_t __attribute__((fastcall)) station_class_hook(
     const std::uintptr_t result = a2fo_call_thiscall_2(
         g_station_class_hook.gateway, station_class, argument1,
         reinterpret_cast<std::uintptr_t>(parameter_db));
-    try {
-        load_tier_build_items(station_class, parameter_db);
-    } catch (...) {
-        log_message("Upgrade station tier build-list parsing failed");
-    }
-    try {
-        register_research_station_hybrid_lists(
-            station_class, parameter_db);
-        publish_research_station_hybrid_items(station_class);
-    } catch (...) {
-        log_message("Hybrid ResearchStation build-list publication failed");
-    }
+    struct Context {void* station_class;void* parameter_db;
+        std::uint8_t failed{};} context{station_class,parameter_db};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:try{load_tier_build_items(c.station_class,c.parameter_db);
+            return 1;}catch(...){return 0;}
+        case 1:log_message("Upgrade station tier build-list parsing failed");
+            return 1;
+        case 2:try{register_research_station_hybrid_lists(
+            c.station_class,c.parameter_db);return 1;}
+            catch(...){return 0;}
+        case 3:try{publish_research_station_hybrid_items(c.station_class);
+            return 1;}catch(...){return 0;}
+        case 4:log_message(
+            "Hybrid ResearchStation build-list publication failed");
+            return 1;
+        default:return 0;
+        }}catch(...){c.failed=1;return 0;}
+    };
+    a2fo_rs_c_upgrade_station_class(&context,step,&context.failed);
+    if(context.failed)std::terminate();
     return result;
 }
 
 std::uintptr_t __attribute__((fastcall)) station_can_build_hook(
     void* station_class, void*, void* item_class) noexcept {
-    bool extended_item = false;
-    if (station_class && item_class && g_upgrade_lock_ready) {
-        EnterCriticalSection(&g_upgrade_lock);
-        const auto found = g_station_classes.find(station_class);
-        if (found != g_station_classes.end()) {
-            const StationClassState& state = found->second;
-            for (std::size_t tier = 2;
-                 tier < state.tiers.size() && !extended_item; ++tier) {
-                const StationTierList& list = state.tiers[tier];
-                for (std::size_t slot = 0;
-                     slot < list.items.size(); ++slot) {
-                    if (list.present[slot] &&
-                        list.items[slot] == item_class) {
-                        extended_item = true;
-                        break;
-                    }
-                }
-            }
-        }
-        LeaveCriticalSection(&g_upgrade_lock);
-    }
-    if (extended_item) return 1;
-    return a2fo_call_thiscall_1(
-        g_station_can_build_hook.gateway, station_class,
-        reinterpret_cast<std::uintptr_t>(item_class));
+    struct Context {
+        void* station_class;
+        void* item_class;
+        const StationClassState* state{};
+        std::uint8_t failed{};
+    } context{station_class,item_class};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t index) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:{EnterCriticalSection(&g_upgrade_lock);
+            const auto found=g_station_classes.find(c.station_class);
+            c.state=found==g_station_classes.end()?nullptr:&found->second;
+            return c.state!=nullptr;}
+        case 1:return c.state->tiers[index/kSecondaryBuildItemCapacity]
+            .present[index%kSecondaryBuildItemCapacity];
+        case 2:return reinterpret_cast<std::uintptr_t>(
+            c.state->tiers[index/kSecondaryBuildItemCapacity]
+                .items[index%kSecondaryBuildItemCapacity]);
+        case 3:LeaveCriticalSection(&g_upgrade_lock);return 1;
+        case 4:return a2fo_call_thiscall_1(
+            g_station_can_build_hook.gateway,c.station_class,
+            reinterpret_cast<std::uintptr_t>(c.item_class));
+        default:return 0;
+        }}catch(...){c.failed=1;return 0;}
+    };
+    const auto result=a2fo_rs_c_upgrade_can_build(&context,
+        reinterpret_cast<std::uintptr_t>(station_class),
+        reinterpret_cast<std::uintptr_t>(item_class),g_upgrade_lock_ready,
+        step,&context.failed);
+    if(context.failed)std::terminate();
+    return result;
 }
 
 std::uintptr_t __attribute__((fastcall)) station_constructor_hook(
@@ -879,114 +925,143 @@ std::uintptr_t __attribute__((fastcall)) station_constructor_hook(
     const std::uintptr_t result = a2fo_call_thiscall_1(
         g_station_constructor_hook.gateway, station,
         reinterpret_cast<std::uintptr_t>(station_class));
-    try {
-        initialize_station_progression(station, station_class);
-    } catch (...) {
-        log_message("Upgrade station instance tier-list setup failed");
-    }
+    struct Context {void* station;void* station_class;
+        std::uint8_t failed{};} context{station,station_class};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:try{initialize_station_progression(c.station,
+            c.station_class);return 1;}catch(...){return 0;}
+        case 1:log_message("Upgrade station instance tier-list setup failed");
+            return 1;
+        default:return 0;
+        }}catch(...){c.failed=1;return 0;}
+    };
+    a2fo_rs_c_upgrade_station_constructor(&context,step,&context.failed);
+    if(context.failed)std::terminate();
     return result;
 }
 
 std::uintptr_t __attribute__((fastcall)) station_destructor_hook(
     void* station, void*) noexcept {
-    cleanup_hybrid_construction(station);
-    cleanup_hybrid_cocoon(station);
-    const std::uintptr_t result = a2fo_call_thiscall_0(
-        g_station_destructor_hook.gateway, station);
-    forget_station_progression(station);
+    struct Context {void* station;std::uint8_t failed{};} context{station};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:cleanup_hybrid_construction(c.station);return 1;
+        case 1:cleanup_hybrid_cocoon(c.station);return 1;
+        case 2:return a2fo_call_thiscall_0(
+            g_station_destructor_hook.gateway,c.station);
+        case 3:forget_station_progression(c.station);return 1;
+        default:return 0;
+        }}catch(...){c.failed=1;return 0;}
+    };
+    const auto result=a2fo_rs_c_upgrade_station_destructor(
+        &context,step,&context.failed);
+    if(context.failed)std::terminate();
     return result;
 }
 
 std::uintptr_t __attribute__((fastcall)) same_type_hook(
     void* pod, void*, void* other_class) noexcept {
-    if (pod && other_class) {
-        void* own_class = *reinterpret_cast<void**>(
-            bytes(pod) + kObjectClassOffset);
-        const std::uint32_t own_tier = declared_class_tier(own_class);
-        const std::uint32_t other_tier = declared_class_tier(other_class);
-        if (is_research_upgrade_pod(own_class) &&
-            is_research_upgrade_pod(other_class)) {
-            const std::uint32_t own_system =
-                *reinterpret_cast<const std::uint32_t*>(
-                    bytes(own_class) + kPodUpgradeSystemOffset);
-            const std::uint32_t other_system =
-                *reinterpret_cast<const std::uint32_t*>(
-                    bytes(other_class) + kPodUpgradeSystemOffset);
-            // Once the live secondary candidate advances from level 3 to
-            // level 4, Armada's native two-tier state machine no longer sees
-            // the attached level-3 pod in either its primary (level 2) or
-            // secondary slot. Treat that level-3+ pod as satisfying the
-            // primary link, so the engine presents the sidecar next tier
-            // instead of offering level 2 again.
-            if (own_tier >= kNativeMaximumTier && other_tier == 2 &&
-                own_system == other_system &&
-                pod_belongs_to_extended_station(pod)) {
-                return 1;
-            }
-        }
-        if (own_tier > kNativeMaximumTier ||
-            other_tier > kNativeMaximumTier) {
-            if (!is_research_upgrade_pod(own_class) ||
-                !is_research_upgrade_pod(other_class)) {
-                return 0;
-            }
-            const std::uint32_t own_system =
-                *reinterpret_cast<const std::uint32_t*>(
-                    bytes(own_class) + kPodUpgradeSystemOffset);
-            const std::uint32_t other_system =
-                *reinterpret_cast<const std::uint32_t*>(
-                    bytes(other_class) + kPodUpgradeSystemOffset);
-            const bool same = own_tier == other_tier &&
-                              own_system == other_system;
-            return same;
-        }
-    }
-    return a2fo_call_thiscall_1(
-        g_same_type_hook.gateway, pod,
-        reinterpret_cast<std::uintptr_t>(other_class));
+    struct Context {
+        void* pod;
+        void* other_class;
+        void* own_class{};
+        std::uint8_t failed{};
+    } context{pod,other_class};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:c.own_class=*reinterpret_cast<void**>(
+            bytes(c.pod)+kObjectClassOffset);
+            return reinterpret_cast<std::uintptr_t>(c.own_class);
+        case 1:return declared_class_tier(c.own_class);
+        case 2:return declared_class_tier(c.other_class);
+        case 3:return is_research_upgrade_pod(c.own_class);
+        case 4:return is_research_upgrade_pod(c.other_class);
+        case 5:return *reinterpret_cast<const std::uint32_t*>(
+            bytes(c.own_class)+kPodUpgradeSystemOffset);
+        case 6:return *reinterpret_cast<const std::uint32_t*>(
+            bytes(c.other_class)+kPodUpgradeSystemOffset);
+        case 7:return pod_belongs_to_extended_station(c.pod);
+        case 8:return a2fo_call_thiscall_1(g_same_type_hook.gateway,c.pod,
+            reinterpret_cast<std::uintptr_t>(c.other_class));
+        default:return 0;
+        }}catch(...){c.failed=1;return 0;}
+    };
+    const auto result=a2fo_rs_c_upgrade_same_type(&context,
+        reinterpret_cast<std::uintptr_t>(pod),
+        reinterpret_cast<std::uintptr_t>(other_class),step,&context.failed);
+    if(context.failed)std::terminate();
+    return result;
 }
 
 std::uintptr_t __attribute__((fastcall)) pod_attach_hook(
     void* pod, void*, std::uintptr_t argument) noexcept {
     const std::uintptr_t result = a2fo_call_thiscall_1(
         g_pod_attach_hook.gateway, pod, argument);
-    try {
-        remember_attached_pod(pod);
-        refresh_station_progression(reinterpret_cast<void*>(argument));
-    } catch (...) {
-        log_message("Upgrade-pod attach tracking failed");
-    }
+    struct Context {void* pod;void* station;
+        std::uint8_t failed{};} context{pod,reinterpret_cast<void*>(argument)};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:try{remember_attached_pod(c.pod);return 1;}
+            catch(...){return 0;}
+        case 1:try{refresh_station_progression(c.station);return 1;}
+            catch(...){return 0;}
+        case 2:log_message("Upgrade-pod attach tracking failed");return 1;
+        default:return 0;
+        }}catch(...){c.failed=1;return 0;}
+    };
+    a2fo_rs_c_upgrade_pod_attach(&context,step,&context.failed);
+    if(context.failed)std::terminate();
     return result;
 }
 
 std::uintptr_t __attribute__((fastcall)) pod_detach_hook(
     void* pod, void*) noexcept {
-    PodInstanceState previous;
-    void* station = nullptr;
-    bool tracked = false;
-    if (pod && readable_range(
-            bytes(pod) + kResearchPodStationOffset, sizeof(void*))) {
-        station = *reinterpret_cast<void**>(
-            bytes(pod) + kResearchPodStationOffset);
-    }
-    if (pod && g_upgrade_lock_ready) {
-        EnterCriticalSection(&g_upgrade_lock);
-        const auto found = g_pod_instances.find(pod);
-        if (found != g_pod_instances.end()) {
-            previous = found->second;
-            tracked = true;
-            g_pod_instances.erase(found);
-        }
-        LeaveCriticalSection(&g_upgrade_lock);
-    }
-    const std::uintptr_t result = a2fo_call_thiscall_0(
-        g_pod_detach_hook.gateway, pod);
-    if (tracked) recompute_multiplier(previous.manager, previous.system);
-    try {
-        refresh_station_progression(station);
-    } catch (...) {
-        log_message("Upgrade station tier-list rollback failed");
-    }
+    struct Context {
+        void* pod;
+        void* station{};
+        decltype(g_pod_instances)::iterator found{};
+        PodInstanceState previous{};
+        std::uint8_t failed{};
+    } context{pod};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:return readable_range(bytes(c.pod)+
+            kResearchPodStationOffset,sizeof(void*));
+        case 1:c.station=*reinterpret_cast<void**>(
+            bytes(c.pod)+kResearchPodStationOffset);
+            return reinterpret_cast<std::uintptr_t>(c.station);
+        case 2:EnterCriticalSection(&g_upgrade_lock);
+            c.found=g_pod_instances.find(c.pod);
+            return c.found!=g_pod_instances.end();
+        case 3:c.previous=c.found->second;
+            g_pod_instances.erase(c.found);return 1;
+        case 4:LeaveCriticalSection(&g_upgrade_lock);return 1;
+        case 5:return a2fo_call_thiscall_0(
+            g_pod_detach_hook.gateway,c.pod);
+        case 6:recompute_multiplier(c.previous.manager,c.previous.system);
+            return 1;
+        case 7:try{refresh_station_progression(c.station);return 1;}
+            catch(...){return 0;}
+        case 8:log_message("Upgrade station tier-list rollback failed");
+            return 1;
+        default:return 0;
+        }}catch(...){c.failed=1;return 0;}
+    };
+    const auto result=a2fo_rs_c_upgrade_detach_pod(&context,
+        reinterpret_cast<std::uintptr_t>(pod),g_upgrade_lock_ready,
+        step,&context.failed);
+    if(context.failed)std::terminate();
     return result;
 }
 
@@ -1002,110 +1077,95 @@ bool install_hook(void* target, void* replacement, std::size_t length,
 bool initialize_upgrade_pods(const A2FO_ModuleApi* api,
                              HMODULE armada,
                              HMODULE fleet_ops) {
-    if (!api || !armada || !fleet_ops || !api->install_inline_hook ||
-        !api->extension_root_count || !api->extension_root) {
-        if (api && api->log) {
-            api->log(kModuleName,
-                     "Configurable upgrade pods unavailable in this core");
-        }
-        return false;
-    }
-
-    const bool signatures_match =
-        signature_matches(armada, kResearchPodDetachRva,
-                          kExpectedResearchPodDetach) &&
-        signature_matches(armada, kResearchPodAttachRva,
-                          kExpectedResearchPodAttach) &&
-        signature_matches(armada, kResearchStationConstructorRva,
-                          kExpectedResearchStationConstructor) &&
-        signature_matches(armada, kResearchStationDestructorRva,
-                          kExpectedResearchStationDestructor) &&
-        signature_matches(armada, kTeamManagerForTeamRva,
-                          kExpectedTeamManagerForTeam) &&
-        signature_matches(armada, kTeamSetUpgradeMultiplierRva,
-                          kExpectedTeamSetUpgradeMultiplier) &&
-        signature_matches(armada, kGameObjectClassFindRva,
-                          kExpectedGameObjectClassFind) &&
-        signature_matches(armada, kGameObjectClassFindProjectIdRva,
-                          kExpectedGameObjectClassFindProjectId) &&
-        signature_matches(armada, kParameterDbGetProjectIdRva,
-                          kExpectedParameterDbGetProjectId) &&
-        signature_matches(fleet_ops, kFoResearchPodClassCallbackRva,
-                          kExpectedResearchPodClassCallback) &&
-        signature_matches(fleet_ops, kFoResearchPodClassDtorRva,
-                          kExpectedResearchPodClassDtor) &&
-        signature_matches(fleet_ops, kFoResearchStationClassCallbackRva,
-                          kExpectedResearchStationClassCallback) &&
-        signature_matches(fleet_ops, kFoResearchStationCanBuildRva,
-                          kExpectedResearchStationCanBuild) &&
-        signature_matches(fleet_ops, kFoResearchPodSameTypeRva,
-                          kExpectedResearchPodSameType);
-    if (!signatures_match) {
-        api->log(kModuleName,
-                 "Configurable upgrade-pod signatures mismatch; disabled");
-        return false;
-    }
-
-    g_api = api;
-    g_armada = armada;
-    load_upgrade_pod_maximum_tier();
-    InitializeCriticalSection(&g_upgrade_lock);
-    g_upgrade_lock_ready = true;
-
-    // Validate every target before this point, then install all hooks as one
-    // supported-build feature. A failed installation leaves the module loaded
-    // for safety; native modules are process-lifetime components.
-    const bool installed =
-        install_hook(at(fleet_ops, kFoResearchPodClassCallbackRva),
-                     reinterpret_cast<void*>(&pod_class_hook),
-                     sizeof(kExpectedResearchPodClassCallback),
-                     kExpectedResearchPodClassCallback, g_pod_class_hook) &&
-        install_hook(at(fleet_ops, kFoResearchPodClassDtorRva),
-                     reinterpret_cast<void*>(&pod_class_dtor_hook),
-                     sizeof(kExpectedResearchPodClassDtor),
-                     kExpectedResearchPodClassDtor, g_pod_class_dtor_hook) &&
-        install_hook(at(fleet_ops, kFoResearchStationClassCallbackRva),
-                     reinterpret_cast<void*>(&station_class_hook),
-                     sizeof(kExpectedResearchStationClassCallback),
-                     kExpectedResearchStationClassCallback,
-                     g_station_class_hook) &&
-        install_hook(at(fleet_ops, kFoResearchStationCanBuildRva),
-                     reinterpret_cast<void*>(&station_can_build_hook),
-                     sizeof(kExpectedResearchStationCanBuild),
-                     kExpectedResearchStationCanBuild,
-                     g_station_can_build_hook) &&
-        install_hook(at(fleet_ops, kFoResearchPodSameTypeRva),
-                     reinterpret_cast<void*>(&same_type_hook),
-                     sizeof(kExpectedResearchPodSameType),
-                     kExpectedResearchPodSameType, g_same_type_hook) &&
-        install_hook(at(armada, kResearchPodAttachRva),
-                     reinterpret_cast<void*>(&pod_attach_hook),
-                     sizeof(kExpectedResearchPodAttach),
-                     kExpectedResearchPodAttach, g_pod_attach_hook) &&
-        install_hook(at(armada, kResearchPodDetachRva),
-                     reinterpret_cast<void*>(&pod_detach_hook),
-                     sizeof(kExpectedResearchPodDetach),
-                     kExpectedResearchPodDetach, g_pod_detach_hook) &&
-        install_hook(at(armada, kResearchStationConstructorRva),
-                     reinterpret_cast<void*>(&station_constructor_hook),
-                     sizeof(kExpectedResearchStationConstructor),
-                     kExpectedResearchStationConstructor,
-                     g_station_constructor_hook) &&
-        install_hook(at(armada, kResearchStationDestructorRva),
-                     reinterpret_cast<void*>(&station_destructor_hook),
-                     sizeof(kExpectedResearchStationDestructor),
-                     kExpectedResearchStationDestructor,
-                     g_station_destructor_hook);
-    if (!installed) {
-        api->log(kModuleName,
-                 "Configurable upgrade-pod hook installation failed");
-        return false;
-    }
-    g_upgrade_hooks_ready = true;
-    log_message(
-        "Configurable upgrade pods enabled (RTS_CFG.h maximum " +
-        std::to_string(g_configured_maximum_tier) + ")");
-    return true;
+    struct SignatureSpec {
+        bool fleet;
+        std::uintptr_t rva;
+        const std::uint8_t* expected;
+        std::size_t length;
+    };
+    const std::array<SignatureSpec,14> signatures{{
+        {false,kResearchPodDetachRva,kExpectedResearchPodDetach,sizeof(kExpectedResearchPodDetach)},
+        {false,kResearchPodAttachRva,kExpectedResearchPodAttach,sizeof(kExpectedResearchPodAttach)},
+        {false,kResearchStationConstructorRva,kExpectedResearchStationConstructor,sizeof(kExpectedResearchStationConstructor)},
+        {false,kResearchStationDestructorRva,kExpectedResearchStationDestructor,sizeof(kExpectedResearchStationDestructor)},
+        {false,kTeamManagerForTeamRva,kExpectedTeamManagerForTeam,sizeof(kExpectedTeamManagerForTeam)},
+        {false,kTeamSetUpgradeMultiplierRva,kExpectedTeamSetUpgradeMultiplier,sizeof(kExpectedTeamSetUpgradeMultiplier)},
+        {false,kGameObjectClassFindRva,kExpectedGameObjectClassFind,sizeof(kExpectedGameObjectClassFind)},
+        {false,kGameObjectClassFindProjectIdRva,kExpectedGameObjectClassFindProjectId,sizeof(kExpectedGameObjectClassFindProjectId)},
+        {false,kParameterDbGetProjectIdRva,kExpectedParameterDbGetProjectId,sizeof(kExpectedParameterDbGetProjectId)},
+        {true,kFoResearchPodClassCallbackRva,kExpectedResearchPodClassCallback,sizeof(kExpectedResearchPodClassCallback)},
+        {true,kFoResearchPodClassDtorRva,kExpectedResearchPodClassDtor,sizeof(kExpectedResearchPodClassDtor)},
+        {true,kFoResearchStationClassCallbackRva,kExpectedResearchStationClassCallback,sizeof(kExpectedResearchStationClassCallback)},
+        {true,kFoResearchStationCanBuildRva,kExpectedResearchStationCanBuild,sizeof(kExpectedResearchStationCanBuild)},
+        {true,kFoResearchPodSameTypeRva,kExpectedResearchPodSameType,sizeof(kExpectedResearchPodSameType)},
+    }};
+    struct HookSpec {
+        bool fleet;
+        std::uintptr_t rva;
+        void* replacement;
+        const std::uint8_t* expected;
+        std::size_t length;
+        A2FO_InlineHook* hook;
+    };
+    const std::array<HookSpec,9> hooks{{
+        {true,kFoResearchPodClassCallbackRva,reinterpret_cast<void*>(&pod_class_hook),kExpectedResearchPodClassCallback,sizeof(kExpectedResearchPodClassCallback),&g_pod_class_hook},
+        {true,kFoResearchPodClassDtorRva,reinterpret_cast<void*>(&pod_class_dtor_hook),kExpectedResearchPodClassDtor,sizeof(kExpectedResearchPodClassDtor),&g_pod_class_dtor_hook},
+        {true,kFoResearchStationClassCallbackRva,reinterpret_cast<void*>(&station_class_hook),kExpectedResearchStationClassCallback,sizeof(kExpectedResearchStationClassCallback),&g_station_class_hook},
+        {true,kFoResearchStationCanBuildRva,reinterpret_cast<void*>(&station_can_build_hook),kExpectedResearchStationCanBuild,sizeof(kExpectedResearchStationCanBuild),&g_station_can_build_hook},
+        {true,kFoResearchPodSameTypeRva,reinterpret_cast<void*>(&same_type_hook),kExpectedResearchPodSameType,sizeof(kExpectedResearchPodSameType),&g_same_type_hook},
+        {false,kResearchPodAttachRva,reinterpret_cast<void*>(&pod_attach_hook),kExpectedResearchPodAttach,sizeof(kExpectedResearchPodAttach),&g_pod_attach_hook},
+        {false,kResearchPodDetachRva,reinterpret_cast<void*>(&pod_detach_hook),kExpectedResearchPodDetach,sizeof(kExpectedResearchPodDetach),&g_pod_detach_hook},
+        {false,kResearchStationConstructorRva,reinterpret_cast<void*>(&station_constructor_hook),kExpectedResearchStationConstructor,sizeof(kExpectedResearchStationConstructor),&g_station_constructor_hook},
+        {false,kResearchStationDestructorRva,reinterpret_cast<void*>(&station_destructor_hook),kExpectedResearchStationDestructor,sizeof(kExpectedResearchStationDestructor),&g_station_destructor_hook},
+    }};
+    struct Context {
+        const A2FO_ModuleApi* api;
+        HMODULE armada;
+        HMODULE fleet_ops;
+        const std::array<SignatureSpec,14>& signatures;
+        const std::array<HookSpec,9>& hooks;
+        std::uint8_t failed{};
+        std::exception_ptr error{};
+    } context{api,armada,fleet_ops,signatures,hooks};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t index) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:return c.api&&c.armada&&c.fleet_ops&&
+            c.api->install_inline_hook&&c.api->extension_root_count&&
+            c.api->extension_root;
+        case 1:if(c.api&&c.api->log)c.api->log(kModuleName,
+            "Configurable upgrade pods unavailable in this core");
+            return 1;
+        case 2:{const auto& spec=c.signatures[index];
+            HMODULE module=spec.fleet?c.fleet_ops:c.armada;
+            return module&&std::memcmp(at(module,spec.rva),
+                spec.expected,spec.length)==0;}
+        case 3:c.api->log(kModuleName,
+            "Configurable upgrade-pod signatures mismatch; disabled");
+            return 1;
+        case 4:g_api=c.api;g_armada=c.armada;return 1;
+        case 5:load_upgrade_pod_maximum_tier();return 1;
+        case 6:InitializeCriticalSection(&g_upgrade_lock);
+            g_upgrade_lock_ready=true;return 1;
+        case 7:{const auto& spec=c.hooks[index];
+            HMODULE module=spec.fleet?c.fleet_ops:c.armada;
+            return install_hook(at(module,spec.rva),spec.replacement,
+                spec.length,spec.expected,*spec.hook);}
+        case 8:c.api->log(kModuleName,
+            "Configurable upgrade-pod hook installation failed");
+            return 1;
+        case 9:g_upgrade_hooks_ready=true;return 1;
+        case 10:log_message("Configurable upgrade pods enabled "
+            "(RTS_CFG.h maximum "+
+            std::to_string(g_configured_maximum_tier)+")");return 1;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();c.failed=1;return 0;}
+    };
+    const bool result=a2fo_rs_c_upgrade_initialize(&context,step,
+        &context.failed);
+    if(context.error)std::rethrow_exception(context.error);
+    return result;
 }
 
 }  // namespace a2fo

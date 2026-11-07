@@ -1,0 +1,13 @@
+A2FOExtensions directionalShields mode 5
+========================================
+
+Mode 5 adds two 180-degree shield hemispheres:
+  port / starboard
+
+SPR entry expected by A2FOCraftIdentity:
+  dshs shield_hemi_side 0 0 128 128
+
+`shield_hemi_side.tga` should be a full 128x128 left/port hemisphere mask.
+The starboard copy is mirrored horizontally at draw time. Forward/aft are
+inactive (0/0). Existing Port/Starboard Area and value-text GUI CFG overrides
+remain available.

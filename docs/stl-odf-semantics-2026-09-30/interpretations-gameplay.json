@@ -1,0 +1,4661 @@
+{
+  "methodology": "One entry per normalized lexical family from evidence-gameplay.json. Documented means a command-specific STL ODF author comment explains the setting; inferred means values, naming and context support a bounded reading; unresolved means available authored evidence is insufficient. Source lines cite assignments. Observed forms are syntax examples, not a parser contract. No Fleet Ops runtime compatibility or binary semantics are implied.",
+  "entries": [
+    {
+      "family": "accelerate",
+      "meaning": "The planet ODF sets Accelerate=1 next to point generation fields, but the affected process is not explained.",
+      "basis": "unresolved",
+      "confidence": "low",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "Point-system semantics and Fleet Ops runtime support are unverified.",
+      "follow_up": "Which STL parser or gameplay call site reads Accelerate, and what does its value control?",
+      "sources": [
+        {
+          "source": "odf/stations/planet.odf",
+          "line": 25,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "ambiguous"
+    },
+    {
+      "family": "aftphotonspread",
+      "meaning": "The Stinger places this flag next to its aft photon count, suggesting a spread setting for aft torpedoes; no spread geometry is specified.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred aftPhotonSpread behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/K_Stinger.odf",
+          "line": 40,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "ambient",
+      "meaning": "The station light material uses an RGB ambient colour, with a sun comment explaining that it glows on its own.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "three space-separated numeric components",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred ambient behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/sun.odf",
+          "line": 27,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/stations/bajor.odf",
+          "line": 11,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "avoidanceboundingellipsoidscaleforcraft",
+      "meaning": "Multiplies a craft prevention ellipsoid to form its avoidance shell.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "scale",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement avoidanceBoundingEllipsoidScaleForCraft as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 199,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "avoidanceboundingellipsoidscalefornoncraft",
+      "meaning": "Multiplies a noncraft prevention ellipsoid, especially an asteroid, to form its avoidance shell.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "scale",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement avoidanceBoundingEllipsoidScaleForNonCraft as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 203,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "avoidancehysteresisscaleforawareness",
+      "meaning": "Multiplies the avoidance shell to form a larger obstacle-awareness shell used in collision prediction.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "scale",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement avoidanceHysteresisScaleForAwareness as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 210,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "avoidancemaxlookaheadtime",
+      "meaning": "Caps future collision prediction time; collisions at this horizon have minimum urgency.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "game-core time",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement avoidanceMaxLookaheadTime as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 184,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "avoidancemaxsearchradius",
+      "meaning": "Caps radius search used to find potential collision obstacles.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "distance units",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement avoidanceMaxSearchRadius as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 191,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "avoidancemintimeformaxsteeringurgency",
+      "meaning": "Sets predicted time-to-collision below which steering force reaches maximum urgency.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "game-core time",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement avoidanceMinTimeForMaxSteeringUrgency as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 187,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "avoidancetimetointerpolatebacktodesiredchase",
+      "meaning": "Sets game time after a collision threat disappears to interpolate back to the planned chase/path course.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "game-core time",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement avoidanceTimeToInterpolateBackToDesiredChase as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/class_destroyer.odf",
+          "line": 122,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 195,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "backenginehitchance",
+      "meaning": "Assigns the back facing hit-chance weight for the engine subsystem when attacks select a target system.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown scale",
+      "caveats": "Craft defaults use hull=100 and other systems=0, while station defaults use 0.2 for every system; these incompatible apparent scales prevent interpreting values as percentages or probabilities.",
+      "follow_up": "Recover facing-angle boundaries, weight normalization (100 versus .2), and behavior for missing/disabled subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 90,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 71,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "backhullhitchance",
+      "meaning": "Assigns the back facing hit-chance weight for the hull subsystem when attacks select a target system.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown scale",
+      "caveats": "Craft defaults use hull=100 and other systems=0, while station defaults use 0.2 for every system; these incompatible apparent scales prevent interpreting values as percentages or probabilities.",
+      "follow_up": "Recover facing-angle boundaries, weight normalization (100 versus .2), and behavior for missing/disabled subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 88,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 69,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "backsensorhitchance",
+      "meaning": "Assigns the back facing hit-chance weight for the sensor subsystem when attacks select a target system.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown scale",
+      "caveats": "Craft defaults use hull=100 and other systems=0, while station defaults use 0.2 for every system; these incompatible apparent scales prevent interpreting values as percentages or probabilities.",
+      "follow_up": "Recover facing-angle boundaries, weight normalization (100 versus .2), and behavior for missing/disabled subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 91,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 72,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "backshieldhitchance",
+      "meaning": "Assigns the back facing hit-chance weight for the shield subsystem when attacks select a target system.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown scale",
+      "caveats": "Craft defaults use hull=100 and other systems=0, while station defaults use 0.2 for every system; these incompatible apparent scales prevent interpreting values as percentages or probabilities.",
+      "follow_up": "Recover facing-angle boundaries, weight normalization (100 versus .2), and behavior for missing/disabled subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 89,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 70,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "backweaponhitchance",
+      "meaning": "Assigns the back facing hit-chance weight for the weapon subsystem when attacks select a target system.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown scale",
+      "caveats": "Craft defaults use hull=100 and other systems=0, while station defaults use 0.2 for every system; these incompatible apparent scales prevent interpreting values as percentages or probabilities.",
+      "follow_up": "Recover facing-angle boundaries, weight normalization (100 versus .2), and behavior for missing/disabled subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 92,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 73,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "boostmodifier",
+      "meaning": "The value appears with a reticle-lock comment and likely adjusts how quickly targeting lock increases; its relationship to phaser/photon-specific modifiers is unclear.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred boostModifier behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 9,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "borgentbuildlist",
+      "meaning": "Defines the Borg ENT construction list for the owning planet. Each pair is an ODF name and the required planet upgrade level, numbered from zero; the trailing 0/1 is a level requirement, not an unexplained Boolean.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "repeated quoted pairs: \"ODF name\" \"required planet upgrade level\"",
+      "units": "zero-based planet upgrade level",
+      "caveats": "Selection by owner/era and inheritance are not traced; number parsing, duplicate items and invalid level handling remain unknown.",
+      "follow_up": "Recover owner/era selection, planet upgrade gating, duplicate handling and validation of required levels.",
+      "sources": [
+        {
+          "source": "odf/stations/classj.odf",
+          "line": 58,
+          "reason": "Shared build-list header explicitly defines ODF-name/required-planet-level pairs from zero."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "borgentcommandpost",
+      "meaning": "Names the Borg ENT command-post ODF associated with a planet, selected by race and era according to the planet header.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted ODF basename",
+      "units": "unknown",
+      "caveats": "Creation time, attachment/placement, capture replacement and absent-definition fallbacks are unknown.",
+      "follow_up": "Recover when the planet creates or replaces its race/era command post.",
+      "sources": [
+        {
+          "source": "odf/stations/planet.odf",
+          "line": 47,
+          "reason": "Header explicitly describes command-post variants by race and era."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "borgtngbuildlist",
+      "meaning": "Defines the Borg TNG construction list for the owning planet. Each pair is an ODF name and the required planet upgrade level, numbered from zero; the trailing 0/1 is a level requirement, not an unexplained Boolean.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "repeated quoted pairs: \"ODF name\" \"required planet upgrade level\"",
+      "units": "zero-based planet upgrade level",
+      "caveats": "Selection by owner/era and inheritance are not traced; number parsing, duplicate items and invalid level handling remain unknown.",
+      "follow_up": "Recover owner/era selection, planet upgrade gating, duplicate handling and validation of required levels.",
+      "sources": [
+        {
+          "source": "odf/stations/classj.odf",
+          "line": 122,
+          "reason": "Shared build-list header explicitly defines ODF-name/required-planet-level pairs from zero."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "borgtngcommandpost",
+      "meaning": "Names the Borg TNG command-post ODF associated with a planet, selected by race and era according to the planet header.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted ODF basename",
+      "units": "unknown",
+      "caveats": "Creation time, attachment/placement, capture replacement and absent-definition fallbacks are unknown.",
+      "follow_up": "Recover when the planet creates or replaces its race/era command post.",
+      "sources": [
+        {
+          "source": "odf/stations/planet.odf",
+          "line": 61,
+          "reason": "Header explicitly describes command-post variants by race and era."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "borgtosbuildlist",
+      "meaning": "Defines the Borg TOS construction list for the owning planet. Each pair is an ODF name and the required planet upgrade level, numbered from zero; the trailing 0/1 is a level requirement, not an unexplained Boolean.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "repeated quoted pairs: \"ODF name\" \"required planet upgrade level\"",
+      "units": "zero-based planet upgrade level",
+      "caveats": "Selection by owner/era and inheritance are not traced; number parsing, duplicate items and invalid level handling remain unknown.",
+      "follow_up": "Recover owner/era selection, planet upgrade gating, duplicate handling and validation of required levels.",
+      "sources": [
+        {
+          "source": "odf/stations/classj.odf",
+          "line": 89,
+          "reason": "Shared build-list header explicitly defines ODF-name/required-planet-level pairs from zero."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "borgtoscommandpost",
+      "meaning": "Names the Borg TOS command-post ODF associated with a planet, selected by race and era according to the planet header.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted ODF basename",
+      "units": "unknown",
+      "caveats": "Creation time, attachment/placement, capture replacement and absent-definition fallbacks are unknown.",
+      "follow_up": "Recover when the planet creates or replaces its race/era command post.",
+      "sources": [
+        {
+          "source": "odf/stations/planet.odf",
+          "line": 54,
+          "reason": "Header explicitly describes command-post variants by race and era."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "buildlist",
+      "meaning": "The command post supplies an ordered list of station ODF names available for construction; no row flags appear in this generic list.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted ODF/asset name or space-separated quoted names",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Recover the meaning of each trailing 0/1 row flag, list enumeration and race/era selection.",
+      "sources": [
+        {
+          "source": "odf/stations/F_ENT_mining_base.odf",
+          "line": 137,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "bumptexturename",
+      "meaning": "Planet material entries name a bump texture asset; the exact texture lookup and rendering behavior are unverified.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred bumpTextureName behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/bajor.odf",
+          "line": 8,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/classJb.odf",
+          "line": 9,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "asset"
+    },
+    {
+      "family": "cameraradiusscale",
+      "meaning": "A ship ODF labels this as a shot-director zoom scale, implying a camera distance based on object radius. The exact camera path using it is unverified.",
+      "basis": "unresolved",
+      "confidence": "low",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL parser or gameplay call site reads cameraRadiusScale, and what does its value control?",
+      "sources": [
+        {
+          "source": "odf/ships/B_tos_cube.odf",
+          "line": 150,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/F_Akula.odf",
+          "line": 175,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "ambiguous"
+    },
+    {
+      "family": "cfg_polarizedhullplatingdamagereduction",
+      "meaning": "Ships with hull plating and all energy allocated to shields are said to reduce incoming damage by this amount.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "fraction",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement cfg_polarizedHullPlatingDamageReduction as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/F_Excelsior.odf",
+          "line": 18,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/F_Excelsior_tng.odf",
+          "line": 20,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "chancechase",
+      "meaning": "Sets the authored AI chance weight for the chase attack maneuver; the ODF comment says the maneuver chances should sum to approximately one.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "fractional weight",
+      "caveats": "Normalization, random-choice process, fallback and actual maneuver paths are not specified.",
+      "follow_up": "Recover maneuver selection, normalization for invalid totals and transitions between attack paths.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 33,
+          "reason": "Authored four-maneuver group says probabilities should sum to approximately one."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "chancecircle",
+      "meaning": "Sets the authored AI chance weight for the circle attack maneuver; the ODF comment says the maneuver chances should sum to approximately one.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "fractional weight",
+      "caveats": "Normalization, random-choice process, fallback and actual maneuver paths are not specified.",
+      "follow_up": "Recover maneuver selection, normalization for invalid totals and transitions between attack paths.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 31,
+          "reason": "Authored four-maneuver group says probabilities should sum to approximately one."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "chancecloverleaf",
+      "meaning": "Sets the authored AI chance weight for the cloverleaf attack maneuver; the ODF comment says the maneuver chances should sum to approximately one.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "fractional weight",
+      "caveats": "Normalization, random-choice process, fallback and actual maneuver paths are not specified.",
+      "follow_up": "Recover maneuver selection, normalization for invalid totals and transitions between attack paths.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 32,
+          "reason": "Authored four-maneuver group says probabilities should sum to approximately one."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "chanceflyby",
+      "meaning": "Sets the authored AI chance weight for the flyby attack maneuver; the ODF comment says the maneuver chances should sum to approximately one.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "fractional weight",
+      "caveats": "Normalization, random-choice process, fallback and actual maneuver paths are not specified.",
+      "follow_up": "Recover maneuver selection, normalization for invalid totals and transitions between attack paths.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 30,
+          "reason": "Authored four-maneuver group says probabilities should sum to approximately one."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "chunksmokeparticlesystems",
+      "meaning": "The listed particle systems attach smoke/fire to debris chunks after a craft fragments.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement ChunkSmokeParticleSystems as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 160,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "coronacolor",
+      "meaning": "Planet ODFs give a three-component colour for the corona effect; component scale and renderer mapping are not documented.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "three space-separated numeric components",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred coronaColor behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/classj.odf",
+          "line": 26,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/earth.odf",
+          "line": 39,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "coronaselfillumination",
+      "meaning": "Planet ODFs use a numeric self-illumination setting for corona rendering; the exact light calculation is unknown.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred coronaSelfIllumination behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/earth.odf",
+          "line": 40,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/sun.odf",
+          "line": 23,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "coronawidth",
+      "meaning": "Planet ODFs use a numeric width for the corona visual; physical or screen units are not specified.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred coronaWidth behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/earth.odf",
+          "line": 38,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/mars.odf",
+          "line": 21,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "criticalbreaknodes",
+      "meaning": "Names model nodes associated with critical breakup; the trigger and ordering are not documented.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted ODF/asset name or space-separated quoted names",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Determine which damage/break event uses the list and whether it hides, detaches or selects model-node subtrees.",
+      "sources": [
+        {
+          "source": "odf/ships/K_Brel.odf",
+          "line": 114,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/ships/K_D_7.odf",
+          "line": 118,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "damagedecal",
+      "meaning": "Names the decal applied to a damaged target surface.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement damageDecal as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/special_weapons/spacemine.odf",
+          "line": 17,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "damagemodelsizemodifier",
+      "meaning": "A ship damage-model size scalar; the source gives no reference size or trigger.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred damageModelSizeModifier behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/B_ent_cube.odf",
+          "line": 143,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/ships/B_tng_cube.odf",
+          "line": 120,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "damageparticlesystems",
+      "meaning": "Lists particle systems played together when a craft suffers hull damage.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement damageParticleSystems as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/B_tng_multicube.odf",
+          "line": 141,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 158,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "delaybetweenshots",
+      "meaning": "Sets the delay between successive shots from the weapon.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "time units (seconds not expressly confirmed)",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement delayBetweenShots as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/weapons/Pulse/pulse.odf",
+          "line": 54,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "diffuse",
+      "meaning": "Station material diffuse colour as three numeric components; colour-space conversion is not documented.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "three space-separated numeric components",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred diffuse behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/bajor.odf",
+          "line": 12,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/sun.odf",
+          "line": 28,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "dispersalmindamagefraction",
+      "meaning": "Sets the fraction of normal damage retained at the weapon’s extreme range.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement dispersalMinDamageFraction as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/special_weapons/long_range_sensoro.odf",
+          "line": 10,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/weapons/Phasers/phasero.odf",
+          "line": 12,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "dispersalrangefraction",
+      "meaning": "Sets the fraction of maximum range where damage begins to fall off.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement dispersalRangeFraction as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/special_weapons/long_range_sensoro.odf",
+          "line": 8,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/weapons/Phasers/phasero.odf",
+          "line": 10,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "dockingareadimensions",
+      "meaning": "Defines the dimensions of the inner shipyard docking region.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "three comma-separated numeric components",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement dockingAreaDimensions as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/stations/K_Tos_Shipyard.odf",
+          "line": 20,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/stations/F_ENT_shipyard.odf",
+          "line": 16,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "draghalflife",
+      "meaning": "A torpedo acceleration tuning value; the comment says values scale from 1 slow to 0 fast but does not define an actual half-life.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred dragHalfLife behavior?",
+      "sources": [
+        {
+          "source": "odf/weapons/Photons/photono.odf",
+          "line": 86,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "durationtofullintensity",
+      "meaning": "Sets how long the phaser visual takes to reach full intensity.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "time units (likely seconds; not explicit)",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement durationToFullIntensity as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/weapons/Phasers/B_phaser_ent_lrg_ord.odf",
+          "line": 10,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/weapons/Phasers/B_phaser_ent_med_ord.odf",
+          "line": 10,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "durationtoreachfullradiussize",
+      "meaning": "Likely controls the time for beam radius to reach its final size, because it follows minRadiusOfBeam/maxRadiusOfBeam. However, its comment says full intensity, so radius-versus-intensity is unresolved.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "time units (likely seconds; not explicit)",
+      "caveats": "Possible copied comment or a shared intensity/radius timer; the field name alone cannot resolve the distinction.",
+      "follow_up": "Trace whether this timer interpolates beam radius, intensity or both.",
+      "sources": [
+        {
+          "source": "odf/weapons/Phasers/B_phaser_ent_lrg_ord.odf",
+          "line": 19,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/weapons/Phasers/fed_phaser_tos_med_ord.odf",
+          "line": 19,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "effectonhithull",
+      "meaning": "Names the impact effect played when this weapon hits a target’s hull.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement effectOnHitHull as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/weapons/Phasers/phasero.odf",
+          "line": 69,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/weapons/Photons/photono.odf",
+          "line": 79,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "effectonhithull_size",
+      "meaning": "Scales the impact effect played on a hull hit; the reference asset size is unknown.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "scale",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred effectOnHitHull_size behavior?",
+      "sources": [
+        {
+          "source": "odf/weapons/Phasers/phasero.odf",
+          "line": 71,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/weapons/Photons/photono.odf",
+          "line": 81,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "effectonhitshields",
+      "meaning": "Names the impact effect played when this weapon hits a target’s shields.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "No command-specific ODF comment found; meaning follows placement and naming.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred effectOnHitShields behavior?",
+      "sources": [
+        {
+          "source": "odf/weapons/Phasers/phasero.odf",
+          "line": 70,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/weapons/Photons/photono.odf",
+          "line": 80,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "effectonhitshields_size",
+      "meaning": "Scales the impact effect played on a shields hit; the reference asset size is unknown.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "scale",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred effectOnHitShields_size behavior?",
+      "sources": [
+        {
+          "source": "odf/weapons/Phasers/phasero.odf",
+          "line": 72,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/weapons/Photons/photono.odf",
+          "line": 82,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "energyeffectonhitcraft",
+      "meaning": "Names the energy effect played when this weapon hits a target’s craft.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement energyEffectOnHitCraft as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/special_weapons/chainp.odf",
+          "line": 72,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/special_weapons/spacemine.odf",
+          "line": 10,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "energyeffectonhitcraft_size",
+      "meaning": "Scales the energy effect played on a craft hit; the reference asset size is unknown.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "scale",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred energyEffectOnHitCraft_Size behavior?",
+      "sources": [
+        {
+          "source": "odf/special_weapons/chainp.odf",
+          "line": 73,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/weapons/Phasers/phasero.odf",
+          "line": 74,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "energyeffectonhitshields",
+      "meaning": "Names the energy effect played when this weapon hits a target’s shields.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement energyEffectOnHitShields as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/special_weapons/chainp.odf",
+          "line": 78,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/special_weapons/long_range_sensoro.odf",
+          "line": 75,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "energyeffectonhitshields_size",
+      "meaning": "Scales the energy effect played on a shields hit; the reference asset size is unknown.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "scale",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred energyEffectOnHitShields_Size behavior?",
+      "sources": [
+        {
+          "source": "odf/special_weapons/chainp.odf",
+          "line": 79,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/special_weapons/long_range_sensoro.odf",
+          "line": 76,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "energyperphoton",
+      "meaning": "Sets energy expended when firing a photon torpedo.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "The comments establish expenditure, but do not say whether the values are absolute energy or a fraction of an energy pool.",
+      "follow_up": "Recover pool units/capacity, update time base, energy-distribution influence and the exact debit/replenishment formula.",
+      "sources": [
+        {
+          "source": "odf/ships/F_Akira.odf",
+          "line": 18,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/R_Dderidex.odf",
+          "line": 28,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "energyperpulsephaser",
+      "meaning": "Sets energy expended per pulse-phaser shot.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "The comments establish expenditure, but do not say whether the values are absolute energy or a fraction of an energy pool.",
+      "follow_up": "Recover pool units/capacity, update time base, energy-distribution influence and the exact debit/replenishment formula.",
+      "sources": [
+        {
+          "source": "odf/ships/F_Defiant.odf",
+          "line": 21,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/K_Brel.odf",
+          "line": 17,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "enginebasefreq",
+      "meaning": "Sets a baseline frequency used by the engine sound configuration; audible mapping is not documented.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred EngineBaseFreq behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/class_scout.odf",
+          "line": 88,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "enginebreaknodes",
+      "meaning": "Names model nodes broken away with engine subsystem destruction.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted ODF/asset name or space-separated quoted names",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Determine which damage/break event uses the list and whether it hides, detaches or selects model-node subtrees.",
+      "sources": [
+        {
+          "source": "odf/ships/F_Akira.odf",
+          "line": 133,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/F_Akula.odf",
+          "line": 154,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "asset"
+    },
+    {
+      "family": "enginedestructioneffect",
+      "meaning": "Names the visual effect played when the engine subsystem is destroyed.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred EngineDestructionEffect behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 165,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "enginedestructionhardpoints",
+      "meaning": "Lists model hardpoints where engine subsystem destruction effects appear.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted ODF/asset name or space-separated quoted names",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred EngineDestructionHardpoints behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/B_tng_obelisk.odf",
+          "line": 116,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/F_Akira.odf",
+          "line": 112,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "asset"
+    },
+    {
+      "family": "enginemaxfreq",
+      "meaning": "Sets a maximum frequency used by the engine sound configuration; audible mapping is not documented.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred EngineMaxFreq behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/class_scout.odf",
+          "line": 89,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "engineofffreq",
+      "meaning": "Sets a frequency for the engine-off sound state; audible mapping is not documented.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred EngineOffFreq behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/class_scout.odf",
+          "line": 90,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "engineramptime",
+      "meaning": "Sets a ramp duration for engine sound frequency or level; the source does not say which.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred EngineRampTime behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/class_scout.odf",
+          "line": 91,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "enginesmaxlevel",
+      "meaning": "Sets the maximum engine upgrade level used for scaling engine upgrades.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "No command-specific ODF comment found; meaning follows placement and naming.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred enginesMaxLevel behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 73,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "enginesminlevel",
+      "meaning": "Sets the minimum engine upgrade level used for scaling engine upgrades.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement enginesMinLevel as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 72,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "enginesound",
+      "meaning": "Names the ship engine sound asset; playback conditions are not specified.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred engineSound behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/B_class_cruiser.odf",
+          "line": 6,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/B_class_science.odf",
+          "line": 6,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "enginetargethardpoints",
+      "meaning": "Lists model hardpoints used when attacking or targeting the engine subsystem.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted ODF/asset name or space-separated quoted names",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Determine how hardpoint lists select aim points and handle missing names, visibility changes and destroyed subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/B_tng_cube.odf",
+          "line": 108,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/B_tng_cube_tact.odf",
+          "line": 130,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "asset"
+    },
+    {
+      "family": "ent",
+      "meaning": "Lists Enterprise-era ship types available to choose in Skirmish/MP for the faction. The source calls these selectable ship types, rather than a preselected spawn fleet.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "space-separated quoted ODF basenames",
+      "units": "unknown",
+      "caveats": "Selection UI filtering, duplicates, starting availability and era lookup remain unverified.",
+      "follow_up": "Trace era/faction ship selection and distinguish selection lists from shipN spawn fleets.",
+      "sources": [
+        {
+          "source": "odf/default fleets/borg_fleet.odf",
+          "line": 7,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/default fleets/federation_fleet.odf",
+          "line": 7,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "ui"
+    },
+    {
+      "family": "entrywounddecal",
+      "meaning": "Names a decal for the projectile entry side of a hit; placement is not documented.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred entryWoundDecal behavior?",
+      "sources": [
+        {
+          "source": "odf/special_weapons/chainp.odf",
+          "line": 83,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "escortme",
+      "meaning": "The flag tells AI to escort this ship.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement escortMe as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/f_civilian.odf",
+          "line": 64,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "exitwounddecal",
+      "meaning": "Names a decal for the projectile exit side of a hit; placement is not documented.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred exitWoundDecal behavior?",
+      "sources": [
+        {
+          "source": "odf/special_weapons/chainp.odf",
+          "line": 84,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "explosionname",
+      "meaning": "Names the explosion ODF class spawned when the ordnance detonates.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement explosionName as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/weapons/Photons/artillery_ord.odf",
+          "line": 52,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "explosionparticlesystemssecondary",
+      "meaning": "Lists secondary particle explosions at chunk-split points, said to occur 1.2 seconds before the major explosion.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement explosionParticleSystemsSecondary as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/B_class_cruiser.odf",
+          "line": 29,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/B_class_scout.odf",
+          "line": 28,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "explosiveimpulse",
+      "meaning": "Sets an absolute impulse applied to a hit ship; the author warns this may later change to damage-relative scaling.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal with optional trailing semicolon",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement explosiveImpulse as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/weapons/Phasers/phasero.odf",
+          "line": 61,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/weapons/Photons/photono.odf",
+          "line": 63,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "explosivelinearscale",
+      "meaning": "Sets the fraction of explosive push, separate from rotational twist.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal with optional trailing semicolon",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement explosiveLinearScale as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/special_weapons/long_range_sensoro.odf",
+          "line": 66,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/weapons/Phasers/phasero.odf",
+          "line": 66,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "explosivetime",
+      "meaning": "Sets the seconds over which a triangular explosive impulse is applied.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal with optional trailing semicolon",
+      "units": "seconds",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement explosiveTime as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/special_weapons/long_range_sensoro.odf",
+          "line": 63,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/weapons/Phasers/phasero.odf",
+          "line": 63,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "federationentbuildlist",
+      "meaning": "Defines the Federation ENT construction list for the owning planet. Each pair is an ODF name and the required planet upgrade level, numbered from zero; the trailing 0/1 is a level requirement, not an unexplained Boolean.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "repeated quoted pairs: \"ODF name\" \"required planet upgrade level\"",
+      "units": "zero-based planet upgrade level",
+      "caveats": "Selection by owner/era and inheritance are not traced; number parsing, duplicate items and invalid level handling remain unknown.",
+      "follow_up": "Recover owner/era selection, planet upgrade gating, duplicate handling and validation of required levels.",
+      "sources": [
+        {
+          "source": "odf/stations/classj.odf",
+          "line": 44,
+          "reason": "Shared build-list header explicitly defines ODF-name/required-planet-level pairs from zero."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "federationentcommandpost",
+      "meaning": "Names the Federation ENT command-post ODF associated with a planet, selected by race and era according to the planet header.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted ODF basename",
+      "units": "unknown",
+      "caveats": "Creation time, attachment/placement, capture replacement and absent-definition fallbacks are unknown.",
+      "follow_up": "Recover when the planet creates or replaces its race/era command post.",
+      "sources": [
+        {
+          "source": "odf/stations/planet.odf",
+          "line": 45,
+          "reason": "Header explicitly describes command-post variants by race and era."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "federationtngbuildlist",
+      "meaning": "Defines the Federation TNG construction list for the owning planet. Each pair is an ODF name and the required planet upgrade level, numbered from zero; the trailing 0/1 is a level requirement, not an unexplained Boolean.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "repeated quoted pairs: \"ODF name\" \"required planet upgrade level\"",
+      "units": "zero-based planet upgrade level",
+      "caveats": "Selection by owner/era and inheritance are not traced; number parsing, duplicate items and invalid level handling remain unknown.",
+      "follow_up": "Recover owner/era selection, planet upgrade gating, duplicate handling and validation of required levels.",
+      "sources": [
+        {
+          "source": "odf/stations/classj.odf",
+          "line": 106,
+          "reason": "Shared build-list header explicitly defines ODF-name/required-planet-level pairs from zero."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "federationtngcommandpost",
+      "meaning": "Names the Federation TNG command-post ODF associated with a planet, selected by race and era according to the planet header.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted ODF basename",
+      "units": "unknown",
+      "caveats": "Creation time, attachment/placement, capture replacement and absent-definition fallbacks are unknown.",
+      "follow_up": "Recover when the planet creates or replaces its race/era command post.",
+      "sources": [
+        {
+          "source": "odf/stations/planet.odf",
+          "line": 59,
+          "reason": "Header explicitly describes command-post variants by race and era."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "federationtosbuildlist",
+      "meaning": "Defines the Federation TOS construction list for the owning planet. Each pair is an ODF name and the required planet upgrade level, numbered from zero; the trailing 0/1 is a level requirement, not an unexplained Boolean.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "repeated quoted pairs: \"ODF name\" \"required planet upgrade level\"",
+      "units": "zero-based planet upgrade level",
+      "caveats": "Selection by owner/era and inheritance are not traced; number parsing, duplicate items and invalid level handling remain unknown.",
+      "follow_up": "Recover owner/era selection, planet upgrade gating, duplicate handling and validation of required levels.",
+      "sources": [
+        {
+          "source": "odf/stations/classj.odf",
+          "line": 73,
+          "reason": "Shared build-list header explicitly defines ODF-name/required-planet-level pairs from zero."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "federationtoscommandpost",
+      "meaning": "Names the Federation TOS command-post ODF associated with a planet, selected by race and era according to the planet header.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted ODF basename",
+      "units": "unknown",
+      "caveats": "Creation time, attachment/placement, capture replacement and absent-definition fallbacks are unknown.",
+      "follow_up": "Recover when the planet creates or replaces its race/era command post.",
+      "sources": [
+        {
+          "source": "odf/stations/planet.odf",
+          "line": 52,
+          "reason": "Header explicitly describes command-post variants by race and era."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "fireallbanks",
+      "meaning": "Makes the weapon fire from all available banks when enabled.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement fireAllBanks as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/weapons/Pulse/rom_base_pulse.odf",
+          "line": 30,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/weapons/Pulse/rom_ent_pulse.odf",
+          "line": 30,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "firesoundgroup",
+      "meaning": "Names the sound group played when this weapon fires.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement fireSoundGroup as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/weapons/Pulse/Fed_tng_defiant_pulse.odf",
+          "line": 54,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/weapons/Pulse/fed_pulse_main_lvl1.odf",
+          "line": 4,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "flarecolorfullintensity",
+      "meaning": "Sets the flare colour reached when the phaser reaches full intensity.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "three space-separated numeric components",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement flareColorFullIntensity as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/weapons/Phasers/f_constit_re_phaser_ord.odf",
+          "line": 8,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "flarethreshold",
+      "meaning": "Sets the phaser intensity threshold at which the flare switches to burst colour.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement flareThreshold as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/weapons/Phasers/f_constit_re_phaser_ord.odf",
+          "line": 5,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "frontenginehitchance",
+      "meaning": "Assigns the front facing hit-chance weight for the engine subsystem when attacks select a target system.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown scale",
+      "caveats": "Craft defaults use hull=100 and other systems=0, while station defaults use 0.2 for every system; these incompatible apparent scales prevent interpreting values as percentages or probabilities.",
+      "follow_up": "Recover facing-angle boundaries, weight normalization (100 versus .2), and behavior for missing/disabled subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 84,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 65,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "fronthullhitchance",
+      "meaning": "Assigns the front facing hit-chance weight for the hull subsystem when attacks select a target system.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown scale",
+      "caveats": "Craft defaults use hull=100 and other systems=0, while station defaults use 0.2 for every system; these incompatible apparent scales prevent interpreting values as percentages or probabilities.",
+      "follow_up": "Recover facing-angle boundaries, weight normalization (100 versus .2), and behavior for missing/disabled subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 82,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 63,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "frontsensorhitchance",
+      "meaning": "Assigns the front facing hit-chance weight for the sensor subsystem when attacks select a target system.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown scale",
+      "caveats": "Craft defaults use hull=100 and other systems=0, while station defaults use 0.2 for every system; these incompatible apparent scales prevent interpreting values as percentages or probabilities.",
+      "follow_up": "Recover facing-angle boundaries, weight normalization (100 versus .2), and behavior for missing/disabled subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 85,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 66,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "frontshieldhitchance",
+      "meaning": "Assigns the front facing hit-chance weight for the shield subsystem when attacks select a target system.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown scale",
+      "caveats": "Craft defaults use hull=100 and other systems=0, while station defaults use 0.2 for every system; these incompatible apparent scales prevent interpreting values as percentages or probabilities.",
+      "follow_up": "Recover facing-angle boundaries, weight normalization (100 versus .2), and behavior for missing/disabled subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 83,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 64,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "frontweaponhitchance",
+      "meaning": "Assigns the front facing hit-chance weight for the weapon subsystem when attacks select a target system.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown scale",
+      "caveats": "Craft defaults use hull=100 and other systems=0, while station defaults use 0.2 for every system; these incompatible apparent scales prevent interpreting values as percentages or probabilities.",
+      "follow_up": "Recover facing-angle boundaries, weight normalization (100 versus .2), and behavior for missing/disabled subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 86,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 67,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "givescommandpoints",
+      "meaning": "Flags a planet/station as a command-point source; the source does not explain the production formula.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "Point-system semantics and Fleet Ops runtime support are unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred GivesCommandPoints behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/planet.odf",
+          "line": 23,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "hascaptain",
+      "meaning": "Marks a normal craft as having a captain; captain selection rules are not given.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement hasCaptain as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 37,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "hashullplating",
+      "meaning": "Enables hull plating for the ship; see the separately documented damage-reduction setting.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred hasHUllplating behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/F_NX_01.odf",
+          "line": 28,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "haspoints",
+      "meaning": "Enables the planet/station point resource or point generation; the type of points is unclear from this assignment alone.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "Point-system semantics and Fleet Ops runtime support are unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred HasPoints behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/planet.odf",
+          "line": 22,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "hastargetingboost",
+      "meaning": "Enables a craft targeting-boost system.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement hasTargetingBoost as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/F_Sovereign.odf",
+          "line": 36,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 8,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "hitsoundgroup",
+      "meaning": "Names the sound group played when ordnance hits its target.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement hitSoundGroup as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/special_weapons/chainp.odf",
+          "line": 87,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/weapons/Photons/tractor_bm.odf",
+          "line": 91,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "hotkeyname",
+      "meaning": "Names the command hotkey binding identifier, such as attack or move.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted command identifier",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement hotkeyName as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/commands/decommission.odf",
+          "line": 13,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/commands/move.odf",
+          "line": 12,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "ui"
+    },
+    {
+      "family": "impactsprite",
+      "meaning": "Names the sprite shown at the weapon impact; exact hit surface mapping is unverified.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred impactSprite behavior?",
+      "sources": [
+        {
+          "source": "odf/weapons/Phasers/B_phaser_ent_lrg_ord.odf",
+          "line": 21,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/weapons/Phasers/K_phaser_ent_lrg_ord.odf",
+          "line": 25,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "insidehulldamagematerial",
+      "meaning": "Names the material used for visible damage inside the hull; trigger and model mapping are unclear.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred insideHullDamageMaterial behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 175,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "islensflaresource",
+      "meaning": "Marks the object as a lens-flare source.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement isLensFlareSource as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/stations/sun.odf",
+          "line": 39,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "klingonentbuildlist",
+      "meaning": "Defines the Klingon ENT construction list for the owning planet. Each pair is an ODF name and the required planet upgrade level, numbered from zero; the trailing 0/1 is a level requirement, not an unexplained Boolean.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "repeated quoted pairs: \"ODF name\" \"required planet upgrade level\"",
+      "units": "zero-based planet upgrade level",
+      "caveats": "Selection by owner/era and inheritance are not traced; number parsing, duplicate items and invalid level handling remain unknown.",
+      "follow_up": "Recover owner/era selection, planet upgrade gating, duplicate handling and validation of required levels.",
+      "sources": [
+        {
+          "source": "odf/stations/classj.odf",
+          "line": 51,
+          "reason": "Shared build-list header explicitly defines ODF-name/required-planet-level pairs from zero."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "klingonentcommandpost",
+      "meaning": "Names the Klingon ENT command-post ODF associated with a planet, selected by race and era according to the planet header.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted ODF basename",
+      "units": "unknown",
+      "caveats": "Creation time, attachment/placement, capture replacement and absent-definition fallbacks are unknown.",
+      "follow_up": "Recover when the planet creates or replaces its race/era command post.",
+      "sources": [
+        {
+          "source": "odf/stations/planet.odf",
+          "line": 46,
+          "reason": "Header explicitly describes command-post variants by race and era."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "klingontngbuildlist",
+      "meaning": "Defines the Klingon TNG construction list for the owning planet. Each pair is an ODF name and the required planet upgrade level, numbered from zero; the trailing 0/1 is a level requirement, not an unexplained Boolean.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "repeated quoted pairs: \"ODF name\" \"required planet upgrade level\"",
+      "units": "zero-based planet upgrade level",
+      "caveats": "Selection by owner/era and inheritance are not traced; number parsing, duplicate items and invalid level handling remain unknown.",
+      "follow_up": "Recover owner/era selection, planet upgrade gating, duplicate handling and validation of required levels.",
+      "sources": [
+        {
+          "source": "odf/stations/classj.odf",
+          "line": 114,
+          "reason": "Shared build-list header explicitly defines ODF-name/required-planet-level pairs from zero."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "klingontngcommandpost",
+      "meaning": "Names the Klingon TNG command-post ODF associated with a planet, selected by race and era according to the planet header.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted ODF basename",
+      "units": "unknown",
+      "caveats": "Creation time, attachment/placement, capture replacement and absent-definition fallbacks are unknown.",
+      "follow_up": "Recover when the planet creates or replaces its race/era command post.",
+      "sources": [
+        {
+          "source": "odf/stations/planet.odf",
+          "line": 60,
+          "reason": "Header explicitly describes command-post variants by race and era."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "klingontosbuildlist",
+      "meaning": "Defines the Klingon TOS construction list for the owning planet. Each pair is an ODF name and the required planet upgrade level, numbered from zero; the trailing 0/1 is a level requirement, not an unexplained Boolean.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "repeated quoted pairs: \"ODF name\" \"required planet upgrade level\"",
+      "units": "zero-based planet upgrade level",
+      "caveats": "Selection by owner/era and inheritance are not traced; number parsing, duplicate items and invalid level handling remain unknown.",
+      "follow_up": "Recover owner/era selection, planet upgrade gating, duplicate handling and validation of required levels.",
+      "sources": [
+        {
+          "source": "odf/stations/classj.odf",
+          "line": 81,
+          "reason": "Shared build-list header explicitly defines ODF-name/required-planet-level pairs from zero."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "klingontoscommandpost",
+      "meaning": "Names the Klingon TOS command-post ODF associated with a planet, selected by race and era according to the planet header.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted ODF basename",
+      "units": "unknown",
+      "caveats": "Creation time, attachment/placement, capture replacement and absent-definition fallbacks are unknown.",
+      "follow_up": "Recover when the planet creates or replaces its race/era command post.",
+      "sources": [
+        {
+          "source": "odf/stations/planet.odf",
+          "line": 53,
+          "reason": "Header explicitly describes command-post variants by race and era."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "leftenginehitchance",
+      "meaning": "Assigns the left facing hit-chance weight for the engine subsystem when attacks select a target system.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown scale",
+      "caveats": "Craft defaults use hull=100 and other systems=0, while station defaults use 0.2 for every system; these incompatible apparent scales prevent interpreting values as percentages or probabilities.",
+      "follow_up": "Recover facing-angle boundaries, weight normalization (100 versus .2), and behavior for missing/disabled subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 96,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 77,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "lefthullhitchance",
+      "meaning": "Assigns the left facing hit-chance weight for the hull subsystem when attacks select a target system.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown scale",
+      "caveats": "Craft defaults use hull=100 and other systems=0, while station defaults use 0.2 for every system; these incompatible apparent scales prevent interpreting values as percentages or probabilities.",
+      "follow_up": "Recover facing-angle boundaries, weight normalization (100 versus .2), and behavior for missing/disabled subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 94,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 75,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "leftsensorhitchance",
+      "meaning": "Assigns the left facing hit-chance weight for the sensor subsystem when attacks select a target system.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown scale",
+      "caveats": "Craft defaults use hull=100 and other systems=0, while station defaults use 0.2 for every system; these incompatible apparent scales prevent interpreting values as percentages or probabilities.",
+      "follow_up": "Recover facing-angle boundaries, weight normalization (100 versus .2), and behavior for missing/disabled subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 97,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 78,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "leftshieldhitchance",
+      "meaning": "Assigns the left facing hit-chance weight for the shield subsystem when attacks select a target system.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown scale",
+      "caveats": "Craft defaults use hull=100 and other systems=0, while station defaults use 0.2 for every system; these incompatible apparent scales prevent interpreting values as percentages or probabilities.",
+      "follow_up": "Recover facing-angle boundaries, weight normalization (100 versus .2), and behavior for missing/disabled subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 95,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 76,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "leftweaponhitchance",
+      "meaning": "Assigns the left facing hit-chance weight for the weapon subsystem when attacks select a target system.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown scale",
+      "caveats": "Craft defaults use hull=100 and other systems=0, while station defaults use 0.2 for every system; these incompatible apparent scales prevent interpreting values as percentages or probabilities.",
+      "follow_up": "Recover facing-angle boundaries, weight normalization (100 versus .2), and behavior for missing/disabled subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 98,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 79,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "logofilenames",
+      "meaning": "Lists logo texture names associated with the ship; exact placement and selection are unclear.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted ODF/asset name or space-separated quoted names",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred logoFileNames behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/F_Akira.odf",
+          "line": 55,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/ships/F_Akula.odf",
+          "line": 80,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "asset"
+    },
+    {
+      "family": "longrangesensorrangemultiplier",
+      "meaning": "Multiplies the ship’s sensor range during long-range sensor boost; triggering and base range are not stated.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred longRangeSensorRangeMultiplier behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/class_cruiser.odf",
+          "line": 6,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/class_science.odf",
+          "line": 6,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "loopfiresound",
+      "meaning": "Names the sound asset looped while a special weapon is firing; lifecycle is unverified.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred loopFireSound behavior?",
+      "sources": [
+        {
+          "source": "odf/special_weapons/long_range_sensor.odf",
+          "line": 40,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/weapons/Photons/f_tractor_bm.odf",
+          "line": 20,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "loopfiresoundgroup",
+      "meaning": "Names the sound group looped during sustained weapon fire; lifecycle is unverified.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred loopFireSoundGroup behavior?",
+      "sources": [
+        {
+          "source": "odf/weapons/Pulse/fed_pulse_main_lvl1.odf",
+          "line": 5,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/weapons/Pulse/fed_pulse_main_lvl2.odf",
+          "line": 5,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "maxcommandpoints",
+      "meaning": "Sets a maximum command-point amount for the planet/station; scope of cap is unclear.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "Point-system semantics and Fleet Ops runtime support are unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred maxCommandPoints behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/classd.odf",
+          "line": 8,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "maxphaserboost",
+      "meaning": "Sets the maximum accumulated phaser targeting boost value.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement maxPhaserBoost as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/F_Enterprise_E.odf",
+          "line": 67,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/F_Stargazer.odf",
+          "line": 78,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "maxphotonboost",
+      "meaning": "Sets the maximum accumulated photon targeting boost value.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement maxPhotonBoost as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/F_Enterprise_E.odf",
+          "line": 73,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/F_Stargazer.odf",
+          "line": 84,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "maxradiusofbeam",
+      "meaning": "Sets the beam’s end radius.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement maxRadiusOfBeam as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/special_weapons/long_range_sensoro.odf",
+          "line": 93,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/weapons/Phasers/B_phaser_ent_med_ord.odf",
+          "line": 16,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "maxupgradelevel",
+      "meaning": "Sets the owning object’s highest upgrade level, starting from zero. It is used by shipyards and planets; planet zero means no upgrade and one is annotated as one upgrade.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal with optional trailing semicolon",
+      "units": "level index from zero",
+      "caveats": "This is an object upgrade limit, not a universal shipyard-only field; level effects and failure handling remain unverified.",
+      "follow_up": "Recover the owning-object upgrade dispatch and how a new level changes available construction items.",
+      "sources": [
+        {
+          "source": "odf/stations/B_Ent_Shipyard.odf",
+          "line": 46,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/stations/classd.odf",
+          "line": 40,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "minradiusofbeam",
+      "meaning": "Sets the beam’s start radius.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement minRadiusOfBeam as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/special_weapons/long_range_sensoro.odf",
+          "line": 90,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/weapons/Phasers/B_phaser_ent_sml_ord.odf",
+          "line": 13,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "numberofaftphotons",
+      "meaning": "Sets how many aft-facing photon launchers or shots the ship has; the source does not distinguish launchers from volley count.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred numberOfAftPhotons behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/F_Akira.odf",
+          "line": 36,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/F_Nova.odf",
+          "line": 59,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "numberofforephotons",
+      "meaning": "Sets how many fore-facing photon launchers or shots the ship has; the source does not distinguish launchers from volley count.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred numberOfForePhotons behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/F_Galaxy_1.odf",
+          "line": 46,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/ships/K_Brel.odf",
+          "line": 34,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "numberofphaserbeams",
+      "meaning": "Sets how many phaser beams the ship can field; simultaneous fire and hardpoint pairing are unknown.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred numberOfPhaserBeams behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/K_D_3.odf",
+          "line": 31,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/K_D_7.odf",
+          "line": 33,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "numships",
+      "meaning": "Sets the number of ship rows in a default-fleet definition.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement numShips as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/default fleets/dev1_fleet.odf",
+          "line": 4,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/default fleets/dev2_fleet.odf",
+          "line": 4,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "schema"
+    },
+    {
+      "family": "ordnancecapacity",
+      "meaning": "Sets total photon ammunition capacity; -1 denotes unlimited capacity.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement ordnanceCapacity as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/weapons/Photons/Tuerell_tos_photon.odf",
+          "line": 13,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/weapons/Photons/f_constit_re_photon.odf",
+          "line": 7,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "particletrail",
+      "meaning": "Names the optional particle trail following the projectile.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement particleTrail as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/weapons/Photons/artillery_ord.odf",
+          "line": 40,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/weapons/Photons/rom_photon_ord_main.odf",
+          "line": 22,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "phaserboostmodifier",
+      "meaning": "Sets the rate at which phaser targeting reticles move toward lock.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement PhaserboostModifier as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/F_Enterprise.odf",
+          "line": 61,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/F_Enterprise_E.odf",
+          "line": 65,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "phaserdamage",
+      "meaning": "Modifies hit-point damage inflicted by this phaser per damage tick.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Recover base-versus-modifier composition, the damage tick interval, and shield/hull application order.",
+      "sources": [
+        {
+          "source": "odf/weapons/Phasers/kling_phaser_main.odf",
+          "line": 16,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/weapons/Phasers/phasero.odf",
+          "line": 93,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "phaserrechargerate",
+      "meaning": "Sets phaser recharge speed; examples 0.5 and 0.1666 are annotated as 2 and 6 seconds, but the conversion rule is not explicitly stated.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal with optional trailing semicolon",
+      "units": "unknown",
+      "caveats": "The 0.5 to 2-second and 0.1666 to 6-second examples suggest a reciprocal rate, but it is not independently verified.",
+      "follow_up": "Confirm whether interval equals 1/rate and determine the energy-ready versus firing-ready gates.",
+      "sources": [
+        {
+          "source": "odf/ships/K_BirdofPrey.odf",
+          "line": 66,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/K_D_7.odf",
+          "line": 136,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "phasertargetingboostthreshold",
+      "meaning": "Sets base chance to hit before phaser targeting boost accumulates.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement phaserTargetingBoostThreshold as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/F_Enterprise_E.odf",
+          "line": 66,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/F_Stargazer.odf",
+          "line": 77,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "phasertargetlocklossvalue",
+      "meaning": "Sets the boost/countdown value applied when phaser target lock is lost.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement phaserTargetLockLossValue as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/F_Enterprise_E.odf",
+          "line": 68,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/F_Stargazer.odf",
+          "line": 79,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "photonboostmodifier",
+      "meaning": "Sets the rate at which photon targeting reticles move toward lock.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement PhotonBoostModifier as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/F_Enterprise.odf",
+          "line": 67,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/F_Enterprise_E.odf",
+          "line": 71,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "photondamage",
+      "meaning": "Modifies the global photon damage configuration value.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Recover base-versus-modifier composition, the damage tick interval, and shield/hull application order.",
+      "sources": [
+        {
+          "source": "odf/weapons/Photons/kling_photon_main.odf",
+          "line": 17,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/weapons/Photons/rom_photon_main.odf",
+          "line": 13,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "photonhulldamagereduction",
+      "meaning": "Reduces photon damage to the hull, under the nearby Borg armour heading; activation and application formula are not documented.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "fraction",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred photonHullDamageReduction behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/k_tos_boss.odf",
+          "line": 43,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/B_tng_cube.odf",
+          "line": 20,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "photonrechargerate",
+      "meaning": "A station sets a photon recharge value, but there is no local comment explaining whether this is a period or rate.",
+      "basis": "unresolved",
+      "confidence": "low",
+      "value_form": "numeric literal with optional trailing semicolon",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL parser or gameplay call site reads photonRechargeRate, and what does its value control?",
+      "sources": [
+        {
+          "source": "odf/stations/F_TOS_starbase.odf",
+          "line": 162,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "ambiguous"
+    },
+    {
+      "family": "photonreplenishrate",
+      "meaning": "Sets the rate at which a ship restores photon ordnance; replenishment units are not documented.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Recover pool units/capacity, update time base, energy-distribution influence and the exact debit/replenishment formula.",
+      "sources": [
+        {
+          "source": "odf/ships/F_Defiant.odf",
+          "line": 28,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/F_Enterprise_A.odf",
+          "line": 37,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "photonspread",
+      "meaning": "Configures photon spread for a ship; the observed 0, 1, 2 and 4 values show this is not demonstrably Boolean.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred photonSpread behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/F_Miranda.odf",
+          "line": 34,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/ships/F_Oberth.odf",
+          "line": 36,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "photontargetingboostthreshold",
+      "meaning": "Sets base chance to hit before photon targeting boost accumulates.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement photonTargetingBoostThreshold as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/F_Enterprise_E.odf",
+          "line": 72,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/F_Stargazer.odf",
+          "line": 83,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "photontargetlocklossvalue",
+      "meaning": "Sets the boost/countdown value applied when photon target lock is lost.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement photonTargetLockLossValue as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/F_Enterprise_A.odf",
+          "line": 57,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/F_Enterprise_E.odf",
+          "line": 74,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "pivotradiusscale",
+      "meaning": "Scales the ship’s turning/pivot radius; reference geometry and effects are not documented.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred pivotRadiusScale behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/B_ent_sphere.odf",
+          "line": 117,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/ships/B_tng_cube.odf",
+          "line": 140,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "pointlightcolor",
+      "meaning": "Sets the colour of light cast by the sun/planet on other objects.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "three space-separated numeric components",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement pointLightColor as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/stations/sun.odf",
+          "line": 32,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "pointmax",
+      "meaning": "Caps the station/planet point amount; the resource called points is not further defined.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "Point-system semantics and Fleet Ops runtime support are unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred PointMax behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/K_TOS_mining.odf",
+          "line": 28,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/classd.odf",
+          "line": 103,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "pointrate",
+      "meaning": "Sets a rate of point production at this station/planet; point identity and time base are not documented.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "Point-system semantics and Fleet Ops runtime support are unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred PointRate behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/K_TOS_mining.odf",
+          "line": 27,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/stations/classd.odf",
+          "line": 102,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "pointtime",
+      "meaning": "Sets a numeric point-generation timing parameter beside PointRate and PointMax; its exact role and units are undocumented.",
+      "basis": "unresolved",
+      "confidence": "low",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "Point-system semantics and Fleet Ops runtime support are unverified.",
+      "follow_up": "Which STL parser or gameplay call site reads PointTime, and what does its value control?",
+      "sources": [
+        {
+          "source": "odf/stations/planet.odf",
+          "line": 24,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "ambiguous"
+    },
+    {
+      "family": "productionpointcost",
+      "meaning": "Sets the point cost of constructing the station; whether it consumes the same points as PointRate is not established.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "Point-system semantics and Fleet Ops runtime support are unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred productionPointCost behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/planet.odf",
+          "line": 7,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 144,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "rightenginehitchance",
+      "meaning": "Assigns the right facing hit-chance weight for the engine subsystem when attacks select a target system.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown scale",
+      "caveats": "Craft defaults use hull=100 and other systems=0, while station defaults use 0.2 for every system; these incompatible apparent scales prevent interpreting values as percentages or probabilities.",
+      "follow_up": "Recover facing-angle boundaries, weight normalization (100 versus .2), and behavior for missing/disabled subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 102,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 83,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "righthullhitchance",
+      "meaning": "Assigns the right facing hit-chance weight for the hull subsystem when attacks select a target system.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown scale",
+      "caveats": "Craft defaults use hull=100 and other systems=0, while station defaults use 0.2 for every system; these incompatible apparent scales prevent interpreting values as percentages or probabilities.",
+      "follow_up": "Recover facing-angle boundaries, weight normalization (100 versus .2), and behavior for missing/disabled subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 100,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 81,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "rightsensorhitchance",
+      "meaning": "Assigns the right facing hit-chance weight for the sensor subsystem when attacks select a target system.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown scale",
+      "caveats": "Craft defaults use hull=100 and other systems=0, while station defaults use 0.2 for every system; these incompatible apparent scales prevent interpreting values as percentages or probabilities.",
+      "follow_up": "Recover facing-angle boundaries, weight normalization (100 versus .2), and behavior for missing/disabled subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 103,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 84,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "rightshieldhitchance",
+      "meaning": "Assigns the right facing hit-chance weight for the shield subsystem when attacks select a target system.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown scale",
+      "caveats": "Craft defaults use hull=100 and other systems=0, while station defaults use 0.2 for every system; these incompatible apparent scales prevent interpreting values as percentages or probabilities.",
+      "follow_up": "Recover facing-angle boundaries, weight normalization (100 versus .2), and behavior for missing/disabled subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 101,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 82,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "rightweaponhitchance",
+      "meaning": "Assigns the right facing hit-chance weight for the weapon subsystem when attacks select a target system.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown scale",
+      "caveats": "Craft defaults use hull=100 and other systems=0, while station defaults use 0.2 for every system; these incompatible apparent scales prevent interpreting values as percentages or probabilities.",
+      "follow_up": "Recover facing-angle boundaries, weight normalization (100 versus .2), and behavior for missing/disabled subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 104,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 85,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "romulanentbuildlist",
+      "meaning": "Defines the Romulan ENT construction list for the owning planet. Each pair is an ODF name and the required planet upgrade level, numbered from zero; the trailing 0/1 is a level requirement, not an unexplained Boolean.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "repeated quoted pairs: \"ODF name\" \"required planet upgrade level\"",
+      "units": "zero-based planet upgrade level",
+      "caveats": "Selection by owner/era and inheritance are not traced; number parsing, duplicate items and invalid level handling remain unknown.",
+      "follow_up": "Recover owner/era selection, planet upgrade gating, duplicate handling and validation of required levels.",
+      "sources": [
+        {
+          "source": "odf/stations/classj.odf",
+          "line": 64,
+          "reason": "Shared build-list header explicitly defines ODF-name/required-planet-level pairs from zero."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "romulanentcommandpost",
+      "meaning": "Names the Romulan ENT command-post ODF associated with a planet, selected by race and era according to the planet header.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted ODF basename",
+      "units": "unknown",
+      "caveats": "Creation time, attachment/placement, capture replacement and absent-definition fallbacks are unknown.",
+      "follow_up": "Recover when the planet creates or replaces its race/era command post.",
+      "sources": [
+        {
+          "source": "odf/stations/planet.odf",
+          "line": 48,
+          "reason": "Header explicitly describes command-post variants by race and era."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "romulantngbuildlist",
+      "meaning": "Defines the Romulan TNG construction list for the owning planet. Each pair is an ODF name and the required planet upgrade level, numbered from zero; the trailing 0/1 is a level requirement, not an unexplained Boolean.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "repeated quoted pairs: \"ODF name\" \"required planet upgrade level\"",
+      "units": "zero-based planet upgrade level",
+      "caveats": "Selection by owner/era and inheritance are not traced; number parsing, duplicate items and invalid level handling remain unknown.",
+      "follow_up": "Recover owner/era selection, planet upgrade gating, duplicate handling and validation of required levels.",
+      "sources": [
+        {
+          "source": "odf/stations/classj.odf",
+          "line": 129,
+          "reason": "Shared build-list header explicitly defines ODF-name/required-planet-level pairs from zero."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "romulantngcommandpost",
+      "meaning": "Names the Romulan TNG command-post ODF associated with a planet, selected by race and era according to the planet header.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted ODF basename",
+      "units": "unknown",
+      "caveats": "Creation time, attachment/placement, capture replacement and absent-definition fallbacks are unknown.",
+      "follow_up": "Recover when the planet creates or replaces its race/era command post.",
+      "sources": [
+        {
+          "source": "odf/stations/planet.odf",
+          "line": 62,
+          "reason": "Header explicitly describes command-post variants by race and era."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "romulantosbuildlist",
+      "meaning": "Defines the Romulan TOS construction list for the owning planet. Each pair is an ODF name and the required planet upgrade level, numbered from zero; the trailing 0/1 is a level requirement, not an unexplained Boolean.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "repeated quoted pairs: \"ODF name\" \"required planet upgrade level\"",
+      "units": "zero-based planet upgrade level",
+      "caveats": "Selection by owner/era and inheritance are not traced; number parsing, duplicate items and invalid level handling remain unknown.",
+      "follow_up": "Recover owner/era selection, planet upgrade gating, duplicate handling and validation of required levels.",
+      "sources": [
+        {
+          "source": "odf/stations/classj.odf",
+          "line": 96,
+          "reason": "Shared build-list header explicitly defines ODF-name/required-planet-level pairs from zero."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "romulantoscommandpost",
+      "meaning": "Names the Romulan TOS command-post ODF associated with a planet, selected by race and era according to the planet header.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted ODF basename",
+      "units": "unknown",
+      "caveats": "Creation time, attachment/placement, capture replacement and absent-definition fallbacks are unknown.",
+      "follow_up": "Recover when the planet creates or replaces its race/era command post.",
+      "sources": [
+        {
+          "source": "odf/stations/planet.odf",
+          "line": 55,
+          "reason": "Header explicitly describes command-post variants by race and era."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "selfdestructdamage",
+      "meaning": "Sets damage applied when the craft blows up. Nearby comments describe the ship being destroyed, so this is not established as exclusive to a manually issued self-destruct order.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal with optional trailing semicolon",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement selfDestructDamage as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/F_Akira.odf",
+          "line": 137,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/F_Nova.odf",
+          "line": 161,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "selfdestructradius",
+      "meaning": "Sets the area affected by self-destruct damage; distance units and falloff are not stated.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal with optional trailing semicolon",
+      "units": "unknown",
+      "caveats": "The comment refers to ship destruction; manual self-destruct exclusivity, distance units and damage falloff are not established.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred selfDestructRadius behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/K_ENT_Raptor.odf",
+          "line": 132,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/K_Raptor.odf",
+          "line": 133,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "selfilluminating",
+      "meaning": "Enables self-illumination of the station material/planet; the material math is undocumented.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred selfIlluminating behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/bajor.odf",
+          "line": 7,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/classd_lava.odf",
+          "line": 12,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "sensorbreaknodes",
+      "meaning": "Names model nodes broken away with sensor subsystem destruction.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted ODF/asset name or space-separated quoted names",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Determine which damage/break event uses the list and whether it hides, detaches or selects model-node subtrees.",
+      "sources": [
+        {
+          "source": "odf/ships/F_Steamrunner.odf",
+          "line": 160,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/F_Fortunate.odf",
+          "line": 97,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "asset"
+    },
+    {
+      "family": "sensorbreakpoints",
+      "meaning": "Names a sensor breakup point; distinction from sensorBreakNodes is undocumented.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Determine which damage/break event uses the list and whether it hides, detaches or selects model-node subtrees.",
+      "sources": [
+        {
+          "source": "odf/ships/K_D_7.odf",
+          "line": 115,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "sensordestructioneffect",
+      "meaning": "Names the visual effect played when the sensor subsystem is destroyed.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred SensorDestructionEffect behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 166,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/ships/q_ent03_kcargo.odf",
+          "line": 54,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "sensordestructionhardpoints",
+      "meaning": "Lists model hardpoints where sensor subsystem destruction effects appear.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted ODF/asset name or space-separated quoted names",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred SensorDestructionHardpoints behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/B_ent_cube.odf",
+          "line": 119,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/B_ent_diamond.odf",
+          "line": 112,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "asset"
+    },
+    {
+      "family": "sensordestructionsize",
+      "meaning": "Scales the visual effect for sensor subsystem destruction.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred SensorDestructionSize behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/q_ent03_kcargo.odf",
+          "line": 55,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "sensormaxstatistic",
+      "meaning": "Sets the maximum sensor statistic or range at an upgraded level; the associated minimum is described as short-range sensor range.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred sensorMaxStatistic behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/station.odf",
+          "line": 55,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "sensorminhitpoints",
+      "meaning": "Sets minimum sensor subsystem hit points at a low upgrade level; the exact level rule is not in this assignment.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred sensorMinHitPoints behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/station.odf",
+          "line": 53,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "sensorminstatistic",
+      "meaning": "Sets the short-range sensor range at the minimum sensor statistic.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement sensorMinStatistic as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/stations/station.odf",
+          "line": 54,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "sensortargethardpoints",
+      "meaning": "Lists model hardpoints used when attacking or targeting the sensor subsystem.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted ODF/asset name or space-separated quoted names",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Determine how hardpoint lists select aim points and handle missing names, visibility changes and destroyed subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/B_ent_cube.odf",
+          "line": 113,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/B_ent_diamond.odf",
+          "line": 106,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "asset"
+    },
+    {
+      "family": "shadername",
+      "meaning": "Names the shader assigned to a planet; lookup and renderer compatibility are unknown.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred shadername behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/classd_lava.odf",
+          "line": 14,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "asset"
+    },
+    {
+      "family": "shieldbackproportion",
+      "meaning": "Sets the relative size/weight of the back shield facing compared with the other facings, according to the four-field group.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "relative proportion",
+      "caveats": "The phrase how big does not distinguish capacity allocation from angular coverage; independent facing pools and normalization are not established.",
+      "follow_up": "Determine whether proportions allocate shield capacity, define angular spans, or weight another facing property.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 61,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "ambiguous"
+    },
+    {
+      "family": "shieldbreaknodes",
+      "meaning": "Names model nodes broken away with shield subsystem destruction.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted ODF/asset name or space-separated quoted names",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Determine which damage/break event uses the list and whether it hides, detaches or selects model-node subtrees.",
+      "sources": [
+        {
+          "source": "odf/ships/F_Lakota.odf",
+          "line": 121,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "asset"
+    },
+    {
+      "family": "shieldcolor",
+      "meaning": "Sets the shield effect colour using normalized components from 0 to 1, according to the comment.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "three space-separated numeric components",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement shieldColor as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/K_Ravenous_borgboss.odf",
+          "line": 165,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/v_tuerell_d.odf",
+          "line": 119,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "shielddestructioneffect",
+      "meaning": "Names the visual effect played when the shield subsystem is destroyed.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred ShieldDestructionEffect behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 164,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "shielddestructionhardpoints",
+      "meaning": "Lists model hardpoints where shield subsystem destruction effects appear.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted ODF/asset name or space-separated quoted names",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred ShieldDestructionHardpoints behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/F_Akira.odf",
+          "line": 114,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/ships/F_Galaxy.odf",
+          "line": 132,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "asset"
+    },
+    {
+      "family": "shielddisabletime",
+      "meaning": "Sets how long the shields remain disabled.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "seconds",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement shieldDisableTime as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 55,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "shieldfrontproportion",
+      "meaning": "Sets the relative size/weight of the front shield facing compared with the other facings, according to the four-field group.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "relative proportion",
+      "caveats": "The phrase how big does not distinguish capacity allocation from angular coverage; independent facing pools and normalization are not established.",
+      "follow_up": "Determine whether proportions allocate shield capacity, define angular spans, or weight another facing property.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 60,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "ambiguous"
+    },
+    {
+      "family": "shieldgeneratorbreaknodes",
+      "meaning": "Names model nodes associated with shield-generator breakage; observed assignments include shield and engine/bridge node names, so the exact trigger and detached parts are unclear.",
+      "basis": "inferred",
+      "confidence": "low",
+      "value_form": "quoted ODF/asset name or space-separated quoted names",
+      "units": "unknown",
+      "caveats": "The listed nodes differ across craft and no comment defines whether this is subsystem damage, breakup, or a cosmetic link. Fleet Ops support is unverified.",
+      "follow_up": "Determine which damage/break event uses the list and whether it hides, detaches or selects model-node subtrees.",
+      "sources": [
+        {
+          "source": "odf/ships/K_Brel.odf",
+          "line": 112,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/ships/K_D_7.odf",
+          "line": 116,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "asset"
+    },
+    {
+      "family": "shieldleftproportion",
+      "meaning": "Sets the relative size/weight of the left shield facing compared with the other facings, according to the four-field group.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "relative proportion",
+      "caveats": "The phrase how big does not distinguish capacity allocation from angular coverage; independent facing pools and normalization are not established.",
+      "follow_up": "Determine whether proportions allocate shield capacity, define angular spans, or weight another facing property.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 63,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "ambiguous"
+    },
+    {
+      "family": "shieldmaxabsorption",
+      "meaning": "Sets the fraction of damage absorbed when shields are full.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "fraction",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement shieldMaxAbsorption as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 56,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 38,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "shieldmaxstatistic",
+      "meaning": "Sets total shield points at level 5.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement shieldMaxStatistic as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/stations/ent03_fed_station.odf",
+          "line": 97,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 35,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "shieldminabsorption",
+      "meaning": "Sets the fraction of damage absorbed when shields are low.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "fraction",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement shieldMinAbsorption as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 57,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 39,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "shieldminhitpoints",
+      "meaning": "Sets minimum shield subsystem hit points; the source groups it under level 1 and 5 values but does not explain interpolation.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred shieldMinHitPoints behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/ent03_fed_station.odf",
+          "line": 95,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 33,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "shieldminstatistic",
+      "meaning": "Sets total shield points at level 1.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement shieldMinStatistic as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/stations/ent03_fed_station.odf",
+          "line": 96,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 34,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "shieldrechargerate",
+      "meaning": "Sets how quickly shields repair or recharge; the time base is not stated.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement shieldRechargeRate as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/ships/class_science.odf",
+          "line": 73,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/v_surak.odf",
+          "line": 123,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "shieldrechargeratemodifier",
+      "meaning": "Sets a per-ship modifier for the shield recharge rate.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement shieldRechargeRateModifier as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/stations/F_TOS_command.odf",
+          "line": 17,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/F_Defiant.odf",
+          "line": 32,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "shieldrightproportion",
+      "meaning": "Sets the relative size/weight of the right shield facing compared with the other facings, according to the four-field group.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "relative proportion",
+      "caveats": "The phrase how big does not distinguish capacity allocation from angular coverage; independent facing pools and normalization are not established.",
+      "follow_up": "Determine whether proportions allocate shield capacity, define angular spans, or weight another facing property.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 62,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "ambiguous"
+    },
+    {
+      "family": "shieldtargethardpoints",
+      "meaning": "Lists model hardpoints used when attacking or targeting the shield subsystem.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted ODF/asset name or space-separated quoted names",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Determine how hardpoint lists select aim points and handle missing names, visibility changes and destroyed subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/F_Akira.odf",
+          "line": 108,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/ships/F_Galaxy.odf",
+          "line": 126,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "asset"
+    },
+    {
+      "family": "ship<N>",
+      "meaning": "Defines one numbered vessel in a default fleet. The authored row grammar is three quoted fields: class ODF, display name and label; an empty display-name string is used by dev1_fleet.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "three quoted strings: class ODF, display name, label",
+      "units": "unknown",
+      "caveats": "Label lookup, blank-name fallback, list gaps and spawning order are not recovered.",
+      "follow_up": "Recover fleet construction, name fallback and the purpose of the label field.",
+      "sources": [
+        {
+          "source": "odf/default fleets/dev1_fleet.odf",
+          "line": 8,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/default fleets/dev2_fleet.odf",
+          "line": 8,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "schema"
+    },
+    {
+      "family": "shipsize",
+      "meaning": "Sets a ship size category as an integer; gameplay effect and category boundaries are undocumented.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred shipSize behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/class_battleship.odf",
+          "line": 118,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/class_cruiser.odf",
+          "line": 126,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "showclass",
+      "meaning": "Names a GUI class string displayed for the ship, such as battleship or cruiser; the precise UI surface is unknown.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred showclass behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/class_cruiser.odf",
+          "line": 28,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/ships/class_destroyer.odf",
+          "line": 25,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "ui"
+    },
+    {
+      "family": "sparkseffectonhitcraft",
+      "meaning": "Names the sparks effect played when this weapon hits a target’s craft.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "No command-specific ODF comment found; meaning follows placement and naming.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred sparksEffectOnHitCraft behavior?",
+      "sources": [
+        {
+          "source": "odf/special_weapons/chainp.odf",
+          "line": 74,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/special_weapons/spacemine.odf",
+          "line": 12,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "sparkseffectonhitcraft_size",
+      "meaning": "Scales the sparks effect played on a craft hit; the reference asset size is unknown.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "scale",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred sparksEffectOnHitCraft_Size behavior?",
+      "sources": [
+        {
+          "source": "odf/special_weapons/chainp.odf",
+          "line": 75,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/special_weapons/spacemine.odf",
+          "line": 13,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "sparkseffectonhitshields",
+      "meaning": "Names the sparks effect played when this weapon hits a target’s shields.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "No command-specific ODF comment found; meaning follows placement and naming.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred sparksEffectOnHitShields behavior?",
+      "sources": [
+        {
+          "source": "odf/special_weapons/chainp.odf",
+          "line": 80,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "sparkseffectonhitshields_size",
+      "meaning": "Scales the sparks effect played on a shields hit; the reference asset size is unknown.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "scale",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred sparksEffectOnHitShields_Size behavior?",
+      "sources": [
+        {
+          "source": "odf/special_weapons/chainp.odf",
+          "line": 81,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "specialcooldowntimer",
+      "meaning": "Sets cooldown before a cloak or warp special ability may activate again.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "time units (seconds not expressly confirmed)",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Recover timer units, start/reset events, negative/zero sentinels and interaction with energy depletion.",
+      "sources": [
+        {
+          "source": "odf/special_weapons/gcloak.odf",
+          "line": 46,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/special_weapons/gcloak_permanent.odf",
+          "line": 46,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "specialdurationtimer",
+      "meaning": "Sets how long a cloak or warp special ability remains active; -1 appears for permanent cloak, but sentinel handling is unverified.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "time units (seconds not expressly confirmed)",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Recover timer units, start/reset events, negative/zero sentinels and interaction with energy depletion.",
+      "sources": [
+        {
+          "source": "odf/special_weapons/gcloak.odf",
+          "line": 43,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/special_weapons/gcloak_permanent.odf",
+          "line": 43,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "specialeffectonhit",
+      "meaning": "Names a cosmetic particle effect played when the weapon hits craft.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement specialEffectOnHit as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/weapons/Pulse/fed_tng_pulse.odf",
+          "line": 50,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/weapons/Pulse/pulseo.odf",
+          "line": 49,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "specificcaptain",
+      "meaning": "Names the captain voice/persona for the ship, such as Kirk or Picard; how this interacts with HasCaptain is not documented.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred specificCaptain behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/F_Constitution.odf",
+          "line": 205,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/F_Defiant.odf",
+          "line": 151,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "specular",
+      "meaning": "Sets a station material specular RGB colour; component scaling and lighting calculation are unknown.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "three space-separated numeric components",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred specular behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/bajor.odf",
+          "line": 13,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "specularpower",
+      "meaning": "Sets the material specular highlight exponent or strength; exact shader semantics are unknown.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred specularPower behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/bajor.odf",
+          "line": 14,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "speculartexturename",
+      "meaning": "Names the station/planet specular texture asset; texture lookup rules are unverified.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred specularTextureName behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/bajor.odf",
+          "line": 10,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/classJb.odf",
+          "line": 8,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "asset"
+    },
+    {
+      "family": "startintensity",
+      "meaning": "Sets the initial phaser beam intensity before it reaches full intensity.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Does the STL runtime implement startIntensity as the authored comment describes, and does Fleet Ops preserve it?",
+      "sources": [
+        {
+          "source": "odf/weapons/Phasers/phasero.odf",
+          "line": 78,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "tng",
+      "meaning": "Lists Next Generation-era ship types available to choose in Skirmish/MP for the faction. The source calls these selectable ship types, rather than a preselected spawn fleet.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "space-separated quoted ODF basenames",
+      "units": "unknown",
+      "caveats": "Selection UI filtering, duplicates, starting availability and era lookup remain unverified.",
+      "follow_up": "Trace era/faction ship selection and distinguish selection lists from shipN spawn fleets.",
+      "sources": [
+        {
+          "source": "odf/default fleets/borg_fleet.odf",
+          "line": 17,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/default fleets/federation_fleet.odf",
+          "line": 17,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "ui"
+    },
+    {
+      "family": "tos",
+      "meaning": "Lists Original Series-era ship types available to choose in Skirmish/MP for the faction. The source calls these selectable ship types, rather than a preselected spawn fleet.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "space-separated quoted ODF basenames",
+      "units": "unknown",
+      "caveats": "Selection UI filtering, duplicates, starting availability and era lookup remain unverified.",
+      "follow_up": "Trace era/faction ship selection and distinguish selection lists from shipN spawn fleets.",
+      "sources": [
+        {
+          "source": "odf/default fleets/borg_fleet.odf",
+          "line": 12,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/default fleets/federation_fleet.odf",
+          "line": 11,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "ui"
+    },
+    {
+      "family": "trailhardpoints",
+      "meaning": "Lists model hardpoints used to attach ship trails; trail effect selection is not shown.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted ODF/asset name or space-separated quoted names",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred trailHardpoints behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/B_tng_cube.odf",
+          "line": 104,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "asset"
+    },
+    {
+      "family": "upgrade<N>",
+      "meaning": "Defines a numbered craft upgrade instruction. Authored grammar: upgrade database key, UI string key, operation (add/mult/toggle/special), cost and allowMultiple; add/mult append systemName and upgrade_value.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "quoted instruction: key UI-key operation cost allowMultiple [systemName upgrade_value]",
+      "units": "mixed identifiers, cost amount, repeatability flag and operation-dependent value",
+      "caveats": "The documented key should be unique, but repeated hullSystemUpgrade rows exist. Cost currency, multiplicative composition (e.g. 0.3), flag enforcement and toggle/special operands remain unknown.",
+      "follow_up": "Recover duplicate-key handling, cost currency, allowMultiple enforcement and the four operation formulas.",
+      "sources": [
+        {
+          "source": "odf/ships/K_Brel_borg.odf",
+          "line": 41,
+          "reason": "Full upgrade row grammar and unique-key requirement are documented in the immediately preceding block."
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "warpsuppressionradiusmultiplier",
+      "meaning": "Sets a numeric modifier for warp-suppression radius on sensor/turret ODFs; the base radius and activation mechanism are unverified.",
+      "basis": "unresolved",
+      "confidence": "low",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL parser or gameplay call site reads warpSuppressionRadiusMultiplier, and what does its value control?",
+      "sources": [
+        {
+          "source": "odf/stations/sensor.odf",
+          "line": 9,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/stations/turret.odf",
+          "line": 3,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "ambiguous"
+    },
+    {
+      "family": "weaponbreaknodes",
+      "meaning": "Names model nodes broken away with weapon subsystem destruction.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted ODF/asset name or space-separated quoted names",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Determine which damage/break event uses the list and whether it hides, detaches or selects model-node subtrees.",
+      "sources": [
+        {
+          "source": "odf/ships/F_Akira.odf",
+          "line": 134,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/ships/F_Akula.odf",
+          "line": 155,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "asset"
+    },
+    {
+      "family": "weapondamage",
+      "meaning": "Sets damage per tick for a successful phaser hit; other weapon classes may interpret this field differently.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Recover base-versus-modifier composition, the damage tick interval, and shield/hull application order.",
+      "sources": [
+        {
+          "source": "odf/weapons/Phasers/fed_ent_phaser_1beam.odf",
+          "line": 11,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/weapons/Phasers/fed_ent_phaser_3beam.odf",
+          "line": 11,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "weapondestructioneffect",
+      "meaning": "Names the visual effect played when the weapon subsystem is destroyed.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred WeaponDestructionEffect behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/q_ent03_kcargo.odf",
+          "line": 50,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 167,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "weapondestructionhardpoints",
+      "meaning": "Lists model hardpoints where weapon subsystem destruction effects appear.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted ODF/asset name or space-separated quoted names",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred WeaponDestructionHardpoints behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/F_Galaxy.odf",
+          "line": 136,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/F_Nova.odf",
+          "line": 138,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "asset"
+    },
+    {
+      "family": "weapondestructionsize",
+      "meaning": "Scales the visual effect for weapon subsystem destruction.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred WeaponDestructionSize behavior?",
+      "sources": [
+        {
+          "source": "odf/ships/q_ent03_kcargo.odf",
+          "line": 51,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "weaponeffect",
+      "meaning": "An empty weapon-effect value is present; no visible effect or fallback semantics can be established.",
+      "basis": "unresolved",
+      "confidence": "low",
+      "value_form": "quoted string",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL parser or gameplay call site reads weaponEffect, and what does its value control?",
+      "sources": [
+        {
+          "source": "odf/weapons/Pulse/pulseo.odf",
+          "line": 51,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "weaponeffect_size",
+      "meaning": "Sets a numeric scale for weaponEffect, but the paired effect name is empty in the sampled ODF.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred weaponEffect_size behavior?",
+      "sources": [
+        {
+          "source": "odf/weapons/Pulse/pulseo.odf",
+          "line": 52,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "presentation"
+    },
+    {
+      "family": "weaponmaxhitpoints",
+      "meaning": "Sets maximum weapon subsystem hit points for a station; level mapping is not documented.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal with optional trailing semicolon",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred weaponMaxHitPoints behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/F_TOS_starbase.odf",
+          "line": 119,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "weaponminhitpoints",
+      "meaning": "Sets minimum weapon subsystem hit points for a station; level mapping is not documented.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "numeric literal with optional trailing semicolon",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred weaponMinHitPoints behavior?",
+      "sources": [
+        {
+          "source": "odf/stations/F_TOS_starbase.odf",
+          "line": 118,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "weaponpooldiminishrate",
+      "meaning": "Sets how slowly the ship’s weapons energy pool diminishes.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Recover pool units/capacity, update time base, energy-distribution influence and the exact debit/replenishment formula.",
+      "sources": [
+        {
+          "source": "odf/ships/F_Stargazer.odf",
+          "line": 61,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/K_Brel.odf",
+          "line": 19,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "weaponsenergyreplenishrate",
+      "meaning": "Sets how quickly the weapons energy pool is restored.",
+      "basis": "documented",
+      "confidence": "high",
+      "value_form": "numeric literal",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Recover pool units/capacity, update time base, energy-distribution influence and the exact debit/replenishment formula.",
+      "sources": [
+        {
+          "source": "odf/ships/F_Apollo.odf",
+          "line": 18,
+          "reason": "assignment and nearby author comment"
+        },
+        {
+          "source": "odf/ships/F_Oberth.odf",
+          "line": 19,
+          "reason": "assignment and nearby author comment"
+        }
+      ],
+      "role": "gameplay"
+    },
+    {
+      "family": "weapontargethardpoints",
+      "meaning": "Lists model hardpoints used when attacking or targeting the weapon subsystem.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "quoted ODF/asset name or space-separated quoted names",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Determine how hardpoint lists select aim points and handle missing names, visibility changes and destroyed subsystems.",
+      "sources": [
+        {
+          "source": "odf/ships/F_Akira.odf",
+          "line": 107,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/ships/F_Nova.odf",
+          "line": 132,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "asset"
+    },
+    {
+      "family": "weapontype",
+      "meaning": "Classifies the special weapon as phaser, photon, or special; dispatch behavior is unverified.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "value_form": "observed ODF value: 'special'",
+      "units": "unknown",
+      "caveats": "ODF-authored meaning only; Fleet Ops compatibility and live behavior remain unverified.",
+      "follow_up": "Which STL runtime parser or call site confirms the inferred weaponType behavior?",
+      "sources": [
+        {
+          "source": "odf/weapons/Photons/f_tractor_bm.odf",
+          "line": 9,
+          "reason": "observed assignment and local context"
+        },
+        {
+          "source": "odf/weapons/Photons/photon.odf",
+          "line": 9,
+          "reason": "observed assignment and local context"
+        }
+      ],
+      "role": "gameplay"
+    }
+  ]
+}

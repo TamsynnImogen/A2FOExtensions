@@ -1,0 +1,51 @@
+[
+  {
+    "source": "/home/tamsynn/.var/app/ru.linux_gaming.PortProton/PortProton.log",
+    "snapshot": "PortProton.log",
+    "size": 137880,
+    "mtime_utc": "2026-11-01T20:10:43.466630+00:00",
+    "sha256": "21bb60c9599b657a2f2b7025b5065281e8f79d51a88ebba5298899317f2818eb"
+  },
+  {
+    "source": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.log",
+    "snapshot": "A2FOExtensions.log",
+    "size": 152011,
+    "mtime_utc": "2026-11-01T20:10:40.831650+00:00",
+    "sha256": "aa97e02f3590da2315635733a58b7c41404d07f66d37decb6ee1024c26d86098"
+  },
+  {
+    "source": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FORenderer.log",
+    "snapshot": "A2FORenderer.log",
+    "size": 183928,
+    "mtime_utc": "2026-11-01T20:07:18.334521+00:00",
+    "sha256": "d51715f0c7ace3a90d174738fe78879e0eb03e075228c86a586fbbd1275d1e40"
+  },
+  {
+    "source": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOStartupProxy.log",
+    "snapshot": "A2FOStartupProxy.log",
+    "size": 286436,
+    "mtime_utc": "2026-11-01T20:07:18.077524+00:00",
+    "sha256": "65d2c8323558deb5ebaff3081f1a7ed008f2a060ab078ae414d21650b3c2302d"
+  },
+  {
+    "source": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/FO4 Nexus/info.ini",
+    "snapshot": "installed-info.ini",
+    "size": 2078,
+    "mtime_utc": "2026-11-01T19:37:07.110078+00:00",
+    "sha256": "4c3188fe7c81b6d994d3198b95dc3bea0a555050f44b58561b98107a9cf73a20"
+  },
+  {
+    "source": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/FO4 Nexus/misc/gui_interface_misc.cfg",
+    "snapshot": "installed-gui.cfg",
+    "size": 34789,
+    "mtime_utc": "2026-11-01T19:37:07.111106+00:00",
+    "sha256": "52a413991f325acdb3f6675785b356616e1160c28a351ac338b29a1fe0a00529"
+  },
+  {
+    "source": "/tmp/codex-clipboard-pKAeF7.png",
+    "snapshot": "mediterranean-working.png",
+    "size": 1264400,
+    "mtime_utc": "2026-11-01T20:10:56.740532+00:00",
+    "sha256": "0c8afa0f2a236cbcd86ec9e7a7e67add14fc1d36f5871b21e25e7df4f02d6eb8"
+  }
+]

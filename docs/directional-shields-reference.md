@@ -2,9 +2,13 @@
 
 Checked against the local source on 23 September 2026.
 
-Directional shields provide four independent facings: forward, aft, port and
-starboard. This reference collects the gameplay, interface, editor and build
-commands in one place.
+Directional shields support multiple horizontal shield layouts. Mode `1` is
+the original four-way forward/aft/port/starboard layout. Mode `2` is a
+tri-forward layout with equal 120-degree forward/port/starboard sectors. Mode
+`3` is the reversed tri-rear layout with equal 120-degree aft/port/starboard
+sectors. This
+reference collects the gameplay, interface, editor and build commands in one
+place.
 
 Related documentation:
 
@@ -56,7 +60,7 @@ starboardShieldStrength = 150
 
 | Command | Meaning |
 | --- | --- |
-| `directionalShields` | Explicit activation gate; omitted or disabled means native shields. |
+| `directionalShields` | `0`/omitted = native, `1` = quad, `2` = tri-forward, `3` = tri-rear. Modes `4..5` are reserved for hemisphere layouts. |
 | `forwardShieldStrength` | Maximum forward capacity. |
 | `aftShieldStrength` | Maximum aft capacity. |
 | `portShieldStrength` | Maximum port capacity. |
@@ -65,19 +69,24 @@ starboardShieldStrength = 150
 
 Rules:
 
-- All four strengths must be finite and greater than zero.
+- Only facings active in the selected layout participate. Mode `2` uses
+  forward, port and starboard with aft stored as `0/0`. Mode `3` uses aft,
+  port and starboard with forward stored as `0/0`.
+- A positive active-facing strength is explicit. An omitted strength or `0`
+  is automatic and receives an equal share of `maxShields` left after the
+  explicit strengths are subtracted.
+- If one or more active strengths are automatic, `maxShields` must be present
+  and positive.
+- If every active strength is explicit, their sum must match an explicit
+  `maxShields`; when `maxShields` is absent their sum establishes the native
+  shield maximum for A1-style ODFs.
 - Strength commands alone do not activate the feature.
-- An explicit or inherited `maxShields` must be positive and match the four
-  strengths' sum. The comparison tolerance is the greater of `0.01` or `0.01%`
-  of the larger total.
-- If `maxShields` is entirely absent, the four strengths establish the native
-  shield maximum. This supports A1-style ODFs.
 - Invalid configurations are rejected and retain native shield behaviour.
 - Field names are case-insensitive and use normal ODF inheritance.
 - Numeric strengths accept decimals, scientific notation and an optional `f`
   suffix.
-- The activation parser also accepts positive numbers or `true`, `yes`, `on`.
-  Disable with `0`, `false`, `no`, `off`. `enabled` is not accepted.
+- `true`, `yes`, or `on` remain aliases for quad mode (`1`) for compatibility.
+  Disable with `0`, `false`, `no`, or `off`.
 
 Native `maxHealth` and `healthRate` remain the hull capacity and repair rate.
 Native `shieldRate` supplies shield recharge; there are no separate per-facing
@@ -86,8 +95,12 @@ recharge commands.
 ## Combat and recharge behaviour
 
 The attacker's position in the target's local horizontal axes selects the
-facing. Exact diagonal boundaries belong to forward or aft. An empty facing
-exposes the hull even while another facing remains charged.
+facing. Quad mode retains its existing dominant-axis boundaries. Tri-forward
+uses three equal 120-degree sectors centred on forward, port and starboard;
+port and starboard meet at the exact rear seam. Tri-rear mirrors that layout:
+the sectors are centred on aft, port and starboard, and port/starboard meet at
+the exact forward seam. An empty active facing exposes the hull even while
+another facing remains charged.
 
 Recharge is shared evenly between depleted facings, redistributing unused
 recharge when a facing fills. Ownerless or otherwise unresolved damage follows
@@ -103,7 +116,7 @@ feature remains independent.
 These optional commands are handled by `A2FOCraftIdentity`:
 
 ```cpp
-// Segment rectangles within the logical 128-by-128 graphic.
+// Explicit ODF rectangles use native UI units from the graphic origin.
 // Format: x y width height
 
 forwardShieldPos = 26 0 76 20
@@ -114,8 +127,13 @@ starboardShieldPos = 108 26 20 76
 directionalShieldValueDisplayMode = 2
 ```
 
-The rectangle values above are the defaults. Each command inherits
-independently; width and height must be positive.
+The rectangle values above are the defaults and form a valid layout at
+128-by-128. Each explicit ODF rectangle is used in native UI units relative
+to the directional graphic origin; it is not normalized or scaled with the
+graphic dimensions, and its coordinates and dimensions are not limited to
+128. Commands inherit independently. An omitted segment uses its default
+128-unit logical layout scaled to the configured graphic area. A GUI
+per-facing `Area` override takes precedence over the ODF rectangle.
 
 | `directionalShieldValueDisplayMode` | Result |
 | --- | --- |
@@ -193,9 +211,11 @@ Rectangles are `x y width height`; colours are RGB components from `0` to `1`.
 | 25% or below | Critical |
 | Exactly zero, arc display mode `2` | Black |
 
-Missing positions use automatic fallbacks. The current renderer scales the
-four segments with the graphic rectangle, so `128 128` is the baseline rather
-than a mandatory size.
+Missing positions use automatic fallbacks. The default segments use a
+128-by-128 logical layout scaled to the configured graphic area. Explicit ODF
+rectangles retain their native UI-unit values relative to the graphic origin;
+they are not scaled or constrained by the graphic dimensions. GUI per-facing
+`Area` overrides take precedence over the ODF rectangles.
 
 ## Independent medium and tall layouts
 

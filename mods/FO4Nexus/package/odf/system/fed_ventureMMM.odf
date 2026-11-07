@@ -1,0 +1,141 @@
+// --- File identity and inheritance ---
+basename = "fed_venture"
+originalclass = "fed_venture"
+
+// --- Display and localization ---
+unitname = "Venture Class"
+tooltip = "Venture Class [Nexus]"
+verbosetooltip = "AUTOTOOLTIP-fed_ventureMMM.odf"
+race = "unitedfederation"
+possiblecraftnames = "USS Aldrin" "USS Andes" "USS Asher" "USS Avon" "USS Bartlett" "USS Bullseye" "USS Celebi" "USS Centauri" "USS Croft" "USS Cumberland" "USS Dart" "USS De Smet" "USS Explorer" "USS Fadland" "USS Flycatcher" "USS Frege" "USS Ghost" "USS Goldfield" "USS Gydan" "USS Haddock" "USS Halibut" "USS Hampton" "USS Harpoon" "USS Hobbes" "USS Impulse" "USS Ireland" "USS Iris" "USS Jallao" "USS Lamprey" "USS Laurent" "USS Lee Spence" "USS Makalu" "USS Neon" "USS Neutron" "USS Pleiade" "USS Rasmussen" "USS Rayleigh" "USS Runner" "USS Skygazer" "USS Snapper" "USS Sophia" "USS Soyuz" "USS Sparrow" "USS Spear" "USS Spectre" "USS Sverdrup" "USS Ural" "USS Verutum" "USS Wolverine" "USS Yangtze"
+hotkeylabel = "GAME-HOTKEY-S"
+shipclass = "scout"
+
+// --- Construction and costs ---
+buildtime = 64
+officercost = 0
+crewcost = 10
+dilithiumcost = 167
+latinumcost = 70
+biomattercost = 6
+
+// --- Hull, shields, crew, and energy ---
+maxhealth = 51
+curhealth = 51
+healthrate = 0.079
+maxshields = 172
+curshields = 172
+shieldrate = 0.279
+maxspecialenergy = 37
+specialenergyrate = 0.000
+specialenergydisplaymode = 1
+shielddelay = 2
+
+// --- Subsystems, damage, and repair ---
+shieldgeneratorhitpoints = 13
+engineshitpoints = 0
+weaponshitpoints = 13
+lifesupporthitpoints = 13
+sensorshitpoints = 13
+enginesrepairtime = 2.0
+lifesupportrepairtime = 0.5
+weaponsrepairtime = 2.0
+shieldgeneratorrepairtime = 2.0
+sensorsrepairtime = 2.0
+enginescrewloss = 10.0f
+lifesupportcrewloss = 10.0f
+weaponscrewloss = 10.0f
+shieldgeneratorcrewloss = 10.0f
+sensorscrewloss = 5.0f
+lifesupportloss = 2
+engineshitpercent = 7.0f
+lifesupporthitpercent = 7.0f
+weaponshitpercent = 7.0f
+shieldgeneratorhitpercent = 1.0f
+sensorshitpercent = 0
+crewhitpercent = 7.0f
+hullhitpercent = 71.0f
+
+// --- Weapons and ordnance ---
+weapon1 = "fed_progscanC"
+weapon2 = "fed_progscanD"
+maxextraweapons = 10
+
+// --- Accuracy, hardpoints, and targeting ---
+weaponhardpoints1 = "root"
+weaponhardpoints2 = "root"
+weapon1iconpos = 85	50
+hulltargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06"
+lifesupporttargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06"
+weaponstargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06"
+shieldgeneratortargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06"
+sensorstargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06"
+enginestargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06"
+criticaltargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06"
+extraweaponhardpoints = "root"
+turntofire = 0
+
+// --- Artificial intelligence and tactical behavior ---
+attackpower = 0.200
+intrinsicvalue = 0.200
+avoidanceclass = 1
+shiptype = "S"
+rangescan = 2250
+damagedscan = 50.0
+ainame = "CraftProcess"
+alert = 1
+can_explore = 1
+combat = 0
+scout = 1
+
+// --- Interface and controls ---
+show_sw_autonomy = 1
+show_movement_autonomy = 1
+overlaysod = "effect_progscan"
+preferredselect = 0
+
+// --- Audio and events ---
+eventselect = "Basic1ScoutSelect"
+eventacknowledge = "Basic1ScoutAcknowledge"
+eventattack = "Basic1ScoutAttack"
+eventstop = "Basic1ScoutStop"
+eventmove = "Basic1ScoutMove"
+eventrepair = "Basic1ScoutRepair"
+eventRepairCombat = "Basic1ScoutRepair"
+eventMoveFleeCombat = "Basic1ScoutMove"
+
+// --- Movement and physics ---
+physicsfile = "smooth_physics_20.odf"
+trekphysicsfile = "smooth_physics_20.odf"
+weldingradius = 0.25
+
+// --- Progression and variants ---
+worthxp = 16
+
+// --- Resource handling and recycling ---
+recycledilithium = 50
+recycletime = 35
+recyclelatinum = 21
+recyclebiomatter = 2
+
+// --- Art, animation, and effects ---
+fireball = "x_small_explosion"
+shieldhit = "shield_fed_hitS"
+shieldhitcritical = "shield_fed_hitcritS"
+shielddown = "shield_fed_down"
+
+// --- Capabilities and object behavior ---
+ship = 1
+has_hitpoints = 1
+has_crew = 1
+transporter = 1
+can_sandd = 0
+buildablebyownerraceonly = 1
+canattack = 0
+
+// --- Runtime class ---
+classlabel = "craft"
+
+// FO4Nexus overlay
+possibleCaptainNames = "Nadia Clarke" "Taylor Arden" "Avery Morgan" "Jordan Vale" "Leah Winters" "Morgan Hale" "Casey Rowan" "Nadia Clarke" "Leah Winters" "Robin Shaw" "Riley Quinn" "Avery Morgan" "Taylor Arden" "Alex Mercer" "Dara Bennett" "Morgan Hale" "Avery Morgan" "Riley Quinn" "Samira Ellis" "Alex Mercer" "Avery Morgan" "Casey Rowan" "Taylor Arden" "Dara Bennett" "Jordan Vale" "Alex Mercer" "Avery Morgan" "Robin Shaw" "Alex Mercer" "Avery Morgan" "Morgan Hale" "Taylor Arden" "Casey Rowan" "Samira Ellis" "Alex Mercer" "Casey Rowan" "Nadia Clarke" "Avery Morgan" "Jordan Vale" "Morgan Hale" "Leah Winters" "Avery Morgan" "Jordan Vale" "Nadia Clarke" "Nadia Clarke" "Avery Morgan" "Taylor Arden" "Alex Mercer" "Dara Bennett" "Nadia Clarke"
+possibleCraftRegistry = "NCC-942361966" "NCC-447085449" "NCC-248446443" "NCC-338879053" "NCC-236164615" "NCC-553567369" "NCC-761853465" "NCC-715980443" "NCC-265286693" "NCC-279195404" "NCC-428194974" "NCC-852421637" "NCC-420742113" "NCC-452479583" "NCC-429230324" "NCC-920623312" "NCC-565434911" "NCC-152430904" "NCC-251619508" "NCC-379245905" "NCC-707644640" "NCC-873435011" "NCC-633770991" "NCC-700957370" "NCC-450155460" "NCC-455527797" "NCC-745964806" "NCC-837662473" "NCC-710689265" "NCC-551369796" "NCC-710100079" "NCC-815503421" "NCC-108843809" "NCC-029080159" "NCC-744123607" "NCC-393531869" "NCC-161265947" "NCC-165072720" "NCC-335243457" "NCC-200366902" "NCC-532188476" "NCC-207666036" "NCC-928252263" "NCC-690641714" "NCC-991759422" "NCC-317173670" "NCC-505883337" "NCC-281904176" "NCC-408830288" "NCC-254252542"

@@ -1,0 +1,43 @@
+{
+  "status": "deployed; manual startup/menu/gameplay acceptance pending",
+  "build_id": "20261015-graphics-options-restored-1",
+  "source": "/home/tamsynn/A2FOHookExtensions",
+  "data_root": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data",
+  "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/graphics-roots-20261015-105922",
+  "artifacts": [
+    {
+      "file": "A2FOExtensions.dll",
+      "package": "/home/tamsynn/A2FOHookExtensions/dist/A2FOExtensions-graphics-roots-20261015/A2FOExtensions.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.dll",
+      "sha256": "0ae18bd3d75850dae53d6cdc5e6b4e7d18aa42307997da68e853f588b245fd37",
+      "previous_sha256": "94754f2225e2eb2122c890f2803930b6e891cd159c4891f01ce4008a4c6f7ac8"
+    },
+    {
+      "file": "modules/A2FOCollectiveXP.dll",
+      "package": "/home/tamsynn/A2FOHookExtensions/dist/A2FOExtensions-graphics-roots-20261015/modules/A2FOCollectiveXP.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOCollectiveXP.dll",
+      "sha256": "5021089cf2574265f58af48cbdac7dc2fe064ac5cd746091c4e30e38c746ed35",
+      "previous_sha256": "f8a50701b6e2cd11e75f24fd449625f0b622b5c39ec760519761bab8202fcffd"
+    },
+    {
+      "file": "A2FOArmadaProfiles.txt",
+      "package": "/home/tamsynn/A2FOHookExtensions/dist/A2FOExtensions-graphics-roots-20261015/A2FOArmadaProfiles.txt",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOArmadaProfiles.txt",
+      "sha256": "08ffa42a487354a7959fa5d4b184eb8120b331d2bca62284ac59f0da1cb52dac",
+      "previous_sha256": "a9cd3788f7498200f197f31aaaa55014ff8e32d12f9dc658fed35f002c2527b7"
+    }
+  ],
+  "engine_sha256": "817b1ddb9876cfb9c5d781b42d2513de48fef9cbdbc408aa43c878c573581a18",
+  "fleetops_sha256": "3fd18eeee4201a9a1297ac26b3eb88f78c5f72e8c55a62c25179f1d4932e4c11",
+  "checks": {
+    "graphics": "original, clean, new DLL signatures and both layout fixtures PASS",
+    "identity": "28 mapped-image checks plus capability/malformed-memory checks PASS",
+    "station_rotation": "new engine PASS; zero extension hook/patch requests",
+    "collective_xp": "new binary pair positive preflight and mutated award rejection PASS",
+    "dll_load": "core and Collective XP load/exports PASS",
+    "manual_gameplay": "not run",
+    "deployed_native_rotation": "PASS against installed engine/profile; no hook/patch requests",
+    "deployed_collective_xp": "PASS against installed engine/DLL/profile; mutated award rejected"
+  },
+  "pending_opengl": "Separate Windows wrapper location/package requested; absent from installed tree and retained renderer source history."
+}

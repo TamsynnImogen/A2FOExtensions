@@ -1,0 +1,33 @@
+// A movable Craft, deliberately without the Embryo's evolver/tug behaviour.
+#include "craft.odf"
+
+classLabel = "craft"
+race = "species8472"
+baseName = "8472_active"
+scaleSOD = 1.0
+animation = 2
+physicsFile = "sconstphys.odf"
+shipClass = "construction"
+shipType = "N"
+unitName = "Genetic Seed"
+tooltip = "Genetic Seed"
+verboseTooltip = "Travels automatically from the Mother to its chosen breeder. Destroying it before arrival releases that breeder's choice."
+maxHealth = 150
+shieldGeneratorHitPoints = 110
+enginesHitPoints = 60
+weaponsHitPoints = 40
+lifeSupportHitPoints = 80
+sensorsHitPoints = 60
+shieldRate = 3.5
+buildTime = 1
+biomatterCost = 0
+officerCost = 0
+crewCost = 0
+has_crew = 0
+transporter = 0
+can_repair = 0
+canShipyardRepair = 0
+can_explore = 0
+canAttack = 0
+eventSelect = "Species8472PassiveSelect"
+eventAcknowledge = "Species8472PassiveAcknowledge"

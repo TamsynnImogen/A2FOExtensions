@@ -56,19 +56,21 @@ Safe mode retains the `wingman` alias, missing-only class defaults, `Addon`
 overlay, and legacy race-menu fallback while withholding the riskier
 executable compatibility and officer-quarter runtime hooks.
 
-`A1Compat.dll`, `A1Fallbacks.dll`, and `A2FORGBTextures.dll` belong in the
+`A1Compat.dll` and `A2FORGBTextures.dll` belong in the
 central `Data/modules` directory. The parent's policy requires the two core
 compatibility modules and selects the image fallback as an optional default;
 mods cannot ship or override DLLs in their own folder.
 `A2FORGBTextures.dll` remains inert when the corresponding legacy texture
 directories are absent.
 
-`A1Fallbacks.dll` is deliberately separate from `A1Compat.dll`. When all
+`A1Fallbacks` remains an independent optional selection from `A1Compat`,
+provided by `A2FOExtensions.dll`; its separate DLL is no longer required.
+See [built-in module stage four](builtin-modules-stage4.md). When all
 native wireframe layers for an object are missing, it tries the object's
 `b_<basename>` build-button sprite and then the current owner's
 `<faction>_icon`. Any valid wireframe remains authoritative.
 
-The DLL additionally checks the active extension-root chain for
+`A1Compat.dll` additionally checks the active extension-root chain for
 `a1compat.ini`. If the DLL is mistakenly selected outside the A1 parent,
 initialization is rejected unless the marker is genuinely present in the
 active chain.

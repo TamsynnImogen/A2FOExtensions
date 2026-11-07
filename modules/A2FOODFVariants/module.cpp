@@ -1,7 +1,12 @@
 /* Ownership-aware ODF variants for Armada II / Fleet Operations Roots. */
 
 #include "../../sdk/include/a2fo_module_api.h"
+#include "../../sdk/include/a2fo_module_provider.hpp"
+#ifdef A2FO_BUILTIN_FEATURE
+#include "../../core/builtin_modules.hpp"
+#endif
 #include "../../sdk/include/a2fo_faction_suffix.hpp"
+#include "../../rust/module_runtime_b6_ffi.h"
 
 #include <windows.h>
 
@@ -112,6 +117,22 @@ std::unordered_map<void*, std::string> g_base_odfs;
 std::unordered_set<std::string> g_missing_variants_logged;
 std::unordered_set<void*> g_pending_renderer_refresh_crafts;
 NebulaClassObserver g_nebula_class_observer = nullptr;
+
+std::uint64_t runtime_gate_op(void*, std::uint32_t operation,
+                              std::uint32_t) noexcept {
+    if (operation == 0) g_pending_renderer_refresh_crafts.clear();
+    return 0;
+}
+bool runtime_enabled() noexcept {
+#ifdef A2FO_BUILTIN_FEATURE
+    static std::uint64_t activation = 0;
+    return a2fo_rs_odf_enabled(
+        a2fo::builtin_module_activation(A2FO_BUILTIN_FEATURE),
+        &activation, nullptr, &runtime_gate_op) != 0;
+#else
+    return g_runtime_alive;
+#endif
+}
 
 void* at(HMODULE module, std::uintptr_t rva) noexcept {
     return module
@@ -233,7 +254,7 @@ void refresh_nebula_renderer_class(void* object_class) noexcept {
     if (!object_class) return;
     try {
         if (!g_nebula_class_observer) {
-            HMODULE renderer = GetModuleHandleA(kNebulaRendererModuleName);
+            HMODULE renderer = a2fo::module_provider(kNebulaRendererModuleName, {"A2FONebulaRenderer_RegisterClass"});
             FARPROC exported = renderer
                 ? GetProcAddress(renderer, kNebulaClassObserverExport)
                 : nullptr;
@@ -448,163 +469,219 @@ void restore_craft_state(void* craft,
     }
 }
 
-bool swap_craft_odf(void* craft, void* current_race) noexcept {
-    if (!g_runtime_alive || !craft || !g_armada) return false;
+struct SwapContext {
+    void* craft;
+    void* current_race;
+    std::string source_odf;
+    std::string base_odf;
+    std::string suffix;
+    std::string target_odf;
+    void* target_class = nullptr;
+    void* replacement = nullptr;
+    void* mission = nullptr;
+    void** mission_vtable = nullptr;
+    std::array<float, 12> transform_copy{};
+    std::int32_t team = 0;
+    CraftStateSnapshot state{};
+};
+std::uint64_t swap_op(void* opaque, std::uint32_t operation,
+                      std::uint32_t) noexcept {
+    auto& context = *static_cast<SwapContext*>(opaque);
     try {
-        const std::string source_odf = craft_odf(craft);
-        if (source_odf.empty()) return false;
-
-        const std::string base_odf = infer_base_odf(craft, source_odf);
-        if (base_odf.empty()) return false;
-        g_base_odfs[craft] = base_odf;
-
-        std::string suffix;
-        const auto suffix_entry = g_race_suffixes.find(current_race);
-        if (suffix_entry != g_race_suffixes.end()) suffix = suffix_entry->second;
-
-        std::string target_odf = suffix.empty()
-            ? base_odf
-            : base_odf + suffix;
-        if (equal_ascii_case_insensitive(target_odf, source_odf)) {
-            return false;
-        }
-        void* target_class = find_object_class(target_odf);
-
-        if (!target_class && !suffix.empty()) {
-            if (g_missing_variants_logged.insert(target_odf).second) {
-                log_line("No loaded ODF variant '" + target_odf +
-                         "'; falling back to '" + base_odf + "'");
+        switch (operation) {
+            case 0:
+                context.source_odf = craft_odf(context.craft);
+                return !context.source_odf.empty();
+            case 1:
+                context.base_odf = infer_base_odf(
+                    context.craft, context.source_odf);
+                if (context.base_odf.empty()) return 0;
+                g_base_odfs[context.craft] = context.base_odf;
+                return 1;
+            case 2: {
+                const auto suffix_entry = g_race_suffixes.find(
+                    context.current_race);
+                if (suffix_entry != g_race_suffixes.end())
+                    context.suffix = suffix_entry->second;
+                context.target_odf = context.suffix.empty()
+                    ? context.base_odf : context.base_odf + context.suffix;
+                return 1;
             }
-            target_odf = base_odf;
-            if (!equal_ascii_case_insensitive(target_odf, source_odf)) {
-                target_class = find_object_class(target_odf);
+            case 3: return equal_ascii_case_insensitive(
+                context.target_odf, context.source_odf);
+            case 4:
+                context.target_class = find_object_class(context.target_odf);
+                return context.target_class != nullptr;
+            case 5: return !context.suffix.empty();
+            case 6:
+                if (g_missing_variants_logged.insert(
+                        context.target_odf).second) {
+                    log_line("No loaded ODF variant '" + context.target_odf +
+                             "'; falling back to '" + context.base_odf + "'");
+                }
+                context.target_odf = context.base_odf;
+                if (!equal_ascii_case_insensitive(
+                        context.target_odf, context.source_odf)) {
+                    context.target_class = find_object_class(context.target_odf);
+                }
+                return context.target_class != nullptr;
+            case 7: return equal_ascii_case_insensitive(
+                context.target_odf, context.source_odf);
+            case 8:
+                log_line("Could not resolve fallback base ODF '" +
+                         context.base_odf + "'");
+                return 0;
+            case 9: {
+                const void* transform = reinterpret_cast<const void*>(
+                    a2fo_odf_variants_call_thiscall_0(
+                        at(g_armada, kGameObjectGetTransformRva),
+                        context.craft));
+                if (!transform) {
+                    log_line("Source transform unavailable for '" +
+                             context.source_odf + "'");
+                    return 0;
+                }
+                std::memcpy(context.transform_copy.data(), transform,
+                            context.transform_copy.size() * sizeof(float));
+                context.team = *reinterpret_cast<const std::int32_t*>(
+                    static_cast<const std::uint8_t*>(context.craft) +
+                    kObjectTeamOffset);
+                context.state = snapshot_craft_state(context.craft);
+                return 1;
             }
+            case 10:
+                context.replacement = a2fo_odf_variants_construct(
+                    at(g_armada, kGameObjectClassConstructRva),
+                    context.target_class, context.transform_copy.data(),
+                    context.team, 0, nullptr);
+                return context.replacement != nullptr;
+            case 11:
+                log_line("Could not construct ODF variant '" +
+                         context.target_odf + "'");
+                return 0;
+            case 12:
+                refresh_nebula_renderer_class(context.target_class);
+                g_pending_renderer_refresh_crafts.insert(context.replacement);
+                return 0;
+            case 13: {
+                const auto get_current_mission =
+                    reinterpret_cast<GetCurrentMission>(
+                        at(g_armada, kAiMissionGetCurrentRva));
+                context.mission = get_current_mission
+                    ? get_current_mission() : nullptr;
+                context.mission_vtable = context.mission
+                    ? *reinterpret_cast<void***>(context.mission) : nullptr;
+                return context.mission_vtable &&
+                    context.mission_vtable[6] != nullptr;
+            }
+            case 14:
+                log_line("Active mission/AddObject unavailable for '" +
+                         context.target_odf + "'");
+                a2fo_odf_variants_call_thiscall_0(
+                    at(g_armada, kCraftDoExpireRva), context.replacement);
+                return 0;
+            case 15:
+                a2fo_odf_variants_call_thiscall_1(
+                    context.mission_vtable[6], context.mission,
+                    reinterpret_cast<std::uintptr_t>(context.replacement));
+                return 0;
+            case 16:
+                a2fo_odf_variants_call_thiscall_1(
+                    at(g_armada, kEvolverSwapObjectsRva), context.craft,
+                    reinterpret_cast<std::uintptr_t>(context.replacement));
+                return 0;
+            case 17:
+                restore_craft_state(context.replacement, context.state);
+                g_base_odfs[context.replacement] = context.base_odf;
+                g_last_races[context.replacement] = context.current_race;
+                g_base_odfs.erase(context.craft);
+                g_last_races.erase(context.craft);
+                a2fo_odf_variants_call_thiscall_0(
+                    at(g_armada, kCraftDoExpireRva), context.craft);
+                log_line("ODF ownership variant: " + context.source_odf +
+                         " -> " + context.target_odf);
+                return 1;
         }
-
-        if (equal_ascii_case_insensitive(target_odf, source_odf)) {
-            return false;
-        }
-        if (!target_class) {
-            log_line("Could not resolve fallback base ODF '" + base_odf + "'");
-            return false;
-        }
-
-        const void* transform = reinterpret_cast<const void*>(
-            a2fo_odf_variants_call_thiscall_0(
-                at(g_armada, kGameObjectGetTransformRva), craft));
-        if (!transform) {
-            log_line("Source transform unavailable for '" + source_odf + "'");
-            return false;
-        }
-        std::array<float, 12> transform_copy{};
-        std::memcpy(transform_copy.data(), transform,
-                    transform_copy.size() * sizeof(float));
-        const std::int32_t team = *reinterpret_cast<const std::int32_t*>(
-            static_cast<const std::uint8_t*>(craft) + kObjectTeamOffset);
-        const CraftStateSnapshot state = snapshot_craft_state(craft);
-
-        void* replacement = a2fo_odf_variants_construct(
-            at(g_armada, kGameObjectClassConstructRva), target_class,
-            transform_copy.data(), team, 0, nullptr);
-        if (!replacement) {
-            log_line("Could not construct ODF variant '" + target_odf + "'");
-            return false;
-        }
-
-        // Construction is the first reliable point at which a late-loaded
-        // variant CraftClass may expose its SOD/material state. Refresh now,
-        // then retry once on the replacement's first simulation tick to cover
-        // Fleet Ops' remaining lazy-geometry paths.
-        refresh_nebula_renderer_class(target_class);
-        g_pending_renderer_refresh_crafts.insert(replacement);
-
-        const auto get_current_mission = reinterpret_cast<GetCurrentMission>(
-            at(g_armada, kAiMissionGetCurrentRva));
-        void* mission = get_current_mission ? get_current_mission() : nullptr;
-        void** mission_vtable = mission ? *reinterpret_cast<void***>(mission)
-                                        : nullptr;
-        if (!mission_vtable || !mission_vtable[6]) {
-            log_line("Active mission/AddObject unavailable for '" +
-                     target_odf + "'");
-            a2fo_odf_variants_call_thiscall_0(
-                at(g_armada, kCraftDoExpireRva), replacement);
-            return false;
-        }
-        a2fo_odf_variants_call_thiscall_1(
-            mission_vtable[6], mission,
-            reinterpret_cast<std::uintptr_t>(replacement));
-
-        // Evolver's native handoff preserves common ownership, selection and
-        // overview relationships without mutating a live CraftClass pointer.
-        a2fo_odf_variants_call_thiscall_1(
-            at(g_armada, kEvolverSwapObjectsRva), craft,
-            reinterpret_cast<std::uintptr_t>(replacement));
-        restore_craft_state(replacement, state);
-
-        g_base_odfs[replacement] = base_odf;
-        g_last_races[replacement] = current_race;
-        g_base_odfs.erase(craft);
-        g_last_races.erase(craft);
-
-        // We are called from SIMULATE_POST. Expire the original and let
-        // Armada perform its normal deferred cleanup after this callback.
-        a2fo_odf_variants_call_thiscall_0(
-            at(g_armada, kCraftDoExpireRva), craft);
-
-        log_line("ODF ownership variant: " + source_odf + " -> " + target_odf);
-        return true;
+        return 0;
     } catch (...) {
         log_line("ODF ownership swap skipped after an unexpected C++ exception");
-        return false;
+        return UINT64_MAX;
     }
 }
+bool swap_craft_odf(void* craft, void* current_race) noexcept {
+    SwapContext context{};
+    context.craft = craft;
+    context.current_race = current_race;
+    return a2fo_rs_odf_swap(g_runtime_alive && craft && g_armada,
+                            &context, &swap_op) != 0;
+}
 
-void A2FO_CALL race_loaded_handler(
-    const A2FO_RaceLoadedEvent* event, void*) {
-    if (!g_runtime_alive || !event || event->struct_size < sizeof(*event) ||
-        !event->race) {
-        return;
-    }
+struct RaceContext {
+    const A2FO_RaceLoadedEvent* event;
+    std::string raw_name;
+    std::string raw_suffix;
+    std::string suffix;
+    bool name_found = false;
+    bool suffix_found = false;
+};
+std::uint64_t race_op(void* opaque, std::uint32_t operation,
+                      std::uint32_t) noexcept {
+    auto& context = *static_cast<RaceContext*>(opaque);
     try {
-        std::string raw_name;
-        std::string raw_suffix;
-        const bool name_found = race_event_field(
-            event, kFactionNameCommand, &raw_name);
-        const bool suffix_found = race_event_field(
-            event, a2fo::faction_suffix::kCommand, &raw_suffix);
-
-        std::string suffix;
-        if (suffix_found) {
-            if (!a2fo::faction_suffix::normalize(raw_suffix, &suffix)) {
+        switch (operation) {
+            case 0:
+                context.name_found = race_event_field(
+                    context.event, kFactionNameCommand, &context.raw_name);
+                context.suffix_found = race_event_field(
+                    context.event, a2fo::faction_suffix::kCommand,
+                    &context.raw_suffix);
+                return static_cast<std::uint64_t>(context.name_found) |
+                    (static_cast<std::uint64_t>(context.suffix_found) << 1);
+            case 1:
+                return a2fo::faction_suffix::normalize(
+                    context.raw_suffix, &context.suffix);
+            case 2: {
                 char message[192]{};
-                std::snprintf(
-                    message, sizeof(message),
+                std::snprintf(message, sizeof(message),
                     "Rejected invalid %s on Race %p",
-                    a2fo::faction_suffix::kCommand, event->race);
+                    a2fo::faction_suffix::kCommand, context.event->race);
                 log_line(message);
-                g_race_suffixes.erase(event->race);
-                return;
+                g_race_suffixes.erase(context.event->race);
+                return 0;
             }
-        } else if (name_found &&
-                   normalized_race_name(raw_name) == "borg") {
-            suffix = kBorgDefaultSuffix;
+            case 3:
+                return normalized_race_name(context.raw_name) == "borg";
+            case 4:
+                context.suffix = kBorgDefaultSuffix;
+                return 0;
+            case 5: return context.suffix.empty();
+            case 6: g_race_suffixes.erase(context.event->race); return 0;
+            case 7: {
+                g_race_suffixes[context.event->race] = context.suffix;
+                char message[224]{};
+                std::snprintf(message, sizeof(message),
+                    "Registered ODF ownership suffix '%s' on Race %p%s",
+                    context.suffix.c_str(), context.event->race,
+                    (!context.suffix_found &&
+                     context.suffix == kBorgDefaultSuffix)
+                        ? " (Borg default)" : "");
+                log_line(message);
+                return 0;
+            }
         }
-
-        if (suffix.empty()) {
-            g_race_suffixes.erase(event->race);
-            return;
-        }
-        g_race_suffixes[event->race] = suffix;
-        char message[224]{};
-        std::snprintf(message, sizeof(message),
-                      "Registered ODF ownership suffix '%s' on Race %p%s",
-                      suffix.c_str(), event->race,
-                      (!suffix_found && suffix == kBorgDefaultSuffix)
-                          ? " (Borg default)" : "");
-        log_line(message);
+        return 0;
     } catch (...) {
         log_line("Could not retain Race ODF ownership suffix");
+        return UINT64_MAX;
     }
+}
+void A2FO_CALL race_loaded_handler(
+    const A2FO_RaceLoadedEvent* event, void*) {
+    RaceContext context{};
+    context.event = event;
+    a2fo_rs_odf_race(g_runtime_alive && event &&
+        event->struct_size >= sizeof(*event) && event->race,
+        &context, &race_op);
 }
 
 void cleanup_craft(void* craft) noexcept {
@@ -614,88 +691,105 @@ void cleanup_craft(void* craft) noexcept {
     g_pending_renderer_refresh_crafts.erase(craft);
 }
 
-void A2FO_CALL craft_event_handler(
-    const A2FO_CraftEvent* event, void*) {
-    if (!g_runtime_alive || !event || event->struct_size < sizeof(*event) ||
-        !event->craft) {
-        return;
-    }
+struct CraftEventContext {
+    const A2FO_CraftEvent* event;
+    void* current_race = nullptr;
+    std::unordered_map<void*, void*>::iterator found;
+    std::string current_odf;
+    std::string base_odf;
+    bool suffix_found = false;
+    bool already_current_variant = false;
+};
+std::uint64_t craft_event_op(void* opaque, std::uint32_t operation,
+                             std::uint32_t) noexcept {
+    auto& context = *static_cast<CraftEventContext*>(opaque);
+    void* craft = context.event->craft;
     try {
-        switch (event->kind) {
-        case A2FO_CRAFT_EVENT_SIMULATE_POST: {
-            const auto pending_refresh =
-                g_pending_renderer_refresh_crafts.find(event->craft);
-            if (pending_refresh != g_pending_renderer_refresh_crafts.end()) {
-                void* object_class = *reinterpret_cast<void**>(
-                    static_cast<std::uint8_t*>(event->craft) +
-                    kObjectClassOffset);
-                refresh_nebula_renderer_class(object_class);
-                g_pending_renderer_refresh_crafts.erase(pending_refresh);
-                log_line("Retried mapped-lighting refresh on replacement craft first simulation tick");
+        switch (operation) {
+            case 0: {
+                const auto pending = g_pending_renderer_refresh_crafts.find(craft);
+                if (pending != g_pending_renderer_refresh_crafts.end()) {
+                    void* object_class = *reinterpret_cast<void**>(
+                        static_cast<std::uint8_t*>(craft) + kObjectClassOffset);
+                    refresh_nebula_renderer_class(object_class);
+                    g_pending_renderer_refresh_crafts.erase(pending);
+                    log_line("Retried mapped-lighting refresh on replacement craft first simulation tick");
+                }
+                return 0;
             }
-
-            void* current_race = craft_race(event->craft);
-            const auto found = g_last_races.find(event->craft);
-            if (found == g_last_races.end()) {
-                g_last_races.emplace(event->craft, current_race);
-                const std::string current_odf = craft_odf(event->craft);
-                if (current_odf.empty()) return;
-
-                // A craft placed in the map editor may have its Race changed
-                // before it ever receives a simulation tick. In that case our
-                // first observation already sees the new owner, so waiting for
-                // a later Race transition would miss the initial ODF swap.
-                // Seed the canonical ODF and immediately reconcile the craft
-                // against its current owner's suffix.
-                std::string base_odf = current_odf;
-                bool already_current_variant = false;
-                const auto suffix_entry = g_race_suffixes.find(current_race);
-                if (suffix_entry != g_race_suffixes.end() &&
-                    !suffix_entry->second.empty()) {
+            case 1:
+                context.current_race = craft_race(craft);
+                context.found = g_last_races.find(craft);
+                return context.found != g_last_races.end();
+            case 2:
+                g_last_races.emplace(craft, context.current_race);
+                return 0;
+            case 3:
+                context.current_odf = craft_odf(craft);
+                return !context.current_odf.empty();
+            case 4:
+                context.base_odf = context.current_odf;
+#ifdef A2FO_BUILTIN_FEATURE
+                context.base_odf = infer_base_odf(craft, context.current_odf);
+#endif
+                return 0;
+            case 5: {
+                const auto suffix_entry = g_race_suffixes.find(context.current_race);
+                context.suffix_found = suffix_entry != g_race_suffixes.end() &&
+                    !suffix_entry->second.empty();
+                if (context.suffix_found) {
                     const std::string& suffix = suffix_entry->second;
-                    already_current_variant =
-                        ends_with_case_insensitive(current_odf, suffix);
-                    if (already_current_variant &&
-                        suffix.size() < current_odf.size()) {
-                        const std::string candidate = current_odf.substr(
-                            0, current_odf.size() - suffix.size());
+                    context.already_current_variant =
+                        ends_with_case_insensitive(context.current_odf, suffix);
+                    if (context.already_current_variant &&
+                        suffix.size() < context.current_odf.size()) {
+                        const std::string candidate = context.current_odf.substr(
+                            0, context.current_odf.size() - suffix.size());
                         if (!candidate.empty() && find_object_class(candidate)) {
-                            base_odf = candidate;
+                            context.base_odf = candidate;
                         }
                     }
                 }
-                g_base_odfs[event->craft] = base_odf;
-
-                if (suffix_entry != g_race_suffixes.end() &&
-                    !suffix_entry->second.empty() &&
-                    !already_current_variant) {
-                    swap_craft_odf(event->craft, current_race);
+                return 0;
+            }
+            case 6: g_base_odfs[craft] = context.base_odf; return 0;
+            case 7: return context.suffix_found &&
+                !context.already_current_variant;
+            case 8:
+                swap_craft_odf(craft, context.current_race);
+                return 0;
+            case 9: return context.found->second == context.current_race;
+            case 10:
+                context.found->second = context.current_race;
+                swap_craft_odf(craft, context.current_race);
+                return 0;
+            case 11: cleanup_craft(craft); return 0;
+            case 12:
+                g_last_races[craft] = craft_race(craft);
+                context.current_odf = craft_odf(craft);
+                if (!context.current_odf.empty()) {
+                    g_base_odfs[craft] = infer_base_odf(craft, context.current_odf);
                 }
-                return;
-            }
-            if (found->second == current_race) return;
-            found->second = current_race;
-            swap_craft_odf(event->craft, current_race);
-            return;
+                return 0;
         }
-        case A2FO_CRAFT_EVENT_CLEANUP:
-            cleanup_craft(event->craft);
-            return;
-        case A2FO_CRAFT_EVENT_POST_LOAD: {
-            g_last_races[event->craft] = craft_race(event->craft);
-            const std::string current_odf = craft_odf(event->craft);
-            if (!current_odf.empty()) {
-                g_base_odfs[event->craft] =
-                    infer_base_odf(event->craft, current_odf);
-            }
-            return;
-        }
-        default:
-            return;
-        }
+        return 0;
     } catch (...) {
         log_line("Craft ownership transition check failed");
+        return UINT64_MAX;
     }
+}
+void A2FO_CALL craft_event_handler(
+    const A2FO_CraftEvent* event, void*) {
+    const bool enabled = runtime_enabled();
+    CraftEventContext context{};
+    context.event = event;
+    const bool valid = g_runtime_alive && event &&
+        event->struct_size >= sizeof(*event) && event->craft;
+    const std::uint32_t kind = !valid ? 3u :
+        event->kind == A2FO_CRAFT_EVENT_SIMULATE_POST ? 0u :
+        event->kind == A2FO_CRAFT_EVENT_CLEANUP ? 1u :
+        event->kind == A2FO_CRAFT_EVENT_POST_LOAD ? 2u : 3u;
+    a2fo_rs_odf_craft(valid, enabled, kind, &context, &craft_event_op);
 }
 
 bool native_signatures_supported() noexcept {
@@ -719,6 +813,61 @@ bool native_signatures_supported() noexcept {
     return supported;
 }
 
+std::uint64_t odf_init_op(void* opaque, std::uint32_t operation,
+                          std::uint32_t) noexcept {
+    const auto* api = static_cast<const A2FO_ModuleApi*>(opaque);
+    try {
+    switch (operation) {
+        case 0:
+            g_api = api;
+            g_armada = static_cast<HMODULE>(api->armada_module());
+            return g_armada != nullptr;
+        case 1: return native_signatures_supported();
+        case 2: {
+            const char* race_fields[]{
+                kFactionNameCommand, a2fo::faction_suffix::kCommand};
+            return api->register_race_loaded_handler(
+                kModuleName, race_fields,
+                static_cast<std::uint32_t>(std::size(race_fields)),
+                &race_loaded_handler, nullptr);
+        }
+        case 3:
+            return A2FO_MODULE_API_HAS(api, register_craft_event_handler_masked) &&
+                api->register_craft_event_handler_masked;
+        case 4:
+            return api->register_craft_event_handler_masked(
+                kModuleName,
+                A2FO_CRAFT_EVENT_MASK_SIMULATE_POST |
+                    A2FO_CRAFT_EVENT_MASK_CLEANUP |
+                    A2FO_CRAFT_EVENT_MASK_POST_LOAD,
+                &craft_event_handler, nullptr);
+        case 5:
+            return api->register_craft_event_handler(
+                kModuleName, &craft_event_handler, nullptr);
+        case 6:
+            g_runtime_alive = true;
+            log_line("Ownership-aware ODF variants initialized; Borg defaults to _b");
+            return 0;
+    }
+    return 0;
+    } catch (...) {
+        return 0;
+    }
+}
+std::uint64_t odf_shutdown_op(void*, std::uint32_t operation,
+                              std::uint32_t) noexcept {
+    switch (operation) {
+        case 0: g_runtime_alive = false; break;
+        case 1: g_race_suffixes.clear(); break;
+        case 2: g_last_races.clear(); g_base_odfs.clear(); break;
+        case 3: g_missing_variants_logged.clear(); break;
+        case 4: g_pending_renderer_refresh_crafts.clear(); break;
+        case 5: g_nebula_class_observer = nullptr; break;
+        case 6: g_armada = nullptr; g_api = nullptr; break;
+    }
+    return 0;
+}
+
 }  // namespace
 
 extern "C" __declspec(dllexport)
@@ -735,48 +884,11 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
         return false;
     }
 
-    g_api = api;
-    g_armada = static_cast<HMODULE>(api->armada_module());
-    if (!g_armada || !native_signatures_supported()) return false;
-
-    const char* race_fields[] = {
-        kFactionNameCommand, a2fo::faction_suffix::kCommand};
-    if (!api->register_race_loaded_handler(
-            kModuleName, race_fields,
-            static_cast<std::uint32_t>(std::size(race_fields)),
-            &race_loaded_handler, nullptr)) {
-        return false;
-    }
-
-    bool craft_registered = false;
-    if (A2FO_MODULE_API_HAS(api, register_craft_event_handler_masked) &&
-        api->register_craft_event_handler_masked) {
-        craft_registered = api->register_craft_event_handler_masked(
-            kModuleName,
-            A2FO_CRAFT_EVENT_MASK_SIMULATE_POST |
-                A2FO_CRAFT_EVENT_MASK_CLEANUP |
-                A2FO_CRAFT_EVENT_MASK_POST_LOAD,
-            &craft_event_handler, nullptr);
-    } else {
-        craft_registered = api->register_craft_event_handler(
-            kModuleName, &craft_event_handler, nullptr);
-    }
-    if (!craft_registered) return false;
-
-    g_runtime_alive = true;
-    log_line("Ownership-aware ODF variants initialized; Borg defaults to _b");
-    return true;
+    return a2fo_rs_odf_init(true, const_cast<A2FO_ModuleApi*>(api),
+                            &odf_init_op) != 0;
 }
 
 extern "C" __declspec(dllexport)
 void A2FO_CALL A2FO_ModuleShutdown() {
-    g_runtime_alive = false;
-    g_race_suffixes.clear();
-    g_last_races.clear();
-    g_base_odfs.clear();
-    g_missing_variants_logged.clear();
-    g_pending_renderer_refresh_crafts.clear();
-    g_nebula_class_observer = nullptr;
-    g_armada = nullptr;
-    g_api = nullptr;
+    a2fo_rs_odf_shutdown(nullptr, &odf_shutdown_op);
 }

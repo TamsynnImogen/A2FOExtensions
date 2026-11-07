@@ -1,0 +1,43 @@
+{
+  "created_utc": "2026-10-03T11:01:02.625551+00:00",
+  "module": "A2FOVideo",
+  "version": "v11",
+  "source_root": "/home/tamsynn/A2FOHookExtensions",
+  "artifact": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOVideo.dll",
+  "installed": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOVideo.dll",
+  "sha256": "d89f2f335624ebfe55cbb8faa2bbbe5db5431203bd36395965df5f600b0c348d",
+  "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/video-v11-20261003T104152Z",
+  "previous_dll_sha256": "307cb53493e56c5a3cfaa0b1cdc87d3cf5c22ee38237008a8bd4cf312e302e00",
+  "unchanged_inputs_sha256": {
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOShellDisplay.dll": "53ce8ee055e28a374e992f6ad7178bcbace732af1abc4916cfe9739c40b5abf3",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.dll": "74b3274a19f8ca1370b37ee2b8834b9634a638994e83507fd160387efc9bb035",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe": "470bf8f4b0196e22fe179d3845cab671e74d9af19cf90a7dafed0b0bbd394318",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll": "d2a0829e87aaa927e27146b90be61fc6359c6cbf3d81aed2c644019dd375b9b6",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/animations/MadDocSoftware.mp4": "35ac62ae972d99a5d9ea42aa6914b0718b88e0214405e6525255bcc9df11173a",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/animations/intro.mp4": "e28bcf9aae6fabebfd87f1c727316c2048960ffaa72aa31bcd44118e9e4d6960",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/settings_saves_logs/mods/A2FO Settings Test/Settings.xml": "c1251fe5f87df0550f52560dfd3e83fc7668669712c1b7eb93705dc9cda04051"
+  },
+  "sdk_status": "Exact FFmpeg SDK archives/headers unchanged; backup hashes compared",
+  "accepted_v10": "User says essentially working; remaining observations lowFPS and pausebetweeneverymovie, inclnativeBIK",
+  "correction": "Single libswscale decode-frame conversion/rescale directly intoownedfullclientDIB, blackmargins, unchangedcheckedGDIpresent. Videothreadcap<=4, noaudio-thread/reopen foralready-probed silentmovies. Startup, pacedFPS, composition/present andrequestgap diagnostics. NativeBIK untouched.",
+  "headless_benchmark": {
+    "old_120frames_fps": 18.425,
+    "old_compose_total_ms": 5932.803,
+    "old_convert_total_ms": 297.247,
+    "old_first_present_ms": 146.156,
+    "new_4threads_120frames_fps": 49.31,
+    "new_4threads_compose_total_ms": 2209.068,
+    "new_4threads_first_present_ms": 60.422,
+    "independent_new_4threads_fps": 52.299,
+    "independent_first_present_ms": 59.234
+  },
+  "validation": [
+    "Strict -Werror DLLbuild passed",
+    "Headless fixture passed with MadDocreference, actualnewAVFramepixelpath inclBGRA/YUV420P orientation andblackbars, transformed/clippedDC restore, input/events/audio checks",
+    "Independentsource/delta review, strictsyntaxcheck andfinalDLLload/exportsmoke passed",
+    "ReproducibleperfMakefile targetcompiled withassertionsenabled",
+    "Makefile diff--check passed"
+  ],
+  "format_status": "MP4/WebM/MKV routed; H264 HEVC VP8 VP9 MPEG4 Theora softwaredecoders; AAC MP3 Opus Vorbis FLAC PCM. AV1 registered but unusable: nativeFFmpegdecoder requireshardware andnoHW/libdav1dbackendcompiled.",
+  "remaining": "Livev11FPS/window/audioacceptance andfreshlogforpausebetweeneverymovie. HeadlessthroughputisnotliveFPS; nativeoccupieddurationincludesfullmovieandcannotseparatenativeloadtime."
+}

@@ -7,7 +7,12 @@
  */
 
 #include "../../sdk/include/a2fo_module_api.h"
+#ifdef A2FO_BUILTIN_FEATURE
+#include "../../core/builtin_modules.hpp"
+#endif
 #include "swarm_motion.hpp"
+#include "../../rust/stage8_a_swarm_ffi.h"
+#include "../../rust/stage10_visibility_swarm_ffi.h"
 
 #include <windows.h>
 
@@ -18,8 +23,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -263,7 +270,15 @@ void* g_cached_object_list_head = nullptr;
 A2FO_InlineHook g_bee_simulate_hook{};
 A2FO_InlineHook g_bee_render_hook{};
 std::unordered_map<void*, ClassPolicy> g_class_policies;
+#ifdef A2FO_BUILTIN_FEATURE
+// Remaining native instances must not call into an engine already tearing
+// down from the core's CRT destructors. Release them at normal simulation
+// boundaries; let the OS reclaim any retained process-lifetime store at exit.
+std::unordered_map<std::uint32_t, HostRuntime>& g_hosts =
+    *new std::unordered_map<std::uint32_t, HostRuntime>;
+#else
 std::unordered_map<std::uint32_t, HostRuntime> g_hosts;
+#endif
 LONG g_instance_failure_reports = 0;
 bool g_logged_simulation_boundary = false;
 bool g_logged_render_boundary = false;
@@ -272,6 +287,55 @@ bool g_logged_first_instance_render = false;
 bool g_logged_frustum_rejection = false;
 bool g_logged_avoidance_volume = false;
 bool g_logged_missing_host_bounds = false;
+
+#ifdef A2FO_BUILTIN_FEATURE
+std::atomic<std::uint64_t> g_swarm_activation{0};
+std::uintptr_t swarm_activation_step(void*, std::uint32_t op,
+                                     std::uintptr_t value) noexcept {
+    try {
+        switch (op) {
+        case 0:
+            *reinterpret_cast<std::uint64_t*>(value) =
+                a2fo::builtin_module_activation(A2FO_BUILTIN_FEATURE);
+            return 1;
+        case 1:
+            *reinterpret_cast<std::uint64_t*>(value) =
+                g_swarm_activation.load(std::memory_order_acquire);
+            return 1;
+        case 2: g_hosts.clear(); return 1;
+        case 3: g_class_policies.clear(); return 1;
+        case 4: g_epoch = 0; return 1;
+        case 5: g_host_discovery_countdown = 0; return 1;
+        case 6:
+            g_last_object_count = std::numeric_limits<std::uint32_t>::max();
+            return 1;
+        case 7: g_cached_object_list = nullptr; return 1;
+        case 8: g_cached_object_list_head = nullptr; return 1;
+        case 9:
+            g_swarm_activation.store(
+                *reinterpret_cast<const std::uint64_t*>(value),
+                std::memory_order_release);
+            return 1;
+        default: return 0;
+        }
+    } catch (...) {
+        // The original boundary is noexcept; preserve the active exception
+        // at termination and never unwind across Rust.
+        std::terminate();
+    }
+}
+bool sync_runtime_activation() noexcept {
+    return a2fo_rs_stage8_swarm_activation(
+        &swarm_activation_step, nullptr, 1) != 0;
+}
+bool runtime_render_enabled() noexcept {
+    return a2fo_rs_stage8_swarm_activation(
+        &swarm_activation_step, nullptr, 0) != 0;
+}
+#else
+bool sync_runtime_activation() noexcept { return g_runtime_ready; }
+bool runtime_render_enabled() noexcept { return g_runtime_ready; }
+#endif
 
 void log_line(const std::string& message) noexcept {
     if (g_api && g_api->log) g_api->log(kModuleName, message.c_str());
@@ -388,11 +452,14 @@ std::string class_odf_name(void* object_class_pointer) {
 void trim(std::string* value) {
     if (!value) return;
     std::size_t first = 0;
-    while (first < value->size() && std::isspace(
-               static_cast<unsigned char>((*value)[first]))) ++first;
     std::size_t last = value->size();
-    while (last > first && std::isspace(
-               static_cast<unsigned char>((*value)[last - 1]))) --last;
+    const auto classify = +[](void*, std::uint32_t,
+                              std::uintptr_t byte) noexcept -> std::uintptr_t {
+        return std::isspace(static_cast<unsigned char>(byte)) != 0;
+    };
+    a2fo_rs_stage8_swarm_trim(
+        reinterpret_cast<const std::uint8_t*>(value->data()),
+        value->size(), classify, nullptr, &first, &last);
     *value = value->substr(first, last - first);
 }
 
@@ -517,17 +584,14 @@ bool read_float(void* database, const std::string& key,
 bool read_count(void* database, const std::string& key,
                 std::uint32_t* output) noexcept {
     if (!database || key.empty() || !output) return false;
-    int value = static_cast<int>(std::min<std::uint32_t>(
-        *output, static_cast<std::uint32_t>(std::numeric_limits<int>::max())));
+    int value = a2fo_rs_stage8_swarm_count_default(*output);
     const std::uintptr_t found = a2fo_swarm_call_thiscall_3(
         at(g_armada, kParameterDbGetIntRva), database,
         reinterpret_cast<std::uintptr_t>(key.c_str()),
         reinterpret_cast<std::uintptr_t>(&value),
         static_cast<std::uintptr_t>(value));
     if ((found & 0xffu) == 0 || value < 0) return false;
-    *output = static_cast<std::uint32_t>(
-        std::min<int>(value,
-                      static_cast<int>(kMaximumMembersPerDefinition)));
+    *output = a2fo_rs_stage8_swarm_count_value(value);
     return true;
 }
 
@@ -551,187 +615,208 @@ std::string indexed_key(std::size_t index, const char* suffix = "") {
     return key;
 }
 
-std::vector<Hardpoint> resolve_hardpoints(
-    void* object_class_pointer, const std::vector<std::string>& names,
-    const char* kind, const std::string& odf_name,
-    std::uint32_t definition_index) {
-    std::vector<Hardpoint> result;
-    if (names.empty()) return result;
-    void* hierarchy = read_at<void*>(object_class_pointer, 0x1d8, nullptr);
-    if (!hierarchy || !readable_range(
-            static_cast<std::uint8_t*>(hierarchy) + 0x3c, sizeof(void*))) {
-        char message[256]{};
-        std::snprintf(message, sizeof(message),
-                      "Ignoring swarm%lu %s hardpoints on '%s': "
-                      "the host has no loaded SOD hierarchy",
-                      static_cast<unsigned long>(definition_index), kind,
-                      odf_name.c_str());
-        log_line(message);
-        return result;
-    }
-    void* root = reinterpret_cast<void*>(a2fo_swarm_call_thiscall_0(
-        at(g_armada, kGameObjectClassGetHierarchyRootRva),
-        object_class_pointer));
-    for (const std::string& name : names) {
-        void* node = root ? reinterpret_cast<void*>(
-            a2fo_swarm_call_thiscall_1(
-                at(g_armada, kSt3dNodeFindRecursiveRva), root,
-                reinterpret_cast<std::uintptr_t>(name.c_str()))) : nullptr;
-        if (!node) {
-            char message[384]{};
-            std::snprintf(
-                message, sizeof(message),
-                "Ignoring missing swarm%lu %s hardpoint '%s' on '%s'",
-                static_cast<unsigned long>(definition_index), kind,
-                name.c_str(), odf_name.c_str());
-            log_line(message);
-            continue;
-        }
-        result.push_back(Hardpoint{name, node});
-    }
-    return result;
-}
-
 void normalize_definition(SwarmDefinition* definition) noexcept {
     if (!definition) return;
-    definition->scale = std::max(0.001f, std::min(definition->scale, 100.0f));
-    definition->minimum_radius = std::max(0.0f,
-        std::min(definition->minimum_radius, 100000.0f));
-    definition->maximum_radius = std::max(definition->minimum_radius,
-        std::min(definition->maximum_radius, 100000.0f));
-    definition->minimum_speed = std::max(0.0f,
-        std::min(definition->minimum_speed, 100000.0f));
-    definition->maximum_speed = std::max(definition->minimum_speed,
-        std::min(definition->maximum_speed, 100000.0f));
-    definition->turn_rate = std::max(0.01f,
-        std::min(definition->turn_rate, 1000.0f));
-    definition->interaction_chance = std::max(0.0f,
-        std::min(definition->interaction_chance, 1.0f));
-    definition->interaction_time = std::max(0.0f,
-        std::min(definition->interaction_time, 3600.0f));
-    definition->interaction_radius = std::max(0.0f,
-        std::min(definition->interaction_radius, 100000.0f));
-    definition->host_clearance = std::max(0.0f,
-        std::min(definition->host_clearance, 100000.0f));
-    definition->member_separation = std::max(0.0f,
-        std::min(definition->member_separation, 100000.0f));
-    definition->count = static_cast<std::uint32_t>(
-        std::min<std::size_t>(definition->count,
-                              kMaximumMembersPerDefinition));
+    A2FO_Stage8SwarmScalars scalars{
+        definition->count, definition->scale,
+        definition->minimum_radius, definition->maximum_radius,
+        definition->minimum_speed, definition->maximum_speed,
+        definition->turn_rate, definition->interaction_chance,
+        definition->interaction_time, definition->interaction_radius,
+        definition->host_clearance, definition->member_separation,
+        definition->hardpoint_capacity, definition->interaction_capacity};
+    a2fo_rs_stage8_swarm_normalize(&scalars);
+    definition->count = scalars.count;
+    definition->scale = scalars.scale;
+    definition->minimum_radius = scalars.minimum_radius;
+    definition->maximum_radius = scalars.maximum_radius;
+    definition->minimum_speed = scalars.minimum_speed;
+    definition->maximum_speed = scalars.maximum_speed;
+    definition->turn_rate = scalars.turn_rate;
+    definition->interaction_chance = scalars.interaction_chance;
+    definition->interaction_time = scalars.interaction_time;
+    definition->interaction_radius = scalars.interaction_radius;
+    definition->host_clearance = scalars.host_clearance;
+    definition->member_separation = scalars.member_separation;
+}
+
+struct SwarmParseContext {
+    explicit SwarmParseContext(void* value) : object_class(value) {}
+    void* object_class = nullptr;
+    ClassPolicy policy{};
+    std::optional<ParameterDbView> database;
+    SwarmDefinition definition{};
+    std::vector<std::string> launch_names;
+    std::vector<std::string> interaction_names;
+    void* root = nullptr;
+    void* node = nullptr;
+    std::exception_ptr exception{};
+};
+
+std::vector<std::string>& names_for(SwarmParseContext& context,
+                                     std::size_t kind) noexcept {
+    return kind == 0 ? context.launch_names : context.interaction_names;
+}
+
+std::vector<Hardpoint>& hardpoints_for(SwarmParseContext& context,
+                                        std::size_t kind) noexcept {
+    return kind == 0 ? context.definition.launch_hardpoints
+                     : context.definition.interaction_hardpoints;
+}
+
+std::uintptr_t swarm_parse_step(void* opaque, std::uint32_t op,
+                                std::uintptr_t arg) noexcept {
+    auto& context = *static_cast<SwarmParseContext*>(opaque);
+    if (context.exception) return std::numeric_limits<std::uintptr_t>::max();
+    try {
+        const auto key = [&context](const char* suffix) {
+            return indexed_key(context.definition.index, suffix);
+        };
+        void* database = context.database ? context.database->get() : nullptr;
+        switch (op) {
+        case 0:
+            context.policy.odf_name = class_odf_name(context.object_class);
+            return !context.policy.odf_name.empty();
+        case 1:
+            context.database.emplace(context.policy.odf_name);
+            return context.database->get() != nullptr;
+        case 2:
+            context.definition = SwarmDefinition{};
+            context.definition.index = static_cast<std::uint32_t>(arg);
+            return read_parameter_string(database, key("").c_str(),
+                                         &context.definition.model);
+        case 3: return read_count(database, key("Count"), &context.definition.count);
+        case 4: return read_float(database, key("Scale"), &context.definition.scale);
+        case 5: return read_float(database, key("Radius"), &context.definition.maximum_radius);
+        case 6: return read_float(database, key("MinRadius"), &context.definition.minimum_radius);
+        case 7: return read_float(database, key("MaxRadius"), &context.definition.maximum_radius);
+        case 8: return read_float(database, key("MinSpeed"), &context.definition.minimum_speed);
+        case 9: return read_float(database, key("MaxSpeed"), &context.definition.maximum_speed);
+        case 10: return read_float(database, key("TurnRate"), &context.definition.turn_rate);
+        case 11: return read_float(database, key("InteractionChance"), &context.definition.interaction_chance);
+        case 12: return read_float(database, key("InteractionTime"), &context.definition.interaction_time);
+        case 13: return read_float(database, key("InteractionRadius"), &context.definition.interaction_radius);
+        case 14: return read_float(database, key("HostClearance"), &context.definition.host_clearance);
+        case 15: return read_float(database, key("Separation"), &context.definition.member_separation);
+        case 16: return read_count(database, key("HardpointCapacity"), &context.definition.hardpoint_capacity);
+        case 17: return read_count(database, key("InteractionCapacity"), &context.definition.interaction_capacity);
+        case 18: return read_bool(database, key("ReturnToHardpoint"), &context.definition.return_to_hardpoint);
+        case 19: return read_bool(database, key("AvoidHost"), &context.definition.avoid_host);
+        case 20: normalize_definition(&context.definition); return 1;
+        case 21: return context.definition.count;
+        case 22: context.definition.count = static_cast<std::uint32_t>(arg); return 1;
+        case 23:
+            context.launch_names.clear();
+            read_parameter_list(database, key("Hardpoint").c_str(), &context.launch_names);
+            return 1;
+        case 24:
+            context.interaction_names.clear();
+            read_parameter_list(database, key("Interaction").c_str(), &context.interaction_names);
+            return 1;
+        case 25: return names_for(context, arg).size();
+        case 26: {
+            void* hierarchy = read_at<void*>(context.object_class, 0x1d8, nullptr);
+            return hierarchy && readable_range(
+                static_cast<std::uint8_t*>(hierarchy) + 0x3c, sizeof(void*));
+        }
+        case 27: {
+            char message[256]{};
+            std::snprintf(message, sizeof(message),
+                "Ignoring swarm%lu %s hardpoints on '%s': "
+                "the host has no loaded SOD hierarchy",
+                static_cast<unsigned long>(context.definition.index),
+                arg == 0 ? "launch" : "interaction",
+                context.policy.odf_name.c_str());
+            log_line(message);
+            return 1;
+        }
+        case 28:
+            context.root = reinterpret_cast<void*>(a2fo_swarm_call_thiscall_0(
+                at(g_armada, kGameObjectClassGetHierarchyRootRva),
+                context.object_class));
+            return 1;
+        case 29: {
+            const std::size_t kind = arg >> 16;
+            const std::size_t index = arg & 0xffffu;
+            const std::string& name = names_for(context, kind)[index];
+            context.node = context.root ? reinterpret_cast<void*>(
+                a2fo_swarm_call_thiscall_1(
+                    at(g_armada, kSt3dNodeFindRecursiveRva), context.root,
+                    reinterpret_cast<std::uintptr_t>(name.c_str()))) : nullptr;
+            return context.node != nullptr;
+        }
+        case 30: {
+            const std::size_t kind = arg >> 16;
+            const std::size_t index = arg & 0xffffu;
+            char message[384]{};
+            std::snprintf(message, sizeof(message),
+                "Ignoring missing swarm%lu %s hardpoint '%s' on '%s'",
+                static_cast<unsigned long>(context.definition.index),
+                kind == 0 ? "launch" : "interaction",
+                names_for(context, kind)[index].c_str(),
+                context.policy.odf_name.c_str());
+            log_line(message);
+            return 1;
+        }
+        case 31: {
+            const std::size_t kind = arg >> 16;
+            const std::size_t index = arg & 0xffffu;
+            hardpoints_for(context, kind).push_back(Hardpoint{
+                names_for(context, kind)[index], context.node});
+            return 1;
+        }
+        case 32: {
+            const auto& d = context.definition;
+            char message[512]{};
+            std::snprintf(message, sizeof(message),
+                "Resolved swarm%lu on '%s': model='%s', count=%lu, "
+                "scale=%.2f, radius=%.2f..%.2f, speed=%.2f..%.2f, "
+                "launch=%lu, interaction=%lu, hostAvoidance=%s+%.2f, "
+                "separation=visualBounds+%.2f, capacity=%lu/%lu",
+                static_cast<unsigned long>(d.index),
+                context.policy.odf_name.c_str(), d.model.c_str(),
+                static_cast<unsigned long>(d.count), d.scale,
+                d.minimum_radius, d.maximum_radius,
+                d.minimum_speed, d.maximum_speed,
+                static_cast<unsigned long>(d.launch_hardpoints.size()),
+                static_cast<unsigned long>(d.interaction_hardpoints.size()),
+                d.avoid_host ? "modelRadius" : "off", d.host_clearance,
+                d.member_separation,
+                static_cast<unsigned long>(d.hardpoint_capacity),
+                static_cast<unsigned long>(d.interaction_capacity));
+            log_line(message);
+            return 1;
+        }
+        case 33:
+            context.policy.definitions.push_back(std::move(context.definition));
+            return 1;
+        case 34: return context.policy.definitions.size();
+        case 35: {
+            char message[320]{};
+            std::snprintf(message, sizeof(message),
+                "Registered %lu swarm definition%s (%lu visual "
+                "instance%s) on '%s'",
+                static_cast<unsigned long>(context.policy.definitions.size()),
+                context.policy.definitions.size() == 1 ? "" : "s",
+                static_cast<unsigned long>(arg), arg == 1 ? "" : "s",
+                context.policy.odf_name.c_str());
+            log_line(message);
+            return 1;
+        }
+        case 36: context.definition.maximum_radius = 50.0f; return 1;
+        default: return 0;
+        }
+    } catch (...) {
+        context.exception = std::current_exception();
+        return std::numeric_limits<std::uintptr_t>::max();
+    }
 }
 
 ClassPolicy parse_class_policy(void* object_class_pointer) {
-    ClassPolicy policy{};
-    policy.odf_name = class_odf_name(object_class_pointer);
-    if (policy.odf_name.empty()) return policy;
-    ParameterDbView database(policy.odf_name);
-    if (!database.get()) return policy;
-
-    std::size_t total_members = 0;
-    for (std::size_t index = 0; index < kMaximumDefinitions; ++index) {
-        SwarmDefinition definition{};
-        definition.index = static_cast<std::uint32_t>(index);
-        if (!read_parameter_string(
-                database.get(), indexed_key(index).c_str(),
-                &definition.model)) continue;
-
-        read_count(database.get(), indexed_key(index, "Count"),
-                   &definition.count);
-        read_float(database.get(), indexed_key(index, "Scale"),
-                   &definition.scale);
-        const bool has_radius = read_float(
-            database.get(), indexed_key(index, "Radius"),
-            &definition.maximum_radius);
-        read_float(database.get(), indexed_key(index, "MinRadius"),
-                   &definition.minimum_radius);
-        if (!read_float(database.get(), indexed_key(index, "MaxRadius"),
-                        &definition.maximum_radius) && !has_radius) {
-            definition.maximum_radius = 50.0f;
-        }
-        read_float(database.get(), indexed_key(index, "MinSpeed"),
-                   &definition.minimum_speed);
-        read_float(database.get(), indexed_key(index, "MaxSpeed"),
-                   &definition.maximum_speed);
-        read_float(database.get(), indexed_key(index, "TurnRate"),
-                   &definition.turn_rate);
-        read_float(database.get(), indexed_key(index, "InteractionChance"),
-                   &definition.interaction_chance);
-        read_float(database.get(), indexed_key(index, "InteractionTime"),
-                   &definition.interaction_time);
-        read_float(database.get(), indexed_key(index, "InteractionRadius"),
-                   &definition.interaction_radius);
-        read_float(database.get(), indexed_key(index, "HostClearance"),
-                   &definition.host_clearance);
-        read_float(database.get(), indexed_key(index, "Separation"),
-                   &definition.member_separation);
-        read_count(database.get(), indexed_key(index, "HardpointCapacity"),
-                   &definition.hardpoint_capacity);
-        read_count(database.get(), indexed_key(index, "InteractionCapacity"),
-                   &definition.interaction_capacity);
-        read_bool(database.get(), indexed_key(index, "ReturnToHardpoint"),
-                  &definition.return_to_hardpoint);
-        read_bool(database.get(), indexed_key(index, "AvoidHost"),
-                  &definition.avoid_host);
-        normalize_definition(&definition);
-
-        if (definition.count == 0) continue;
-        if (total_members >= kMaximumMembersPerHost) break;
-        definition.count = static_cast<std::uint32_t>(
-            std::min<std::size_t>(definition.count,
-                kMaximumMembersPerHost - total_members));
-
-        std::vector<std::string> launch_names;
-        std::vector<std::string> interaction_names;
-        read_parameter_list(database.get(),
-                            indexed_key(index, "Hardpoint").c_str(),
-                            &launch_names);
-        read_parameter_list(database.get(),
-                            indexed_key(index, "Interaction").c_str(),
-                            &interaction_names);
-        definition.launch_hardpoints = resolve_hardpoints(
-            object_class_pointer, launch_names, "launch", policy.odf_name,
-            definition.index);
-        definition.interaction_hardpoints = resolve_hardpoints(
-            object_class_pointer, interaction_names, "interaction",
-            policy.odf_name, definition.index);
-
-        char definition_message[512]{};
-        std::snprintf(
-            definition_message, sizeof(definition_message),
-            "Resolved swarm%lu on '%s': model='%s', count=%lu, "
-            "scale=%.2f, radius=%.2f..%.2f, speed=%.2f..%.2f, "
-            "launch=%lu, interaction=%lu, hostAvoidance=%s+%.2f, "
-            "separation=visualBounds+%.2f, capacity=%lu/%lu",
-            static_cast<unsigned long>(definition.index),
-            policy.odf_name.c_str(), definition.model.c_str(),
-            static_cast<unsigned long>(definition.count), definition.scale,
-            definition.minimum_radius, definition.maximum_radius,
-            definition.minimum_speed, definition.maximum_speed,
-            static_cast<unsigned long>(definition.launch_hardpoints.size()),
-            static_cast<unsigned long>(
-                definition.interaction_hardpoints.size()),
-            definition.avoid_host ? "modelRadius" : "off",
-            definition.host_clearance, definition.member_separation,
-            static_cast<unsigned long>(definition.hardpoint_capacity),
-            static_cast<unsigned long>(definition.interaction_capacity));
-        log_line(definition_message);
-
-        total_members += definition.count;
-        policy.definitions.push_back(std::move(definition));
-    }
-
-    if (!policy.definitions.empty()) {
-        char message[320]{};
-        std::snprintf(message, sizeof(message),
-                      "Registered %lu swarm definition%s (%lu visual "
-                      "instance%s) on '%s'",
-                      static_cast<unsigned long>(policy.definitions.size()),
-                      policy.definitions.size() == 1 ? "" : "s",
-                      static_cast<unsigned long>(total_members),
-                      total_members == 1 ? "" : "s", policy.odf_name.c_str());
-        log_line(message);
-    }
-    return policy;
+    SwarmParseContext context(object_class_pointer);
+    a2fo_rs_stage8_swarm_parse(&swarm_parse_step, &context);
+    if (context.exception) std::rethrow_exception(context.exception);
+    return std::move(context.policy);
 }
 
 const ClassPolicy* ensure_class_policy(void* object_class_pointer) noexcept {
@@ -750,35 +835,60 @@ const ClassPolicy* ensure_class_policy(void* object_class_pointer) noexcept {
 
 bool NativeInstance::initialize(const std::string& model,
                                 float scale) noexcept {
-    if (constructed_ || model.empty()) return false;
-    a2fo_swarm_call_thiscall_0(
-        at(g_armada, kSt3dInstanceConstructorRva), bytes_.data());
-    constructed_ = true;
-    a2fo_swarm_call_thiscall_1(
-        at(g_armada, kSt3dInstanceSetDatabaseRva), bytes_.data(),
-        reinterpret_cast<std::uintptr_t>(model.c_str()));
-    void* logical = read_at<void*>(
-        bytes_.data(), kSt3dLogicalDatabaseOffset, nullptr);
-    void* visible = read_at<void*>(
-        bytes_.data(), kSt3dVisibleDatabaseOffset, nullptr);
-    if (!logical && !visible) {
-        release();
-        return false;
-    }
-    if (std::fabs(scale - 1.0f) > 0.0001f) {
-        a2fo_swarm_call_thiscall_1(
-            at(g_armada, kSt3dInstanceScaleGeometryRva), bytes_.data(),
-            float_bits(scale));
-    }
-    // Native WorkerBee::CreateBee enables and starts animation for animated
-    // bee SODs. Doing this unconditionally is harmless for static databases
-    // and prevents animated-only hierarchy channels from remaining at an
-    // invisible pre-trigger state.
-    a2fo_swarm_call_thiscall_1(
-        at(g_armada, kSt3dInstanceSetAnimationFlagsRva), bytes_.data(), 1);
-    a2fo_swarm_call_thiscall_0(
-        at(g_armada, kSt3dInstanceTriggerAnimationRva), bytes_.data());
-    return true;
+    struct Context {
+        NativeInstance* instance;
+        const std::string* model;
+        float scale;
+    } context{this, &model, scale};
+    const auto step = +[](void* opaque, std::uint32_t op,
+                          std::uintptr_t) noexcept -> std::uintptr_t {
+        auto& c = *static_cast<Context*>(opaque);
+        try {
+            switch (op) {
+            case 0: return c.instance->constructed_;
+            case 1: return c.model->empty();
+            case 2:
+                a2fo_swarm_call_thiscall_0(
+                    at(g_armada, kSt3dInstanceConstructorRva),
+                    c.instance->bytes_.data());
+                return 1;
+            case 3: c.instance->constructed_ = true; return 1;
+            case 4:
+                a2fo_swarm_call_thiscall_1(
+                    at(g_armada, kSt3dInstanceSetDatabaseRva),
+                    c.instance->bytes_.data(),
+                    reinterpret_cast<std::uintptr_t>(c.model->c_str()));
+                return 1;
+            case 5:
+                return read_at<void*>(c.instance->bytes_.data(),
+                    kSt3dLogicalDatabaseOffset, nullptr) != nullptr;
+            case 6:
+                return read_at<void*>(c.instance->bytes_.data(),
+                    kSt3dVisibleDatabaseOffset, nullptr) != nullptr;
+            case 7: c.instance->release(); return 1;
+            case 8: return std::fabs(c.scale - 1.0f) > 0.0001f;
+            case 9:
+                a2fo_swarm_call_thiscall_1(
+                    at(g_armada, kSt3dInstanceScaleGeometryRva),
+                    c.instance->bytes_.data(), float_bits(c.scale));
+                return 1;
+            case 10:
+                a2fo_swarm_call_thiscall_1(
+                    at(g_armada, kSt3dInstanceSetAnimationFlagsRva),
+                    c.instance->bytes_.data(), 1);
+                return 1;
+            case 11:
+                a2fo_swarm_call_thiscall_0(
+                    at(g_armada, kSt3dInstanceTriggerAnimationRva),
+                    c.instance->bytes_.data());
+                return 1;
+            default: return 0;
+            }
+        } catch (...) {
+            std::terminate();
+        }
+    };
+    return a2fo_rs_stage8_swarm_instance_init(step, &context) != 0;
 }
 
 float NativeInstance::bounding_radius() const noexcept {
@@ -862,8 +972,9 @@ bool hardpoint_local_position(void* host, const Hardpoint* hardpoint,
 
 const Hardpoint* hardpoint_at(const std::vector<Hardpoint>& hardpoints,
                              std::size_t index) noexcept {
-    return hardpoints.empty() ? nullptr :
-        &hardpoints[index % hardpoints.size()];
+    std::size_t selected = 0;
+    return a2fo_rs_stage10_swarm_hardpoint_index(
+        hardpoints.size(), index, &selected) ? &hardpoints[selected] : nullptr;
 }
 
 float host_exclusion_radius(const BoundingSphere& bounds,
@@ -873,59 +984,142 @@ float host_exclusion_radius(const BoundingSphere& bounds,
     return bounds.radius + agent.visual_radius + definition.host_clearance;
 }
 
+struct SwarmRoamingContext {
+    Agent* agent = nullptr;
+    const SwarmDefinition* definition = nullptr;
+    const BoundingSphere* bounds = nullptr;
+};
+
+std::uintptr_t swarm_roaming_step(void* opaque, std::uint32_t op,
+                                  std::uintptr_t) noexcept {
+    auto& context = *static_cast<SwarmRoamingContext*>(opaque);
+    Agent& agent = *context.agent;
+    const SwarmDefinition& definition = *context.definition;
+    const BoundingSphere& bounds = *context.bounds;
+    switch (op) {
+    case 0: agent.phase = AgentPhase::roaming; return 1;
+    case 1: {
+        const float exclusion = host_exclusion_radius(
+            bounds, agent, definition);
+        agent.target = a2fo::swarm::add(
+            exclusion > 0.0f ? bounds.centre : Vec3{},
+            a2fo::swarm::random_shell_point(
+                agent.random,
+                exclusion + definition.minimum_radius,
+                exclusion + definition.maximum_radius));
+        return 1;
+    }
+    case 2:
+        agent.speed = agent.random.range(
+            definition.minimum_speed, definition.maximum_speed);
+        return 1;
+    case 3: agent.target_offset = {}; return 1;
+    default: return 0;
+    }
+}
+
 void choose_roaming_target(Agent* agent,
                            const SwarmDefinition& definition,
                            const BoundingSphere& bounds) noexcept {
     if (!agent) return;
-    agent->phase = AgentPhase::roaming;
-    const float exclusion = host_exclusion_radius(
-        bounds, *agent, definition);
-    agent->target = a2fo::swarm::add(
-        exclusion > 0.0f ? bounds.centre : Vec3{},
-        a2fo::swarm::random_shell_point(
-            agent->random, exclusion + definition.minimum_radius,
-            exclusion + definition.maximum_radius));
-    agent->speed = agent->random.range(
-        definition.minimum_speed, definition.maximum_speed);
-    agent->target_offset = {};
+    SwarmRoamingContext context{agent, &definition, &bounds};
+    a2fo_rs_stage8_swarm_choose_roaming(&swarm_roaming_step, &context);
 }
 
-bool phase_claims_hardpoint(AgentPhase phase,
-                            bool interaction) noexcept {
-    return interaction
-        ? phase == AgentPhase::approaching_interaction ||
-              phase == AgentPhase::dwelling_interaction
-        : phase == AgentPhase::returning ||
-              phase == AgentPhase::dwelling_return;
+struct SwarmHardpointChoiceContext {
+    Agent* agent = nullptr;
+    const RuntimeGroup* group = nullptr;
+    std::size_t* selected = nullptr;
+};
+
+std::uintptr_t swarm_hardpoint_choice_step(void* opaque, std::uint32_t op,
+                                           std::uintptr_t arg) noexcept {
+    auto& context = *static_cast<SwarmHardpointChoiceContext*>(opaque);
+    switch (op) {
+    case 0:
+        *reinterpret_cast<std::uint32_t*>(arg) = context.agent->random.next_u32();
+        return 1;
+    case 1: return context.group->agents.size();
+    case 2: {
+        const Agent* other = context.group->agents[arg].get();
+        return other && other != context.agent;
+    }
+    case 3:
+        return static_cast<std::uintptr_t>(
+            context.group->agents[arg]->phase);
+    case 4: return context.group->agents[arg]->target_hardpoint;
+    case 5: *context.selected = arg; return 1;
+    default: return 0;
+    }
 }
 
 bool choose_available_hardpoint(
         Agent* agent, const RuntimeGroup* group,
         std::size_t hardpoint_count, std::uint32_t capacity,
         bool interaction, std::size_t* selected) noexcept {
-    if (!agent || !selected || hardpoint_count == 0) return false;
-    const std::size_t first = static_cast<std::size_t>(
-        agent->random.next_u32()) % hardpoint_count;
-    for (std::size_t offset = 0; offset < hardpoint_count; ++offset) {
-        const std::size_t candidate = (first + offset) % hardpoint_count;
-        if (capacity == 0 || !group) {
-            *selected = candidate;
-            return true;
-        }
-        std::uint32_t claims = 0;
-        for (const auto& member : group->agents) {
-            const Agent* other = member.get();
-            if (!other || other == agent ||
-                !phase_claims_hardpoint(other->phase, interaction) ||
-                other->target_hardpoint != candidate) continue;
-            if (++claims >= capacity) break;
-        }
-        if (claims < capacity) {
-            *selected = candidate;
-            return true;
-        }
+    if (!agent || !selected) return false;
+    SwarmHardpointChoiceContext context{agent, group, selected};
+    return a2fo_rs_stage8_swarm_choose_hardpoint(
+        &swarm_hardpoint_choice_step, &context, hardpoint_count, capacity,
+        interaction ? 1 : 0, group ? 1 : 0) != 0;
+}
+
+struct SwarmTargetContext {
+    Agent* agent = nullptr;
+    const SwarmDefinition* definition = nullptr;
+    const BoundingSphere* bounds = nullptr;
+    const RuntimeGroup* group = nullptr;
+    std::size_t selected = 0;
+};
+
+std::uintptr_t swarm_target_step(void* opaque, std::uint32_t op,
+                                 std::uintptr_t) noexcept {
+    auto& context = *static_cast<SwarmTargetContext*>(opaque);
+    Agent& agent = *context.agent;
+    const SwarmDefinition& definition = *context.definition;
+    switch (op) {
+    case 0: return !definition.interaction_hardpoints.empty();
+    case 1: return agent.random.unit() < definition.interaction_chance;
+    case 2:
+        context.selected = 0;
+        return choose_available_hardpoint(
+            &agent, context.group, definition.interaction_hardpoints.size(),
+            definition.interaction_capacity, true, &context.selected);
+    case 3:
+        agent.phase = AgentPhase::approaching_interaction;
+        agent.target_hardpoint = context.selected;
+        return 1;
+    case 4:
+        agent.target_offset = a2fo::swarm::random_shell_point(
+            agent.random, 0.0f, definition.interaction_radius);
+        return 1;
+    case 5:
+        agent.speed = agent.random.range(
+            definition.minimum_speed, definition.maximum_speed);
+        return 1;
+    case 6: return definition.return_to_hardpoint;
+    case 7: return agent.random.unit() < 0.12f;
+    case 8: agent.phase = AgentPhase::returning; return 1;
+    case 9:
+        context.selected = 0;
+        return choose_available_hardpoint(
+            &agent, context.group,
+            std::max<std::size_t>(1, definition.launch_hardpoints.size()),
+            definition.hardpoint_capacity, false, &context.selected);
+    case 10:
+        agent.target_hardpoint = context.selected;
+        agent.target_offset = {};
+        return 1;
+    case 11:
+        agent.speed = agent.random.range(
+            definition.minimum_speed, definition.maximum_speed);
+        return 1;
+    case 12: agent.phase = AgentPhase::roaming; return 1;
+    case 13:
+        choose_roaming_target(&agent, definition, *context.bounds);
+        return 1;
+    default: return 0;
     }
-    return false;
 }
 
 void choose_next_target(Agent* agent,
@@ -933,199 +1127,287 @@ void choose_next_target(Agent* agent,
                         const BoundingSphere& bounds,
                         const RuntimeGroup* group) noexcept {
     if (!agent) return;
-    if (!definition.interaction_hardpoints.empty() &&
-        agent->random.unit() < definition.interaction_chance) {
-        std::size_t selected = 0;
-        if (choose_available_hardpoint(
-                agent, group, definition.interaction_hardpoints.size(),
-                definition.interaction_capacity, true, &selected)) {
-            agent->phase = AgentPhase::approaching_interaction;
-            agent->target_hardpoint = selected;
-            agent->target_offset = a2fo::swarm::random_shell_point(
-                agent->random, 0.0f, definition.interaction_radius);
-            agent->speed = agent->random.range(
-                definition.minimum_speed, definition.maximum_speed);
-            return;
-        }
+    SwarmTargetContext context{agent, &definition, &bounds, group};
+    a2fo_rs_stage8_swarm_choose_target(&swarm_target_step, &context);
+}
+
+struct SwarmRefreshContext {
+    const HostRuntime* host = nullptr;
+    Agent* agent = nullptr;
+    const SwarmDefinition* definition = nullptr;
+    const std::vector<Hardpoint>* hardpoints = nullptr;
+    Vec3 anchor{};
+    float exclusion = 0.0f;
+};
+
+std::uintptr_t swarm_refresh_step(void* opaque, std::uint32_t op,
+                                  std::uintptr_t) noexcept {
+    auto& context = *static_cast<SwarmRefreshContext*>(opaque);
+    if (op == 0) return context.host->object && context.agent;
+    Agent& agent = *context.agent;
+    const HostRuntime& host = *context.host;
+    const SwarmDefinition& definition = *context.definition;
+    switch (op) {
+    case 1: return static_cast<std::uintptr_t>(agent.phase);
+    case 2: context.hardpoints = &definition.interaction_hardpoints; return 1;
+    case 3: context.hardpoints = &definition.launch_hardpoints; return 1;
+    case 4:
+        return hardpoint_local_position(
+            host.object,
+            hardpoint_at(*context.hardpoints, agent.target_hardpoint),
+            &context.anchor);
+    case 5:
+        agent.target = a2fo::swarm::add(
+            context.anchor, agent.target_offset);
+        return 1;
+    case 6:
+        context.exclusion = host_exclusion_radius(
+            host.bounds, agent, definition);
+        return context.exclusion > 0.0f;
+    case 7:
+        agent.target = a2fo::swarm::project_outside_sphere(
+            agent.target, host.bounds.centre, context.exclusion,
+            a2fo::swarm::subtract(context.anchor, host.bounds.centre));
+        return 1;
+    default: return 0;
     }
-    if (definition.return_to_hardpoint &&
-        agent->random.unit() < 0.12f) {
-        agent->phase = AgentPhase::returning;
-        const std::size_t count = std::max<std::size_t>(
-            1, definition.launch_hardpoints.size());
-        std::size_t selected = 0;
-        if (choose_available_hardpoint(
-                agent, group, count, definition.hardpoint_capacity,
-                false, &selected)) {
-            agent->target_hardpoint = selected;
-            agent->target_offset = {};
-            agent->speed = agent->random.range(
-                definition.minimum_speed, definition.maximum_speed);
-            return;
-        }
-        agent->phase = AgentPhase::roaming;
-    }
-    choose_roaming_target(agent, definition, bounds);
 }
 
 bool refresh_hardpoint_target(const HostRuntime& host, Agent* agent,
                               const SwarmDefinition& definition) noexcept {
-    if (!host.object || !agent) return false;
-    const std::vector<Hardpoint>* hardpoints = nullptr;
-    if (agent->phase == AgentPhase::approaching_interaction ||
-        agent->phase == AgentPhase::dwelling_interaction) {
-        hardpoints = &definition.interaction_hardpoints;
-    } else if (agent->phase == AgentPhase::returning ||
-               agent->phase == AgentPhase::dwelling_return) {
-        hardpoints = &definition.launch_hardpoints;
-    } else {
-        return true;
-    }
-    Vec3 anchor{};
-    if (!hardpoint_local_position(
-            host.object, hardpoint_at(*hardpoints, agent->target_hardpoint),
-            &anchor)) return false;
-    agent->target = a2fo::swarm::add(anchor, agent->target_offset);
-    const float exclusion = host_exclusion_radius(
-        host.bounds, *agent, definition);
-    if (exclusion > 0.0f) {
-        agent->target = a2fo::swarm::project_outside_sphere(
-            agent->target, host.bounds.centre, exclusion,
-            a2fo::swarm::subtract(anchor, host.bounds.centre));
-    }
-    return true;
+    SwarmRefreshContext context{&host, agent, &definition};
+    return a2fo_rs_stage8_swarm_refresh_target(
+        &swarm_refresh_step, &context) != 0;
 }
 
-std::uint32_t mix_seed(std::uint32_t handle, std::uint32_t definition,
-                       std::uint32_t member) noexcept {
-    std::uint32_t value = handle ^ 0x9e3779b9u;
-    value ^= definition + 0x85ebca6bu + (value << 6) + (value >> 2);
-    value ^= member + 0xc2b2ae35u + (value << 6) + (value >> 2);
-    value ^= value >> 16;
-    value *= 0x7feb352du;
-    value ^= value >> 15;
-    return value == 0 ? 1u : value;
+struct SwarmCreationContext {
+    void* object = nullptr;
+    const ClassPolicy* policy = nullptr;
+    HostRuntime runtime{};
+    RuntimeGroup group{};
+    const SwarmDefinition* definition = nullptr;
+    std::unique_ptr<Agent> agent;
+    float exclusion = 0.0f;
+    A2FO_Stage8SwarmCreation state{};
+    std::exception_ptr exception{};
+};
+
+std::uintptr_t swarm_creation_step(void* opaque, std::uint32_t op,
+                                   std::uintptr_t arg) noexcept {
+    auto& context = *static_cast<SwarmCreationContext*>(opaque);
+    if (context.exception) return std::numeric_limits<std::uintptr_t>::max();
+    try {
+        switch (op) {
+        case 0: context.runtime.object = context.object; return 1;
+        case 1:
+            context.runtime.object_class = object_class(context.object);
+            return 1;
+        case 2:
+            context.runtime.handle = object_handle(context.object);
+            context.state.handle = context.runtime.handle;
+            return 1;
+        case 3: context.runtime.last_seen_epoch = g_epoch; return 1;
+        case 4:
+            host_bounding_sphere(context.object, &context.runtime.bounds);
+            return 1;
+        case 5:
+            context.runtime.groups.reserve(context.policy->definitions.size());
+            return 1;
+        case 6:
+            context.state.definition_count = static_cast<std::uint32_t>(
+                context.policy->definitions.size());
+            return 1;
+        case 7:
+            context.definition = &context.policy->definitions[arg];
+            context.state.definition_index = context.definition->index;
+            context.group = RuntimeGroup{};
+            context.group.definition = arg;
+            context.group.agents.reserve(context.definition->count);
+            return 1;
+        case 8:
+            context.state.member_count = context.definition->count;
+            return 1;
+        case 9:
+            context.agent = std::make_unique<Agent>(
+                static_cast<std::uint32_t>(arg));
+            return 1;
+        case 10:
+            return context.agent->visual.initialize(
+                context.definition->model, context.definition->scale);
+        case 11:
+            context.state.failure_report = InterlockedIncrement(
+                &g_instance_failure_reports);
+            return 1;
+        case 12: {
+            char message[320]{};
+            std::snprintf(message, sizeof(message),
+                "Could not load swarm%lu model '%s' for '%s'",
+                static_cast<unsigned long>(context.definition->index),
+                context.definition->model.c_str(),
+                context.policy->odf_name.c_str());
+            log_line(message);
+            return 1;
+        }
+        case 13:
+            log_line("Further swarm model-load failures suppressed");
+            return 1;
+        case 14:
+            // Native ST3D sphere and scale multiplication keep GNU/x87 bits.
+            context.agent->visual_radius =
+                context.agent->visual.bounding_radius() *
+                context.definition->scale;
+            return 1;
+        case 15: return context.definition->avoid_host;
+        case 16: return g_logged_avoidance_volume;
+        case 17: return context.runtime.bounds.radius > 0.0f;
+        case 18: {
+            char message[320]{};
+            std::snprintf(message, sizeof(message),
+                "Host avoidance active on '%s': hostRadius=%.2f, "
+                "visualRadius=%.2f, clearance=%.2f",
+                context.policy->odf_name.c_str(),
+                context.runtime.bounds.radius,
+                context.agent->visual_radius,
+                context.definition->host_clearance);
+            log_line(message);
+            g_logged_avoidance_volume = true;
+            return 1;
+        }
+        case 19: return g_logged_missing_host_bounds;
+        case 20: {
+            char message[256]{};
+            std::snprintf(message, sizeof(message),
+                "Host avoidance unavailable on '%s': the native model "
+                "has no valid bounding sphere",
+                context.policy->odf_name.c_str());
+            log_line(message);
+            g_logged_missing_host_bounds = true;
+            return 1;
+        }
+        case 21:
+            context.state.launch_count = std::max<std::size_t>(
+                1, context.definition->launch_hardpoints.size());
+            return 1;
+        case 22:
+            context.state.random = context.agent->random.next_u32();
+            return 1;
+        case 23:
+            hardpoint_local_position(
+                context.object,
+                hardpoint_at(context.definition->launch_hardpoints, arg),
+                &context.agent->position);
+            return 1;
+        case 24:
+            choose_roaming_target(context.agent.get(), *context.definition,
+                                  context.runtime.bounds);
+            return 1;
+        case 25:
+            context.exclusion = host_exclusion_radius(
+                context.runtime.bounds, *context.agent,
+                *context.definition);
+            return context.exclusion > 0.0f;
+        case 26:
+            context.agent->position = a2fo::swarm::project_outside_sphere(
+                context.agent->position, context.runtime.bounds.centre,
+                context.exclusion,
+                a2fo::swarm::subtract(
+                    context.agent->target, context.runtime.bounds.centre));
+            return 1;
+        case 27:
+            context.agent->direction = a2fo::swarm::normalized(
+                a2fo::swarm::subtract(context.agent->target,
+                                      context.agent->position));
+            return 1;
+        case 28:
+            context.group.agents.push_back(std::move(context.agent));
+            return 1;
+        case 29: return !context.group.agents.empty();
+        case 30:
+            context.runtime.groups.push_back(std::move(context.group));
+            return 1;
+        case 31: return context.runtime.bounds.radius <= 0.0f;
+        case 32: context.agent.reset(); return 1;
+        default: return 0;
+        }
+    } catch (...) {
+        context.exception = std::current_exception();
+        return std::numeric_limits<std::uintptr_t>::max();
+    }
 }
 
 HostRuntime create_host_runtime(void* object, const ClassPolicy& policy) {
+    SwarmCreationContext context{};
+    context.object = object;
+    context.policy = &policy;
+    a2fo_rs_stage8_swarm_create_host(
+        &swarm_creation_step, &context, &context.state);
+    if (context.exception) std::rethrow_exception(context.exception);
+    return std::move(context.runtime);
+}
+
+struct SwarmObserveContext {
+    explicit SwarmObserveContext(void* value) : object(value) {}
+    void* object = nullptr;
+    A2FO_Stage8SwarmObserved observed{};
+    const ClassPolicy* policy = nullptr;
+    std::unordered_map<std::uint32_t, HostRuntime>::iterator present{};
     HostRuntime runtime{};
-    runtime.object = object;
-    runtime.object_class = object_class(object);
-    runtime.handle = object_handle(object);
-    runtime.last_seen_epoch = g_epoch;
-    host_bounding_sphere(object, &runtime.bounds);
-    runtime.groups.reserve(policy.definitions.size());
+    std::exception_ptr exception{};
+};
 
-    for (std::size_t definition_index = 0;
-         definition_index < policy.definitions.size(); ++definition_index) {
-        const SwarmDefinition& definition =
-            policy.definitions[definition_index];
-        RuntimeGroup group{};
-        group.definition = definition_index;
-        group.agents.reserve(definition.count);
-        for (std::uint32_t member = 0; member < definition.count; ++member) {
-            auto agent = std::make_unique<Agent>(mix_seed(
-                runtime.handle, definition.index, member));
-            if (!agent->visual.initialize(
-                    definition.model, definition.scale)) {
-                const LONG report = InterlockedIncrement(
-                    &g_instance_failure_reports);
-                if (report <= 8) {
-                    char message[320]{};
-                    std::snprintf(
-                        message, sizeof(message),
-                        "Could not load swarm%lu model '%s' for '%s'",
-                        static_cast<unsigned long>(definition.index),
-                        definition.model.c_str(), policy.odf_name.c_str());
-                    log_line(message);
-                } else if (report == 9) {
-                    log_line("Further swarm model-load failures suppressed");
-                }
-                // Database lookup is definition-wide. Avoid repeating the
-                // same failed native load for every requested member.
-                break;
-            }
-            // ST3D_Instance keeps its database sphere unscaled even when
-            // ScaleGeometry stores a separate per-axis render scale.
-            agent->visual_radius =
-                agent->visual.bounding_radius() * definition.scale;
-            if (definition.avoid_host && !g_logged_avoidance_volume &&
-                runtime.bounds.radius > 0.0f) {
-                char message[320]{};
-                std::snprintf(
-                    message, sizeof(message),
-                    "Host avoidance active on '%s': hostRadius=%.2f, "
-                    "visualRadius=%.2f, clearance=%.2f",
-                    policy.odf_name.c_str(), runtime.bounds.radius,
-                    agent->visual_radius, definition.host_clearance);
-                log_line(message);
-                g_logged_avoidance_volume = true;
-            } else if (definition.avoid_host &&
-                       !g_logged_missing_host_bounds &&
-                       runtime.bounds.radius <= 0.0f) {
-                char message[256]{};
-                std::snprintf(
-                    message, sizeof(message),
-                    "Host avoidance unavailable on '%s': the native model "
-                    "has no valid bounding sphere",
-                    policy.odf_name.c_str());
-                log_line(message);
-                g_logged_missing_host_bounds = true;
-            }
-
-            const std::size_t launch_count = std::max<std::size_t>(
-                1, definition.launch_hardpoints.size());
-            const std::size_t launch_index =
-                (static_cast<std::size_t>(member) +
-                 static_cast<std::size_t>(agent->random.next_u32())) %
-                launch_count;
-            hardpoint_local_position(
-                object, hardpoint_at(definition.launch_hardpoints,
-                                     launch_index),
-                &agent->position);
-            choose_roaming_target(agent.get(), definition, runtime.bounds);
-            const float exclusion = host_exclusion_radius(
-                runtime.bounds, *agent, definition);
-            if (exclusion > 0.0f) {
-                agent->position = a2fo::swarm::project_outside_sphere(
-                    agent->position, runtime.bounds.centre, exclusion,
-                    a2fo::swarm::subtract(
-                        agent->target, runtime.bounds.centre));
-            }
-            agent->direction = a2fo::swarm::normalized(
-                a2fo::swarm::subtract(agent->target, agent->position));
-            group.agents.push_back(std::move(agent));
+std::uintptr_t swarm_observe_step(void* opaque, std::uint32_t op,
+                                  std::uintptr_t) noexcept {
+    auto& context = *static_cast<SwarmObserveContext*>(opaque);
+    if (context.exception) return std::numeric_limits<std::uintptr_t>::max();
+    try {
+        switch (op) {
+        case 0:
+            return context.object && read_live_at<std::uint8_t>(
+                context.object, kObjectExpiredOffset, 1) == 0;
+        case 1:
+            context.observed.handle = read_live_at<std::uint32_t>(
+                context.object, kObjectHandleOffset, 0);
+            return 1;
+        case 2:
+            context.observed.object_class = reinterpret_cast<std::uintptr_t>(
+                read_live_at<void*>(context.object, kObjectClassOffset, nullptr));
+            return 1;
+        case 3:
+            context.policy = ensure_class_policy(
+                reinterpret_cast<void*>(context.observed.object_class));
+            return context.policy && !context.policy->definitions.empty();
+        case 4:
+            context.present = g_hosts.find(context.observed.handle);
+            return context.present != g_hosts.end();
+        case 5:
+            return context.present->second.object == context.object &&
+                context.present->second.object_class ==
+                    reinterpret_cast<void*>(context.observed.object_class);
+        case 6:
+            context.present->second.last_seen_epoch = g_epoch;
+            return 1;
+        case 7:
+            context.runtime = create_host_runtime(context.object,
+                                                  *context.policy);
+            return 1;
+        case 8: return context.runtime.groups.empty();
+        case 9:
+            g_hosts.insert_or_assign(context.observed.handle,
+                                     std::move(context.runtime));
+            return 1;
+        default: return 0;
         }
-        if (!group.agents.empty()) runtime.groups.push_back(std::move(group));
+    } catch (...) {
+        context.exception = std::current_exception();
+        return std::numeric_limits<std::uintptr_t>::max();
     }
-    return runtime;
 }
 
 void observe_host(void* object) noexcept {
-    if (!object || read_live_at<std::uint8_t>(
-            object, kObjectExpiredOffset, 1) != 0) return;
-    const std::uint32_t handle = read_live_at<std::uint32_t>(
-        object, kObjectHandleOffset, 0);
-    void* class_pointer = read_live_at<void*>(
-        object, kObjectClassOffset, nullptr);
-    if (handle == 0 || !class_pointer) return;
-    const ClassPolicy* policy = ensure_class_policy(class_pointer);
-    if (!policy || policy->definitions.empty()) return;
-
-    auto present = g_hosts.find(handle);
-    if (present != g_hosts.end() &&
-        present->second.object == object &&
-        present->second.object_class == class_pointer) {
-        present->second.last_seen_epoch = g_epoch;
-        return;
-    }
-    try {
-        HostRuntime runtime = create_host_runtime(object, *policy);
-        if (runtime.groups.empty()) return;
-        g_hosts.insert_or_assign(handle, std::move(runtime));
-    } catch (...) {
-        log_line("Could not allocate per-host swarm state");
-    }
+    SwarmObserveContext context(object);
+    a2fo_rs_stage8_swarm_observe(&swarm_observe_step, &context,
+                                 &context.observed);
+    if (context.exception) log_line("Could not allocate per-host swarm state");
 }
 
 bool live_object_list(void** list_output, void** head_output,
@@ -1150,96 +1432,142 @@ bool live_object_list(void** list_output, void** head_output,
     return true;
 }
 
-bool enumerate_hosts(std::uint32_t* count_output) noexcept {
-    void* list = nullptr;
-    void* head = nullptr;
-    std::uint32_t count = 0;
-    if (!live_object_list(&list, &head, &count)) return false;
-    (void)list;
-    void* node = read_live_at<void*>(head, 0, nullptr);
-    for (std::uint32_t index = 0;
-         node && node != head && index < count; ++index) {
-        void* next = read_live_at<void*>(node, 0, nullptr);
-        observe_host(read_live_at<void*>(node, 8, nullptr));
-        if (next == node) break;
-        node = next;
+struct SwarmEnumerationContext {
+    A2FO_Stage8SwarmEnumeration state{};
+};
+
+std::uintptr_t swarm_enumeration_step(void* opaque, std::uint32_t op,
+                                      std::uintptr_t) noexcept {
+    auto& context = *static_cast<SwarmEnumerationContext*>(opaque);
+    switch (op) {
+    case 0: {
+        void* list = nullptr;
+        void* head = nullptr;
+        if (!live_object_list(&list, &head, &context.state.count)) return 0;
+        (void)list;
+        context.state.head = reinterpret_cast<std::uintptr_t>(head);
+        return 1;
     }
-    if (count_output) *count_output = count;
-    return true;
+    case 1:
+        context.state.node = reinterpret_cast<std::uintptr_t>(
+            read_live_at<void*>(reinterpret_cast<void*>(context.state.head),
+                                0, nullptr));
+        return 1;
+    case 2:
+        context.state.next = reinterpret_cast<std::uintptr_t>(
+            read_live_at<void*>(reinterpret_cast<void*>(context.state.node),
+                                0, nullptr));
+        return 1;
+    case 3:
+        observe_host(read_live_at<void*>(
+            reinterpret_cast<void*>(context.state.node), 8, nullptr));
+        return 1;
+    default: return 0;
+    }
+}
+
+bool enumerate_hosts(std::uint32_t* count_output) noexcept {
+    SwarmEnumerationContext context{};
+    const bool enumerated = a2fo_rs_stage8_swarm_enumerate(
+        &swarm_enumeration_step, &context, &context.state) != 0;
+    if (enumerated && count_output) *count_output = context.state.count;
+    return enumerated;
+}
+
+struct SwarmUpdateContext {
+    const HostRuntime* host = nullptr;
+    RuntimeGroup* group = nullptr;
+    Agent* agent = nullptr;
+    const SwarmDefinition* definition = nullptr;
+    float elapsed = 0.0f;
+    Vec3 previous_target{};
+    Vec3 previous_position{};
+    Vec3 radius_relative{};
+    float arrival = 0.0f;
+    float exclusion = 0.0f;
+    bool arrived = false;
+};
+
+std::uintptr_t swarm_update_step(void* opaque, std::uint32_t op,
+                                 std::uintptr_t arg) noexcept {
+    auto& context = *static_cast<SwarmUpdateContext*>(opaque);
+    if (op == 0) return context.host->object && context.agent;
+    Agent& agent = *context.agent;
+    const HostRuntime& host = *context.host;
+    const SwarmDefinition& definition = *context.definition;
+    switch (op) {
+    case 1: context.previous_target = agent.target; return 1;
+    case 2: return refresh_hardpoint_target(host, &agent, definition);
+    case 3:
+        choose_roaming_target(&agent, definition, host.bounds);
+        return 1;
+    case 4: return static_cast<std::uintptr_t>(agent.phase);
+    case 5:
+        agent.position = a2fo::swarm::add(
+            agent.position,
+            a2fo::swarm::subtract(agent.target, context.previous_target));
+        agent.dwell_remaining -= context.elapsed;
+        return agent.dwell_remaining <= 0.0f;
+    case 6:
+        context.arrival = arg != 0
+            ? std::max(0.25f, definition.interaction_radius * 0.25f)
+            : 0.75f;
+        return 1;
+    case 7:
+        context.previous_position = agent.position;
+        context.arrived = a2fo::swarm::advance_agent(
+            &agent.position, &agent.direction, agent.target,
+            agent.speed, definition.turn_rate, context.elapsed,
+            context.arrival);
+        return 1;
+    case 8:
+        context.exclusion = host_exclusion_radius(
+            host.bounds, agent, definition);
+        return context.exclusion > 0.0f;
+    case 9:
+        return a2fo::swarm::constrain_motion_outside_sphere(
+            context.previous_position, &agent.position, &agent.direction,
+            host.bounds.centre, context.exclusion);
+    case 10: context.arrived = false; return 1;
+    case 11:
+        context.radius_relative = a2fo::swarm::subtract(
+            agent.position, arg != 0 ? host.bounds.centre : Vec3{});
+        return 1;
+    case 12:
+        return a2fo::swarm::constrain_to_radius(
+            &context.radius_relative,
+            context.exclusion + definition.maximum_radius);
+    case 13:
+        agent.position = a2fo::swarm::add(
+            arg != 0 ? host.bounds.centre : Vec3{},
+            context.radius_relative);
+        agent.direction = a2fo::swarm::normalized(
+            a2fo::swarm::subtract(agent.target, agent.position),
+            agent.direction);
+        return 1;
+    case 14: return context.arrived;
+    case 15: return !(definition.interaction_time <= 0.0f);
+    case 16:
+        agent.phase = AgentPhase::dwelling_interaction;
+        agent.dwell_remaining = definition.interaction_time;
+        return 1;
+    case 17:
+        agent.phase = AgentPhase::dwelling_return;
+        agent.dwell_remaining = agent.random.range(0.25f, 1.25f);
+        return 1;
+    case 18:
+        choose_next_target(&agent, definition, host.bounds, context.group);
+        return 1;
+    default: return 0;
+    }
 }
 
 void update_agent(const HostRuntime& host, RuntimeGroup* group, Agent* agent,
                   const SwarmDefinition& definition,
                   float elapsed_seconds) noexcept {
-    if (!host.object || !agent) return;
-    const Vec3 previous_target = agent->target;
-    if (!refresh_hardpoint_target(host, agent, definition)) {
-        choose_roaming_target(agent, definition, host.bounds);
-    }
-    if (agent->phase == AgentPhase::dwelling_interaction ||
-        agent->phase == AgentPhase::dwelling_return) {
-        // Preserve separation offsets established after the prior update.
-        // Moving/animated hardpoints still carry the whole local formation by
-        // the target delta instead of collapsing every member onto one point.
-        agent->position = a2fo::swarm::add(
-            agent->position,
-            a2fo::swarm::subtract(agent->target, previous_target));
-        agent->dwell_remaining -= elapsed_seconds;
-        if (agent->dwell_remaining <= 0.0f) {
-            // Always release a claimed hardpoint into a roaming leg. This
-            // prevents repeated visits from turning interaction locations
-            // into permanent gathering points.
-            choose_roaming_target(agent, definition, host.bounds);
-        }
-        return;
-    }
-
-    const float arrival =
-        agent->phase == AgentPhase::approaching_interaction
-            ? std::max(0.25f, definition.interaction_radius * 0.25f)
-            : 0.75f;
-    const Vec3 previous_position = agent->position;
-    bool arrived = a2fo::swarm::advance_agent(
-            &agent->position, &agent->direction, agent->target,
-            agent->speed, definition.turn_rate, elapsed_seconds,
-            arrival);
-    const float exclusion = host_exclusion_radius(
-        host.bounds, *agent, definition);
-    if (exclusion > 0.0f) {
-        if (a2fo::swarm::constrain_motion_outside_sphere(
-            previous_position, &agent->position, &agent->direction,
-            host.bounds.centre, exclusion)) {
-            arrived = false;
-        }
-    }
-    Vec3 radius_relative = a2fo::swarm::subtract(
-        agent->position,
-        exclusion > 0.0f ? host.bounds.centre : Vec3{});
-    if (agent->phase == AgentPhase::roaming &&
-        a2fo::swarm::constrain_to_radius(
-            &radius_relative, exclusion + definition.maximum_radius)) {
-        agent->position = a2fo::swarm::add(
-            exclusion > 0.0f ? host.bounds.centre : Vec3{},
-            radius_relative);
-        agent->direction = a2fo::swarm::normalized(
-            a2fo::swarm::subtract(agent->target, agent->position),
-            agent->direction);
-    }
-    if (!arrived) return;
-
-    if (agent->phase == AgentPhase::approaching_interaction) {
-        if (definition.interaction_time <= 0.0f) {
-            choose_roaming_target(agent, definition, host.bounds);
-        } else {
-            agent->phase = AgentPhase::dwelling_interaction;
-            agent->dwell_remaining = definition.interaction_time;
-        }
-    } else if (agent->phase == AgentPhase::returning) {
-        agent->phase = AgentPhase::dwelling_return;
-        agent->dwell_remaining = agent->random.range(0.25f, 1.25f);
-    } else {
-        choose_next_target(agent, definition, host.bounds, group);
-    }
+    SwarmUpdateContext context{&host, group, agent, &definition,
+                               elapsed_seconds};
+    a2fo_rs_stage8_swarm_update(&swarm_update_step, &context);
 }
 
 Vec3 pair_separation_axis(std::uint32_t left,
@@ -1252,133 +1580,203 @@ Vec3 pair_separation_axis(std::uint32_t left,
     return a2fo::swarm::random_shell_point(random, 1.0f, 1.0f);
 }
 
+struct SwarmSeparationContext {
+    HostRuntime* host = nullptr;
+    RuntimeGroup* group = nullptr;
+    const SwarmDefinition* definition = nullptr;
+    Agent* left = nullptr;
+    Agent* right = nullptr;
+    Agent* agent = nullptr;
+    float minimum_distance = 0.0f;
+    float exclusion = 0.0f;
+    Vec3 relative{};
+};
+
+std::uintptr_t swarm_separation_step(void* opaque, std::uint32_t op,
+                                     std::uintptr_t arg) noexcept {
+    auto& context = *static_cast<SwarmSeparationContext*>(opaque);
+    if (op == 0) return context.group ? context.group->agents.size() : 0;
+    RuntimeGroup& group = *context.group;
+    const SwarmDefinition& definition = *context.definition;
+    switch (op) {
+    case 1:
+        context.left = group.agents[arg].get();
+        return context.left != nullptr;
+    case 2:
+        context.right = group.agents[arg].get();
+        return context.right != nullptr;
+    case 3: {
+        context.minimum_distance =
+            context.left->visual_radius + context.right->visual_radius +
+            definition.member_separation;
+        const Vec3 separation = a2fo::swarm::subtract(
+            context.left->position, context.right->position);
+        const float distance_squared =
+            a2fo::swarm::length_squared(separation);
+        return std::isfinite(distance_squared) &&
+            distance_squared >=
+                context.minimum_distance * context.minimum_distance;
+    }
+    case 4:
+        a2fo::swarm::separate_pair(
+            &context.left->position, &context.left->direction,
+            &context.right->position, &context.right->direction,
+            context.minimum_distance,
+            pair_separation_axis(context.left->identity,
+                                 context.right->identity));
+        return 1;
+    case 5:
+        context.agent = group.agents[arg].get();
+        return context.agent != nullptr;
+    case 6:
+        context.exclusion = host_exclusion_radius(
+            context.host->bounds, *context.agent, definition);
+        return context.exclusion > 0.0f;
+    case 7:
+        context.agent->position = a2fo::swarm::project_outside_sphere(
+            context.agent->position, context.host->bounds.centre,
+            context.exclusion, context.agent->direction);
+        return 1;
+    case 8: return static_cast<std::uintptr_t>(context.agent->phase);
+    case 9:
+        context.relative = a2fo::swarm::subtract(
+            context.agent->position,
+            arg != 0 ? context.host->bounds.centre : Vec3{});
+        return a2fo::swarm::constrain_to_radius(
+            &context.relative,
+            context.exclusion + definition.maximum_radius);
+    case 10:
+        context.agent->position = a2fo::swarm::add(
+            arg != 0 ? context.host->bounds.centre : Vec3{},
+            context.relative);
+        return 1;
+    default: return 0;
+    }
+}
+
 void separate_group_members(HostRuntime& host, RuntimeGroup* group,
                             const SwarmDefinition& definition) noexcept {
-    if (!group || group->agents.size() < 2) return;
+    SwarmSeparationContext context{&host, group, &definition};
+    a2fo_rs_stage8_swarm_separate(&swarm_separation_step, &context);
+}
 
-    // Small authored groups benefit from extra relaxation. Large ambient
-    // groups use one pass so the fallback remains bounded instead of doing
-    // three full O(n^2) sweeps at the 256-member limit.
-    const unsigned relaxation_passes = group->agents.size() <= 16
-        ? 3u : (group->agents.size() <= 64 ? 2u : 1u);
-    for (unsigned pass = 0; pass < relaxation_passes; ++pass) {
-        for (std::size_t left_index = 0;
-             left_index + 1 < group->agents.size(); ++left_index) {
-            Agent* left = group->agents[left_index].get();
-            if (!left) continue;
-            for (std::size_t right_index = left_index + 1;
-                 right_index < group->agents.size(); ++right_index) {
-                Agent* right = group->agents[right_index].get();
-                if (!right) continue;
-                const float minimum_distance =
-                    left->visual_radius + right->visual_radius +
-                    definition.member_separation;
-                const Vec3 separation = a2fo::swarm::subtract(
-                    left->position, right->position);
-                const float distance_squared =
-                    a2fo::swarm::length_squared(separation);
-                if (std::isfinite(distance_squared) &&
-                    distance_squared >=
-                        minimum_distance * minimum_distance) {
-                    continue;
-                }
-                a2fo::swarm::separate_pair(
-                    &left->position, &left->direction,
-                    &right->position, &right->direction,
-                    minimum_distance,
-                    pair_separation_axis(left->identity, right->identity));
-            }
-        }
+struct SwarmSimulationContext {
+    A2FO_Stage8SwarmSimulation state{};
+    float elapsed = 0.0f;
+    std::unordered_map<std::uint32_t, HostRuntime>::iterator iterator{};
+    std::unordered_map<std::uint32_t, HostRuntime>::iterator cleanup{};
+    std::unordered_map<void*, ClassPolicy>::iterator policy{};
+    HostRuntime* host = nullptr;
+    RuntimeGroup* group = nullptr;
+    const SwarmDefinition* definition = nullptr;
+    std::exception_ptr exception{};
+};
+
+std::uintptr_t swarm_simulation_step(void* opaque, std::uint32_t op,
+                                     std::uintptr_t arg) noexcept {
+    auto& context = *static_cast<SwarmSimulationContext*>(opaque);
+    if (context.exception && op != 31 && op != 32) {
+        return std::numeric_limits<std::uintptr_t>::max();
     }
-
-    // Pair correction can push one member toward the host or beyond the
-    // roaming shell. Reapply the same cheap sidecar constraints afterward.
-    for (const auto& member : group->agents) {
-        Agent* agent = member.get();
-        if (!agent) continue;
-        const float exclusion = host_exclusion_radius(
-            host.bounds, *agent, definition);
-        if (exclusion > 0.0f) {
-            agent->position = a2fo::swarm::project_outside_sphere(
-                agent->position, host.bounds.centre, exclusion,
-                agent->direction);
+    try {
+        switch (op) {
+        case 0: return g_inside_simulation;
+        case 1: g_inside_simulation = true; return 1;
+        case 2: context.state.epoch = g_epoch; return 1;
+        case 3: g_epoch = static_cast<std::uint32_t>(arg); return 1;
+        case 4:
+            for (auto& entry : g_hosts) entry.second.last_seen_epoch = 0;
+            return 1;
+        case 5:
+            return live_object_list(nullptr, nullptr,
+                                    &context.state.object_count);
+        case 6:
+            context.state.last_object_count = g_last_object_count;
+            context.state.countdown = g_host_discovery_countdown;
+            return 1;
+        case 7:
+            return enumerate_hosts(&context.state.enumerated_count);
+        case 8:
+            g_last_object_count = context.state.enumerated_count;
+            return 1;
+        case 9:
+            g_host_discovery_countdown = static_cast<std::uint32_t>(arg);
+            return 1;
+        case 10: --g_host_discovery_countdown; return 1;
+        case 11: context.iterator = g_hosts.begin(); return 1;
+        case 12: return context.iterator != g_hosts.end();
+        case 13:
+            context.host = &context.iterator->second;
+            context.state.last_seen_epoch = context.host->last_seen_epoch;
+            return 1;
+        case 14: return context.host->object != nullptr;
+        case 15: return object_expired(context.host->object);
+        case 16:
+            context.policy = g_class_policies.find(context.host->object_class);
+            return context.policy != g_class_policies.end();
+        case 17:
+            context.state.group_count = static_cast<std::uint32_t>(
+                context.host->groups.size());
+            return 1;
+        case 18:
+            context.group = &context.host->groups[arg];
+            context.state.group_definition = static_cast<std::uint32_t>(
+                context.group->definition);
+            return 1;
+        case 19:
+            context.state.definition_count = static_cast<std::uint32_t>(
+                context.policy->second.definitions.size());
+            if (context.group->definition <
+                    context.policy->second.definitions.size()) {
+                context.definition = &context.policy->second.definitions[
+                    context.group->definition];
+            }
+            return 1;
+        case 20:
+            context.state.agent_count = static_cast<std::uint32_t>(
+                context.group->agents.size());
+            return 1;
+        case 21:
+            update_agent(*context.host, context.group,
+                         context.group->agents[arg].get(),
+                         *context.definition, context.elapsed);
+            return 1;
+        case 22:
+            separate_group_members(*context.host, context.group,
+                                   *context.definition);
+            return 1;
+        case 23: ++context.iterator; return 1;
+        case 24: context.cleanup = g_hosts.begin(); return 1;
+        case 25: return context.cleanup != g_hosts.end();
+        case 26:
+            context.state.last_seen_epoch =
+                context.cleanup->second.last_seen_epoch;
+            return 1;
+        case 27: return context.cleanup->second.object != nullptr;
+        case 28: return object_expired(context.cleanup->second.object);
+        case 29: context.cleanup = g_hosts.erase(context.cleanup); return 1;
+        case 30: ++context.cleanup; return 1;
+        case 31: g_inside_simulation = false; return 1;
+        case 32:
+            log_line("Swarm simulation recovered from an allocation failure");
+            return 1;
+        case 33: {
+            const std::uint32_t bits = static_cast<std::uint32_t>(arg);
+            std::memcpy(&context.elapsed, &bits, sizeof(bits));
+            return 1;
         }
-        if (agent->phase != AgentPhase::roaming) continue;
-        Vec3 relative = a2fo::swarm::subtract(
-            agent->position,
-            exclusion > 0.0f ? host.bounds.centre : Vec3{});
-        if (a2fo::swarm::constrain_to_radius(
-                &relative, exclusion + definition.maximum_radius)) {
-            agent->position = a2fo::swarm::add(
-                exclusion > 0.0f ? host.bounds.centre : Vec3{}, relative);
+        default: return 0;
         }
+    } catch (...) {
+        context.exception = std::current_exception();
+        return std::numeric_limits<std::uintptr_t>::max();
     }
 }
 
 void simulate_swarms(float elapsed_seconds) noexcept {
-    if (g_inside_simulation) return;
-    g_inside_simulation = true;
-    try {
-        ++g_epoch;
-        if (g_epoch == 0) {
-            g_epoch = 1;
-            for (auto& entry : g_hosts) entry.second.last_seen_epoch = 0;
-        }
-        std::uint32_t current_object_count = 0;
-        const bool object_count_available = live_object_list(
-            nullptr, nullptr, &current_object_count);
-        const bool object_count_changed = object_count_available &&
-            current_object_count != g_last_object_count;
-        const bool changed_scan_due = object_count_changed &&
-            g_host_discovery_countdown <=
-                kHostDiscoveryIntervalTicks -
-                    kHostDiscoveryMinimumTicks - 1;
-        bool enumerated_hosts = false;
-        if (g_host_discovery_countdown == 0 || changed_scan_due) {
-            std::uint32_t enumerated_count = 0;
-            enumerated_hosts = enumerate_hosts(&enumerated_count);
-            if (enumerated_hosts) g_last_object_count = enumerated_count;
-            g_host_discovery_countdown = kHostDiscoveryIntervalTicks - 1;
-        } else {
-            --g_host_discovery_countdown;
-        }
-
-        elapsed_seconds = std::max(0.0f, std::min(elapsed_seconds, 0.25f));
-        for (auto& host_entry : g_hosts) {
-            HostRuntime& host = host_entry.second;
-            if ((enumerated_hosts && host.last_seen_epoch != g_epoch) ||
-                !host.object ||
-                object_expired(host.object)) continue;
-            const auto policy = g_class_policies.find(host.object_class);
-            if (policy == g_class_policies.end()) continue;
-            for (RuntimeGroup& group : host.groups) {
-                if (group.definition >= policy->second.definitions.size()) {
-                    continue;
-                }
-                const SwarmDefinition& definition =
-                    policy->second.definitions[group.definition];
-                for (const auto& agent : group.agents) {
-                    update_agent(host, &group, agent.get(), definition,
-                                 elapsed_seconds);
-                }
-                separate_group_members(host, &group, definition);
-            }
-        }
-
-        for (auto iterator = g_hosts.begin(); iterator != g_hosts.end();) {
-            if ((enumerated_hosts &&
-                 iterator->second.last_seen_epoch != g_epoch) ||
-                !iterator->second.object ||
-                object_expired(iterator->second.object)) {
-                iterator = g_hosts.erase(iterator);
-            } else {
-                ++iterator;
-            }
-        }
-    } catch (...) {
-        log_line("Swarm simulation recovered from an allocation failure");
-    }
-    g_inside_simulation = false;
+    SwarmSimulationContext context{};
+    a2fo_rs_stage8_swarm_simulate(
+        &swarm_simulation_step, &context, &context.state, elapsed_seconds);
 }
 
 bool should_draw_host(std::uint32_t handle) noexcept {
@@ -1391,234 +1789,295 @@ bool should_draw_host(std::uint32_t handle) noexcept {
         reinterpret_cast<std::uintptr_t>(fake_bee.data())) & 0xffu) != 0;
 }
 
+struct SwarmRenderContext {
+    void* camera = nullptr;
+    std::unordered_map<std::uint32_t, HostRuntime>::iterator iterator{};
+    HostRuntime* host = nullptr;
+    RuntimeGroup* group = nullptr;
+    Agent* agent = nullptr;
+    Matrix34 transform{};
+    Vec3 preferred_up{};
+    Vec3 world_position{};
+};
+
+std::uintptr_t swarm_render_step(void* opaque, std::uint32_t op,
+                                 std::uintptr_t arg) noexcept {
+    auto& context = *static_cast<SwarmRenderContext*>(opaque);
+    switch (op) {
+    case 0: return context.camera != nullptr;
+    case 1: context.iterator = g_hosts.begin(); return 1;
+    case 2: return context.iterator != g_hosts.end();
+    case 3:
+        context.host = &context.iterator->second;
+        return context.host->object != nullptr;
+    case 4: return object_expired(context.host->object);
+    case 5: return should_draw_host(context.host->handle);
+    case 6: return g_logged_visibility_rejection;
+    case 7:
+        log_line("A configured swarm host was rejected by native "
+                 "worker-bee visibility policy");
+        g_logged_visibility_rejection = true;
+        return 1;
+    case 8: ++context.iterator; return 1;
+    case 9:
+        if (!host_transform(context.host->object, &context.transform)) {
+            return 0;
+        }
+        context.preferred_up = {
+            context.transform.values[3], context.transform.values[4],
+            context.transform.values[5]};
+        return 1;
+    case 11: return context.host->groups.size();
+    case 12: context.group = &context.host->groups[arg]; return 1;
+    case 13: return context.group->agents.size();
+    case 14:
+        context.agent = context.group->agents[arg].get();
+        return context.agent != nullptr;
+    case 15: {
+        context.world_position = a2fo::swarm::transform_point(
+            context.transform, context.agent->position);
+        const Vec3 world_direction = a2fo::swarm::transform_direction(
+            context.transform, context.agent->direction);
+        const Matrix34 visual_transform =
+            a2fo::swarm::compose_facing_transform(
+                context.world_position, world_direction, context.preferred_up);
+        context.agent->visual.set_transform(visual_transform);
+        return context.agent->visual.render(context.camera);
+    }
+    case 16: return g_logged_first_instance_render;
+    case 17:
+        log_line("First dynamic swarm visual instance submitted "
+                 "after passing Storm3D frustum testing");
+        g_logged_first_instance_render = true;
+        return 1;
+    case 18: return g_logged_frustum_rejection;
+    case 19: {
+        char message[320]{};
+        std::snprintf(message, sizeof(message),
+            "A swarm instance was rejected by Storm3D frustum "
+            "testing at world position %.1f, %.1f, %.1f",
+            context.world_position.x, context.world_position.y,
+            context.world_position.z);
+        log_line(message);
+        g_logged_frustum_rejection = true;
+        return 1;
+    }
+    default: return 0;
+    }
+}
+
 void render_swarms(void* camera) noexcept {
-    if (!camera) return;
-    for (auto& host_entry : g_hosts) {
-        HostRuntime& host = host_entry.second;
-        if (!host.object || object_expired(host.object)) continue;
-        if (!should_draw_host(host.handle)) {
-            if (!g_logged_visibility_rejection) {
-                log_line("A configured swarm host was rejected by native "
-                         "worker-bee visibility policy");
-                g_logged_visibility_rejection = true;
+    SwarmRenderContext context{};
+    context.camera = camera;
+    a2fo_rs_stage8_swarm_render(&swarm_render_step, &context);
+}
+
+struct SwarmHookContext {
+    void* self = nullptr;
+    float elapsed = 0.0f;
+    void* camera = nullptr;
+    std::uint32_t flags = 0;
+    bool rendering = false;
+};
+
+std::uintptr_t swarm_hook_step(void* opaque, std::uint32_t op,
+                               std::uintptr_t) noexcept {
+    auto& context = *static_cast<SwarmHookContext*>(opaque);
+    try {
+        switch (op) {
+        case 0:
+            if (context.rendering) {
+                a2fo_swarm_call_thiscall_2(
+                    g_bee_render_hook.gateway, context.self,
+                    reinterpret_cast<std::uintptr_t>(context.camera),
+                    context.flags);
+            } else {
+                a2fo_swarm_call_thiscall_1(
+                    g_bee_simulate_hook.gateway, context.self,
+                    float_bits(context.elapsed));
             }
-            continue;
-        }
-        Matrix34 transform{};
-        if (!host_transform(host.object, &transform)) continue;
-        const Vec3 preferred_up{transform.values[3], transform.values[4],
-                                transform.values[5]};
-        for (RuntimeGroup& group : host.groups) {
-            for (const auto& agent : group.agents) {
-                if (!agent) continue;
-                const Vec3 world_position = a2fo::swarm::transform_point(
-                    transform, agent->position);
-                const Vec3 world_direction = a2fo::swarm::transform_direction(
-                    transform, agent->direction);
-                const Matrix34 visual_transform =
-                    a2fo::swarm::compose_facing_transform(
-                        world_position, world_direction, preferred_up);
-                agent->visual.set_transform(visual_transform);
-                const bool rendered = agent->visual.render(camera);
-                if (rendered && !g_logged_first_instance_render) {
-                    log_line("First dynamic swarm visual instance submitted "
-                             "after passing Storm3D frustum testing");
-                    g_logged_first_instance_render = true;
-                } else if (!rendered && !g_logged_frustum_rejection) {
-                    char message[320]{};
-                    std::snprintf(
-                        message, sizeof(message),
-                        "A swarm instance was rejected by Storm3D frustum "
-                        "testing at world position %.1f, %.1f, %.1f",
-                        world_position.x, world_position.y,
-                        world_position.z);
-                    log_line(message);
-                    g_logged_frustum_rejection = true;
-                }
+            return 1;
+        case 1:
+            return context.rendering ? runtime_render_enabled()
+                                     : sync_runtime_activation();
+        case 2:
+            return context.self == at(g_armada, kWorkerBeeColonyRva);
+        case 3:
+            return context.rendering ? g_logged_render_boundary
+                                     : g_logged_simulation_boundary;
+        case 4:
+            if (context.rendering) {
+                log_line("Worker-bee render boundary reached");
+                g_logged_render_boundary = true;
+            } else {
+                log_line("Worker-bee simulation boundary reached");
+                g_logged_simulation_boundary = true;
             }
+            return 1;
+        case 5:
+            if (context.rendering) render_swarms(context.camera);
+            else simulate_swarms(context.elapsed);
+            return 1;
+        default: return 0;
         }
+    } catch (...) {
+        // The original hooks are noexcept, including their gateway calls.
+        std::terminate();
     }
 }
 
 void __attribute__((fastcall)) bee_colony_simulate_hook(
     void* self, void*, float elapsed_seconds) noexcept {
-    a2fo_swarm_call_thiscall_1(
-        g_bee_simulate_hook.gateway, self, float_bits(elapsed_seconds));
-    if (g_runtime_ready && self == at(g_armada, kWorkerBeeColonyRva)) {
-        if (!g_logged_simulation_boundary) {
-            log_line("Worker-bee simulation boundary reached");
-            g_logged_simulation_boundary = true;
-        }
-        simulate_swarms(elapsed_seconds);
-    }
+    SwarmHookContext context{};
+    context.self = self;
+    context.elapsed = elapsed_seconds;
+    a2fo_rs_stage8_swarm_hook(&swarm_hook_step, &context);
 }
 
 void __attribute__((fastcall)) bee_colony_render_hook(
     void* self, void*, void* camera, std::uint32_t flags) noexcept {
-    a2fo_swarm_call_thiscall_2(
-        g_bee_render_hook.gateway, self,
-        reinterpret_cast<std::uintptr_t>(camera), flags);
-    if (g_runtime_ready && self == at(g_armada, kWorkerBeeColonyRva)) {
-        if (!g_logged_render_boundary) {
-            log_line("Worker-bee render boundary reached");
-            g_logged_render_boundary = true;
+    SwarmHookContext context{};
+    context.self = self;
+    context.camera = camera;
+    context.flags = flags;
+    context.rendering = true;
+    a2fo_rs_stage8_swarm_hook(&swarm_hook_step, &context);
+}
+
+bool checked_binding_index(std::size_t index) noexcept {
+    switch (index) {
+    case 0: return checked_binding("BeeColony::Simulate", kBeeColonySimulateRva, kExpectedBeeColonySimulate);
+    case 1: return checked_binding("BeeColony::Render", kBeeColonyRenderRva, kExpectedBeeColonyRender);
+    case 2: return checked_binding("BeeColony::ShouldDrawBee", kBeeColonyShouldDrawBeeRva, kExpectedBeeColonyShouldDrawBee);
+    case 3: return checked_binding("ParameterDB::ParameterDB", kParameterDbConstructorRva, kExpectedParameterDbConstructor);
+    case 4: return checked_binding("ParameterDB::~ParameterDB", kParameterDbDestructorRva, kExpectedParameterDbDestructor);
+    // The core may have installed its checked typed-default near jumps.
+    case 5: return checked_binding("ParameterDB::Get(int)", kParameterDbGetIntRva, kExpectedParameterDbGetScalar, true);
+    case 6: return checked_binding("ParameterDB::Get(float)", kParameterDbGetFloatRva, kExpectedParameterDbGetScalar, true);
+    case 7: return checked_binding("ParameterDB::Get(bool)", kParameterDbGetBoolRva, kExpectedParameterDbGetScalar, true);
+    case 8: return checked_binding("ParameterDB::Get(string)", kParameterDbGetStringRva, kExpectedParameterDbGetString, true);
+    case 9: return checked_binding("ParameterDB::Get(string vector)", kParameterDbGetStringVectorRva, kExpectedParameterDbGetStringVector, true);
+    case 10: return checked_binding("ST3D_Instance::ST3D_Instance", kSt3dInstanceConstructorRva, kExpectedSt3dInstanceConstructor);
+    case 11: return checked_binding("ST3D_Instance::~ST3D_Instance", kSt3dInstanceDestructorRva, kExpectedSt3dInstanceDestructor);
+    case 12: return checked_binding("ST3D_Instance::SetAnimationFlags", kSt3dInstanceSetAnimationFlagsRva, kExpectedSt3dInstanceSetAnimationFlags);
+    case 13: return checked_binding("ST3D_Instance::ScaleGeometry", kSt3dInstanceScaleGeometryRva, kExpectedSt3dInstanceScaleGeometry);
+    case 14: return checked_binding("ST3D_Instance::SetTransform", kSt3dInstanceSetTransformRva, kExpectedSt3dInstanceSetTransform);
+    case 15: return checked_binding("ST3D_Instance::SetDatabase", kSt3dInstanceSetDatabaseRva, kExpectedSt3dInstanceSetDatabase);
+    case 16: return checked_binding("ST3D_Instance::Render", kSt3dInstanceRenderRva, kExpectedSt3dInstanceRender);
+    case 17: return checked_binding("ST3D_Instance::TriggerAnimation", kSt3dInstanceTriggerAnimationRva, kExpectedSt3dInstanceTriggerAnimation);
+    case 18: return checked_binding("Entity::GetTransform", kEntityGetTransformRva, kExpectedEntityGetTransform);
+    case 19: return checked_binding("Entity::GetBoundingSphere", kEntityGetBoundingSphereRva, kExpectedEntityGetBoundingSphere);
+    case 20: return checked_binding("Entity::GetWorldTransform", kEntityGetWorldTransformRva, kExpectedEntityGetWorldTransform);
+    case 21: return checked_binding("GameObjectClass::GetHierarchyRoot", kGameObjectClassGetHierarchyRootRva, kExpectedClassGetHierarchyRoot);
+    case 22: return checked_binding("GameObjectClass::GetOdfName", kGameObjectClassGetOdfNameRva, kExpectedClassGetOdfName);
+    case 23: return checked_binding("ST3D_Node::FindRecursive", kSt3dNodeFindRecursiveRva, kExpectedNodeFindRecursive);
+    // Fleet Operations may detour the shared allocator. Retain this live
+    // readability check instead of comparing the stock bytes.
+    case 24: return checked_readable_binding("operator delete", kEngineOperatorDeleteRva, sizeof(kExpectedEngineOperatorDelete));
+    case 25: return checked_readable_binding("GameObject::objectList", kGameObjectListPointerRva, 4);
+    case 26: return checked_readable_binding("workerBeeColony", kWorkerBeeColonyRva, 4);
+    default: return false;
+    }
+}
+
+struct SwarmInitContext {
+    const A2FO_ModuleApi* api = nullptr;
+    std::exception_ptr exception{};
+    bool installing = false;
+};
+
+std::uintptr_t swarm_step(void* opaque, std::uint32_t op,
+                          std::uintptr_t arg) noexcept {
+    auto& context = *static_cast<SwarmInitContext*>(opaque);
+    if (context.exception) return std::numeric_limits<std::uintptr_t>::max();
+    try {
+        switch (op) {
+        case 0:
+            return context.api &&
+                context.api->struct_size >= A2FO_MODULE_API_V4_BASE_SIZE &&
+                context.api->api_version == A2FO_MODULE_API_VERSION &&
+                context.api->log && context.api->armada_module &&
+                context.api->install_inline_hook;
+        case 1:
+            g_api = context.api;
+            return 1;
+        case 2:
+            g_armada = static_cast<HMODULE>(context.api->armada_module());
+            return g_armada != nullptr;
+        case 3:
+            return checked_binding_index(arg);
+        case 4:
+            log_line("Supported ArmadaL swarm signatures were not found; runtime disabled");
+            return 1;
+        case 5:
+            context.installing = true;
+            return context.api->install_inline_hook(
+                at(g_armada, kBeeColonySimulateRva),
+                reinterpret_cast<void*>(&bee_colony_simulate_hook),
+                sizeof(kExpectedBeeColonySimulate),
+                kExpectedBeeColonySimulate, &g_bee_simulate_hook);
+        case 6:
+            log_line("Could not install the checked BeeColony simulation hook");
+            return 1;
+        case 7:
+            context.installing = true;
+            return context.api->install_inline_hook(
+                at(g_armada, kBeeColonyRenderRva),
+                reinterpret_cast<void*>(&bee_colony_render_hook),
+                sizeof(kExpectedBeeColonyRender), kExpectedBeeColonyRender,
+                &g_bee_render_hook);
+        case 8:
+            log_line("Could not install the checked BeeColony render hook");
+            return 1;
+        case 9:
+            return g_bee_simulate_hook.gateway && g_bee_render_hook.gateway;
+        case 10:
+            g_runtime_ready = arg != 0;
+            log_line(g_runtime_ready
+                ? "Dynamic render-only swarm runtime initialized"
+                : "Swarm module loaded with runtime disabled");
+            return 1;
+        case 11: g_runtime_ready = false; return 1;
+        case 12: g_hosts.clear(); return 1;
+        case 13: g_class_policies.clear(); return 1;
+        case 14: g_host_discovery_countdown = 0; return 1;
+        case 15:
+            g_last_object_count = std::numeric_limits<std::uint32_t>::max();
+            return 1;
+        case 16: g_cached_object_list = nullptr; return 1;
+        case 17: g_cached_object_list_head = nullptr; return 1;
+        default: return 0;
         }
-        render_swarms(camera);
+    } catch (...) {
+        context.exception = std::current_exception();
+        return std::numeric_limits<std::uintptr_t>::max();
     }
 }
 
-bool preflight_signatures() noexcept {
-    bool supported = true;
-    supported &= checked_binding(
-        "BeeColony::Simulate", kBeeColonySimulateRva,
-        kExpectedBeeColonySimulate);
-    supported &= checked_binding(
-        "BeeColony::Render", kBeeColonyRenderRva,
-        kExpectedBeeColonyRender);
-    supported &= checked_binding(
-        "BeeColony::ShouldDrawBee", kBeeColonyShouldDrawBeeRva,
-        kExpectedBeeColonyShouldDrawBee);
-    supported &= checked_binding(
-        "ParameterDB::ParameterDB", kParameterDbConstructorRva,
-        kExpectedParameterDbConstructor);
-    supported &= checked_binding(
-        "ParameterDB::~ParameterDB", kParameterDbDestructorRva,
-        kExpectedParameterDbDestructor);
-    // The core installs these checked typed-default hooks before deferred
-    // modules load. Calling their live entry remains ABI-correct and preserves
-    // registered classlabel defaults, so accept either stock bytes or A2FO's
-    // five-byte near jump.
-    supported &= checked_binding(
-        "ParameterDB::Get(int)", kParameterDbGetIntRva,
-        kExpectedParameterDbGetScalar, true);
-    supported &= checked_binding(
-        "ParameterDB::Get(float)", kParameterDbGetFloatRva,
-        kExpectedParameterDbGetScalar, true);
-    supported &= checked_binding(
-        "ParameterDB::Get(bool)", kParameterDbGetBoolRva,
-        kExpectedParameterDbGetScalar, true);
-    supported &= checked_binding(
-        "ParameterDB::Get(string)", kParameterDbGetStringRva,
-        kExpectedParameterDbGetString, true);
-    supported &= checked_binding(
-        "ParameterDB::Get(string vector)",
-        kParameterDbGetStringVectorRva,
-        kExpectedParameterDbGetStringVector, true);
-    supported &= checked_binding(
-        "ST3D_Instance::ST3D_Instance", kSt3dInstanceConstructorRva,
-        kExpectedSt3dInstanceConstructor);
-    supported &= checked_binding(
-        "ST3D_Instance::~ST3D_Instance", kSt3dInstanceDestructorRva,
-        kExpectedSt3dInstanceDestructor);
-    supported &= checked_binding(
-        "ST3D_Instance::SetAnimationFlags",
-        kSt3dInstanceSetAnimationFlagsRva,
-        kExpectedSt3dInstanceSetAnimationFlags);
-    supported &= checked_binding(
-        "ST3D_Instance::ScaleGeometry", kSt3dInstanceScaleGeometryRva,
-        kExpectedSt3dInstanceScaleGeometry);
-    supported &= checked_binding(
-        "ST3D_Instance::SetTransform", kSt3dInstanceSetTransformRva,
-        kExpectedSt3dInstanceSetTransform);
-    supported &= checked_binding(
-        "ST3D_Instance::SetDatabase", kSt3dInstanceSetDatabaseRva,
-        kExpectedSt3dInstanceSetDatabase);
-    supported &= checked_binding(
-        "ST3D_Instance::Render", kSt3dInstanceRenderRva,
-        kExpectedSt3dInstanceRender);
-    supported &= checked_binding(
-        "ST3D_Instance::TriggerAnimation",
-        kSt3dInstanceTriggerAnimationRva,
-        kExpectedSt3dInstanceTriggerAnimation);
-    supported &= checked_binding(
-        "Entity::GetTransform", kEntityGetTransformRva,
-        kExpectedEntityGetTransform);
-    supported &= checked_binding(
-        "Entity::GetBoundingSphere", kEntityGetBoundingSphereRva,
-        kExpectedEntityGetBoundingSphere);
-    supported &= checked_binding(
-        "Entity::GetWorldTransform", kEntityGetWorldTransformRva,
-        kExpectedEntityGetWorldTransform);
-    supported &= checked_binding(
-        "GameObjectClass::GetHierarchyRoot",
-        kGameObjectClassGetHierarchyRootRva,
-        kExpectedClassGetHierarchyRoot);
-    supported &= checked_binding(
-        "GameObjectClass::GetOdfName", kGameObjectClassGetOdfNameRva,
-        kExpectedClassGetOdfName);
-    supported &= checked_binding(
-        "ST3D_Node::FindRecursive", kSt3dNodeFindRecursiveRva,
-        kExpectedNodeFindRecursive);
-    // Fleet Operations may detour the shared Armada allocator entry. Native
-    // ParameterDB vector storage must be released through that live entry,
-    // rather than bypassing its active memory-manager policy.
-    supported &= checked_readable_binding(
-        "operator delete", kEngineOperatorDeleteRva,
-        sizeof(kExpectedEngineOperatorDelete));
-    supported &= checked_readable_binding(
-        "GameObject::objectList", kGameObjectListPointerRva, 4);
-    supported &= checked_readable_binding(
-        "workerBeeColony", kWorkerBeeColonyRva, 4);
-    if (!supported) {
-        log_line("Supported ArmadaL swarm signatures were not found; "
-                 "runtime disabled");
-    }
-    return supported;
-}
-
-bool install_hooks(const A2FO_ModuleApi* api) noexcept {
-    if (!api || !api->install_inline_hook || !preflight_signatures()) {
-        return false;
-    }
-    if (!api->install_inline_hook(
-            at(g_armada, kBeeColonySimulateRva),
-            reinterpret_cast<void*>(&bee_colony_simulate_hook),
-            sizeof(kExpectedBeeColonySimulate),
-            kExpectedBeeColonySimulate, &g_bee_simulate_hook)) {
-        log_line("Could not install the checked BeeColony simulation hook");
-        return false;
-    }
-    if (!api->install_inline_hook(
-            at(g_armada, kBeeColonyRenderRva),
-            reinterpret_cast<void*>(&bee_colony_render_hook),
-            sizeof(kExpectedBeeColonyRender), kExpectedBeeColonyRender,
-            &g_bee_render_hook)) {
-        log_line("Could not install the checked BeeColony render hook");
-        return false;
-    }
-    return g_bee_simulate_hook.gateway && g_bee_render_hook.gateway;
+// The original install_hooks is noexcept. Keep its active-exception terminate
+// behavior if an external installer throws, after Rust has stopped callbacks.
+void rethrow_install_exception(std::exception_ptr error) noexcept {
+    std::rethrow_exception(error);
 }
 
 }  // namespace
 
 extern "C" __declspec(dllexport)
 bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
-    if (!api || api->struct_size < A2FO_MODULE_API_V4_BASE_SIZE ||
-        api->api_version != A2FO_MODULE_API_VERSION || !api->log ||
-        !api->armada_module || !api->install_inline_hook) {
-        return false;
-    }
-    g_api = api;
-    g_armada = static_cast<HMODULE>(api->armada_module());
-    if (!g_armada) return false;
-    g_runtime_ready = install_hooks(api);
-    if (g_runtime_ready) {
-        log_line("Dynamic render-only swarm runtime initialized");
-    } else {
-        log_line("Swarm module loaded with runtime disabled");
+    SwarmInitContext context{api};
+    const bool result = a2fo_rs_stage8_swarm_init(&swarm_step, &context) != 0;
+    if (context.exception) {
+        if (context.installing) rethrow_install_exception(context.exception);
+        std::rethrow_exception(context.exception);
     }
     // Hooks are process-lifetime patches. Remain resident and fail open even
     // if the second hook or a future executable signature is unsupported.
-    return true;
+    return result;
 }
 
 extern "C" __declspec(dllexport)
 void A2FO_CALL A2FO_ModuleShutdown() {
-    g_runtime_ready = false;
-    g_hosts.clear();
-    g_class_policies.clear();
-    g_host_discovery_countdown = 0;
-    g_last_object_count = std::numeric_limits<std::uint32_t>::max();
-    g_cached_object_list = nullptr;
-    g_cached_object_list_head = nullptr;
+    SwarmInitContext context{};
+    a2fo_rs_stage8_swarm_shutdown(&swarm_step, &context);
+    if (context.exception) std::rethrow_exception(context.exception);
 }

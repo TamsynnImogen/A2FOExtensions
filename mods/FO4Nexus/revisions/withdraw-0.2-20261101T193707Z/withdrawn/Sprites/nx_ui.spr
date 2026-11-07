@@ -1,0 +1,6 @@
+sprite_table
+@reference=128
+@tmaterial=interface
+@skip=off
+dsq nx_ui_shield_quad 0 0 128 128
+dsqs nx_ui_shield_quad_side 0 0 128 128

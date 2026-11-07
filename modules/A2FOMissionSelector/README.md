@@ -28,12 +28,14 @@ Higher-precedence mods override parent values:
 title = Federation Campaign
 overview = Command Starfleet through the opening campaign.
 background = bitmaps/MissionSelector/federation.png
+menuView = federation
 
 [campaign1.mission0]
 title = Invasion
 description = The Enterprise answers a distress call.
 objectives = Investigate the system.\nProtect the Enterprise.
 thumbnail = bzn/a2_fed01.png
+menuView = federation-briefing
 ```
 
 Sections are `campaign0` through `campaign3`; mission sections append
@@ -46,6 +48,18 @@ path. It is aspect-filled behind the selector and changes as soon as another
 campaign is selected; a subtle dark overlay preserves text readability.
 Mission thumbnails also auto-resolve beside the corresponding BZN in the same
 image formats.
+
+When an already loaded `A2FORefitMenus.dll` provides its optional scene
+interface, `menuView` selects a named Refit `[View.*]` backdrop. A mission view
+overrides its campaign view. Stock campaigns 0 through 3 default to
+`tutorials`, `federation`, `klingon`, and `borg`; custom campaigns with no
+`menuView` keep the current scene. If Refit is unavailable or declines a frame,
+the configured static `background` remains the fallback. The selector refreshes
+an active scene when Refit publishes a new frame.
+On Start, it copies the selected map, title, description, and objectives to
+Refit's optional loading metadata handoff and requests departure immediately
+before Armada's existing `SetupMission` call. A rejected launch cancels the
+departure request.
 
 ### Authoritative INI catalogs
 
@@ -94,9 +108,9 @@ campaigns and missions default to unlocked; `unlocked = 0` can hide their Start
 button, but there is not yet independent saveable custom-campaign progression.
 The supported display fields are:
 
-- campaign: `title`, `overview`, `background`, `unlocked`;
+- campaign: `title`, `overview`, `background`, `menuView`, `unlocked`;
 - mission: `file`, `title`, `description`, `objectives`, `thumbnail`,
-  `unlocked`.
+  `menuView`, `unlocked`.
 
 By default a custom BZN borrows native launch cell Federation mission 1. The
 advanced `nativeCampaign = 0..3` and `nativeMission = 0..9` fields may choose a

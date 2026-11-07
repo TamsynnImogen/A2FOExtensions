@@ -1,0 +1,8 @@
+{
+  "cause": "User tested starting Venture and Mediterranean, which lacked Nexus identity rows. Tall identities were zero-sized.",
+  "fix": "Nine identity-only overrides plus two visible tall identity fields above queue",
+  "baseline_log": "diagnostics/ui-missing-20261101T162735Z/A2FOExtensions.log",
+  "read_only_review": "9 source-preserving overlays; 686 aligned rows independently checked; native queue geometry clear",
+  "receipt": "/home/tamsynn/A2FOHookExtensions/mods/FO4Nexus/deployment-20261101T163446Z.json",
+  "manual_retest": "New Federation game, select Venture alone then Mediterranean alone; look for captain and NCC registry"
+}

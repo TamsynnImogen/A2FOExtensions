@@ -1,0 +1,40 @@
+#pragma once
+#include <array>
+#include <cstddef>
+#include <cstdint>
+
+// Independently checked against the clean and local patched FO4 DLLs.
+// See README.md. RVAs, not pointers; relative CALL operands need no fixup.
+namespace a2fo::refit_menu::native {
+inline constexpr std::uint32_t show_rva = 0x1cc330;
+inline constexpr std::uint32_t main_vmt_rva = 0x1cb7a8;
+// TWinControl.GetHandle reads +1b4. +1c4 is ParentWindow, used by FormShow
+// to re-enable the parent; it MUST NOT be subclassed as the menu window.
+inline constexpr std::size_t handle_offset = 0x1b4;
+inline constexpr std::size_t parent_window_offset = 0x1c4;
+inline constexpr std::size_t form_size = 0x3b4;
+inline constexpr std::size_t visible_offset = 0x57;
+inline constexpr std::size_t action_caption_offset = 0x64;
+inline constexpr std::size_t action_enabled_offset = 0x6a;
+inline constexpr std::size_t action_visible_offset = 0x86;
+inline constexpr std::array<std::uint8_t, 8> show_prologue{{0x6a,0xff,0x8b,0x80,0xc4,0x01,0x00,0x00}};
+inline constexpr std::array<std::size_t, 7> action_fields{{0x3a8,0x374,0x368,0x364,0x39c,0x370,0x36c}};
+inline constexpr std::array<std::size_t, 9> visual_fields{{0x378,0x37c,0x380,0x384,0x388,0x38c,0x390,0x398,0x3a4}};
+inline constexpr std::array<std::uint32_t, 7> action_rvas{{0x1cc854,0x1cc28c,0x1cc2a4,0x1cc2bc,0x1cbd54,0x1cc274,0x1cbdd0}};
+struct Signature { std::uint32_t rva; const char* bytes; std::size_t size; };
+inline constexpr Signature signatures[]{
+    {0xcd81c,"\x53\x8b\xd8\x8b\xc3\xe8\xd2\xff\xff\xff\x8b\x83\xb4\x01\x00\x00\x5b\xc3",18},
+    {show_rva,"\x6a\xff\x8b\x80\xc4\x01\x00\x00\x50\xe8\x4e\xcf\xe3\xff\xc3",15},
+    {0xc563c,"\x53\x56\x57\x8b\xda\x8b\xf8\x3a\x5f\x57\x74\x26\x8b\xc7\x66\xbe\xcd\xff\xe8\xd1\xf1\xf3\xff\x88\x5f\x57\x6a\x00\x0f\xb6\xcb\xba\x0b\xb0\x00\x00\x8b\xc7\xe8\xad\x13\x00\x00\x8b\xc7\x8b\x10\xff\x52\x5c\x5f\x5e\x5b\xc3",54},
+    {0x1cbd54,"\x53\x8b\xd8\x66\xb8\x2c\x01\xe8\x60\x1f\x01\x00\x8b\xc3\xe8\xa1\x5d\xee\xff\x5b\xc3",21},
+    {0x1cc274,"\x53\x8b\xd8\x66\xb8\x1e\x00\xe8\x40\x1a\x01\x00\x8b\xc3\xe8\x81\x58\xee\xff\x5b\xc3",21},
+    {0x1cc28c,"\x53\x8b\xd8\x66\xb8\x02\x01\xe8\x28\x1a\x01\x00\x8b\xc3\xe8\x69\x58\xee\xff\x5b\xc3",21},
+    {0x1cc2a4,"\x53\x8b\xd8\x66\xb8\x0d\x00\xe8\x10\x1a\x01\x00\x8b\xc3\xe8\x51\x58\xee\xff\x5b\xc3",21},
+    {0x1cc2bc,"\x53\x8b\xd8\x66\xb8\x19\x00\xe8\xf8\x19\x01\x00\x8b\xc3\xe8\x39\x58\xee\xff\x5b\xc3",21},
+    {0x1cc854,"\x53\x8b\xd8\x66\xb8\x02\x00\xe8\x60\x14\x01\x00\x8b\xc3\xe8\xa1\x52\xee\xff\x5b\xc3",21},
+    {0x1cbdd0,"\x53\x8b\xd8\x33\xc0\xe8\xe6\x1e\x01\x00\xb8\x02\x00\x00\x00\xe8\xec\x1e\x01\x00\x8b\xc3\xe8\x1d\x5d\xee\xff\x5b\xc3",29},
+    {0xd7444,"\x53\x56\x57\x51\x89\x14\x24\x8b\xd8\x8b\x04\x24\x8b\x53\x64\xe8\x88\xe6\xf2\xff",20},
+    {0xd75ac,"\x53\x56\x57\x51\x88\x14\x24\x8b\xd8\x0f\xb6\x04\x24\x3a\x43\x6a\x74\x63",18},
+    {0xd78b8,"\x53\x56\x57\x51\x88\x14\x24\x8b\xd8\x0f\xb6\x04\x24\x3a\x83\x86\x00\x00\x00",19},
+};
+} // namespace a2fo::refit_menu::native

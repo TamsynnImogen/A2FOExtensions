@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "module": "A2FORecoveryTests",
+  "module_build": "20260930-recovery-tests-1",
+  "checked_utc": "2026-09-30T13:31:15.987901+00:00",
+  "input_sha256": "63bd645d82aec75cdd7ee3e3271fb67bb54f4ae1d1636a736b0db620bd997e36",
+  "artifacts": [
+    {
+      "path": "build/modules/A2FORecoveryTests.dll",
+      "bytes": 2378248,
+      "sha256": "f6d366033b107f89b033acb22e5473b7618eeabae59a9f486d9656e83921e601"
+    },
+    {
+      "path": "build/recovery_tests_native.exe",
+      "bytes": 11456210,
+      "sha256": "b7ebff8f8c4215aa908059d77fd9c174f0c4b859ded877732f58deb9e50479a5"
+    },
+    {
+      "path": "build/recovery_tests_test",
+      "bytes": 37120,
+      "sha256": "4258490ea3554d318cfe6805a770c7233ff68723d23075ff0dab2c23c3fd6fda"
+    },
+    {
+      "path": "build/librecovery_tests_replay.so",
+      "bytes": 32184,
+      "sha256": "1dcfea1a11a9a84c6754ef762f9ddc778640d738892997d88b7ca63c1e8bfb6c"
+    }
+  ],
+  "source_sha256": {
+    "modules/A2FORecoveryTests/module.cpp": "a2f4824fabe89bd34e868ff966eb41d04a07e7a19daf68ae21efc78551478e8c",
+    "modules/A2FORecoveryTests/native_bridge.S": "aa194076335b905a4a048a1af6d4fdad198914042a17df5eff0f89556716c181",
+    "modules/A2FORecoveryTests/signatures.hpp": "c32d12c7bf406e76e1f383a727e173878eeec3df9dbe167bd60dced2c89e0277",
+    "modules/A2FORecoveryTests/recovery_tests.cpp": "2cf3014b1b7478c679ec3cda56b120563a064cf11a6e5704bf205efd2653c788",
+    "modules/A2FORecoveryTests/recovery_tests.hpp": "59c15de3d922328f11abc15cf9960c92bdd79fec117730cf94a2c6e78280668c",
+    "tests/recovery_tests_native.cpp": "05a57ced1b3d69a17e0a444584c040ff04ab56994ff61917f50ea65ff80a78a2",
+    "tests/recovery_tests_native_bridge.S": "e8e5f4a2c482203f74486ef2f3bba5ba490a9327e6163cd9132ba46ed888577b",
+    "tests/recovery_tests_test.cpp": "05384444105e7875e33b5352e092b8e22eaf67fecd1501b8ce72c78be8ede20c",
+    "tests/recovery_tests_replay.py": "e3ab2b4b9322456348ad77fd0326c7f2c8b8df3678983cdd0f84a6d576ee3eda",
+    "tests/recovery_tests_replay_bridge.cpp": "a62fc2d1354d7bfe3c5822cbcda74a1902583727776d052249166218d39766d5",
+    "reverse_engineering/ArmadaL/src/engine_context.cpp": "3e87ffbfcc5cc00482bbba41a31cd2ab48c87de1ea4f4a78cdf030ac0d058dc6",
+    "reverse_engineering/ArmadaL/src/node_transform.cpp": "e5282f2dd0ecd37d33203f0705025eeb4da1d37fa8ebfbd313e3e299b4501899",
+    "reverse_engineering/ArmadaL/src/node_read.cpp": "7bda396727ecd9495b1bd3baee83883bfaa4ea20756500b827e6af8be9fe85c4",
+    "reverse_engineering/ArmadaL/src/sod_header.cpp": "344d6f8f96c763fa40d998e1d3af598b159be09596ed0dac64e7a05b6947cac2"
+  },
+  "checks": {
+    "build": {
+      "status": "PASS",
+      "command": "make -j2 recovery-tests recovery-tests-test build/recovery_tests_native.exe",
+      "flags": "-Werror -frounding-math -ffp-contract=off -fno-fast-math -mfpmath=387"
+    },
+    "signatures": {
+      "status": "PASS",
+      "input_sha256": "63bd645d82aec75cdd7ee3e3271fb67bb54f4ae1d1636a736b0db620bd997e36",
+      "routines": [
+        {
+          "routine": "context",
+          "rva": "0x22b710",
+          "bytes": 17,
+          "body_sha256": "52768dbcbf2419111c6f9e947c343a8a13ee5a77fe348caa06edf70752b06b87"
+        },
+        {
+          "routine": "node",
+          "rva": "0x239460",
+          "bytes": 187,
+          "body_sha256": "99b0c58fdab6eefdac47cc1136ab0dcd6d2b378d623d715eed9739601229dcb4"
+        }
+      ]
+    },
+    "portable": {
+      "status": "PASS",
+      "command": "build/recovery_tests_test",
+      "assertions_enabled": true
+    },
+    "replay_self_test": {
+      "status": "PASS",
+      "self_test_cases": 7,
+      "reproduced_mismatch": 1,
+      "malformed_rejections": 4
+    },
+    "native": {
+      "status": "PASS",
+      "context_cases": 6,
+      "node_cases": 12,
+      "precision_modes": 3,
+      "flags_modes": 2,
+      "matched": 18,
+      "detour_cases": 3,
+      "captures": 2,
+      "capture_path": "C:\\users\\tamsynn\\AppData\\Local\\Temp\\a2fo-recovery-fixture-320-667459642\\context-match-320-0-001.json"
+    },
+    "captured_record_replay": [
+      {
+        "status": "PASS",
+        "capture": "build/recovery-tests-validation/context-match-320-0-001.json",
+        "outcome": "match",
+        "expected_return": 2596016692
+      },
+      {
+        "status": "PASS",
+        "capture": "build/recovery-tests-validation/context-mismatch-320-0-001.json",
+        "outcome": "mismatch",
+        "expected_return": 324478056
+      }
+    ],
+    "pe": {
+      "format": "PE32/i386",
+      "exports": [
+        "A2FO_ModuleInit",
+        "A2FO_ModuleShutdown",
+        "A2FORecoveryTests_Status"
+      ],
+      "imports": [
+        "ADVAPI32.dll",
+        "KERNEL32.dll",
+        "msvcrt.dll"
+      ]
+    }
+  },
+  "review": {
+    "status": "PASS",
+    "scope": "Independent read-only source/docs review and portable/signature/replay/native checks; latest fixture-only changes reject malformed strings and isolate temporary directories, lead rebuilt and reran."
+  },
+  "deployed": false,
+  "game_launched": false,
+  "in_game_acceptance": "pending manual matrix in module README",
+  "limits": [
+    "Native fixture uses private executable bodies and checked private detours, not a live pinned game image.",
+    "Game inputs can mutate between captures; mismatches are discrepancy candidates.",
+    "Scaled comparisons skip unsupported floating-point domains.",
+    "Hooks remain resident and require full process restart to remove instrumentation.",
+    "Headless Wine emitted Mesa/EGL warnings but fixture exited zero."
+  ]
+}

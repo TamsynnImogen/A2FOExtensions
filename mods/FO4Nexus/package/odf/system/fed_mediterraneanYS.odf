@@ -1,0 +1,181 @@
+// --- File identity and inheritance ---
+basename = "fed_mediterranean"
+originalclass = "fed_mediterraneanY"
+
+// --- Display and localization ---
+unitname = "Mediterranean Class"
+tooltip = "Mediterranean Class [Nexus]"
+verbosetooltip = "AUTOTOOLTIP-fed_mediterranean.odf"
+race = "unitedfederation"
+possiblecraftnames = "USS Ayers" "USS Ayrton" "USS Bardeen" "USS Barmin" "USS Barnwell" "USS Bechtolsheim" "USS Bell" "USS Blondel" "USS Blumlein" "USS Bode" "USS B?lkow" "USS Brown" "USS Bruch" "USS Busemann" "USS Camm" "USS Camras" "USS Chadwick" "USS Chaffee" "USS Champbell" "USS Chawla" "USS Chelomei" "USS Coandra" "USS Condit" "USS Conway" "USS Coolidge" "USS Corin" "USS Cray" "USS Curtiss" "USS Dahm" "USS Dassault" "USS De Havilland" "USS De Mestral" "USS DeForest" "USS Dennard" "USS Dennis" "USS Dibner" "USS Dittmar" "USS Dobrovolsky" "USS Dodds" "USS Dolby" "USS Dornier" "USS Dowie" "USS Dowty" "USS Dumont" "USS Eckert" "USS Engelbart" "USS Eppler" "USS Faraday" "USS Farnsworth" "USS Gabrielli" "USS Gessow" "USS Glushko" "USS Gora" "USS Gouge" "USS Greene" "USS Greensite" "USS Haack" "USS Habibie" "USS Hafner" "USS Hervian" "USS Homer" "USS Jones" "USS Kalam" "USS Korolev" "USS Kranz" "USS Lilienthal" "USS Lindstrand" "USS Lippisch" "USS Lunney" "USS MacCready" "USS MacGill" "USS Mach" "USS Mackan" "USS Marriott" "USS Maughmer" "USS Messerschmitt" "USS Nath" "USS Neumann" "USS Ohain" "USS Pearse" "USS Petter" "USS Pilcher" "USS Podlech" "USS Potocnik" "USS Prandtl" "USS Rajan" "USS Resnik" "USS Reynolds" "USS Riebe" "USS Roe" "USS Roskam" "USS Roth" "USS Ruppelt" "USS Rutan" "USS Shute" "USS Sikorsky" "USS Simonov" "USS Smith" "USS Sopwith" "USS Sutter" "USS Szebehely" "USS Theodorson" "USS Truly" "USS Tupolev" "USS Vlaicu" "USS Voigt" "USS Von Braun" "USS Von Storch" "USS Vuia"
+hotkeylabel = "GAME-HOTKEY-C"
+shipclass = "construction"
+
+// --- Construction and costs ---
+buildtime = 4
+officercost = 0
+crewcost = 100
+builditem0 = "fed_outpostYA"
+builditem1 = "fed_storage_dock"
+builditem2 = "fed_antares_yardY"
+builditem3 = "fed_sf_engineeringY"
+builditem4 = "fed_sf_scienceY"
+builditem5 = "fed_sf_commandY"
+builditem6 = "fed_eraudi_yardY"
+builditem7 = "fed_platformY"
+builditem8 = "fed_mixedtech_yard_domA"
+builditem9 = "fed_mixedtech_yard_kliA"
+builditem10 = "fed_mixedtech_yard_romA"
+builditem11 = "fed_mixedtech_yard_borA"
+builditem0availability = 2
+builditem1availability = 2
+builditem2availability = 2
+builditem3availability = 2
+builditem4availability = 2
+builditem5availability = 2
+builditem6availability = 2
+builditem7availability = 2
+builditem8availability = 130
+builditem9availability = 130
+builditem10availability = 130
+builditem11availability = 130
+builditem12 = "dom_mixedtech_yard_fed"
+builditem13 = "kli_mixedtech_yard_fed"
+builditem14 = "rom_mixedtech_yard_fed"
+builditem15 = "bor_adap_matrix_fed"
+builditem12availability = 2
+builditem13availability = 2
+builditem14availability = 2
+builditem15availability = 2
+builditem16 = "fed_outpostY_DDWW"
+builditem17 = "fed_platform_phaser"
+builditem18 = "fed_platform_pulse"
+builditem19 = "fed_platform_sensor"
+builditem20 = "fed_platform_torpedo"
+workerbeename = "fed_s_workbee"
+numberofworkerbees = 12
+workerbeehardpoints = "hp96" "hp97" "hp98" "hp99" "hp96" "hp97" "hp98" "hp99" "hp96" "hp97" "hp98" "hp99"
+constructionvoice = 5
+
+// --- Hull, shields, crew, and energy ---
+maxhealth = 151
+curhealth = 151
+healthrate = 0.448
+maxshields = 504
+curshields = 504
+shieldrate = 1.250
+specialenergydisplaymode = 1
+shielddelay = 2
+
+// --- Subsystems, damage, and repair ---
+shieldgeneratorhitpoints = 42
+engineshitpoints = 42
+weaponshitpoints = 42
+lifesupporthitpoints = 42
+sensorshitpoints = 42
+enginesrepairtime = 1.0
+lifesupportrepairtime = 0.25
+weaponsrepairtime = 1.0
+shieldgeneratorrepairtime = 1.0
+sensorsrepairtime = 1.0
+enginescrewloss = 10.0f
+lifesupportcrewloss = 10.0f
+weaponscrewloss = 10.0f
+shieldgeneratorcrewloss = 10.0f
+sensorscrewloss = 5.0f
+lifesupportloss = 2
+engineshitpercent = 0f
+lifesupporthitpercent = 8.0f
+weaponshitpercent = 8.0f
+shieldgeneratorhitpercent = 1.0f
+sensorshitpercent = 0
+crewhitpercent = 8.0f
+hullhitpercent = 75.0f
+
+// --- Weapons and ordnance ---
+weapon1 = "npc_tractorbeam"
+maxextraweapons = 10
+
+// --- Accuracy, hardpoints, and targeting ---
+weaponhardpoints1 = "hp08"
+weapon1iconpos = 80	50
+hulltargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06" "hp07" "hp08" "hp09" "hp10" "hp11" "hp12" "hp13" "hp14"
+lifesupporttargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06" "hp07" "hp08" "hp09" "hp10" "hp11" "hp12" "hp13" "hp14"
+weaponstargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06" "hp07" "hp08" "hp09" "hp10" "hp11" "hp12" "hp13" "hp14"
+shieldgeneratortargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06" "hp07" "hp08" "hp09" "hp10" "hp11" "hp12" "hp13" "hp14"
+sensorstargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06" "hp07" "hp08" "hp09" "hp10" "hp11" "hp12" "hp13" "hp14"
+enginestargethardpoints = "hp15" "hp16" "hp17" "hp18" "hp19" "hp20" "hp21" "hp22" "hp23" "hp24" "hp25" "hp26"
+criticaltargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06" "hp07" "hp08" "hp09" "hp10" "hp11" "hp12" "hp13" "hp14"
+extraweaponhardpoints = "root"
+turntofire = 0
+
+// --- Artificial intelligence and tactical behavior ---
+attackpower = 0.000
+intrinsicvalue = 0.000
+avoidanceclass = 3
+shiptype = "N"
+rangescan = 850
+damagedscan = 50.0
+ainame = "CraftProcess"
+alert = 1
+can_explore = 1
+combat = 1
+
+// --- Interface and controls ---
+show_sw_autonomy = 1
+show_movement_autonomy = 1
+preferredselect = 0
+allowbuildqueuepop = 0
+
+// --- Audio and events ---
+eventselect = "Basic1ConstructorSelect"
+eventacknowledge = "Basic1ConstructorAcknowledge"
+eventattack = "Basic1ConstructorAcknowledge"
+eventstop = "Basic1ConstructorStop"
+eventmove = "Basic1ConstructorMove"
+eventrepair = "Basic1ConstructorRepair"
+eventRepairCombat = "Basic1ConstructorRepair"
+eventMoveFleeCombat = "Basic1ConstructorMove"
+
+// --- Movement and physics ---
+physicsfile = "smooth_physics_70_trift.odf"
+trekphysicsfile = "smooth_physics_70_trift.odf"
+weldingbeamwidth = 2.0
+weldingradius = 0.25
+timewelding = 0.5
+timeuntiltakeoff = 3.0
+timeuntilclosure = 3.0
+
+// --- Progression and variants ---
+worthxp = 40
+
+// --- Resource handling and recycling ---
+recycledilithium = 78
+recycletime = 36
+recyclelatinum = 54
+recyclebiomatter = 3
+
+// --- Art, animation, and effects ---
+fireball = "x_medium_explosion"
+shieldhit = "shield_fed_hitM"
+shieldhitcritical = "shield_fed_hitcritM"
+shielddown = "shield_fed_down"
+weldingbeamsprite = "weldbeam"
+
+// --- Capabilities and object behavior ---
+ship = 1
+has_hitpoints = 1
+has_crew = 1
+transporter = 1
+can_sandd = 1
+buildablebyownerraceonly = 1
+builder_facility = 1
+giveisallowed = 0
+canattack = 0
+
+// --- Runtime class ---
+classlabel = "constructionrig"
+
+// FO4Nexus overlay
+possibleCaptainNames = "Jordan Vale" "Taylor Arden" "Samira Ellis" "Riley Quinn" "Morgan Hale" "Leah Winters" "Leah Winters" "Jordan Vale" "Morgan Hale" "Jordan Vale" "Samira Ellis" "Alex Mercer" "Jordan Vale" "Samira Ellis" "Alex Mercer" "Nadia Clarke" "Taylor Arden" "Samira Ellis" "Nadia Clarke" "Taylor Arden" "Casey Rowan" "Casey Rowan" "Alex Mercer" "Jordan Vale" "Avery Morgan" "Jordan Vale" "Samira Ellis" "Samira Ellis" "Taylor Arden" "Casey Rowan" "Casey Rowan" "Dara Bennett" "Taylor Arden" "Nadia Clarke" "Alex Mercer" "Nadia Clarke" "Robin Shaw" "Nadia Clarke" "Casey Rowan" "Samira Ellis" "Taylor Arden" "Dara Bennett" "Riley Quinn" "Casey Rowan" "Casey Rowan" "Robin Shaw" "Jordan Vale" "Casey Rowan" "Robin Shaw" "Nadia Clarke" "Jordan Vale" "Taylor Arden" "Riley Quinn" "Taylor Arden" "Samira Ellis" "Dara Bennett" "Dara Bennett" "Leah Winters" "Dara Bennett" "Robin Shaw" "Nadia Clarke" "Avery Morgan" "Taylor Arden" "Samira Ellis" "Alex Mercer" "Avery Morgan" "Morgan Hale" "Casey Rowan" "Alex Mercer" "Jordan Vale" "Morgan Hale" "Dara Bennett" "Leah Winters" "Leah Winters" "Leah Winters" "Nadia Clarke" "Leah Winters" "Nadia Clarke" "Nadia Clarke" "Morgan Hale" "Riley Quinn" "Casey Rowan" "Jordan Vale" "Leah Winters" "Casey Rowan" "Alex Mercer" "Taylor Arden" "Riley Quinn" "Samira Ellis" "Leah Winters" "Casey Rowan" "Morgan Hale" "Alex Mercer" "Avery Morgan" "Robin Shaw" "Dara Bennett" "Dara Bennett" "Taylor Arden" "Morgan Hale" "Morgan Hale" "Leah Winters" "Leah Winters" "Nadia Clarke" "Samira Ellis" "Leah Winters" "Nadia Clarke" "Casey Rowan" "Leah Winters" "Robin Shaw"
+possibleCraftRegistry = "NCC-635237546" "NCC-525673060" "NCC-677840669" "NCC-192492574" "NCC-501540020" "NCC-201947037" "NCC-165763181" "NCC-264543711" "NCC-563991901" "NCC-842731301" "NCC-102496779" "NCC-161701005" "NCC-104019108" "NCC-258439448" "NCC-650296145" "NCC-561001672" "NCC-015259288" "NCC-543535865" "NCC-149658228" "NCC-778290245" "NCC-514973594" "NCC-802760515" "NCC-212890035" "NCC-787273454" "NCC-837348751" "NCC-236431095" "NCC-617293606" "NCC-122155355" "NCC-709002283" "NCC-665623705" "NCC-677252658" "NCC-872679614" "NCC-903099968" "NCC-943321752" "NCC-572260117" "NCC-192692595" "NCC-143584676" "NCC-830255753" "NCC-719632390" "NCC-152203862" "NCC-119766638" "NCC-498101020" "NCC-062542417" "NCC-668401347" "NCC-110726548" "NCC-256166887" "NCC-806033297" "NCC-085044827" "NCC-934631154" "NCC-721547333" "NCC-535280630" "NCC-798861157" "NCC-618229896" "NCC-917537778" "NCC-781152320" "NCC-465271235" "NCC-410126423" "NCC-332484151" "NCC-832970540" "NCC-099303959" "NCC-246701161" "NCC-897938136" "NCC-736721998" "NCC-070446325" "NCC-807167298" "NCC-089757916" "NCC-555730277" "NCC-045950556" "NCC-640616882" "NCC-765922339" "NCC-225118838" "NCC-992859913" "NCC-326967111" "NCC-402870830" "NCC-816983552" "NCC-357549746" "NCC-169821152" "NCC-535566448" "NCC-904734689" "NCC-157934138" "NCC-464429849" "NCC-826494875" "NCC-129326498" "NCC-681011152" "NCC-223319492" "NCC-712121397" "NCC-354279009" "NCC-357403430" "NCC-930328316" "NCC-930763486" "NCC-373893506" "NCC-271670789" "NCC-661847321" "NCC-820498572" "NCC-127060470" "NCC-914051514" "NCC-166794077" "NCC-200573629" "NCC-131039569" "NCC-530712217" "NCC-464780465" "NCC-847764512" "NCC-229460634" "NCC-282449658" "NCC-998387722" "NCC-110610573" "NCC-247637769" "NCC-795739579" "NCC-812306407"

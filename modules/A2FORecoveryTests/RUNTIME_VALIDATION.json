@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "checked_utc": "2026-09-30T14:46:13.123474+00:00",
+  "observed_runtime_state": "enabled",
+  "module_loaded": true,
+  "observation_hooks_installed": true,
+  "configuration_exists": true,
+  "capture_directory_exists": true,
+  "installed_dll_sha256": "e20024c03ab19438f2f872610fbd6e3255c59324f25fc83642996a1292383113",
+  "saved_log": "modules/A2FORecoveryTests/evidence/enabled-live-20260930T144608Z/A2FOExtensions.log",
+  "saved_log_sha256": "fdc449ac5ae06881bdf6e310ffcf87cde87136ba75ea5349041a9163e97123bd",
+  "sample_counts_at_saved_log": {
+    "node_transform": {
+      "visited": 64000,
+      "attempted": 64,
+      "matched": 64,
+      "mismatched": 0,
+      "skipped": 0,
+      "busy": 0
+    },
+    "engine_context": {
+      "visited": 288000,
+      "attempted": 288,
+      "matched": 288,
+      "mismatched": 0,
+      "skipped": 0,
+      "busy": 0
+    }
+  },
+  "total_logged_matches": 352,
+  "captured_record_replay": [
+    {
+      "status": "PASS",
+      "capture": "modules/A2FORecoveryTests/evidence/enabled-live-20260930T144608Z/context-match-516-671279808-002.json",
+      "outcome": "match",
+      "expected_return": 83960832
+    },
+    {
+      "status": "PASS",
+      "capture": "modules/A2FORecoveryTests/evidence/enabled-live-20260930T144608Z/node-match-516-671279808-001.json",
+      "outcome": "match",
+      "expected_return": 263386156
+    }
+  ],
+  "replay_self_test": {
+    "status": "PASS",
+    "self_test_cases": 7,
+    "reproduced_mismatch": 1,
+    "malformed_rejections": 4
+  },
+  "replay_library": "modules/A2FORecoveryTests/evidence/enabled-live-20260930T144608Z/librecovery_tests_replay.so",
+  "replay_library_sha256": "ce975bf3c29633cdcbf39f57df2569928b257fdaad1ec08b29f4fda98ac7dd4b",
+  "node_capture_scale_bits": "0x3f800000",
+  "live_scaled_node_arithmetic": "not demonstrated by saved first-match capture; aggregate counters do not distinguish paths",
+  "comparison_correctness": "sampled live results match for both observed routines; broader game correctness remains unverified",
+  "previous_observations": [
+    {
+      "version": 1,
+      "checked_utc": "2026-09-30T14:32:45.296927+00:00",
+      "user_report": "ok module runs no issues",
+      "user_reported_stability": "no issues reported",
+      "observed_runtime_state": "passive",
+      "module_loaded": true,
+      "observation_hooks_installed": false,
+      "configuration_exists": false,
+      "capture_directory_exists": false,
+      "installed_dll_sha256": "e20024c03ab19438f2f872610fbd6e3255c59324f25fc83642996a1292383113",
+      "current_build_dll_sha256": "e20024c03ab19438f2f872610fbd6e3255c59324f25fc83642996a1292383113",
+      "previous_headless_manifest_dll_sha256": "f6d366033b107f89b033acb22e5473b7618eeabae59a9f486d9656e83921e601",
+      "matches_previous_headless_artifact": false,
+      "saved_log": "build/recovery-tests-validation/passive-live-20260930T143245Z/A2FOExtensions.log",
+      "saved_log_sha256": "7f468036cfb2c8423b659a76251210d6c8386717577cbca161a1619b32086bc9",
+      "log_evidence": [
+        {
+          "line": 176,
+          "text": "[A2FORecoveryTests] Disabled; passive, no hooks installed"
+        },
+        {
+          "line": 177,
+          "text": "Module loader: loaded H:\\NVMeData\\Fleet Ops Roots\\Data\\modules\\A2FORecoveryTests.dll"
+        }
+      ],
+      "comparison_correctness": "unverified in game; passive run performed no comparisons"
+    }
+  ]
+}

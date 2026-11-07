@@ -28,29 +28,45 @@ loaded.
 | [`A2FOAlwaysShowShields`](../modules/A2FOAlwaysShowShields/README.md) | `alwaysShowShields` object command |
 | [`A2FOAnimatedHardpoints`](../modules/A2FOAnimatedHardpoints/README.md) | SOD matrix animation for gameplay hardpoint/null transforms; no ODF command |
 | [`A2FOAnimations`](../modules/A2FOAnimations/README.md) | `animationXevent`, `start`, `end`, `direction`, `repeat`, `resetonend`, `speed`; SOD clips for lifecycle events, paired states and opted-in weapon names; overrides vanilla matrix animation; in-game acceptance pending |
+| [`A2FOBreeders`](../modules/A2FOBreeders/README.md) | prototype Noxter-style biological production using genetic-choice BuildYard entries |
 | [`A2FOBuildTooltips`](../modules/A2FOBuildTooltips/README.md) | adjusted build-time text in normal and verbose build-button tooltips; no ODF command |
+| [`A2FOCameraControls`](../modules/A2FOCameraControls/README.md) | optional right-drag camera panning speed control and `Data/A2FOCameraControls.ini` settings |
 | [`A2FOCheats`](../modules/A2FOCheats/README.md) | configurable `showmethemoney` resources and restored single-player chat cheats |
+| [`A2FOCollectiveXP`](../modules/A2FOCollectiveXP/README.md) | experimental race `collectiveXP` and `collectiveXPModifier`; per-player native veterancy pool and ranked queue admission; [behavior and limits](collective-xp.md) |
 | [`A2FOCraftIdentity`](../modules/A2FOCraftIdentity/README.md) | captain/registry lists, ammunition/directional-shield UI, XP bar, and selected shield/XP tooltips |
 | [`A2FODirectionalShields`](../modules/A2FODirectionalShields/README.md) | optional forward, aft, port, and starboard Craft shield facings |
 | [`A2FOEditMenu`](../modules/A2FOEditMenu/README.md) | recursive `buildItemX` edit-menu submenus |
-| [`A2FOFeaturePack`](../modules/A2FOFeaturePack/README.md) | recursive ODF/FPQ discovery, BuildYard pseudo-technology gates, queue controls, extended upgrade pods, and viewport-correct Bink movies |
+| [`A2FOFeaturePack`](../modules/A2FOFeaturePack/README.md) | recursive ODF/FPQ discovery, BuildYard pseudo-technology gates, queue controls, and extended upgrade pods |
 | [`A2FOFireArcs`](../modules/A2FOFireArcs/README.md) | three-dimensional weapon fire volumes and tactical hover preview |
 | [`A2FOEnergySystems`](../modules/A2FOEnergySystems/README.md) | Photon Torpedo, Quantum Torpedo, and Shuttle Craft stores, recharge, and resupply |
 | [`A2FOHybridBuild`](../modules/A2FOHybridBuild/README.md) | `hybridbuild`, four production lists, shared queue, placements, and cocoons |
 | [`A2FOInfoIni`](../modules/A2FOInfoIni/README.md) | `SettingsDirectory` and `DefaultGameSpeed` |
+| [`A2FOInfestation`](../modules/A2FOInfestation/README.md) | infestation weapon ODF commands for delayed Noxter infestation |
 | [`A2FOInstantActionSettings`](../modules/A2FOInstantActionSettings/README.md) | restored Instant Action `Load Settings` behavior; no new command |
+| [`A2FOLogMailer`](../modules/A2FOLogMailer/README.md) | optional diagnostic email reporting with consent and delivery-mode configuration |
+| [`A2FOM3D`](../modules/A2FOM3D/README.md) | runtime Star Trek: Legacy `.m3d` model compatibility |
 | [`A2FOMissionSelector`](../modules/A2FOMissionSelector/README.md) | scrollable stock/custom campaign browser and `mission_selector.ini` |
+| [`A2FOMissions`](../modules/A2FOMissions/README.md) | MMM mission runtime integration through the `A2FOMissions` module |
+| [`A2FOMultiYardBuild`](../modules/A2FOMultiYardBuild/README.md) | distributes selected build orders across identical yards |
+| [`A2FOMuzzleFlashes`](../modules/A2FOMuzzleFlashes/README.md) | weapon ODF muzzle-flash sprite, size, and duration settings |
 | [`A2FONebulaRenderer`](../modules/A2FONebulaRenderer/README.md) | DX8 per-pixel lighting, emissive/specular maps, damage decals, and ship-name logo decals |
 | [`A2FONormalWeaponTech`](../modules/A2FONormalWeaponTech/README.md) | normal-weapon `.tt` prerequisite enforcement; no new ODF command |
 | [`A2FOODFVariants`](../modules/A2FOODFVariants/README.md) | ownership-aware ODF swapping using the shared faction suffix convention |
+| [`A2FORadarDiagnostics`](../modules/A2FORadarDiagnostics/README.md) | opt-in observation and capture of the existing D3D8 radar path |
 | [`A2FOTeamChangeWeapons`](../modules/A2FOTeamChangeWeapons/README.md) | weapon `activateOnTeamChange`: automatic activation after ownership changes, including self-destruct |
 | [`A2FOPointDefenseCycles`](../modules/A2FOPointDefenseCycles/README.md) | CannonImp-style numbered point-defense firing delays |
 | [`A2FOResources`](../modules/A2FOResources/README.md) | four independent resources, object costs, Race starting values, panel row, and native accessors |
+| [`A2FORecoveryTests`](../modules/A2FORecoveryTests/README.md) | opt-in diagnostics for checking recovered ArmadaL routines |
+| [`A2FORefitMenus`](../modules/A2FORefitMenus/README.md) | refit menus, campaign views, and shell/loading presentation settings |
 | [`A2FORGBTextures`](../modules/A2FORGBTextures/README.md) | presence-based legacy RGB/Index8/Compressed TGA loading; no ODF command |
+| [`A2FOSOLMaps`](../modules/A2FOSOLMaps/README.md) | experimental Star Trek: Legacy `.sol` map compatibility and current implementation phase |
+| [`A2FOShellDisplay`](../modules/A2FOShellDisplay/README.md) | shell window geometry and movie presentation settings |
 | [`A2FOStationRotation`](../modules/A2FOStationRotation/README.md) | experimental R/Shift+R 90-degree station placement, footprints and native rally facing; no ODF command; matching version required on all peers |
 | [`A2FOSwarmSystem`](../modules/A2FOSwarmSystem/README.md) | lightweight render-only ambient swarms |
 | [`A2FOTextureVariants`](../modules/A2FOTextureVariants/README.md) | faction textures/nodes, Borg DDS repair, and subsystem damage meshes |
 | [`A2FOTurrets`](../modules/A2FOTurrets/README.md) | indexed independently armed hull turrets |
+| [`A2FOVideo`](../modules/A2FOVideo/README.md) | video dispatch for supported MP4, WebM, and MKV containers and codecs |
+| [`A2FOViewDistance`](../modules/A2FOViewDistance/README.md) | optional camera far-plane and object-culling distance settings |
 | [`A2FORefitYards`](../modules/A2FORefitYards/README.md) | synchronized ship refits through native Shipyard queues |
 | [`A2FOWeaponDamageControls`](../modules/A2FOWeaponDamageControls/README.md) | independent shield/hull permission and damage multipliers |
 | [`A2FOWreckage`](../modules/A2FOWreckage/README.md) | deterministic native `wreckage` replacement policy |
@@ -224,9 +240,15 @@ shuttleCraftCriticalColor = 1.0 0.0 0.0
 
 Shipyards and `RepairShip` classes provide resupply within 200 units by
 default. `torpedoResupply` overrides provider status and
-`torpedoResupplyRange` overrides its range. See
-[the energy-system guide](../modules/A2FOEnergySystems/README.md) for the full
-contract and save-game note.
+`torpedoResupplyRange` overrides its range. Providers may set
+`canResupplySelf = 0` to prevent mode-2 self-resupply (the default is `1`),
+and `resupplyValidTargets` to a quoted, whitespace-separated scalar rule list
+such as `"type:fighter !odf:fed_noncombat_fighter"`. Receivers set the shared
+`resupplyTargetType` tag for type rules; exact ODF rules can match without a
+tag. Omitted filters allow other Craft, an explicit empty filter denies them,
+and malformed or conflicting rules fail closed. See
+[the energy-system guide](../modules/A2FOEnergySystems/README.md) for rule
+syntax, precedence, examples, and the save-game note.
 
 ## Optional directional shields
 
@@ -614,28 +636,55 @@ race-side `officerUpgradeODF` route. Numbered model nodes are named exactly
 
 ### BuildYard module technology
 
-Place `moduleXPseudoTechnology` in the BuildYard configuration ODF named by a
-BuildYard class's native `moduleConf` command. `X` is the same zero-based
-module index used by `moduleXRequiredTechnology`:
+Place `moduleXTechnologyEntry` in the BuildYard configuration ODF named by a
+BuildYard class's native `moduleConf` command. `X` is the same zero-based module
+index used by `moduleXRequiredTechnology`:
 
 ```cpp
-module0RequiredTechnology = "fed_module_basic_tech.odf"
-module0PseudoTechnology = "fed_module_chassis_gate.odf"
+module0TechnologyEntry = "bor_test_module_gate"
 ```
 
-The value is a normal project ID. Add the named fake item to the selected
-technology-tree file with the prerequisites that should control the module,
-for example:
+`moduleXPseudoTechnology` is retained as a compatibility alias.
 
-```text
-fed_module_chassis_gate.odf 2 fed_research_1.odf fed_research_2.odf
+Define the gate in an XML technology tree with `MODULE=`:
+
+```xml
+<object MODULE="bor_test_module_gate.odf">
+    <requirement>
+        <obj>romR_leahval2.odf</obj>
+    </requirement>
+</object>
 ```
 
-The fake item is checked but never constructed. A pseudo-only module uses it
-as its technology gate. When both commands are present, both project IDs must
-be available. Omitting `moduleXPseudoTechnology` preserves native BuildYard
-behavior. All multiplayer peers must use the same configuration ODF and
-technology tree.
+`MODULE` is an A2FOExtensions namespace, not a normal Fleet Operations project,
+so `bor_test_module_gate.odf` does **not** need to exist as an ODF. The `<obj>`
+children are normal real ODF technology requirements. Multiple `<obj>` nodes in
+one requirement are AND conditions; multiple `<requirement>` nodes are OR
+alternatives. `<obj mustNotHave="true">` is supported.
+
+If both commands are present, the stock gate and MODULE gate are combined:
+
+```cpp
+module0RequiredTechnology = "bor_existing_module"
+module0TechnologyEntry = "bor_test_module_gate"
+```
+
+Both must be satisfied. There is no need to repeat the stock requirement in the
+XML MODULE entry.
+
+If `moduleXButtonTooltip` is defined, A2FOExtensions associates its localization
+key with the MODULE gate and appends the currently-missing requirements while
+the module is unavailable, for example `Requires: Leahval Class`. v6 intercepts
+Armada's final Tooltip render boundary for Fleet Ops AUTOTOOLTIP text; ordinary localized-key tooltip
+routes are covered. It uses the requirement ODF's loaded `unitName` when
+available and its basename as fallback.
+
+v6 MODULE entries intentionally support direct object requirements only. A
+MODULE definition using race, cap/capList, ally/enemy, or logicGroups is logged
+as unsupported and remains unavailable rather than being evaluated
+incorrectly. A real ODF passed to TechnologyEntry still uses the older v4
+recursive-project compatibility path. All multiplayer peers must use matching
+configuration and technology XML.
 
 ### Hybrid production
 
@@ -758,6 +807,27 @@ countdown and later captures do not cancel/restart that countdown. Multiple
 swaps before one weapon pass coalesce to the final owner. Pending requests
 are cleared by cleanup/PostLoad, not saved for replay. Native replaceweapon
 instant-player/AI/derelict options remain independent.
+
+### Resupply weapons
+
+With [`A2FOEnergySystems`](../modules/A2FOEnergySystems/README.md#resupply-weapons):
+
+```text
+// Weapon ODF on a torpedoResupply provider
+classLabel = "resupplyweapon"
+resupplyValidTargets = "type:fighter"   // optional receiver filter
+```
+
+| Command | Meaning |
+| --- | --- |
+| `classLabel = "resupplyweapon"` | Resupply-range indicator. Its icon is grey while no valid receiver is in range and green while a same-team Craft's mode-`2` store is being reloaded by the owner. It fires automatically at that Craft, so the icon's reload fill follows `shotDelay`. Normal AI/player targeting is disabled |
+| `resupplyValidTargets` | Optional. Uses the provider rule syntax, but chooses which receivers this weapon reacts to; omitted means any receiver |
+
+For a silent indicator, omit `fireSound` and use a zero-damage ordnance with
+no visible effect, and set `range` to at least `torpedoResupplyRange`.
+Self-resupply and automatic (mode `1`) recharge never count. The active colour
+is the CraftIdentity GUI command `resupplyWeaponIconColor` (default
+`0.10 1.00 0.10`). Idle uses `passiveWeaponIconColor`.
 
 ### Normal weapon technology
 
@@ -926,8 +996,9 @@ Native `ScaleSOD` is applied automatically to offsets and sizes.
 - `A2FOFeaturePack`: recursive loose ODF folders and `odf.fpq` archives follow
   Data -> ParentMod -> active-mod precedence; A1's registered `Addon` folder
   wins within its own root.
-- `A2FOFeaturePack`: Bink intro, GDI movie, and menu/campaign movie output is
-  fitted to the active viewport automatically; there is no mod command.
+- `A2FOShellDisplay`: startup intro windows use the selected shell resolution and
+  Window Mode state; full-window Bink output is aspect-fitted automatically.
+  Embedded gameplay/viewscreen movies retain their authored rectangles.
 
 ## Controls and authoring tools
 

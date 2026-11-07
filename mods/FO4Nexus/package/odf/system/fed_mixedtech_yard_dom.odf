@@ -1,0 +1,341 @@
+// --- Display and localization ---
+unitname = "Experimental Yard"
+tooltip = "Experimental Yard"
+verbosetooltip = "AUTOTOOLTIP-fed_mixedtech_yard_dom.odf"
+race = "unitedfederation"
+possiblecraftnames =
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+    "(Classified)" "(Classified)" "(Classified)" "(Classified)"
+
+// --- Construction and costs ---
+buildtime = 40
+officercost = 0
+crewcost = 300
+dilithiumcost = 600
+latinumcost = 150
+builditem0 = "all_mixed_tech"
+builditem1 = "fed_mandril_dom"
+builditem2 = "fed_akira_dom"
+builditem3 = "fed_mirandaii"
+builditem4 = "all_halt"
+
+// --- Hull, shields, crew, and energy ---
+maxhealth = 724
+curhealth = 724
+healthrate = 1.404
+maxshields = 2424
+curshields = 2424
+shieldrate = 4.508
+specialenergydisplaymode = 1
+shielddelay = 2
+repairyellow = 2.0f
+repairred = 4.0f
+
+// --- Subsystems, damage, and repair ---
+shieldgeneratorhitpoints = 266
+engineshitpoints = 0
+weaponshitpoints = 0
+lifesupporthitpoints = 266
+sensorshitpoints = 266
+enginesrepairtime = 0.25
+lifesupportrepairtime = 0.0625
+weaponsrepairtime = 0.25
+shieldgeneratorrepairtime = 0.25
+sensorsrepairtime = 0.25
+enginescrewloss = 5.0f
+lifesupportcrewloss = 5.0f
+weaponscrewloss = 8.0f
+shieldgeneratorcrewloss = 8.0f
+sensorscrewloss = 5.0f
+lifesupportloss = 0.5
+engineshitpercent = 0.0f
+lifesupporthitpercent = 7.0f
+weaponshitpercent = 7.0f
+shieldgeneratorhitpercent = 1.0f
+sensorshitpercent = 0
+crewhitpercent = 7.0f
+hullhitpercent = 78.0f
+
+// --- Weapons and ordnance ---
+maxextraweapons = 10
+
+// --- Accuracy, hardpoints, and targeting ---
+hulltargethardpoints = "hp11" "hp12" "hp13" "hp14" "hp15" "hp16" "hp17" "hp18" "hp19" "hp20" "hp21" "hp22"
+lifesupporttargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06" "hp07" "hp08" "hp09" "hp10"
+weaponstargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06" "hp07" "hp08" "hp09" "hp10"
+shieldgeneratortargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06" "hp07" "hp08" "hp09" "hp10"
+sensorstargethardpoints = "hp11" "hp12" "hp13" "hp14" "hp15" "hp16" "hp17" "hp18" "hp19" "hp20" "hp21" "hp22"
+enginestargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06" "hp07" "hp08" "hp09" "hp10"
+criticaltargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06" "hp07" "hp08" "hp09" "hp10"
+extraweaponhardpoints = "root"
+buildhardpoint = "hp99"
+
+// --- Artificial intelligence and tactical behavior ---
+attackpower = 0.000
+intrinsicvalue = 0.000
+avoidanceclass = 9
+rangescan = 600
+damagedscan = 50.0f
+ainame = "StarbaseProcess"
+alert = 1
+combat = 1
+
+// --- Interface and controls ---
+show_sw_autonomy = 1
+show_movement_autonomy = 1
+overlaysod = "fed_s_shuttlesM"
+
+// --- Audio and events ---
+eventselect = "FederationAntaresSelect"
+eventacknowledge = "StarbaseAcknowledge"
+eventattack = "StarbaseAttack"
+eventdecommission = "StarbaseDecommission"
+
+// --- Movement and physics ---
+percentNebulaWarn = 0
+footprintbuffer = 120.0f
+southbuffer = 170.0
+weldingradius = 1.0
+
+// --- Progression and variants ---
+worthxp = 140
+
+// --- Resource handling and recycling ---
+recycledilithium = 180
+recycletime = 22
+recyclelatinum = 45
+recyclebiomatter = 0
+checkvalidresourceinterval = 10.0f
+
+// --- Art, animation, and effects ---
+fireball = "x_building_explosion"
+shieldhit = "shield_fed_hitXL"
+shieldhitcritical = "shield_fed_hitcritXL"
+shielddown = "shield_fed_down"
+animation = 2
+buildanimation = 0
+repairanimation = 0
+
+// --- Capabilities and object behavior ---
+has_hitpoints = 1
+has_crew = 1
+transporter = 1
+can_sandd = 0
+buildablebyownerraceonly = 1
+repairfacility = 0
+decommissionfacility = 0
+builder_ship = 1
+is_starbase = 1
+facility = 1
+
+// --- Runtime class ---
+classlabel = "shipyard"
+
+// FO4Nexus overlay
+torpedoResupply = 1
+torpedoResupplyRange = 350

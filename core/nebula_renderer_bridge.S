@@ -468,7 +468,9 @@ _a2fo_nebula_fleetops_dot3_draw_hook:
 	addl $12, %esp
 	popal
 	popfl
-	call *0x11c(%eax)
+	# Same six stdcall arguments and HRESULT as the native COM draw. The
+	# helper passes through unless the optional cloak replacement succeeds.
+	call _a2fo_nebula_refit_cloak_draw@24
 	pushfl
 	pushal
 	call _a2fo_nebula_transparent_indices_post

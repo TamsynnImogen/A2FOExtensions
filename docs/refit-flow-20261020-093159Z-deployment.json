@@ -1,0 +1,53 @@
+{
+  "timestamp_utc": "20261020-093159Z",
+  "target": "/home/tamsynn/NVMeData/Fleet Ops Roots",
+  "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/refit-flow-20261020-093159Z",
+  "files": {
+    "Data/modules/A2FORefitMenus.dll": {
+      "source": "build/modules/A2FORefitMenus.dll",
+      "before": "81069a212581cd988297615acb2cc87b106b64a8285198c71fb34c111ef2b8ed",
+      "after": "d5e91c87ba4b682f33711e13575dbcdc087805dfb2574fd4842a32413e8b7aed"
+    },
+    "Data/modules/refit/A2FORefitScene.dll": {
+      "source": "build/modules/refit/A2FORefitScene.dll",
+      "before": "f817596a3e7205cf7d2acb2b36055015b5cc58a52ed5fba04218051dd1261562",
+      "after": "ac308381faf7d3b93e7c6f59105ca9b0b91c1d3cdc04f7f658097cbfdf169f4b"
+    },
+    "Data/modules/A2FOMissionSelector.dll": {
+      "source": "build/modules/A2FOMissionSelector.dll",
+      "before": "4605f38be9d7061708585a91fb140febf34132df13b27aa2550b43bf38012ff2",
+      "after": "7cee00f19b905a5dd08fb4eb93c6f38953690799a6f93cb16a0f20987495c0aa"
+    }
+  },
+  "protected": {
+    "FleetOpsHook.dll": "3fd18eeee4201a9a1297ac26b3eb88f78c5f72e8c55a62c25179f1d4932e4c11",
+    "Data/ArmadaL.exe": "817b1ddb9876cfb9c5d781b42d2513de48fef9cbdbc408aa43c878c573581a18",
+    "Data/A2FOExtensions.dll": "45be55e79afe53365dc26f1e4238bfcd9d74120299215b52bca6458f072d4b05",
+    "Data/d3d8.dll": "ec6d494fbdcef42908e86f01f4f54342619f8d442519b4ab751c3b298c5a8437",
+    "Data/d3d9.dll": "00bc142e98ddad1e334a4d88fa630038e092b0758b3d79e295172b181a4c772d",
+    "Data/renderers/dxvk/d3d9.dll": "00bc142e98ddad1e334a4d88fa630038e092b0758b3d79e295172b181a4c772d",
+    "Data/modules/A2FOShellDisplay.dll": "506ae54e9ea852c1b07e2daeea0a060ec28894bd62dbb302843a8f29b4add85b",
+    "Data/info.ini": "d40efd9f80bc8e07d95186ede2ddd2a44277c758f45ac58171712f8eaa9a7192",
+    "Data/A2FORefitMenus.ini": "1f89a024b235963548a7c9b6cc12a2f28f11d4d8811099689bbf5dccda9d74f9",
+    "Data/A2FOShellDisplay.ini": null,
+    "Data/RefitScene/Menu/map.ini": "cc370d017744facc01eecb91dca2b9d1f02461de9794fab60149c46b1dde7b2d",
+    "Data/RefitScene/Render3D.ini": "66ac89a0f313f8b0f8a85e25fcab25929cba7d4f454146bc30e3a81d1f98ef2f",
+    "Data/RefitScene/Loading/themes.ini": "c0634bd750e31652640ba184a8036a61b6e27ed5423d79bc674742b2741e4236",
+    "Data/odf/other/loadscreen.odf": null,
+    "Data/Mods/test/info.ini": "68cef7963cf436691dc775dae6efc07d9ed4a9545d1b71f596b1d3b8a76061ac",
+    "Data/Mods/test/mission_selector.ini": "d89d49a125bfa55d95c59077d4e47886567492d52d8016c37688286f524de1a8",
+    "Data/Mods/test/odf/other/loadscreen.odf": null,
+    "Data/Mods/STA2 Classic Mod/info.ini": "9f599f3f5217d0219d80ef0dd8a01990a72e9995b51a0b5cc372ff709cf77976"
+  },
+  "status": "Deployed; full-restart native game acceptance pending",
+  "protected_files_present": 15,
+  "verification": {
+    "portable_suites": 12,
+    "console_dll_cases": 38,
+    "additional_console_cases": 7,
+    "scene_gpu_log": "build/refit-flow-20261020/scene-gpu-final.log",
+    "loading_gpu_log": "build/refit-flow-20261020/loading-gpu.log",
+    "initial_slow_sample_log": "build/refit-flow-20261020/scene-gpu-initial.log",
+    "native_game_acceptance": "pending manual full restart"
+  }
+}

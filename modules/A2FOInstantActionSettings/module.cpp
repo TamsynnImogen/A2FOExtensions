@@ -4,9 +4,13 @@
  */
 
 #include "../../sdk/include/a2fo_module_api.h"
+#include "../../rust/module_runtime_b5_ffi.h"
 #include "../../sdk/include/a2fo_supported_armada.hpp"
 #include "load_button_bounds.hpp"
 #include "setup_details_line.hpp"
+#ifdef A2FO_BUILTIN_FEATURE
+#include "../../core/builtin_modules.hpp"
+#endif
 
 #include <windows.h>
 
@@ -93,7 +97,30 @@ volatile LONG g_missing_starting_race_reports = 0;
 volatile LONG g_shell_multiple_recovery_reports = 0;
 bool g_runtime_ready = false;
 void* g_active_load_game_setup = nullptr;
+#ifdef A2FO_BUILTIN_FEATURE
+std::uint64_t g_active_load_activation = 0;
+#endif
 char g_resolved_profile_path[kMaximumProfilePath]{};
+
+std::uint64_t feature_activation() noexcept {
+#ifdef A2FO_BUILTIN_FEATURE
+    // Availability is published only after Ready confirms complete setup.
+    // The atomic acquire also keeps callbacks passive during preparation.
+    return a2fo::builtin_module_activation(A2FO_BUILTIN_FEATURE);
+#else
+    return 1;
+#endif
+}
+
+bool active_load_scope() noexcept {
+#ifdef A2FO_BUILTIN_FEATURE
+    const auto activation = feature_activation();
+    return activation != 0 && g_active_load_game_setup &&
+        g_active_load_activation == activation;
+#else
+    return g_active_load_game_setup != nullptr;
+#endif
+}
 
 // GameSetup's starting-unit pass assumes every active slot resolves to a
 // loaded Race and immediately indexes Race+0x298. A stale Settings.prf can
@@ -113,13 +140,17 @@ void* at(HMODULE module, std::uintptr_t rva) noexcept {
         : nullptr;
 }
 
+#ifdef A2FO_BUILTIN_FEATURE
+// Refit loading verifies this exact core entry when admitting our detour.
+extern "C" __declspec(dllexport)
+#endif
 void* __cdecl race_by_id_hook(std::int32_t race_id) noexcept {
     void* const caller = __builtin_extract_return_addr(
         __builtin_return_address(0));
     const auto original = reinterpret_cast<RaceById>(
         g_race_by_id_hook.gateway);
     void* const race = original ? original(race_id) : nullptr;
-    if (race || caller != at(
+    if (!feature_activation() || race || caller != at(
             g_armada, kStartingUnitsRaceLookupReturnRva)) {
         return race;
     }
@@ -219,7 +250,7 @@ void report_shell_multiple_recovery_once() noexcept {
 
 LONG WINAPI shell_multiple_exception_handler(
     EXCEPTION_POINTERS* pointers) noexcept {
-    if (!pointers || !pointers->ExceptionRecord ||
+    if (!feature_activation() || !pointers || !pointers->ExceptionRecord ||
         !pointers->ContextRecord ||
         pointers->ExceptionRecord->ExceptionCode !=
             EXCEPTION_ACCESS_VIOLATION) {
@@ -348,107 +379,178 @@ bool signature_matches(
         std::memcmp(target, expected.data(), expected.size()) == 0;
 }
 
+struct LoadContext {
+    void* game_setup;
+    LoadSettings original = nullptr;
+#ifdef A2FO_BUILTIN_FEATURE
+    void* previous_setup = nullptr;
+    std::uint64_t previous_activation = 0;
+#endif
+};
+std::uint64_t load_op(void* opaque, std::uint32_t operation,
+                      std::uint32_t) noexcept {
+    auto& context = *static_cast<LoadContext*>(opaque);
+    switch (operation) {
+        case 0:
+            InterlockedIncrement(&g_load_invocations);
+            context.original = reinterpret_cast<LoadSettings>(
+                g_load_settings_hook.gateway);
+            return 0;
+        case 1:
+#ifdef A2FO_BUILTIN_FEATURE
+            context.previous_setup = g_active_load_game_setup;
+            context.previous_activation = g_active_load_activation;
+            g_active_load_activation = feature_activation();
+            g_active_load_game_setup = g_active_load_activation
+                ? context.game_setup : nullptr;
+#else
+            g_active_load_game_setup = context.game_setup;
+#endif
+            return 0;
+        case 2: {
+            if (context.original) context.original(context.game_setup);
+            return 0;
+        }
+        case 3:
+#ifdef A2FO_BUILTIN_FEATURE
+            g_active_load_game_setup = context.previous_setup;
+            g_active_load_activation = context.previous_activation;
+#else
+            g_active_load_game_setup = nullptr;
+#endif
+            return 0;
+    }
+    return 0;
+}
 void __cdecl load_settings_hook(void* game_setup) noexcept {
-    InterlockedIncrement(&g_load_invocations);
-    const auto original = reinterpret_cast<LoadSettings>(
-        g_load_settings_hook.gateway);
-    g_active_load_game_setup = game_setup;
-    if (original) original(game_setup);
-    g_active_load_game_setup = nullptr;
+    LoadContext context{game_setup};
+    a2fo_rs_instant_load(&context, &load_op);
 }
 
-extern "C" std::uintptr_t __cdecl
-a2fo_instant_action_settings_file_reader_hook_cpp(
-    void* reader, void* path_string, std::uintptr_t options) noexcept {
+struct ReaderContext {
+    void* reader;
+    void* path_string;
+    std::uintptr_t options;
     char* path = nullptr;
     char path_copy[512]{};
-    if (read_member(path_string, 0x04, &path) && path) {
-        for (std::size_t index = 0; index + 1 < sizeof(path_copy); ++index) {
-            if (!readable_range(path + index, 1)) break;
-            path_copy[index] = path[index];
-            if (path_copy[index] == '\0') break;
-        }
-    }
-    const bool tracked = g_active_load_game_setup != nullptr;
-    char* original_path = path;
-    char* opened_path = path;
-    bool redirected = false;
-    if (tracked && std::strcmp(path_copy, kSettingsProfileName) == 0 &&
-        A2FO_MODULE_API_HAS(g_api, get_settings_directory) &&
-        g_api->get_settings_directory) {
-        char directory[kMaximumProfilePath]{};
-        if (g_api->get_settings_directory(
-                directory, static_cast<std::uint32_t>(sizeof(directory)))) {
-            std::size_t length = 0;
-            while (length < sizeof(directory) && directory[length] != '\0') {
-                ++length;
+    char* original_path = nullptr;
+};
+std::uint64_t reader_op(void* opaque, std::uint32_t operation,
+                        std::uint32_t) noexcept {
+    auto& context = *static_cast<ReaderContext*>(opaque);
+    switch (operation) {
+        case 0: return active_load_scope();
+        case 1:
+            if (read_member(context.path_string, 0x04, &context.path) &&
+                context.path) {
+                for (std::size_t index = 0;
+                     index + 1 < sizeof(context.path_copy); ++index) {
+                    if (!readable_range(context.path + index, 1)) break;
+                    context.path_copy[index] = context.path[index];
+                    if (context.path_copy[index] == '\0') break;
+                }
             }
+            context.original_path = context.path;
+            return 0;
+        case 2: return active_load_scope();
+        case 3:
+            return std::strcmp(context.path_copy, kSettingsProfileName) == 0 &&
+                A2FO_MODULE_API_HAS(g_api, get_settings_directory) &&
+                g_api->get_settings_directory;
+        case 4: {
+            char directory[kMaximumProfilePath]{};
+            if (!g_api->get_settings_directory(
+                    directory, static_cast<std::uint32_t>(sizeof(directory))))
+                return 0;
+            std::size_t length = 0;
+            while (length < sizeof(directory) && directory[length] != '\0') ++length;
             const std::size_t name_length = sizeof(kSettingsProfileName) - 1;
             const bool needs_separator = length != 0 &&
                 directory[length - 1] != '\\' && directory[length - 1] != '/';
-            if (length != 0 && length < sizeof(directory) &&
-                length + (needs_separator ? 1 : 0) + name_length + 1 <=
-                    sizeof(g_resolved_profile_path)) {
-                std::memcpy(g_resolved_profile_path, directory, length);
-                if (needs_separator) {
-                    g_resolved_profile_path[length++] = '\\';
-                }
-                std::memcpy(g_resolved_profile_path + length,
-                            kSettingsProfileName, name_length + 1);
-                opened_path = g_resolved_profile_path;
-                std::memcpy(
-                    static_cast<std::uint8_t*>(path_string) + 0x04,
-                    &opened_path, sizeof(opened_path));
-                redirected = true;
-            }
+            if (length == 0 || length >= sizeof(directory) ||
+                length + (needs_separator ? 1 : 0) + name_length + 1 >
+                    sizeof(g_resolved_profile_path)) return 0;
+            std::memcpy(g_resolved_profile_path, directory, length);
+            if (needs_separator) g_resolved_profile_path[length++] = '\\';
+            std::memcpy(g_resolved_profile_path + length,
+                        kSettingsProfileName, name_length + 1);
+            char* opened_path = g_resolved_profile_path;
+            std::memcpy(static_cast<std::uint8_t*>(context.path_string) + 0x04,
+                        &opened_path, sizeof(opened_path));
+            return 1;
         }
+        case 6:
+            return a2fo_instant_action_settings_call_thiscall_2(
+                g_file_reader_hook.gateway, context.reader,
+                context.path_string, context.options);
+        case 7:
+            std::memcpy(static_cast<std::uint8_t*>(context.path_string) + 0x04,
+                        &context.original_path, sizeof(context.original_path));
+            return 0;
     }
-    const std::uintptr_t result =
-        a2fo_instant_action_settings_call_thiscall_2(
-            g_file_reader_hook.gateway, reader, path_string, options);
-    if (redirected) {
-        std::memcpy(static_cast<std::uint8_t*>(path_string) + 0x04,
-                    &original_path, sizeof(original_path));
-    }
-    return result;
+    return 0;
+}
+extern "C" std::uintptr_t __cdecl
+ a2fo_instant_action_settings_file_reader_hook_cpp(
+    void* reader, void* path_string, std::uintptr_t options) noexcept {
+    ReaderContext context{reader, path_string, options};
+    return a2fo_rs_instant_reader(&context, &reader_op);
 }
 
-bool __cdecl read_blob_hook(void* reader, void* destination,
-                            std::uint32_t size) noexcept {
-    const auto original = reinterpret_cast<ReadBlob>(g_read_blob_hook.gateway);
+struct BlobContext {
+    void* reader;
+    void* destination;
+    std::uint32_t size;
+    ReadBlob original;
     char* current = nullptr;
     char* end = nullptr;
-    const bool cursor_available =
-        read_member(reader, 0x54, &current) &&
-        read_member(reader, 0x58, &end) && current && end && current < end;
-    const bool is_setup_details = g_active_load_game_setup &&
-        size == kSetupDetailsSize && cursor_available;
-
-    if (is_setup_details) {
-        const std::size_t available = static_cast<std::size_t>(end - current);
-        constexpr std::size_t kMaximumSetupDetailsLine =
-            kSetupDetailsSize * 2 + 64;
-        const std::size_t scan_size =
-            available < kMaximumSetupDetailsLine
+};
+std::uint64_t blob_op(void* opaque, std::uint32_t operation,
+                      std::uint32_t) noexcept {
+    auto& context = *static_cast<BlobContext*>(opaque);
+    switch (operation) {
+        case 0: return active_load_scope();
+        case 1:
+            return read_member(context.reader, 0x54, &context.current) &&
+                read_member(context.reader, 0x58, &context.end) &&
+                context.current && context.end && context.current < context.end;
+        case 2: return active_load_scope();
+        case 3: {
+            const std::size_t available = static_cast<std::size_t>(
+                context.end - context.current);
+            constexpr std::size_t kMaximumSetupDetailsLine =
+                kSetupDetailsSize * 2 + 64;
+            const std::size_t scan_size = available < kMaximumSetupDetailsLine
                 ? available : kMaximumSetupDetailsLine;
-        if (readable_range(current, scan_size)) {
+            if (!readable_range(context.current, scan_size)) return 0;
             std::array<std::uint8_t, kSetupDetailsSize> decoded{};
             const auto result =
                 a2fo::instant_action_settings::decode_setup_details_line(
-                    current, scan_size, decoded.data(), decoded.size());
-            if (result.decoded &&
-                readable_range(destination, decoded.size())) {
-                std::memcpy(destination, decoded.data(), decoded.size());
-                char* next = current + result.next_line_offset;
-                std::memcpy(static_cast<std::uint8_t*>(reader) + 0x54,
-                            &next, sizeof(next));
-                return true;
-            }
+                    context.current, scan_size, decoded.data(), decoded.size());
+            if (!result.decoded ||
+                !readable_range(context.destination, decoded.size())) return 0;
+            std::memcpy(context.destination, decoded.data(), decoded.size());
+            char* next = context.current + result.next_line_offset;
+            std::memcpy(static_cast<std::uint8_t*>(context.reader) + 0x54,
+                        &next, sizeof(next));
+            return 1;
         }
-        log_line("Could not decode the scoped setupDetails payload; "
-                 "falling back to Armada's reader");
+        case 4:
+            log_line("Could not decode the scoped setupDetails payload; "
+                     "falling back to Armada's reader");
+            return 0;
+        case 5:
+            return context.original && context.original(
+                context.reader, context.destination, context.size);
     }
-    return original ? original(reader, destination, size) : false;
+    return 0;
+}
+bool __cdecl read_blob_hook(void* reader, void* destination,
+                            std::uint32_t size) noexcept {
+    BlobContext context{reader, destination, size,
+        reinterpret_cast<ReadBlob>(g_read_blob_hook.gateway)};
+    return a2fo_rs_instant_blob(size, kSetupDetailsSize,
+                                &context, &blob_op) != 0;
 }
 
 void* current_game_setup() noexcept {
@@ -473,50 +575,67 @@ bool is_load_button_command(WPARAM wparam, LPARAM lparam) noexcept {
         a2fo::instant_action_settings::is_load_settings_caption(caption);
 }
 
+struct DialogContext {
+    HWND window;
+    UINT message;
+    WPARAM wparam;
+    LPARAM lparam;
+    DialogProc original;
+    void* game_setup = nullptr;
+};
+std::uint64_t dialog_op(void* opaque, std::uint32_t operation,
+                        std::uint32_t) noexcept {
+    auto& context = *static_cast<DialogContext*>(opaque);
+    switch (operation) {
+        case 0: return context.original != nullptr;
+        case 1: return feature_activation();
+        case 2: {
+            bool load_click = context.message == WM_COMMAND &&
+                is_load_button_command(context.wparam, context.lparam);
+            if (context.message == WM_LBUTTONUP) {
+                Bounds raw_load{};
+                Bounds raw_save{};
+                if (read_button_bounds(kLoadButtonSlotRva, &raw_load) &&
+                    read_button_bounds(kSaveButtonSlotRva, &raw_save)) {
+                    const EffectiveBounds effective =
+                        a2fo::instant_action_settings::effective_load_bounds(
+                            raw_load, raw_save);
+                    if (effective.valid) {
+                        const std::int32_t x = static_cast<std::int16_t>(
+                            static_cast<std::uint16_t>(LOWORD(context.lparam)));
+                        const std::int32_t y = static_cast<std::int16_t>(
+                            static_cast<std::uint16_t>(HIWORD(context.lparam)));
+                        load_click = a2fo::instant_action_settings::contains(
+                            effective.bounds, x, y);
+                    }
+                }
+            }
+            return load_click;
+        }
+        case 3: return static_cast<std::uint32_t>(
+            InterlockedCompareExchange(&g_load_invocations, 0, 0));
+        case 4:
+            return static_cast<std::uintptr_t>(context.original(
+                context.window, context.message, context.wparam,
+                context.lparam));
+        case 5: return static_cast<std::uint32_t>(
+            InterlockedCompareExchange(&g_load_invocations, 0, 0));
+        case 6: return feature_activation();
+        case 7:
+            context.game_setup = current_game_setup();
+            return context.game_setup != nullptr;
+        case 8:
+            return a2fo_instant_action_settings_call_thiscall_0(
+                at(g_armada, kGameSetupIsHostRva), context.game_setup) != 0;
+        case 9: load_settings_hook(context.game_setup); return 0;
+    }
+    return 0;
+}
 INT_PTR CALLBACK multiplayer_setup_dialog_hook(
     HWND window, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
-    const auto original = reinterpret_cast<DialogProc>(g_dialog_hook.gateway);
-    if (!original) return FALSE;
-
-    bool load_click = message == WM_COMMAND &&
-        is_load_button_command(wparam, lparam);
-    if (message == WM_LBUTTONUP) {
-        Bounds raw_load{};
-        Bounds raw_save{};
-        if (read_button_bounds(kLoadButtonSlotRva, &raw_load) &&
-            read_button_bounds(kSaveButtonSlotRva, &raw_save)) {
-            const EffectiveBounds effective =
-                a2fo::instant_action_settings::effective_load_bounds(
-                    raw_load, raw_save);
-            if (effective.valid) {
-                const std::int32_t x = static_cast<std::int16_t>(
-                    static_cast<std::uint16_t>(LOWORD(lparam)));
-                const std::int32_t y = static_cast<std::int16_t>(
-                    static_cast<std::uint16_t>(HIWORD(lparam)));
-                load_click = a2fo::instant_action_settings::contains(
-                    effective.bounds, x, y);
-            }
-        }
-    }
-
-    const LONG before = InterlockedCompareExchange(
-        &g_load_invocations, 0, 0);
-    const INT_PTR result = original(window, message, wparam, lparam);
-    const LONG after = InterlockedCompareExchange(
-        &g_load_invocations, 0, 0);
-    if (!load_click || after != before) {
-        return result;
-    }
-
-    void* game_setup = current_game_setup();
-    if (!game_setup ||
-        a2fo_instant_action_settings_call_thiscall_0(
-            at(g_armada, kGameSetupIsHostRva), game_setup) == 0) {
-        return result;
-    }
-
-    load_settings_hook(game_setup);
-    return result;
+    DialogContext context{window, message, wparam, lparam,
+        reinterpret_cast<DialogProc>(g_dialog_hook.gateway)};
+    return a2fo_rs_instant_dialog(&context, &dialog_op);
 }
 
 bool preflight() noexcept {
@@ -554,63 +673,92 @@ bool preflight() noexcept {
     return true;
 }
 
-bool install_hooks() noexcept {
-    if (!preflight()) return false;
-    g_shell_multiple_exception_handler = AddVectoredExceptionHandler(
-        1, shell_multiple_exception_handler);
-    if (!g_shell_multiple_exception_handler) {
-        log_line("Could not install the Instant Action toggle-label guard");
-        return false;
+std::uint64_t instant_init_op(void* opaque, std::uint32_t operation,
+                              std::uint32_t argument) noexcept {
+    const auto* api = static_cast<const A2FO_ModuleApi*>(opaque);
+    try {
+    switch (operation) {
+        case 0:
+            g_api = api;
+            g_armada = static_cast<HMODULE>(api->armada_module());
+            g_fleetops = static_cast<HMODULE>(api->fleetops_module());
+            return g_armada && g_fleetops;
+        case 1: return preflight();
+        case 2:
+            g_shell_multiple_exception_handler = AddVectoredExceptionHandler(
+                1, shell_multiple_exception_handler);
+            if (!g_shell_multiple_exception_handler)
+                log_line("Could not install the Instant Action toggle-label guard");
+            return g_shell_multiple_exception_handler != nullptr;
+        case 3: {
+            const bool installed = api->install_inline_hook(
+                at(g_armada, kRaceByIdRva),
+                reinterpret_cast<void*>(&race_by_id_hook),
+                kExpectedRaceById.size(), kExpectedRaceById.data(),
+                &g_race_by_id_hook);
+            if (!installed)
+                log_line("Could not install the missing starting-race guard");
+            return installed;
+        }
+        case 4: {
+            const bool installed = api->install_inline_hook(
+                at(g_armada, kLoadSettingsRva),
+                reinterpret_cast<void*>(&load_settings_hook),
+                kExpectedFunctionPrologue.size(),
+                kExpectedFunctionPrologue.data(), &g_load_settings_hook);
+            if (!installed) log_line("Could not install the LoadSettings tracking hook");
+            return installed;
+        }
+        case 5: {
+            const bool installed = api->install_inline_hook(
+                at(g_armada, kReadBlobRva),
+                reinterpret_cast<void*>(&read_blob_hook),
+                kExpectedReadBlob.size(), kExpectedReadBlob.data(),
+                &g_read_blob_hook);
+            if (!installed)
+                log_line("Could not install the scoped setupDetails decoder hook; "
+                         "the LoadSettings hook remains a transparent pass-through");
+            return installed;
+        }
+        case 6: {
+            const bool installed = api->install_inline_hook(
+                at(g_armada, kFileReaderConstructorRva),
+                reinterpret_cast<void*>(
+                    &a2fo_instant_action_settings_file_reader_bridge),
+                kExpectedFunctionPrologue.size(),
+                kExpectedFunctionPrologue.data(), &g_file_reader_hook);
+            if (!installed)
+                log_line("Could not install the Settings.prf path-resolution hook");
+            return installed;
+        }
+        case 7: {
+            const bool installed = api->install_inline_hook(
+                at(g_armada, kMultiplayerSetupDlgProcRva),
+                reinterpret_cast<void*>(&multiplayer_setup_dialog_hook),
+                kExpectedFunctionPrologue.size(),
+                kExpectedFunctionPrologue.data(), &g_dialog_hook);
+            if (!installed)
+                log_line("Could not install the Instant Action dialog hook; the "
+                         "LoadSettings hook remains a transparent pass-through");
+            return installed;
+        }
+        case 8:
+            g_runtime_ready = argument != 0;
+            log_line(g_runtime_ready
+                ? (kEnableProfileLoadRepair
+                    ? "Instant Action Load Settings repair initialized"
+                    : "Instant Action missing-race guard initialized; profile-load repair isolated")
+                : "Instant Action settings module loaded with runtime disabled");
+            return 0;
+        case 9:
+            log_line("Profile-load repair isolated; missing starting-race guard "
+                     "remains active");
+            return 0;
     }
-    if (!g_api->install_inline_hook(
-            at(g_armada, kRaceByIdRva),
-            reinterpret_cast<void*>(&race_by_id_hook),
-            kExpectedRaceById.size(), kExpectedRaceById.data(),
-            &g_race_by_id_hook)) {
-        log_line("Could not install the missing starting-race guard");
-        return false;
+    return 0;
+    } catch (...) {
+        return 0;
     }
-    if (!kEnableProfileLoadRepair) {
-        log_line("Profile-load repair isolated; missing starting-race guard "
-                 "remains active");
-        return true;
-    }
-    if (!g_api->install_inline_hook(
-            at(g_armada, kLoadSettingsRva),
-            reinterpret_cast<void*>(&load_settings_hook),
-            kExpectedFunctionPrologue.size(),
-            kExpectedFunctionPrologue.data(), &g_load_settings_hook)) {
-        log_line("Could not install the LoadSettings tracking hook");
-        return false;
-    }
-    if (!g_api->install_inline_hook(
-            at(g_armada, kReadBlobRva),
-            reinterpret_cast<void*>(&read_blob_hook),
-            kExpectedReadBlob.size(), kExpectedReadBlob.data(),
-            &g_read_blob_hook)) {
-        log_line("Could not install the scoped setupDetails decoder hook; "
-                 "the LoadSettings hook remains a transparent pass-through");
-        return false;
-    }
-    if (!g_api->install_inline_hook(
-            at(g_armada, kFileReaderConstructorRva),
-            reinterpret_cast<void*>(
-                &a2fo_instant_action_settings_file_reader_bridge),
-            kExpectedFunctionPrologue.size(),
-            kExpectedFunctionPrologue.data(), &g_file_reader_hook)) {
-        log_line("Could not install the Settings.prf path-resolution hook");
-        return false;
-    }
-    if (!g_api->install_inline_hook(
-            at(g_armada, kMultiplayerSetupDlgProcRva),
-            reinterpret_cast<void*>(&multiplayer_setup_dialog_hook),
-            kExpectedFunctionPrologue.size(),
-            kExpectedFunctionPrologue.data(), &g_dialog_hook)) {
-        log_line("Could not install the Instant Action dialog hook; the "
-                 "LoadSettings hook remains a transparent pass-through");
-        return false;
-    }
-    return true;
 }
 
 }  // namespace
@@ -623,21 +771,8 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
         !api->install_inline_hook) {
         return false;
     }
-    g_api = api;
-    g_armada = static_cast<HMODULE>(api->armada_module());
-    g_fleetops = static_cast<HMODULE>(api->fleetops_module());
-    if (!g_armada || !g_fleetops) return false;
-
-    g_runtime_ready = install_hooks();
-    log_line(g_runtime_ready
-                 ? (kEnableProfileLoadRepair
-                        ? "Instant Action Load Settings repair initialized"
-                        : "Instant Action missing-race guard initialized; "
-                          "profile-load repair isolated")
-                 : "Instant Action settings module loaded with runtime disabled");
-    // Inline hooks are process-lifetime patches, so the module must remain
-    // resident even if only the transparent tracking hook was installed.
-    return true;
+    return a2fo_rs_instant_init(true, kEnableProfileLoadRepair,
+        const_cast<A2FO_ModuleApi*>(api), &instant_init_op) != 0;
 }
 
 extern "C" __declspec(dllexport)

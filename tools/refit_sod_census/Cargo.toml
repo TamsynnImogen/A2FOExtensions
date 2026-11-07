@@ -1,0 +1,13 @@
+[package]
+name = "refit_sod_census"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Offline, read-only coverage census. Deliberately outside core/renderer/rust/sdk
+# so it never enters the Core source attestation scope.
+[dependencies]
+a2fo_native11_model = { path = "../../rust/a2fo_native11_model" }
+a2fmt = { path = "../../third_party/armada2-refit/menu-renderer/a2fmt" }
+
+[workspace]

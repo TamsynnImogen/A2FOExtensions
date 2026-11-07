@@ -1,5 +1,9 @@
 # Build-button tooltip times
 
+This feature is now built into `A2FOExtensions.dll`. Keep using `A2FOBuildTooltips`
+in the Modules menu and `info.ini`; its standalone DLL is unnecessary and is
+ignored by the new core. See [built-in module behaviour](../../docs/builtin-modules-stage1.md).
+
 A2FOBuildTooltips.dll inserts build time into Armada's native parenthesised
 cost row as another compact amount/unit token. The compact unit is the
 build-time glyph at byte `0x8A`:

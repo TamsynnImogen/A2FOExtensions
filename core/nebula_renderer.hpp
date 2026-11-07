@@ -30,6 +30,8 @@ using NebulaRendererLog = void (*)(const std::string& message);
 bool install_nebula_renderer_early(HMODULE armada, HMODULE fleet_ops,
                                    const std::string& root_directory,
                                    NebulaRendererLog log);
+// Invoked at the checked first workspace construction boundary outside loader lock.
+void initialize_refit_scene_sources() noexcept;
 
 // Releases the retained live Direct3D device and every GPU object owned by
 // the renderer. Process termination lets Windows reclaim these objects; this
@@ -81,8 +83,16 @@ bool register_nebula_specular_materials(
 
 // Cooperative render-boundary callbacks supplied to A2FOHybridBuild. They
 // maintain a thread-local stack because Fleet Operations may nest craft draws.
+// Refit specular maps: the loose specular-map path registered for the craft currently
+// being drawn (the same class policy, key normalisation and faction fallback as the
+// legacy path). False when no craft render is open or nothing is registered.
+bool nebula_specular_map_path(const char* diffuse_name, std::string& path) noexcept;
 void nebula_begin_craft_render(void* craft) noexcept;
 void nebula_end_craft_render(void* craft) noexcept;
+
+// Diagnostic names copied from the existing checked class-load dispatcher.
+// Does nothing while the opt-in cloak pass is disabled.
+void register_nebula_cloak_class_name(void* object_class, const char* odf) noexcept;
 
 // ABI-stable descriptor copied by the core. `node` is the CraftClass SOD node
 // resolved by the optional ODF controller. system_index uses the native

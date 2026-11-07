@@ -1,0 +1,25 @@
+A2FOMissions / MMM integration overlay
+=======================================
+
+Copy this overlay onto the matching A2FOExtensions source tree.
+
+Build only the mission integration:
+    make missions
+
+Expected outputs:
+    build/modules/A2FOMissions.dll
+    build/missions/mmm_loader.dll
+
+If the MMM source is already present beneath third_party/mmm with mmm_armada,
+mmm_common, mmm_loader, etc., the Makefile uses it directly.
+
+If the tree only contains the released MMM assets, run once:
+    make vendor-mmm-source
+
+That vendors the pinned upstream source into third_party/mmm/source and applies
+the small MinGW compatibility patch. Normal builds remain offline afterwards.
+
+The original mmm_loader/Main.cpp is deliberately NOT linked. Its process-global
+Worker runs too early when built as a normal A2FO module. A2FOMissions supplies
+those entry points and owns Worker lazily. The mission-folder mmm_loader.dll is
+only the legacy ABI shim forwarding ScriptInit and ScriptExtendInterface.

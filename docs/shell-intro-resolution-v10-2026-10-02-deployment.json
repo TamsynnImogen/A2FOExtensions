@@ -1,0 +1,34 @@
+{
+  "created_utc": "2026-10-02T12:39:07.061152+00:00",
+  "module": "A2FOShellDisplay",
+  "version": "v10",
+  "source_root": "/home/tamsynn/A2FOHookExtensions",
+  "artifact": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOShellDisplay.dll",
+  "installed": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOShellDisplay.dll",
+  "sha256": "419e8d8cf145276058d4f90f45ce92fff4dac81478f626e1812b44b58162e1c4",
+  "installed_mtime_utc": "2026-10-02T12:35:59.749092+00:00",
+  "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/intro-resolution-v10-20261002T123500Z",
+  "previous_dll_sha256": "1724fc28f4eabc8427b71aa492b14bba60ee31c180b71b91ce82c03e337438cb",
+  "core_unchanged_sha256": "74b3274a19f8ca1370b37ee2b8834b9634a638994e83507fd160387efc9bb035",
+  "armada_sha256": "470bf8f4b0196e22fe179d3845cab671e74d9af19cf90a7dafed0b0bbd394318",
+  "fleetops_sha256": "d2a0829e87aaa927e27146b90be61fc6359c6cbf3d81aed2c644019dd375b9b6",
+  "unchanged_settings": {
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/info.ini": "42639e533412cd47a27ab23bdcd16a3a7f3fc23d48c3bbd49f53ccf834bd3da6",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/info.ini": "09c1552037754797e05cf994a61f4b5145794302074de44c4edacb613f7a2211",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/settings_saves_logs/mods/A2FO Settings Test/Settings.xml": "c1251fe5f87df0550f52560dfd3e83fc7668669712c1b7eb93705dc9cda04051"
+  },
+  "target_mod": "STA2 Classic: Test (Mods/test)",
+  "live_v9_failure": "User screenshots show smaller intro window versus 1920x1080 shell. Preserved log shows intro hook ran native engine 4 times, trusting temporary1280x960 snapshot.",
+  "correction": "Read saved FoSettings at constructor HWND/common movie entry despite valid snapshot; replace temporary dimensions and HWND only if saved selection differs.",
+  "validation": [
+    "make shell-display-test: all four suites passed",
+    "synthetic transient1280x960 versus saved1920x1080 and saved1600x900 regression passed",
+    "stored0x0 desktop selection resolved by deterministic USER32 test stubs to1920x1080",
+    "intro synthetic regression and actual-DLL smoke passed with installed Roots pair mapped as data"
+  ],
+  "live_acceptance": "v10 pending manual restart of test mod, verify selected1920x1080 intro geometry and video placement",
+  "limitations": [
+    "Native engine existing video backbuffer not recreated; visible movie scaling/proportions require live check",
+    "No game/VCL/D3D methods or GUI/input automation executed"
+  ]
+}

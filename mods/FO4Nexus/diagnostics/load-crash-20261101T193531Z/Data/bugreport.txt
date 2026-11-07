@@ -1,0 +1,203 @@
+date/time         : 2026-10-19, 00:32:53, 140ms
+computer name     : NOX
+user name         : steamuser <admin>
+operating system  : Windows 8 x64 build 9200
+system language   : English
+system up time    : 2 days 15 hours
+program up time   : 50 milliseconds
+processors        : 12x Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz
+physical memory   : 16067/31894 MB (free/total)
+free disk space   : (C:) 105.50 GB (H:) 105.50 GB
+display mode      : 1920x1080, 32 bit
+process id        : $1c0
+allocated memory  : 25.33 MB
+executable        : ArmadaL.exe
+current module    : FleetOpsHook.dll
+module date/time  : 2026-10-07 02:41
+version           : 4.0.0.0
+compiled with     : Delphi 2006/07
+madExcept version : 4.0.5
+callstack crc     : $94130f3b, $f5e6394c, $f5e6394c
+count             : 4
+exception number  : 1
+exception class   : EOSError
+exception message : System Error. Code: 299. Read/WriteProcessMemory partially completed.
+
+main thread ($1c4):
+5a811610 +070 FleetOpsHook.dll SysUtils               RaiseLastOSError
+5a811599 +005 FleetOpsHook.dll SysUtils               RaiseLastOSError
+5a8d8e59 +07d FleetOpsHook.dll RtlVclOptimize         InitDMTBinSearch
+5a8d8ed7 +01b FleetOpsHook.dll RtlVclOptimize         DMTSearch
+5a8d8f2a +022 FleetOpsHook.dll RtlVclOptimize         GetDynaMethod
+5a804828 +004 FleetOpsHook.dll System          494 +0 @CallDynaInst
+5a881279 +011 FleetOpsHook.dll Classes                TInterfacedPersistent.AfterConstruction
+5a8049e9 +01d FleetOpsHook.dll System          494 +0 @AfterConstruction
+5a89385f +053 FleetOpsHook.dll Graphics               TBitmap.Create
+5aa00716 +01a FleetOpsHook.dll GR32           5968 +2 initialization
+5a805275 +03d FleetOpsHook.dll System          494 +0 InitUnits
+5a80535f +0bf FleetOpsHook.dll System          494 +0 @StartLib
+7bf429c2 +0a2 ntdll.dll                               LdrLoadDll
+7bc27018 +4c8 kernelbase.dll                          LoadLibraryExW
+7bc26a66 +036 kernelbase.dll                          LoadLibraryA
+7bf429c2 +0a2 ntdll.dll                               LdrLoadDll
+7bc27018 +4c8 kernelbase.dll                          LoadLibraryExW
+7bc26a66 +036 kernelbase.dll                          LoadLibraryA
+
+modules:
+00400000 ArmadaL.exe                         43.0.0.0         H:\NVMeData\Fleet Ops Roots\Data
+01a20000 D3DX81ab.dll                        8.1.0.0          H:\NVMeData\Fleet Ops Roots\Data
+10000000 NetworkManager.dll                                   H:\NVMeData\Fleet Ops Roots\Data
+18000000 binkw32.dll                         1.9.18.0         H:\NVMeData\Fleet Ops Roots\Data
+4a800000 Win2kDisableTaskSwitch.original.dll 4.0.0.0          H:\NVMeData\Fleet Ops Roots\Data
+5a800000 FleetOpsHook.dll                    4.0.0.0          H:\NVMeData\Fleet Ops Roots
+78230000 FaultRep.dll                                         C:\windows\system32
+78250000 d3dx9_43.dll                        9.29.952.3111    H:\NVMeData\Fleet Ops Roots\Data
+78460000 fmodex.dll                          0.4.38.6         H:\NVMeData\Fleet Ops Roots\Data
+785c0000 d3d9.dll                            10.0.17763.1     H:\NVMeData\Fleet Ops Roots\Data
+78a20000 mpr.dll                             5.0.2195.6611    C:\windows\system32
+78a50000 wininet.dll                         8.0.7601.17601   C:\windows\system32
+78af0000 nsi.dll                                              C:\windows\system32
+78b10000 dnsapi.dll                          5.2.3790.4318    C:\windows\system32
+78b40000 iphlpapi.dll                        5.1.2600.2180    C:\windows\system32
+78b80000 wsock32.dll                         4.0.0.0          C:\windows\system32
+78ba0000 d3d8.dll                            1.3.7708.25      H:\NVMeData\Fleet Ops Roots\Data
+78c20000 Win2kDisableTaskSwitch.dll                           H:\NVMeData\Fleet Ops Roots\Data
+78ca0000 version.dll                         5.1.2600.2180    C:\windows\system32
+795f0000 WINMM.dll                                            C:\windows\system32
+796d0000 uxtheme.dll                         10.0.0.0         C:\windows\system32
+79720000 winex11.drv                         10.0.0.0         c:\windows\system32
+79830000 MSVCP60.dll                                          C:\windows\system32
+79960000 msvfw32.dll                                          C:\windows\system32
+799a0000 msacm32.dll                                          C:\windows\system32
+799e0000 AVIFIL32.dll                        4.0.3.1998       C:\windows\system32
+79a40000 IMAGEHLP.dll                                         C:\windows\system32
+79a60000 DSOUND.dll                          5.3.1.904        C:\windows\system32
+79ac0000 WS2_32.dll                          5.1.2600.5512    C:\windows\system32
+79b00000 dbghelp.dll                         6.1.7601.17514   C:\windows\system32
+79b90000 SETUPAPI.dll                                         C:\windows\system32
+7a670000 compstui.dll                                         C:\windows\system32
+7a6a0000 winspool.drv                        5.1.2600.2180    C:\windows\system32
+7a6f0000 oleaut32.dll                        10.0.19043.1466  C:\windows\system32
+7a7d0000 coml2.dll                                            C:\windows\system32
+7a800000 combase.dll                                          C:\windows\system32
+7a860000 ole32.dll                           10.0.0.0         C:\windows\system32
+7a930000 oleacc.dll                          7.0.0.0          C:\windows\system32
+7a970000 comctl32.dll                        6.0.4704.1100    C:\windows\system32
+7aae0000 comdlg32.dll                        6.0.2900.5512    C:\windows\system32
+7ac00000 imm32.dll                           5.1.2600.2180    C:\windows\system32
+7ac30000 shcore.dll                                           C:\windows\system32
+7ac60000 shlwapi.dll                         6.0.2800.1692    C:\windows\system32
+7acc0000 win32u.dll                                           C:\windows\system32
+7ad10000 USER32.dll                          5.1.2600.2180    C:\windows\system32
+7aef0000 gdi32.dll                           10.0.0.0         C:\windows\system32
+7af90000 sechost.dll                                          C:\windows\system32
+7afc0000 ucrtbase.dll                        10.0.14393.2247  C:\windows\system32
+7b0c0000 rpcrt4.dll                          5.1.2600.2180    C:\windows\system32
+7b160000 msvcrt.dll                          7.0.2600.2180    H:\NVMeData\Fleet Ops Roots\Data
+7b230000 advapi32.dll                        10.0.10240.16384 C:\windows\system32
+7b290000 shell32.dll                         6.0.2900.6242    C:\windows\system32
+7bbf0000 kernelbase.dll                                       C:\windows\system32
+7beb0000 kernel32.dll                        10.0.19045.5796  C:\windows\system32
+7bf30000 ntdll.dll                           10.0.19045.5796  C:\windows\system32
+
+processes:
+020 start.exe      1 0 0 normal C:\windows\syswow64
+030 services.exe   1 0 0 normal C:\windows\system32
+03c winedevice.exe 1 0 0 normal C:\windows\system32
+060 svchost.exe    1 0 0 normal C:\windows\system32
+074 plugplay.exe   1 0 0 normal C:\windows\system32
+090 winedevice.exe 1 0 0 normal C:\windows\system32
+0c4 start.exe      1 0 0 normal C:\windows\syswow64
+0cc Armada2.exe    1 0 0 normal H:\NVMeData\Star Trek Armada II
+0d4 explorer.exe   1 0 0 normal C:\windows\system32
+0ec rpcss.exe      1 0 0 normal C:\windows\system32
+114 tabtip.exe     1 0 0 normal C:\windows\system32
+1b0 start.exe      1 0 0 normal C:\windows\syswow64
+1b8 start.exe      1 0 0 normal C:\windows\syswow64
+1c0 ArmadaL.exe    1 0 0 normal H:\NVMeData\Fleet Ops Roots\Data
+
+hardware:
++ Display adapters
+  - Intel(R) UHD Graphics 630 (CFL GT2)
++ Human Interface Devices
+  - Wine HID compatible device
+  - Wine HID compatible device
+  - Wine HID device
+  - Wine HID device
++ Monitors
+  - Generic Non-PnP Monitor
+
+cpu registers:
+eax = 00b06bb8
+ebx = 0000012b
+ecx = 00000000
+edx = 00b06bcc
+esi = 00b06c4c
+edi = 00b06be4
+eip = 7bc3a15f
+esp = 00b06bb8
+ebp = 00b06c18
+
+stack dump:
+00b06bb8  de fa ed 0e 01 00 00 00 - 00 00 00 00 5f a1 c3 7b  ............_..{
+00b06bc8  07 00 00 00 15 16 81 5a - e8 43 e8 01 2b 01 00 00  .......Z.C..+...
+00b06bd8  f0 e3 87 5a 0e 00 00 00 - 74 6c b0 00 50 6c b0 00  ...Z....tl..Pl..
+00b06be8  00 00 00 00 00 00 00 00 - b0 95 b7 00 74 6c b0 00  ............tl..
+00b06bf8  96 92 86 5a f7 92 86 5a - 0e 00 00 00 f0 e3 87 5a  ...Z...Z.......Z
+00b06c08  74 6c b0 00 24 6c b0 00 - f0 e3 87 5a 0e 00 00 00  tl..$l.....Z....
+00b06c18  74 6c b0 00 15 16 81 5a - 15 16 81 5a de fa ed 0e  tl.....Z...Z....
+00b06c28  01 00 00 00 07 00 00 00 - 34 6c b0 00 15 16 81 5a  ........4l.....Z
+00b06c38  e8 43 e8 01 2b 01 00 00 - f0 e3 87 5a 0e 00 00 00  .C..+......Z....
+00b06c48  74 6c b0 00 50 6c b0 00 - d8 6c b0 00 64 4e 80 5a  tl..Pl...l..dN.Z
+00b06c58  74 6c b0 00 02 00 00 00 - 00 00 00 00 2b 01 00 00  tl..........+...
+00b06c68  00 8e 8d 5a 28 1f e8 01 - 0b e3 87 5a 94 6c b0 00  ...Z(......Z.l..
+00b06c78  9e 15 81 5a 5e 8e 8d 5a - 2c e4 87 5a ff ff 00 00  ...Z^..Z,..Z....
+00b06c88  2c e4 87 5a 00 00 00 00 - 2a c0 b5 00 a8 6c b0 00  ,..Z....*....l..
+00b06c98  dc 8e 8d 5a 20 e4 87 5a - ff ff 00 00 02 00 00 00  ...Z ..Z........
+00b06ca8  f4 6c b0 00 2f 8f 8d 5a - 5c d1 88 5a 18 13 e7 01  .l../..Z\..Z....
+00b06cb8  18 13 e7 01 2d 48 80 5a - 60 02 e8 01 18 13 e7 01  ....-H.Z`.......
+00b06cc8  7e 12 88 5a 60 02 e8 01 - 01 00 00 00 ec 49 80 5a  ~..Z`........I.Z
+00b06cd8  fc 6c b0 00 fb 4f 80 5a - f4 6c b0 00 18 13 e7 01  .l...O.Z.l......
+00b06ce8  60 02 e8 01 01 00 00 00 - 18 13 e7 01 3c 6d b0 00  `...........<m..
+
+disassembling:
+5a8035ac     loc_5a8035ac:
+5a8035ac 494   cmp     dword ptr [$5aa1402c], 0  ; SysUtils.AbstractErrorHandler
+5a8035b3       jz      loc_5a8035bb
+5a8035b3
+5a8035b5       call    dword ptr [$5aa1402c]  ; SysUtils.AbstractErrorHandler
+5a8035b5
+5a8035bb     loc_5a8035bb:
+5a8035bb       mov     eax, $d2
+5a8035c0       jmp     loc_5a8055d8
+5a8035c0
+5a8035c0     ; ---------------------------------------------------------
+5a8035c0
+5a804824     public System.@CallDynaInst:     ; function entry point
+5a804824       push    eax
+5a804825       push    ecx
+5a804826       mov     eax, [eax]
+5a804828     > call    +$d46db ($5a8d8f08)    ; RtlVclOptimize.GetDynaMethod
+5a804828
+5a80482d       pop     ecx
+5a80482e       pop     eax
+5a80482f       jz      loc_5a804833
+5a80482f
+5a804831       jmp     esi
+5a804831
+5a804831     ; ---------------------------------------------------------
+5a804831
+5a804833     loc_5a804833:
+5a804833       pop     ecx
+5a804834       jmp     loc_5a8035ac
+5a804834
+5a804834     ; ---------------------------------------------------------
+5a804834
+5a8055cc     loc_5a8055cc:
+5a8055cc       mov     [$5aa02000], eax
+5a8055d1       call    -$e6 ($5a8054f0)       ; System.@Halt0
+5a8055d1
+5a8055d8     loc_5a8055d8:
+5a8055d8       pop     dword ptr [$5aa02004]
+[...]
+

@@ -1,0 +1,76 @@
+{
+  "checked_at_utc": "2026-09-30T16:43:21.274328+00:00",
+  "scope_keys": 538,
+  "families": 413,
+  "coverage": "exact; no missing or extra scoped keys/families",
+  "basis_counts": {
+    "unresolved": 9,
+    "inferred": 191,
+    "documented": 213
+  },
+  "source_assignment_citations_checked_by_renderer": 648,
+  "fresh_manifest_files_hash_verified": {
+    "STL": 1685,
+    "STA1 Classic Mod": 494,
+    "STA2 Classic Mod": 1097,
+    "Fleet Ops 4.0": 9364,
+    "FO_ROOT": 1696
+  },
+  "installed_legacy_matching_odf_hashes_verified": 1685,
+  "executable_hashes_verified": [
+    "Legacy",
+    "FleetOperations"
+  ],
+  "edited_scope_hash_verified": "9d8a4e31f740ce5f99ec32680a2f6f5d5b1a73c02235295da9526c38ece23a8e",
+  "markdown_links": {
+    "local_markdown_links": 1110,
+    "external_links_recorded_not_validated": 1,
+    "validation_artifact_link": 1
+  },
+  "checks": [
+    {
+      "command": "python3 tools/render_stl_odf_semantics.py --audit docs/stl-odf-semantics-2026-09-30",
+      "result": "pass"
+    },
+    {
+      "command": "python3 -m unittest discover -s tests -p stl_odf_audit_test.py -v",
+      "result": "pass; seven tests"
+    },
+    {
+      "check": "Independent read-only review of interpretations, source pointers, corrections, source-inventory limits and README",
+      "result": "pass after correction of README upgrade anchor; all local links independently checked"
+    }
+  ],
+  "artifact_sha256": {
+    "docs/stl-odf-semantics-2026-09-30/README.md": "7a5e1f9c9e1d263cc7b3201f65566fa6ef294dd9d3785eb36981e7544c79183e",
+    "docs/stl-odf-semantics-2026-09-30/command-index.md": "030deaf2aa3b16b35b28c8c8165da38f4f8101998772929cec8d8273dc7db427",
+    "docs/stl-odf-semantics-2026-09-30/evidence-effects.json": "e558060d6d2965010b8c6689d8ef5c60e3f06e5feda2b1fbf0b5661f76bd0090",
+    "docs/stl-odf-semantics-2026-09-30/evidence-gameplay.json": "b94e864307ff7425b2341f065be0ac7dec1de9b25804625bac33c117c4eba2f1",
+    "docs/stl-odf-semantics-2026-09-30/evidence-other.json": "c84018984f3047d1308b5fec463fd86e2da4af1445c0e5fdb1125e94bb22b675",
+    "docs/stl-odf-semantics-2026-09-30/input-audit/candidates.json": "5b6c5410ed8368cffc7816ef5dee49579c3e126cb67c59ef222687c3fd9e4391",
+    "docs/stl-odf-semantics-2026-09-30/input-audit/classlabel-matrix.json": "69d8728b96b92902fcd97fbb7f2e4c84f87dcd97fa0c668719238ee6d08b97fa",
+    "docs/stl-odf-semantics-2026-09-30/input-audit/command-matrix.json": "b4b90193939142ab2253aa4d7c463fb79d6e61b9c349a66643413a3384c695c4",
+    "docs/stl-odf-semantics-2026-09-30/input-audit/comments.json": "fb15d77a3b61c8f1ea7944d5a389b8b02c21c72147030198418edee65a6f1faa",
+    "docs/stl-odf-semantics-2026-09-30/input-audit/manifest.json": "5f311f58a7cfff5ec9b06ac5e9dbadd458f66c95de8b1043fde5db3862f3a037",
+    "docs/stl-odf-semantics-2026-09-30/input-audit/summary.json": "8141561c2bc2c0ff633519721fe876cffe68441e9f38afdef2c53ad0ced3fb6b",
+    "docs/stl-odf-semantics-2026-09-30/interpretations-effects.json": "87f92a14218ec5c33afb1f96fb7961de51bb98ea2aab7c45533f87449a294404",
+    "docs/stl-odf-semantics-2026-09-30/interpretations-gameplay.json": "47f285346e76d8d23ac6055b44536fe41a1b4b3cc5b4b369d282c251994861a7",
+    "docs/stl-odf-semantics-2026-09-30/interpretations-other.json": "70ff8e95817fc675bb3a45eac544d5d94f69f10ffd13b685ebf41715e1341aa5",
+    "docs/stl-odf-semantics-2026-09-30/reference-effects.md": "c38f96598ac487f436b1eb8a0321430b1090d9583065d536ff626956a78121ae",
+    "docs/stl-odf-semantics-2026-09-30/reference-gameplay.md": "8fe45b73b3b186fe2df8f461b739748bdd74f838de4b7f4c4355c8d67217715a",
+    "docs/stl-odf-semantics-2026-09-30/reference-other.md": "f32beb56985e02bce2c2e28ff79c1c6fd8a66a7721ba2df9894786e81904e881",
+    "docs/stl-odf-semantics-2026-09-30/scope.json": "2b42edc260ba37bef6b5d795251921dcc4a8072737e8b534010fdb63f548f34b",
+    "docs/stl-odf-semantics-2026-09-30/semantics-summary.json": "bddec4ae4db44fbd75c8ccce8d6bb8504870e960e5c848b3100a7ff0fc73156d",
+    "docs/stl-odf-semantics-2026-09-30/semantics.json": "437f36426e4aa10e7fa55f590c3b52e3cfb746823344734c2dc6b220853a952a",
+    "docs/stl-odf-semantics-2026-09-30/source-inventory.json": "b697dca708edb3db7980e63548aae4a8af5eac16d3a57a0b61d8d54edb5d05e2",
+    "docs/stl-odf-semantics-2026-09-30/unresolved.md": "122656fd22f6350b363fadb874d33fa3cc04c9fe32e14f9549d8c02a500b6c5a",
+    "tests/stl_odf_audit_test.py": "fe665add2d59c7c3c48321d1668ea9a9faa6da9a58fcddf9f93f268c5ab1b474",
+    "tools/audit_stl_odf_commands.py": "ae6a7de5f79eea1fb8ea43a5469b5fd47f00a13bdef0deecb27e495e2834d0c2",
+    "tools/render_stl_odf_semantics.py": "1fd5f2daf5945d8c284af2cde16079c2b686eb8a4de84e8e676a225d820dfe4c"
+  },
+  "limits": [
+    "Intended meanings only; no recovered executable consumers or live gameplay tests.",
+    "Local file identity does not prove unmodified retail provenance.",
+    "External tutorial archive not obtained; its contents were not used."
+  ]
+}

@@ -1,0 +1,9 @@
+#include "8472_destroy.odf"
+
+baseName = "8472_destroy"
+unitName = "Brood Destroyer"
+tooltip = "Destroyer Strain"
+verboseTooltip = "Select Destroyer genes for this breeder. A seed comes from a friendly Mother within 800. Offspring retain the Species 8472 Destroyer costs, build time and weapons."
+shipIsBuiltByEvolution = 0
+breederSeed = "nox_seed_destroy"
+breederResult = "nox_breeder_destroy"

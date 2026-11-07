@@ -6,6 +6,7 @@
  */
 #include "fleetops_object_editor.hpp"
 #include "object_editor.hpp"
+#include "../../rust/craft_inspector_ffi.h"
 
 #include <algorithm>
 #include <array>
@@ -208,47 +209,30 @@ void warning(const char* text) noexcept {
                 MB_OK | MB_ICONWARNING | MB_TASKMODAL);
 }
 
+struct DraftContext {SavedState* state;std::array<std::array<char,64>,4> current{},maximum{};};
+std::uintptr_t draft_step(void* value,std::uint32_t op,std::uint32_t i) noexcept {
+    auto& c=*static_cast<DraftContext*>(value);auto& state=*c.state;
+    switch(op) {
+    case 0:state=g_session.initial;return 1;
+    case 1:return read_text(g_session.rows[i],i?state.registry.data():state.captain.data(),kTextCapacity);
+    case 2:{bool reset=false;if(!checked(g_session.rows[2+i],&reset))return 0;return reset?2:1;}
+    case 3:return std::strcmp(i?state.registry.data():state.captain.data(),i?g_session.initial.registry.data():g_session.initial.captain.data())!=0;
+    case 4:return read_text(g_session.rows[4+i*2],c.current[i].data(),c.current[i].size());
+    case 5:return read_text(g_session.rows[5+i*2],c.maximum[i].data(),c.maximum[i].size());
+    case 6:return parse_shield_number(c.current[i].data(),&state.current[i]);
+    case 7:return parse_shield_number(c.maximum[i].data(),&state.maximum[i]);
+    case 8:return valid_state(state);
+    case 10:
+        if(i==0)warning("Captain and registry must fit within 511 bytes.\nNo properties have been applied.");
+        else if(i==1)warning("Each directional shield value must be a finite number.\nNo properties have been applied.");
+        else warning("Active shield maxima must be greater than zero; inactive facings use 0/0.\nCurrent must be between zero and that facing's maximum,\nand the combined totals must be finite.\nNo properties have been applied.");
+        return 1;
+    default:return 0;
+    }
+}
 bool read_draft(SavedState* state) noexcept {
-    *state = g_session.initial;
-    if (!read_text(g_session.rows[0], state->captain.data(), kTextCapacity) ||
-        !read_text(g_session.rows[1], state->registry.data(), kTextCapacity)) {
-        warning("Captain and registry must fit within 511 bytes.\n"
-                "No properties have been applied.");
-        return false;
-    }
-    for (std::size_t i = 0; i < 2; ++i) {
-        bool reset = false;
-        if (!checked(g_session.rows[2 + i], &reset)) return false;
-        const std::uint32_t flag = i == 0 ? kCaptain : kRegistry;
-        const auto& text = i == 0 ? state->captain : state->registry;
-        const auto& initial = i == 0 ? g_session.initial.captain
-                                    : g_session.initial.registry;
-        if (reset) state->flags &= ~flag;
-        else if (std::strcmp(text.data(), initial.data()) != 0) state->flags |= flag;
-    }
-    if (g_session.shields) {
-        for (std::size_t i = 0; i < 4; ++i) {
-            char current[64]{};
-            char maximum[64]{};
-            if (!read_text(g_session.rows[4 + i * 2], current, sizeof(current)) ||
-                !read_text(g_session.rows[5 + i * 2], maximum, sizeof(maximum)) ||
-                !parse_shield_number(current, &state->current[i]) ||
-                !parse_shield_number(maximum, &state->maximum[i])) {
-                warning("Each directional shield value must be a finite number.\n"
-                        "No properties have been applied.");
-                return false;
-            }
-        }
-        state->flags |= kShields;
-    }
-    if (!valid_state(*state)) {
-        warning("Each shield maximum must be greater than zero.\n"
-                "Current must be between zero and that facing's maximum,\n"
-                "and the combined totals must be finite.\n"
-                "No properties have been applied.");
-        return false;
-    }
-    return true;
+    DraftContext context{state,{},{}};
+    return a2fo_rs_inspector_draft(&context,&state->flags,g_session.shields,&draft_step)!=0;
 }
 
 template <std::size_t Size>
@@ -260,122 +244,91 @@ bool signature(std::uintptr_t rva,
 
 }  // namespace
 
-void build(void* form, void* parent) noexcept {
-    if (!g_build_hook.gateway) return;
-    call(g_build_hook.gateway, form, reinterpret_cast<std::uintptr_t>(parent));
-    if (!g_ready) return;
-    g_session = Session{};
-    void* craft = read_at<void*>(at(kActiveObjectRva), 0);
-    SavedState values{};
-    bool shields = false;
-    if (!read_values(craft, &values, &shields)) {
-        log_line("Fleet Ops inspector: could not snapshot this Craft's properties");
-        return;
+namespace {
+struct EditorContext {void* form;void* argument;void* craft{};SavedState values{};bool shields{};const A2FO_ModuleApi* api{};HMODULE module{};};
+std::uintptr_t build_step(void* value,std::uint32_t op,std::uint32_t i) noexcept {
+    auto& c=*static_cast<EditorContext*>(value);
+    switch(op) {
+    case 0:return g_build_hook.gateway!=nullptr;
+    case 1:call(g_build_hook.gateway,c.form,reinterpret_cast<std::uintptr_t>(c.argument));return 1;
+    case 2:return g_ready;
+    case 3:g_session=Session{};return 1;
+    case 4:c.craft=read_at<void*>(at(kActiveObjectRva),0);return read_values(c.craft,&c.values,&c.shields);
+    case 5:
+        g_session.form=c.form;g_session.craft=c.craft;g_session.object_class=read_at<void*>(c.craft,0x40);
+        g_session.handle=read_at<std::uint32_t>(c.craft,0x28);g_session.initial=c.values;g_session.shields=c.shields;
+        g_session.text_pointers={g_session.initial.captain.data(),g_session.initial.registry.data()};return 1;
+    case 6: {
+        void* field=i<2?static_cast<void*>(&g_session.text_pointers[i]):i<4?static_cast<void*>(&g_session.reset[i-2]):i%2?static_cast<void*>(&g_session.initial.maximum[(i-5)/2]):static_cast<void*>(&g_session.initial.current[(i-4)/2]);
+        g_session.rows[i]=add_row(c.form,c.argument,kCaptions[i],i<2?5:i<4?3:1,field);return 1;
     }
-    g_session.form = form;
-    g_session.craft = craft;
-    g_session.object_class = read_at<void*>(craft, 0x40);
-    g_session.handle = read_at<std::uint32_t>(craft, 0x28);
-    g_session.initial = values;
-    g_session.shields = shields;
-    g_session.text_pointers = {g_session.initial.captain.data(),
-                              g_session.initial.registry.data()};
-    g_session.rows[0] = add_row(form, parent, kCaptions[0], 5,
-                                &g_session.text_pointers[0]);
-    g_session.rows[1] = add_row(form, parent, kCaptions[1], 5,
-                                &g_session.text_pointers[1]);
-    g_session.rows[2] = add_row(form, parent, kCaptions[2], 3, &g_session.reset[0]);
-    g_session.rows[3] = add_row(form, parent, kCaptions[3], 3, &g_session.reset[1]);
-    if (shields) {
-        for (std::size_t i = 0; i < 4; ++i) {
-            g_session.rows[4 + i * 2] = add_row(form, parent,
-                kCaptions[4 + i * 2], 1, &g_session.initial.current[i]);
-            g_session.rows[5 + i * 2] = add_row(form, parent,
-                kCaptions[5 + i * 2], 1, &g_session.initial.maximum[i]);
+    case 7:return c.shields;
+    case 8:return g_session.rows[i]!=nullptr;
+    case 9:g_session.complete=i!=0;return 1;
+    case 10:
+        log_line(i==0?"Fleet Ops inspector: could not snapshot this Craft's properties":i==1?"Fleet Ops inspector: added captain, registry and eight facing values under Craft":i==2?"Fleet Ops inspector: added captain and registry; directional shields are not enabled":"Fleet Ops inspector: incomplete rows; OK is blocked to avoid partial edits");return 1;
+    default:return 0;
+    }
+}
+std::uintptr_t okay_step(void* value,std::uint32_t op,std::uint32_t i) noexcept {
+    auto& c=*static_cast<EditorContext*>(value);
+    switch(op) {
+    case 0:return g_okay_hook.gateway!=nullptr;
+    case 1:return g_ready;
+    case 2:return matching_session(c.form);
+    case 3:call(g_okay_hook.gateway,c.form,reinterpret_cast<std::uintptr_t>(c.argument));return 1;
+    case 4:return g_session.complete;
+    case 5:return read_draft(&c.values);
+    case 6:c.craft=g_session.craft;c.shields=g_session.shields;return apply_values(c.craft,c.values,c.shields);
+    case 7:call(at(kApplyRva),c.form);return 1;
+    case 8:return c.shields;
+    case 9:return apply_values(c.craft,c.values,true);
+    case 10:
+        warning(i==0?"The extension properties could not be created completely.\nPlease cancel and reopen this object inspector.":i==1?"The per-ship properties could not be applied.\nThe inspector has been left open.":"The native properties were applied, but restoring the directional\nshield totals failed. Please cancel and reopen the inspector.");return 1;
+    case 11:call(at(kCloseRva),c.form);return 1;
+    case 12:log_line(i?"Fleet Ops inspector: committed per-ship properties":"Fleet Ops inspector: failed to restore facing totals after native Apply");return 1;
+    default:return 0;
+    }
+}
+std::uintptr_t destroy_step(void* value,std::uint32_t op,std::uint32_t) noexcept {
+    auto& c=*static_cast<EditorContext*>(value);
+    switch(op) {
+    case 0:return g_destroy_hook.gateway!=nullptr;
+    case 1:call(g_destroy_hook.gateway,c.form,reinterpret_cast<std::uintptr_t>(c.argument));return 1;
+    case 2:return g_session.form==c.form;
+    case 3:g_session=Session{};return 1;
+    default:return 0;
+    }
+}
+std::uintptr_t init_step(void* value,std::uint32_t op,std::uint32_t i) noexcept {
+    auto& c=*static_cast<EditorContext*>(value);
+    switch(op) {
+    case 0:return g_ready;
+    case 1:g_api=c.api;g_module=c.module;return 1;
+    case 2:return c.api && c.module && c.api->install_inline_hook;
+    case 3:
+        switch(i) {
+        case 0:return signature(kBuildCraftRva,kBuildSignature);case 1:return signature(kOkayRva,kOkaySignature);
+        case 2:return signature(kDestroyRva,kDestroySignature);case 3:return signature(kAddPropertyRva,kPropertySignature);
+        case 4:return signature(kApplyRva,kApplySignature);case 5:return signature(kOkayRva+5,kOkayApplyCall);
+        case 6:return signature(kOkayRva+12,kOkayCloseCall);default:return 0;
         }
+    case 4:
+        if(i==0)return c.api->install_inline_hook(at(kBuildCraftRva),reinterpret_cast<void*>(&a2fo_fo_editor_build_bridge),kBuildSignature.size(),kBuildSignature.data(),&g_build_hook);
+        if(i==1)return c.api->install_inline_hook(at(kOkayRva),reinterpret_cast<void*>(&a2fo_fo_editor_ok_bridge),kOkaySignature.size(),kOkaySignature.data(),&g_okay_hook);
+        return c.api->install_inline_hook(at(kDestroyRva),reinterpret_cast<void*>(&a2fo_fo_editor_destroy_bridge),kDestroySignature.size(),kDestroySignature.data(),&g_destroy_hook);
+    case 5:return (i==0?g_build_hook.gateway:i==1?g_okay_hook.gateway:g_destroy_hook.gateway)!=nullptr;
+    case 6:g_ready=i!=0;return 1;
+    case 7:log_line(i?"Fleet Ops advanced object inspector hooks installed (Craft rows / OK / destroy)":"Fleet Ops object inspector installation incomplete; hooks remain pass-through");return 1;
+    case 8:log_line("Fleet Ops object inspector signatures are unsupported; property-grid extension disabled");return 1;
+    default:return 0;
     }
-    g_session.complete = true;
-    for (std::size_t i = 0; i < (shields ? 12u : 4u); ++i)
-        g_session.complete = g_session.complete && g_session.rows[i];
-    log_line(g_session.complete
-        ? (shields ? "Fleet Ops inspector: added captain, registry and eight facing values under Craft"
-                   : "Fleet Ops inspector: added captain and registry; directional shields are not enabled")
-        : "Fleet Ops inspector: incomplete rows; OK is blocked to avoid partial edits");
 }
-
-void okay(void* form, void* sender) noexcept {
-    if (!g_okay_hook.gateway) return;
-    if (!g_ready || !matching_session(form)) {
-        call(g_okay_hook.gateway, form, reinterpret_cast<std::uintptr_t>(sender));
-        return;
-    }
-    if (!g_session.complete) {
-        warning("The extension properties could not be created completely.\n"
-                "Please cancel and reopen this object inspector.");
-        return;
-    }
-    SavedState state{};
-    if (!read_draft(&state)) return;
-    void* craft = g_session.craft;
-    const bool shields = g_session.shields;
-    // Allocate per-Craft storage and verify the shield bridge before the
-    // native apply loop can change ship name, health, position, or crew.
-    if (!apply_values(craft, state, shields)) {
-        warning("The per-ship properties could not be applied.\n"
-                "The inspector has been left open.");
-        return;
-    }
-    call(at(kApplyRva), form);
-    // Native curShields/maxShields are aggregates. The four facing values
-    // are authoritative, so reapply them after Fleet Ops writes those totals.
-    if (shields && !apply_values(craft, state, true)) {
-        log_line("Fleet Ops inspector: failed to restore facing totals after native Apply");
-        warning("The native properties were applied, but restoring the directional\n"
-                "shield totals failed. Please cancel and reopen the inspector.");
-        return;
-    }
-    log_line("Fleet Ops inspector: committed per-ship properties");
-    call(at(kCloseRva), form);
 }
-
-void destroy(void* form, void* sender) noexcept {
-    if (g_destroy_hook.gateway)
-        call(g_destroy_hook.gateway, form, reinterpret_cast<std::uintptr_t>(sender));
-    if (g_session.form == form) g_session = Session{};
-}
-
-bool initialize(const A2FO_ModuleApi* api, HMODULE module) noexcept {
-    if (g_ready) return true;
-    g_api = api;
-    g_module = module;
-    if (!api || !module || !api->install_inline_hook ||
-        !signature(kBuildCraftRva, kBuildSignature) ||
-        !signature(kOkayRva, kOkaySignature) ||
-        !signature(kDestroyRva, kDestroySignature) ||
-        !signature(kAddPropertyRva, kPropertySignature) ||
-        !signature(kApplyRva, kApplySignature) ||
-        !signature(kOkayRva + 5, kOkayApplyCall) ||
-        !signature(kOkayRva + 12, kOkayCloseCall)) {
-        log_line("Fleet Ops object inspector signatures are unsupported; property-grid extension disabled");
-        return false;
-    }
-    g_ready = api->install_inline_hook(at(kBuildCraftRva),
-        reinterpret_cast<void*>(&a2fo_fo_editor_build_bridge),
-        kBuildSignature.size(), kBuildSignature.data(), &g_build_hook) &&
-        g_build_hook.gateway &&
-        api->install_inline_hook(at(kOkayRva),
-            reinterpret_cast<void*>(&a2fo_fo_editor_ok_bridge),
-            kOkaySignature.size(), kOkaySignature.data(), &g_okay_hook) &&
-        g_okay_hook.gateway &&
-        api->install_inline_hook(at(kDestroyRva),
-            reinterpret_cast<void*>(&a2fo_fo_editor_destroy_bridge),
-            kDestroySignature.size(), kDestroySignature.data(), &g_destroy_hook) &&
-        g_destroy_hook.gateway;
-    log_line(g_ready
-        ? "Fleet Ops advanced object inspector hooks installed (Craft rows / OK / destroy)"
-        : "Fleet Ops object inspector installation incomplete; hooks remain pass-through");
-    return g_ready;
-}
+void build(void* form,void* parent) noexcept {EditorContext c{form,parent};a2fo_rs_inspector_build(&c,&build_step);}
+void okay(void* form,void* sender) noexcept {EditorContext c{form,sender};a2fo_rs_inspector_okay(&c,&okay_step);}
+void destroy(void* form,void* sender) noexcept {EditorContext c{form,sender};a2fo_rs_inspector_destroy(&c,&destroy_step);}
+bool initialize(const A2FO_ModuleApi* api,HMODULE module) noexcept {EditorContext c{nullptr,nullptr,nullptr,{},false,api,module};return a2fo_rs_inspector_init(&c,&init_step)!=0;}
 
 }  // namespace a2fo::object_editor::fleetops
 

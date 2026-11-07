@@ -153,3 +153,40 @@ scripted grants, gifting, and AI economic planning are not yet extended to
 indices 6 through 9. Fleet Operations' historical tritanium and
 supplies helpers alias native latinum and biomatter, so they must not be used as
 compatibility fallbacks for these independent pools.
+
+
+## Checkpoint — 2026-10-27: A2FOResources controller conversion complete
+
+Rust now owns remaining payment admission/commit, refund, public resource API,
+cache/tooltip/panel sequencing, native lookup/append policy, class/race event
+publication and module initialization decisions. Native callbacks retain checked
+reads, SDK/Win32 calls, locks/map entries, string/temporary lifetimes, exact CRT
+formatting and the established GNU++17/x87 plus CRT lround rectangle primitives.
+Payment rechecks affordability inside the same native lock as debit. Lazy team,
+class and cost reads, infinite-resource bypass, A1 legacy/original renderer order,
+fresh-cache reuse and the runtime guard after the original render are preserved.
+Raw refund event kinds use a u32 output word, preserving UINT32_MAX rejection
+without confusing it with callback error metadata. The superseded native index
+API bridge remains as a maybe_unused adapter for the historical regression test.
+
+Validation passed: 221 Rust tests, fmt, host/i686 Windows Clippy, both release
+archives, integrated and standalone DLLs; six original/current full-source pairs
+in both flavors (768 equal stdout lines), 48 matching rectangle/amount projection
+rows across 12 x87 modes, 37 presentation assertions per flavor including prior
+allocation cases, five new targeted allocation-failure cases/10 executions, and
+built-in batch9 admission. Native lock unwind and partial publication match the
+original; the noexcept payment allocation case preserves original termination.
+All 52 source-referenced Rust implementations link. Integrated 197 and standalone
+7 exports/ordinals are unchanged, no new system imports; 41 native functions,
+layouts and the constants/SDK/ASM pins remain intact. The prior presentation
+fixture is preserved; its generated test-only copy adds an explicit return 0 so
+renaming main does not introduce undefined behavior.
+
+Evidence: build/rust-migration-stage10/resources/checkpoint/validation.json.
+Resources is completed_pending_census. Strict totals remain 116/151 with 35
+uncredited records: five completed components await the shared census refresh,
+and 30 other units still need completion/validation. No common-DLL/archive gate
+was weakened. Candidate is isolated under resources/candidate; earlier artifacts,
+failed attempts and immutable checkpoints are preserved. This is an incremental
+native build using authenticated object reuse. No deployment/game launch occurred;
+GPU and in-game acceptance remain pending.

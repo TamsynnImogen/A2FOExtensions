@@ -1,5 +1,15 @@
 # A2FOAnimations
 
+## Built-in integration
+
+The core-provided `A2FOAnimations` name has an independent module policy.
+Source-frame, class, and weapon metadata is collected while the feature is off;
+activation-generation changes invalidate transient playback, launch, dock, and
+job state. Hooks remain resident and policy changes gate behavior without
+unpatching them. The built-in requires class, craft, weapon, and Producer
+dispatch support from the updated `A2FOFeaturePack.dll`. The standalone SDK
+target remains available for compatibility builds.
+
 Event-driven animation clips for a unit's existing SOD matrix-animation timeline.
 Source and native DLL implemented; host and headless x86 integration tests are
 provided. Visual in-game acceptance remains required.
@@ -37,7 +47,10 @@ wrapping. Resetonend applies only to natural one-shot completion, not interrupti
 or loop boundaries. For reverse, the terminal pose is already `start`, so reset
 has no additional effect. Equal endpoints hold a static pose, even with repeat on.
 
-Speed 1 uses the SOD's stored timing, not an assumed FPS. Frames are original
+Speed 1 uses the SOD's stored timing, not an assumed FPS. If a channel's stored
+duration is implausible (some writers store the block byte length there, which
+the engine reads as a near-zero float), the module logs a warning and uses
+30 samples per second for that channel. Frames are original
 exported SOD samples captured before engine keyframe optimisation; original 3D
 editor frame labels may differ. Playback uses native-style discrete matrix poses,
 not pose blending. All animated matrix tracks must cover the requested range and

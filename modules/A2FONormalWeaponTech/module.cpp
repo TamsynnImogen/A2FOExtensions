@@ -9,6 +9,11 @@
  */
 
 #include "../../sdk/include/a2fo_module_api.h"
+#include "../../rust/module_runtime_a_ffi.h"
+#include "../../rust/runtime_normal_state_ffi.h"
+#ifdef A2FO_BUILTIN_FEATURE
+#include "../../core/builtin_modules.hpp"
+#endif
 
 #include <windows.h>
 
@@ -16,6 +21,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <string>
 
 extern "C" {
@@ -52,13 +58,20 @@ constexpr std::uint8_t kExpectedTechnologyTreeAllowsProject[] = {
     0x53, 0x51, 0x89, 0x14, 0x24, 0x33, 0xd2, 0x8b,
     0x40, 0x0c, 0x8b, 0x0c, 0x24, 0x8b, 0x5c, 0x88};
 
-const A2FO_ModuleApi* g_api = nullptr;
-HMODULE g_armada = nullptr;
-HMODULE g_fleet_ops = nullptr;
-bool g_runtime_ready = false;
-volatile LONG g_logged_first_default_weapon = 0;
-volatile LONG g_logged_first_listed_allowed = 0;
-volatile LONG g_logged_first_listed_blocked = 0;
+A2foRsNormalState& checked_normal_runtime_state() noexcept {
+    if (!a2fo_normal_state_layout_matches()) std::terminate();
+    return *a2fo_rs_normal_state();
+}
+auto& g_state = checked_normal_runtime_state();
+auto& g_api = g_state.api;
+auto& g_armada = g_state.armada;
+auto& g_fleet_ops = g_state.fleet_ops;
+auto& g_runtime_ready = g_state.runtime_ready;
+auto& g_logged_first_default_weapon = g_state.logged_first_default_weapon;
+auto& g_logged_first_listed_allowed = g_state.logged_first_listed_allowed;
+auto& g_logged_first_listed_blocked = g_state.logged_first_listed_blocked;
+
+struct NormalInitContext { std::exception_ptr error; };
 
 void log_line(const std::string& message) noexcept {
     if (g_api && g_api->log) g_api->log(kModuleName, message.c_str());
@@ -115,127 +128,144 @@ void log_decision(const char* decision, std::uint32_t project_id,
     log_line(message);
 }
 
-bool normal_weapon_technology_allows(void* weapon) noexcept {
-    if (!g_runtime_ready || !weapon) return true;
-
-    void* weapon_class = read_live_at<void*>(
-        weapon, kWeaponClassOnWeaponOffset, nullptr);
-    if (!weapon_class) return true;
-
-    // Special weapons already have a native technology path. Applying the
-    // ordinary-weapon filter as well could change their established rules.
-    if (read_live_at<std::uint8_t>(
-            weapon_class, kWeaponClassSpecialOffset, 0) != 0) {
-        return true;
+std::uintptr_t normal_read(void*, std::uint32_t operation,
+                           std::uintptr_t first,
+                           std::uintptr_t second) noexcept {
+    switch (operation) {
+    case 0:
+        return reinterpret_cast<std::uintptr_t>(read_live_at<void*>(
+            reinterpret_cast<void*>(first), kWeaponClassOnWeaponOffset, nullptr));
+    case 1:
+        return read_live_at<std::uint8_t>(reinterpret_cast<void*>(first),
+                                          kWeaponClassSpecialOffset, 0);
+    case 2:
+        return reinterpret_cast<std::uintptr_t>(read_live_at<const void*>(
+            reinterpret_cast<void*>(first), kWeaponClassProjectIdOffset, nullptr));
+    case 3:
+        return read_live_at<std::uint32_t>(reinterpret_cast<void*>(first), 0, 0);
+    case 4:
+        return a2fo_normal_weapon_tech_call_thiscall_0(
+            at(g_armada, kWeaponGetOwnerRva), reinterpret_cast<void*>(first));
+    case 5:
+        return static_cast<std::uintptr_t>(read_live_at<std::int32_t>(
+            reinterpret_cast<void*>(first), kGameObjectTeamOffset, -1));
+    case 6:
+        return reinterpret_cast<std::uintptr_t>(read_live_at<void*>(
+            at(g_fleet_ops, kTeamTechnologyTreesPointerRva), 0, nullptr));
+    case 7:
+        return reinterpret_cast<std::uintptr_t>(read_live_at<void*>(
+            reinterpret_cast<void*>(first),
+            static_cast<std::size_t>(second) * sizeof(void*), nullptr));
+    case 8:
+        return reinterpret_cast<std::uintptr_t>(read_live_at<void*>(
+            reinterpret_cast<void*>(first), kTechnologyTreeItemsOffset, nullptr));
+    case 9:
+        return reinterpret_cast<std::uintptr_t>(read_live_at<void*>(
+            reinterpret_cast<void*>(first),
+            static_cast<std::size_t>(second) * sizeof(void*), nullptr));
+    case 10:
+        return a2fo_normal_weapon_tech_call_delphi_2(
+            at(g_fleet_ops, kTechnologyTreeAllowsProjectRva), first, second);
+    default:
+        return 0;
     }
+}
 
-    const void* project_id_object = read_live_at<const void*>(
-        weapon_class, kWeaponClassProjectIdOffset, nullptr);
-    const std::uint32_t project_id = read_live_at<std::uint32_t>(
-        project_id_object, 0, 0);
-    if (project_id == 0 || project_id > 0x7fffffffu) return true;
-
-    void* owner = reinterpret_cast<void*>(
-        a2fo_normal_weapon_tech_call_thiscall_0(
-            at(g_armada, kWeaponGetOwnerRva), weapon));
-    const std::int32_t team_index = read_live_at<std::int32_t>(
-        owner, kGameObjectTeamOffset, -1);
-    if (!owner || team_index < 0 || team_index > kMaximumTeamIndex) {
-        return true;
-    }
-
-    void* technology_trees = read_live_at<void*>(
-        at(g_fleet_ops, kTeamTechnologyTreesPointerRva), 0, nullptr);
-    void* team_tree = read_live_at<void*>(
-        technology_trees,
-        static_cast<std::size_t>(team_index) * sizeof(void*), nullptr);
-    void* technology_items = read_live_at<void*>(
-        team_tree, kTechnologyTreeItemsOffset, nullptr);
-    if (!team_tree || !technology_items) return true;
-
-    void* technology_item = read_live_at<void*>(
-        technology_items,
-        static_cast<std::size_t>(project_id - 1) * sizeof(void*), nullptr);
-    if (!technology_item) {
-        if (InterlockedCompareExchange(
-                &g_logged_first_default_weapon, 1, 0) == 0) {
-            log_decision("was allowed (unlisted/default 0)",
-                         project_id, team_index);
-        }
-        return true;
-    }
-
-    const bool allowed =
-        (a2fo_normal_weapon_tech_call_delphi_2(
-             at(g_fleet_ops, kTechnologyTreeAllowsProjectRva),
-             reinterpret_cast<std::uintptr_t>(team_tree),
-             static_cast<std::uintptr_t>(project_id)) &
-         0xffu) != 0;
-    volatile LONG* first = allowed
-        ? &g_logged_first_listed_allowed
-        : &g_logged_first_listed_blocked;
+void normal_log(void*, std::uint32_t kind, std::uint32_t project,
+                std::int32_t team) noexcept {
+    volatile LONG* first = kind == 0 ? &g_logged_first_default_weapon :
+        kind == 1 ? &g_logged_first_listed_allowed :
+                    &g_logged_first_listed_blocked;
     if (InterlockedCompareExchange(first, 1, 0) == 0) {
-        log_decision(allowed ? "was allowed" : "was blocked",
-                     project_id, team_index);
+        log_decision(kind == 0 ? "was allowed (unlisted/default 0)" :
+                     kind == 1 ? "was allowed" : "was blocked", project, team);
     }
-    return allowed;
+}
+
+bool normal_weapon_technology_allows(void* weapon) noexcept {
+    const bool enabled =
+#ifdef A2FO_BUILTIN_FEATURE
+        a2fo::builtin_module_enabled(A2FO_BUILTIN_FEATURE);
+#else
+        true;
+#endif
+    return a2fo_rs_runtime_normal_allows(enabled, g_runtime_ready,
+        reinterpret_cast<std::uintptr_t>(weapon), &normal_read, &normal_log,
+        nullptr) != 0;
 }
 
 bool A2FO_CALL weapon_trigger_handler(
     const A2FO_WeaponTriggerEvent* event, void*) {
-    if (!event || event->struct_size < sizeof(*event)) return false;
-    if (event->kind == A2FO_WEAPON_TRIGGER_COMMITTED) return true;
-    if (event->kind != A2FO_WEAPON_TRIGGER_PRECHECK) return false;
-    return normal_weapon_technology_allows(event->weapon);
+    const bool valid = event && event->struct_size >= sizeof(*event);
+    const bool enabled =
+#ifdef A2FO_BUILTIN_FEATURE
+        valid && a2fo::builtin_module_enabled(A2FO_BUILTIN_FEATURE);
+#else
+        true;
+#endif
+    return a2fo_rs_runtime_normal_event(
+        valid,
+        valid ? event->kind : 0,
+        reinterpret_cast<std::uintptr_t>(valid ? event->weapon : nullptr),
+        enabled, g_runtime_ready, &normal_read, &normal_log, nullptr) != 0;
+}
+
+std::uint8_t normal_init_step(void* context, std::uint32_t operation) noexcept {
+    auto& init = *static_cast<NormalInitContext*>(context);
+    if (init.error) return 0;
+    try {
+        switch (operation) {
+        case 0:
+            g_armada = static_cast<HMODULE>(g_api->armada_module());
+            g_fleet_ops = static_cast<HMODULE>(g_api->fleetops_module());
+            return g_armada && g_fleet_ops;
+        case 1:
+            return A2FO_MODULE_API_HAS(g_api, register_weapon_trigger_handler) &&
+                g_api->register_weapon_trigger_handler &&
+                (g_api->capabilities & A2FO_CAP_WEAPON_TRIGGER_EVENTS) != 0;
+        case 2:
+            return A2FO_MODULE_API_HAS(
+                       g_api, register_weapon_trigger_handler_masked) &&
+                    g_api->register_weapon_trigger_handler_masked
+                ? g_api->register_weapon_trigger_handler_masked(
+                      kModuleName, A2FO_WEAPON_TRIGGER_EVENT_MASK_PRECHECK,
+                      &weapon_trigger_handler, nullptr)
+                : g_api->register_weapon_trigger_handler(
+                      kModuleName, &weapon_trigger_handler, nullptr);
+        case 3:
+            g_runtime_ready = signature_matches(
+                g_armada, kWeaponGetOwnerRva, kExpectedWeaponGetOwner) &&
+                signature_matches(g_fleet_ops, kTechnologyTreeAllowsProjectRva,
+                                  kExpectedTechnologyTreeAllowsProject);
+            return g_runtime_ready;
+        default: return 0;
+        }
+    } catch (...) {
+        init.error = std::current_exception();
+        return 0;
+    }
+}
+void normal_init_log(void* context, std::uint32_t code) noexcept {
+    if (static_cast<NormalInitContext*>(context)->error) return;
+    log_line(code == 0 ? "Shared weapon-trigger registration is unavailable" :
+             code == 1 ? "Normal-weapon technology-tree filter initialized; unlisted weapons default to 0 (available)" :
+                         "Supported weapon or Fleet Operations technology-tree signature was not found; filter disabled");
 }
 
 }  // namespace
 
 extern "C" __declspec(dllexport)
 bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
-    if (!api || api->struct_size < A2FO_MODULE_API_V4_BASE_SIZE ||
-        api->api_version != A2FO_MODULE_API_VERSION || !api->log ||
-        !api->armada_module || !api->fleetops_module) {
-        return false;
-    }
+    const bool valid = api && api->struct_size >= A2FO_MODULE_API_V4_BASE_SIZE &&
+        api->api_version == A2FO_MODULE_API_VERSION && api->log &&
+        api->armada_module && api->fleetops_module;
+    if (!valid) return false;
     g_api = api;
-    g_armada = static_cast<HMODULE>(api->armada_module());
-    g_fleet_ops = static_cast<HMODULE>(api->fleetops_module());
-    if (!g_armada || !g_fleet_ops) return false;
-
-    if (!A2FO_MODULE_API_HAS(api, register_weapon_trigger_handler) ||
-        !api->register_weapon_trigger_handler ||
-        (api->capabilities & A2FO_CAP_WEAPON_TRIGGER_EVENTS) == 0) {
-        log_line("Shared weapon-trigger registration is unavailable");
-        return false;
-    }
-    const bool trigger_registered =
-        A2FO_MODULE_API_HAS(
-            api, register_weapon_trigger_handler_masked) &&
-        api->register_weapon_trigger_handler_masked
-            ? api->register_weapon_trigger_handler_masked(
-                  kModuleName,
-                  A2FO_WEAPON_TRIGGER_EVENT_MASK_PRECHECK,
-                  &weapon_trigger_handler, nullptr)
-            : api->register_weapon_trigger_handler(
-                  kModuleName, &weapon_trigger_handler, nullptr);
-    if (!trigger_registered) {
-        log_line("Shared weapon-trigger registration is unavailable");
-        return false;
-    }
-
-    g_runtime_ready =
-        signature_matches(
-            g_armada, kWeaponGetOwnerRva, kExpectedWeaponGetOwner) &&
-        signature_matches(
-            g_fleet_ops, kTechnologyTreeAllowsProjectRva,
-            kExpectedTechnologyTreeAllowsProject);
-    if (g_runtime_ready) {
-        log_line("Normal-weapon technology-tree filter initialized; unlisted weapons default to 0 (available)");
-    } else {
-        log_line("Supported weapon or Fleet Operations technology-tree signature was not found; filter disabled");
-    }
-    return true;
+    NormalInitContext context{};
+    const bool result = a2fo_rs_runtime_normal_init(
+        valid, &normal_init_step, &normal_init_log, &context) != 0;
+    if (context.error) std::rethrow_exception(context.error);
+    return result;
 }
 
 extern "C" __declspec(dllexport)

@@ -1,17 +1,18 @@
 /*
  * File: core/module_policy.cpp
  * Module: A2FOHookExtensions (source-module)
- * Purpose: Per-mod native-module policy parsing, evaluation, and persistence.
+ * Purpose: Native module policy adapters and Win32 discovery/persistence.
  */
-
 #include "module_policy.hpp"
+#include "builtin_state.hpp"
+#include "../rust/module_policy_ffi.h"
 
 #include <algorithm>
-#include <cctype>
+#include <exception>
 #include <fstream>
-#include <map>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <utility>
 
 #if defined(_WIN32)
@@ -20,91 +21,78 @@
 
 namespace a2fo {
 namespace {
-
-std::string trim(std::string value) {
-    const auto first = std::find_if_not(
-        value.begin(), value.end(),
-        [](unsigned char ch) { return std::isspace(ch) != 0; });
-    if (first == value.end()) return {};
-    const auto last = std::find_if_not(
-        value.rbegin(), value.rend(),
-        [](unsigned char ch) { return std::isspace(ch) != 0; }).base();
-    return std::string(first, last);
+A2foPolicyBytes view(const std::string& value) {
+    return {reinterpret_cast<const uint8_t*>(value.data()), value.size()};
 }
-
-std::string lower_ascii(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(),
-                   [](unsigned char ch) {
-                       return static_cast<char>(std::tolower(ch));
-                   });
-    return value;
+std::string copy(A2foPolicyBytes value) {
+    return value.size ? std::string(reinterpret_cast<const char*>(value.data), value.size)
+                      : std::string();
 }
-
-std::string unquote(std::string value) {
-    value = trim(std::move(value));
-    if (value.size() >= 2 &&
-        ((value.front() == '"' && value.back() == '"') ||
-         (value.front() == '\'' && value.back() == '\''))) {
-        value = value.substr(1, value.size() - 2);
-    }
-    return trim(std::move(value));
+struct CallbackError { std::exception_ptr error; };
+struct StringResult : CallbackError { std::string value; };
+void receive_string(void* context, A2foPolicyBytes value) noexcept {
+    auto& result = *static_cast<StringResult*>(context);
+    if (result.error) return;
+    try { result.value = copy(value); }
+    catch (...) { result.error = std::current_exception(); }
 }
-
-bool indexed_key(const std::string& key, const char* prefix) {
-    const std::string lower = lower_ascii(trim(key));
-    const std::string wanted(prefix);
-    if (lower.size() <= wanted.size() ||
-        lower.compare(0, wanted.size(), wanted) != 0) {
-        return false;
-    }
-    return std::all_of(
-        lower.begin() + static_cast<std::ptrdiff_t>(wanted.size()), lower.end(),
-        [](unsigned char ch) { return std::isdigit(ch) != 0; });
+struct RuleResult : CallbackError { ModuleRules value; };
+void receive_rule(void* context, uint32_t kind, A2foPolicyBytes value) noexcept {
+    auto& result = *static_cast<RuleResult*>(context);
+    if (result.error) return;
+    try {
+        switch (kind) {
+        case 0: result.value.has_section = true; break;
+        case 1: result.value.required.push_back(copy(value)); break;
+        case 2: result.value.rejected.push_back(copy(value)); break;
+        case 3: result.value.active.push_back(copy(value)); break;
+        case 4: result.value.diagnostics.push_back(copy(value)); break;
+        default: throw std::runtime_error("Invalid Rust policy rule kind");
+        }
+    } catch (...) { result.error = std::current_exception(); }
 }
-
-void append_unique(std::vector<std::string>& values,
-                   std::set<std::string>& keys,
-                   const std::string& value) {
-    const std::string name = normalize_module_name(value);
-    const std::string key = module_name_key(name);
-    if (!key.empty() && keys.insert(key).second) values.push_back(name);
+struct PolicyResult : CallbackError { ModulePolicy value; };
+void receive_meta(void* context, uint8_t managed, uint8_t valid) noexcept {
+    auto& result = *static_cast<PolicyResult*>(context);
+    if (result.error) return;
+    result.value.managed = managed != 0;
+    result.value.valid = valid != 0;
 }
-
-std::vector<std::string> split_lines(const std::string& contents) {
-    std::vector<std::string> lines;
-    std::size_t start = 0;
-    while (start < contents.size()) {
-        const std::size_t newline = contents.find('\n', start);
-        std::size_t end = newline == std::string::npos ? contents.size() : newline;
-        if (end > start && contents[end - 1] == '\r') --end;
-        lines.push_back(contents.substr(start, end - start));
-        if (newline == std::string::npos) return lines;
-        start = newline + 1;
-    }
-    if (contents.empty() || contents.back() == '\n') lines.emplace_back();
-    return lines;
+void receive_entry(void* context, const A2foPolicyEntry* value) noexcept {
+    auto& result = *static_cast<PolicyResult*>(context);
+    if (result.error) return;
+    try {
+        if (!value || value->state > static_cast<uint32_t>(ModulePolicyState::missing_required))
+            throw std::runtime_error("Invalid Rust policy state");
+        ModulePolicyEntry entry;
+        entry.key = copy(value->key);
+        entry.name = copy(value->name);
+        entry.filename = copy(value->filename);
+        entry.path = copy(value->path);
+        entry.state = static_cast<ModulePolicyState>(value->state);
+        entry.installed = value->installed != 0;
+        result.value.entries.push_back(std::move(entry));
+    } catch (...) { result.error = std::current_exception(); }
 }
-
-bool section_line(const std::string& line, std::string& name) {
-    const std::string cleaned = trim(line);
-    if (cleaned.size() < 2 || cleaned.front() != '[' ||
-        cleaned.back() != ']') {
-        return false;
-    }
-    name = lower_ascii(trim(cleaned.substr(1, cleaned.size() - 2)));
-    return true;
+void receive_diagnostic(void* context, A2foPolicyBytes value) noexcept {
+    auto& result = *static_cast<PolicyResult*>(context);
+    if (result.error) return;
+    try { result.value.diagnostics.push_back(copy(value)); }
+    catch (...) { result.error = std::current_exception(); }
 }
-
-bool active_assignment(const std::string& line) {
-    std::string cleaned = trim(line);
-    if (cleaned.empty() || cleaned.front() == ';' || cleaned.front() == '#') {
-        return false;
-    }
-    const std::size_t equals = cleaned.find('=');
-    return equals != std::string::npos &&
-           indexed_key(cleaned.substr(0, equals), "active");
+void check(uint8_t success, const CallbackError& result) {
+    if (result.error) std::rethrow_exception(result.error);
+    if (!success) throw std::invalid_argument("Invalid Rust policy input");
 }
-
+std::vector<A2foPolicyBytes> views(const std::vector<std::string>& strings) {
+    std::vector<A2foPolicyBytes> result;
+    result.reserve(strings.size());
+    for (const auto& item : strings) result.push_back(view(item));
+    return result;
+}
+A2foPolicyByteArray array(const std::vector<A2foPolicyBytes>& values) {
+    return {values.data(), values.size()};
+}
 #if defined(_WIN32)
 std::string join_path(const std::string& left, const std::string& right) {
     if (left.empty()) return right;
@@ -112,12 +100,9 @@ std::string join_path(const std::string& left, const std::string& right) {
     if (left.back() == '\\' || left.back() == '/') return left + right;
     return left + "\\" + right;
 }
-
 bool has_dll_extension(const std::string& name) {
-    return name.size() >= 4 &&
-           _stricmp(name.c_str() + name.size() - 4, ".dll") == 0;
+    return name.size() >= 4 && _stricmp(name.c_str() + name.size() - 4, ".dll") == 0;
 }
-
 std::string read_text_file(const std::string& path, bool& opened) {
     std::ifstream input(path, std::ios::binary);
     opened = static_cast<bool>(input);
@@ -127,247 +112,55 @@ std::string read_text_file(const std::string& path, bool& opened) {
     return contents.str();
 }
 #endif
-
-}  // namespace
+} // namespace
 
 std::string normalize_module_name(const std::string& value) {
-    std::string name = unquote(value);
-    if (name.size() >= 4 &&
-        lower_ascii(name.substr(name.size() - 4)) == ".dll") {
-        name.resize(name.size() - 4);
-        name = trim(std::move(name));
-    }
-    if (name.empty() || name == "." || name == ".." ||
-        name.find('\\') != std::string::npos ||
-        name.find('/') != std::string::npos ||
-        name.find(':') != std::string::npos ||
-        name.find('"') != std::string::npos ||
-        name.find('\'') != std::string::npos) {
-        return {};
-    }
-    return name;
+    StringResult result;
+    check(a2fo_rs_policy_normalize(view(value), &result, receive_string), result);
+    return result.value;
 }
-
 std::string module_name_key(const std::string& value) {
-    return lower_ascii(normalize_module_name(value));
+    StringResult result;
+    check(a2fo_rs_policy_key(view(value), &result, receive_string), result);
+    return result.value;
 }
-
 ModuleRules module_rules_from_info(const std::string& contents) {
-    ModuleRules result;
-    std::set<std::string> required_keys;
-    std::set<std::string> rejected_keys;
-    std::set<std::string> active_keys;
-    bool in_modules = false;
-    std::istringstream stream(contents);
-    std::string line;
-    std::size_t line_number = 0;
-    while (std::getline(stream, line)) {
-        ++line_number;
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        const std::string cleaned = trim(line);
-        if (cleaned.empty() || cleaned.front() == ';' ||
-            cleaned.front() == '#') {
-            continue;
-        }
-        std::string section;
-        if (section_line(cleaned, section)) {
-            in_modules = section == "modules";
-            if (in_modules) result.has_section = true;
-            continue;
-        }
-        if (!in_modules) continue;
-        const std::size_t equals = cleaned.find('=');
-        if (equals == std::string::npos) continue;
-        const std::string key = cleaned.substr(0, equals);
-        const std::string value = unquote(cleaned.substr(equals + 1));
-        if (!indexed_key(key, "required") &&
-            !indexed_key(key, "reject") &&
-            !indexed_key(key, "active")) {
-            continue;
-        }
-        if (value.empty()) continue;
-        const std::string name = normalize_module_name(value);
-        if (name.empty()) {
-            result.diagnostics.push_back(
-                "Invalid module reference on info.ini line " +
-                std::to_string(line_number) + ": " + value);
-            continue;
-        }
-        if (indexed_key(key, "required")) {
-            append_unique(result.required, required_keys, name);
-        } else if (indexed_key(key, "reject")) {
-            append_unique(result.rejected, rejected_keys, name);
-        } else {
-            append_unique(result.active, active_keys, name);
-        }
-    }
-    return result;
+    RuleResult result;
+    check(a2fo_rs_policy_parse(view(contents), &result, receive_rule), result);
+    return result.value;
 }
-
-ModulePolicy evaluate_module_rules(
-    const std::vector<ModuleRules>& ordered_rules,
-    const std::vector<InstalledModule>& installed) {
-    ModulePolicy result;
-    std::map<std::string, std::string> required;
-    std::map<std::string, std::string> rejected;
-    std::map<std::string, std::string> active;
-
-    for (const ModuleRules& rules : ordered_rules) {
-        result.managed = result.managed || rules.has_section;
-        result.diagnostics.insert(result.diagnostics.end(),
-                                  rules.diagnostics.begin(),
-                                  rules.diagnostics.end());
-        for (const std::string& name : rules.required) {
-            required.emplace(module_name_key(name), name);
-        }
-        for (const std::string& name : rules.rejected) {
-            rejected.emplace(module_name_key(name), name);
-        }
-        if (rules.has_section) {
-            active.clear();
-            for (const std::string& name : rules.active) {
-                active.emplace(module_name_key(name), name);
-            }
-        }
-    }
-
-    std::map<std::string, InstalledModule> inventory;
-    for (const InstalledModule& module : installed) {
-        const std::string key = module_name_key(module.name.empty()
-                                                    ? module.filename
-                                                    : module.name);
-        if (key.empty()) continue;
-        inventory.emplace(key, module);
-    }
-
-    std::set<std::string> emitted;
-    for (const auto& item : inventory) {
-        const std::string& key = item.first;
-        const InstalledModule& module = item.second;
-        ModulePolicyEntry entry;
-        entry.key = key;
-        entry.name = module.name.empty()
-                         ? normalize_module_name(module.filename)
-                         : module.name;
-        entry.filename = module.filename;
-        entry.path = module.path;
-        entry.installed = true;
-        const bool is_required = required.count(key) != 0;
-        const bool is_rejected = rejected.count(key) != 0;
-        if (is_required && is_rejected) {
-            entry.state = ModulePolicyState::conflict;
-            result.valid = false;
-            result.diagnostics.push_back(
-                "Module is both required and rejected: " + entry.name);
-        } else if (is_rejected) {
-            entry.state = ModulePolicyState::rejected;
-        } else if (is_required) {
-            entry.state = ModulePolicyState::required;
-        } else if (!result.managed || active.count(key) != 0) {
-            entry.state = ModulePolicyState::active;
-        } else {
-            entry.state = ModulePolicyState::inactive;
-        }
-        emitted.insert(key);
-        result.entries.push_back(std::move(entry));
-    }
-
-    for (const auto& item : required) {
-        if (emitted.count(item.first) != 0) continue;
-        ModulePolicyEntry entry;
-        entry.key = item.first;
-        entry.name = item.second;
-        entry.state = rejected.count(item.first) != 0
-                          ? ModulePolicyState::conflict
-                          : ModulePolicyState::missing_required;
-        result.valid = false;
-        if (entry.state == ModulePolicyState::conflict) {
-            result.diagnostics.push_back(
-                "Missing module is both required and rejected: " + entry.name);
-        } else {
-            result.diagnostics.push_back(
-                "Required module is not installed: " + entry.name);
-        }
-        emitted.insert(item.first);
-        result.entries.push_back(std::move(entry));
-    }
-
-    for (const auto& item : active) {
-        if (emitted.count(item.first) != 0 ||
-            rejected.count(item.first) != 0) {
-            continue;
-        }
-        ModulePolicyEntry entry;
-        entry.key = item.first;
-        entry.name = item.second;
-        entry.state = ModulePolicyState::missing_active;
-        result.entries.push_back(std::move(entry));
-    }
-
-    std::sort(result.entries.begin(), result.entries.end(),
-              [](const ModulePolicyEntry& left,
-                 const ModulePolicyEntry& right) {
-                  return left.key < right.key;
-              });
-    return result;
-}
-
-std::string rewrite_active_modules(
-    const std::string& contents,
-    const std::vector<std::string>& active_modules) {
-    const std::string newline =
-        contents.find("\r\n") != std::string::npos ? "\r\n" : "\n";
-    std::vector<std::string> lines = split_lines(contents);
-    std::vector<std::string> output;
-    output.reserve(lines.size() + active_modules.size() + 3);
-    bool found_modules = false;
-    bool in_modules = false;
-    bool inserted = false;
-
-    auto insert_active = [&]() {
-        if (inserted) return;
-        std::set<std::string> keys;
-        std::size_t index = 0;
-        for (const std::string& raw : active_modules) {
-            const std::string name = normalize_module_name(raw);
-            const std::string key = module_name_key(name);
-            if (key.empty() || !keys.insert(key).second) continue;
-            output.push_back("active" + std::to_string(index++) +
-                             " = \"" + name + "\"");
-        }
-        inserted = true;
+ModulePolicy evaluate_module_rules(const std::vector<ModuleRules>& ordered_rules,
+                                   const std::vector<InstalledModule>& installed) {
+    struct RuleViews {
+        std::vector<A2foPolicyBytes> required, rejected, active, diagnostics;
     };
-
-    for (const std::string& line : lines) {
-        std::string section;
-        if (section_line(line, section)) {
-            if (in_modules) insert_active();
-            in_modules = section == "modules";
-            if (in_modules) found_modules = true;
-            output.push_back(line);
-            continue;
-        }
-        if (in_modules && active_assignment(line)) continue;
-        output.push_back(line);
-    }
-    if (in_modules) insert_active();
-    if (!found_modules) {
-        while (!output.empty() && output.back().empty()) output.pop_back();
-        if (!output.empty()) output.emplace_back();
-        output.push_back("[modules]");
-        insert_active();
-    }
-
-    std::ostringstream joined;
-    for (std::size_t index = 0; index < output.size(); ++index) {
-        joined << output[index];
-        if (index + 1 < output.size()) joined << newline;
-    }
-    if (!output.empty() && (contents.empty() ||
-                            contents.back() == '\n')) {
-        joined << newline;
-    }
-    return joined.str();
+    std::vector<RuleViews> storage;
+    storage.reserve(ordered_rules.size());
+    for (const auto& rule : ordered_rules)
+        storage.push_back({views(rule.required), views(rule.rejected),
+                           views(rule.active), views(rule.diagnostics)});
+    std::vector<A2foPolicyRule> rule_inputs;
+    rule_inputs.reserve(ordered_rules.size());
+    for (std::size_t i = 0; i < ordered_rules.size(); ++i)
+        rule_inputs.push_back({static_cast<uint8_t>(ordered_rules[i].has_section),
+                               array(storage[i].required), array(storage[i].rejected),
+                               array(storage[i].active), array(storage[i].diagnostics)});
+    std::vector<A2foPolicyInstalled> module_inputs;
+    module_inputs.reserve(installed.size());
+    for (const auto& module : installed)
+        module_inputs.push_back({view(module.name), view(module.filename), view(module.path)});
+    PolicyResult result;
+    check(a2fo_rs_policy_evaluate(rule_inputs.data(), rule_inputs.size(),
+                                  module_inputs.data(), module_inputs.size(), &result,
+                                  receive_meta, receive_entry, receive_diagnostic), result);
+    return result.value;
+}
+std::string rewrite_active_modules(const std::string& contents,
+                                   const std::vector<std::string>& active_modules) {
+    auto names = views(active_modules);
+    StringResult result;
+    check(a2fo_rs_policy_rewrite(view(contents), array(names), &result, receive_string), result);
+    return result.value;
 }
 
 #if defined(_WIN32)
@@ -377,11 +170,19 @@ std::vector<InstalledModule> discover_installed_modules(
     const std::string directory = join_path(data_root, "modules");
     CreateDirectoryA(directory.c_str(), nullptr);
     std::vector<InstalledModule> result;
+    std::set<std::string> keys;
+    // Built-ins are present even when no Data/modules directory or DLL exists.
+    // Reserve their names first so an old standalone copy cannot run twice.
+    for (std::size_t index = 0;
+         index < static_cast<std::size_t>(BuiltinFeature::count); ++index) {
+        const std::string name = canonical_builtin_name(static_cast<BuiltinFeature>(index));
+        result.push_back({name, name + ".dll", "builtin:" + name});
+        keys.insert(module_name_key(name));
+    }
     WIN32_FIND_DATAA data{};
     HANDLE search = FindFirstFileA(join_path(directory, "*.dll").c_str(),
                                    &data);
     if (search == INVALID_HANDLE_VALUE) return result;
-    std::set<std::string> keys;
     do {
         if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ||
             !has_dll_extension(data.cFileName)) {
@@ -395,7 +196,7 @@ std::vector<InstalledModule> discover_installed_modules(
         if (key.empty() || !keys.insert(key).second) {
             if (diagnostics) {
                 diagnostics->push_back(
-                    "Duplicate or invalid global module filename ignored: " +
+                    "Built-in, duplicate or invalid global module filename ignored: " +
                     module.filename);
             }
             continue;

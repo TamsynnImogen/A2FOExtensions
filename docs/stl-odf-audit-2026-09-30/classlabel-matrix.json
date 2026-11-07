@@ -1,0 +1,3656 @@
+{
+  "rows": [
+    {
+      "value": "artillery",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/weapons/Photons/artillery_ord.odf",
+              "line": 2,
+              "value": "\"artillery\"",
+              "canonical_value": "artillery",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/weapons/Photons/cbltphot.odf",
+              "line": 2,
+              "value": "\"artillery\"",
+              "canonical_value": "artillery",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/weapons/Photons/cbltphot.odf",
+              "line": 2,
+              "value": "\"artillery\"",
+              "canonical_value": "artillery",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 29,
+          "file_count": 29,
+          "examples": [
+            {
+              "source": "odf/system/dom_tetrionsingularityo.odf",
+              "line": 26,
+              "value": "\"artillery\"",
+              "canonical_value": "artillery",
+              "section": null
+            },
+            {
+              "source": "odf/system/rom_silentresolveo.odf",
+              "line": 26,
+              "value": "\"artillery\"",
+              "canonical_value": "artillery",
+              "section": null
+            },
+            {
+              "source": "odf/system/rom_silentresolver6o.odf",
+              "line": 26,
+              "value": "\"artillery\"",
+              "canonical_value": "artillery",
+              "section": null
+            }
+          ]
+        },
+        "FO_ROOT": {
+          "assignment_count": 15,
+          "file_count": 15,
+          "examples": [
+            {
+              "source": "odf/system/8472W_tricobalto.odf",
+              "line": 2,
+              "value": "\"artillery\"",
+              "canonical_value": "artillery",
+              "section": null
+            },
+            {
+              "source": "odf/system/8472W_tricobaltro.odf",
+              "line": 2,
+              "value": "\"artillery\"",
+              "canonical_value": "artillery",
+              "section": null
+            },
+            {
+              "source": "odf/system/borgW_tricobalto.odf",
+              "line": 2,
+              "value": "\"artillery\"",
+              "canonical_value": "artillery",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "asteroid",
+      "corpora": {
+        "STL": {
+          "assignment_count": 2,
+          "file_count": 2,
+          "examples": [
+            {
+              "source": "odf/other/aster.odf",
+              "line": 3,
+              "value": "\"asteroid\"",
+              "canonical_value": "asteroid",
+              "section": "GameObjectClass"
+            },
+            {
+              "source": "odf/other/master1.odf",
+              "line": 2,
+              "value": "\"asteroid\"",
+              "canonical_value": "asteroid",
+              "section": "GameObjectClass"
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 2,
+          "file_count": 2,
+          "examples": [
+            {
+              "source": "odf/other/aster.odf",
+              "line": 3,
+              "value": "\"asteroid\"",
+              "canonical_value": "asteroid",
+              "section": "GameObjectClass"
+            },
+            {
+              "source": "odf/other/master1.odf",
+              "line": 2,
+              "value": "\"asteroid\"",
+              "canonical_value": "asteroid",
+              "section": "GameObjectClass"
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 2,
+          "file_count": 2,
+          "examples": [
+            {
+              "source": "odf/other/aster.odf",
+              "line": 3,
+              "value": "\"asteroid\"",
+              "canonical_value": "asteroid",
+              "section": "GameObjectClass"
+            },
+            {
+              "source": "odf/other/master1.odf",
+              "line": 2,
+              "value": "\"asteroid\"",
+              "canonical_value": "asteroid",
+              "section": "GameObjectClass"
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "asteroidfield",
+      "corpora": {
+        "STL": {
+          "assignment_count": 2,
+          "file_count": 2,
+          "examples": [
+            {
+              "source": "odf/other/mafield.odf",
+              "line": 2,
+              "value": "\"asteroidfield\"",
+              "canonical_value": "asteroidfield",
+              "section": "GameObjectClass"
+            },
+            {
+              "source": "odf/other/mafield2.odf",
+              "line": 2,
+              "value": "\"asteroidfield\"",
+              "canonical_value": "asteroidfield",
+              "section": "GameObjectClass"
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/other/mafield.odf",
+              "line": 2,
+              "value": "\"asteroidfield\"",
+              "canonical_value": "asteroidfield",
+              "section": "GameObjectClass"
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 2,
+          "file_count": 2,
+          "examples": [
+            {
+              "source": "odf/other/mafield.odf",
+              "line": 2,
+              "value": "\"asteroidfield\"",
+              "canonical_value": "asteroidfield",
+              "section": "GameObjectClass"
+            },
+            {
+              "source": "odf/other/mafield2.odf",
+              "line": 2,
+              "value": "\"asteroidfield\"",
+              "canonical_value": "asteroidfield",
+              "section": "GameObjectClass"
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 2,
+          "file_count": 2,
+          "examples": [
+            {
+              "source": "odf/system/trigger_blocking.odf",
+              "line": 22,
+              "value": "\"asteroidfield\"",
+              "canonical_value": "asteroidfield",
+              "section": null
+            },
+            {
+              "source": "odf/system/trigger_blocking_sml.odf",
+              "line": 22,
+              "value": "\"asteroidfield\"",
+              "canonical_value": "asteroidfield",
+              "section": null
+            }
+          ]
+        },
+        "FO_ROOT": {
+          "assignment_count": 2,
+          "file_count": 2,
+          "examples": [
+            {
+              "source": "odf/system/trigger_blocking.odf",
+              "line": 1,
+              "value": "\"asteroidfield\"",
+              "canonical_value": "asteroidfield",
+              "section": null
+            },
+            {
+              "source": "odf/system/trigger_blocking_sml.odf",
+              "line": 1,
+              "value": "\"asteroidfield\"",
+              "canonical_value": "asteroidfield",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "background_obj",
+      "corpora": {
+        "STL": {
+          "assignment_count": 6,
+          "file_count": 6,
+          "examples": [
+            {
+              "source": "odf/other/ambientlight.odf",
+              "line": 2,
+              "value": "\"background_obj\"",
+              "canonical_value": "background_obj",
+              "section": "GameObjectClass"
+            },
+            {
+              "source": "odf/other/Ambientlight.odf",
+              "line": 2,
+              "value": "\"background_obj\"",
+              "canonical_value": "background_obj",
+              "section": "GameObjectClass"
+            },
+            {
+              "source": "odf/other/dlight.odf",
+              "line": 2,
+              "value": "\"background_obj\"",
+              "canonical_value": "background_obj",
+              "section": "GameObjectClass"
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 8,
+          "file_count": 8,
+          "examples": [
+            {
+              "source": "odf/other/dlight.odf",
+              "line": 2,
+              "value": "\"background_obj\"",
+              "canonical_value": "background_obj",
+              "section": "GameObjectClass"
+            },
+            {
+              "source": "odf/other/mgate.odf",
+              "line": 2,
+              "value": "\"background_obj\"",
+              "canonical_value": "background_obj",
+              "section": "GameObjectClass"
+            },
+            {
+              "source": "odf/other/Mmoon.odf",
+              "line": 2,
+              "value": "\"background_obj\"",
+              "canonical_value": "background_obj",
+              "section": "GameObjectClass"
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 7,
+          "file_count": 7,
+          "examples": [
+            {
+              "source": "odf/other/dlight.odf",
+              "line": 2,
+              "value": "\"background_obj\"",
+              "canonical_value": "background_obj",
+              "section": "GameObjectClass"
+            },
+            {
+              "source": "odf/other/mgate.odf",
+              "line": 2,
+              "value": "\"background_obj\"",
+              "canonical_value": "background_obj",
+              "section": "GameObjectClass"
+            },
+            {
+              "source": "odf/other/mnebula.odf",
+              "line": 3,
+              "value": "\"background_obj\"",
+              "canonical_value": "background_obj",
+              "section": "GameObjectClass"
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 19,
+          "file_count": 19,
+          "examples": [
+            {
+              "source": "odf/system/dlight.odf",
+              "line": 15,
+              "value": "\"background_obj\"",
+              "canonical_value": "background_obj",
+              "section": null
+            },
+            {
+              "source": "odf/system/map_argus.odf",
+              "line": 15,
+              "value": "\"background_obj\"",
+              "canonical_value": "background_obj",
+              "section": null
+            },
+            {
+              "source": "odf/system/map_iceasteroidset_dust1.odf",
+              "line": 16,
+              "value": "\"background_obj\"",
+              "canonical_value": "background_obj",
+              "section": null
+            }
+          ]
+        },
+        "FO_ROOT": {
+          "assignment_count": 21,
+          "file_count": 21,
+          "examples": [
+            {
+              "source": "odf/system/dlight.odf",
+              "line": 1,
+              "value": "\"background_obj\"",
+              "canonical_value": "background_obj",
+              "section": null
+            },
+            {
+              "source": "odf/system/map_argus.odf",
+              "line": 1,
+              "value": "\"background_obj\"",
+              "canonical_value": "background_obj",
+              "section": null
+            },
+            {
+              "source": "odf/system/map_iceasteroidset_dust1.odf",
+              "line": 1,
+              "value": "\"background_obj\"",
+              "canonical_value": "background_obj",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "blackhole_obj",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/other/mblkhole.odf",
+              "line": 5,
+              "value": "\"blackhole_obj\"",
+              "canonical_value": "blackhole_obj",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/other/mblkhole.odf",
+              "line": 5,
+              "value": "\"blackhole_obj\"",
+              "canonical_value": "blackhole_obj",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/other/mblkhole.odf",
+              "line": 5,
+              "value": "\"blackhole_obj\"",
+              "canonical_value": "blackhole_obj",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "breeder",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/stations/nox_breeder_base.odf",
+              "line": 4,
+              "value": "\"breeder\"",
+              "canonical_value": "breeder",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        }
+      },
+      "absent_from_baselines": true
+    },
+    {
+      "value": "cannon",
+      "corpora": {
+        "STL": {
+          "assignment_count": 2,
+          "file_count": 2,
+          "examples": [
+            {
+              "source": "odf/weapons/Phasers/phaser.odf",
+              "line": 12,
+              "value": "\"cannon\"",
+              "canonical_value": "cannon",
+              "section": null
+            },
+            {
+              "source": "odf/weapons/Pulse/pulse.odf",
+              "line": 15,
+              "value": "\"cannon\"",
+              "canonical_value": "cannon",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 16,
+          "file_count": 16,
+          "examples": [
+            {
+              "source": "odf/special_weapons/gfedrep.odf",
+              "line": 36,
+              "value": "\"cannon\"",
+              "canonical_value": "cannon",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/gionstm.odf",
+              "line": 32,
+              "value": "\"cannon\"",
+              "canonical_value": "cannon",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/gminebm.odf",
+              "line": 25,
+              "value": "\"cannon\"",
+              "canonical_value": "cannon",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 23,
+          "file_count": 23,
+          "examples": [
+            {
+              "source": "odf/special_weapons/gborgionbeam.odf",
+              "line": 37,
+              "value": "\"cannon\"",
+              "canonical_value": "cannon",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/gcolbeam.odf",
+              "line": 26,
+              "value": "\"cannon\"",
+              "canonical_value": "cannon",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/gfedrep.odf",
+              "line": 41,
+              "value": "\"cannon\"",
+              "canonical_value": "cannon",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 2,
+          "file_count": 2,
+          "examples": [
+            {
+              "source": "odf/system/all_mine_dilithium.odf",
+              "line": 76,
+              "value": "\"cannon\"",
+              "canonical_value": "cannon",
+              "section": null
+            },
+            {
+              "source": "odf/system/all_mine_tritanium.odf",
+              "line": 76,
+              "value": "\"cannon\"",
+              "canonical_value": "cannon",
+              "section": null
+            }
+          ]
+        },
+        "FO_ROOT": {
+          "assignment_count": 31,
+          "file_count": 31,
+          "examples": [
+            {
+              "source": "odf/system/8472W_tricobalt.odf",
+              "line": 16,
+              "value": "\"cannon\"",
+              "canonical_value": "cannon",
+              "section": null
+            },
+            {
+              "source": "odf/system/8472W_tricobaltr.odf",
+              "line": 16,
+              "value": "\"cannon\"",
+              "canonical_value": "cannon",
+              "section": null
+            },
+            {
+              "source": "odf/system/all_mine_biomatter.odf",
+              "line": 25,
+              "value": "\"cannon\"",
+              "canonical_value": "cannon",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "chainpulsar",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/special_weapons/chainp.odf",
+              "line": 2,
+              "value": "\"chainpulsar\"",
+              "canonical_value": "chainpulsar",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 2,
+          "file_count": 2,
+          "examples": [
+            {
+              "source": "addon/chainp.odf",
+              "line": 2,
+              "value": "\"chainpulsar\"",
+              "canonical_value": "chainpulsar",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/chainp.odf",
+              "line": 2,
+              "value": "\"chainpulsar\"",
+              "canonical_value": "chainpulsar",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 2,
+          "file_count": 2,
+          "examples": [
+            {
+              "source": "odf/special_weapons/chainp.odf",
+              "line": 2,
+              "value": "\"chainpulsar\"",
+              "canonical_value": "chainpulsar",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/old_chainp.odf",
+              "line": 2,
+              "value": "\"chainpulsar\"",
+              "canonical_value": "chainpulsar",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 2,
+          "file_count": 2,
+          "examples": [
+            {
+              "source": "odf/system/fed_vectoro.odf",
+              "line": 228,
+              "value": "\"chainpulsar\"",
+              "canonical_value": "chainpulsar",
+              "section": null
+            },
+            {
+              "source": "odf/system/rom_vectoro.odf",
+              "line": 270,
+              "value": "\"chainpulsar\"",
+              "canonical_value": "chainpulsar",
+              "section": null
+            }
+          ]
+        },
+        "FO_ROOT": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "cloakingdevice",
+      "corpora": {
+        "STL": {
+          "assignment_count": 2,
+          "file_count": 2,
+          "examples": [
+            {
+              "source": "odf/special_weapons/gcloak.odf",
+              "line": 34,
+              "value": "\"cloakingdevice\"",
+              "canonical_value": "cloakingdevice",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/gcloak_permanent.odf",
+              "line": 34,
+              "value": "\"cloakingdevice\"",
+              "canonical_value": "cloakingdevice",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/special_weapons/gcloak.odf",
+              "line": 31,
+              "value": "\"cloakingdevice\"",
+              "canonical_value": "cloakingdevice",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/special_weapons/gcloak.odf",
+              "line": 34,
+              "value": "\"cloakingdevice\"",
+              "canonical_value": "cloakingdevice",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 3,
+          "file_count": 3,
+          "examples": [
+            {
+              "source": "odf/system/kli_cloak.odf",
+              "line": 13,
+              "value": "\"cloakingdevice\"",
+              "canonical_value": "cloakingdevice",
+              "section": null
+            },
+            {
+              "source": "odf/system/rom_cloak.odf",
+              "line": 13,
+              "value": "\"cloakingdevice\"",
+              "canonical_value": "cloakingdevice",
+              "section": null
+            },
+            {
+              "source": "odf/system/rom_cloak_noncom.odf",
+              "line": 13,
+              "value": "\"cloakingdevice\"",
+              "canonical_value": "cloakingdevice",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "constplaceholder",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/other/mconstph.odf",
+              "line": 4,
+              "value": "\"constPlaceholder\"",
+              "canonical_value": "constplaceholder",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/other/mconstph.odf",
+              "line": 4,
+              "value": "\"constPlaceholder\"",
+              "canonical_value": "constplaceholder",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/other/mconstph.odf",
+              "line": 4,
+              "value": "\"constPlaceholder\"",
+              "canonical_value": "constplaceholder",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/system/mconstph.odf",
+              "line": 1,
+              "value": "\"constPlaceholder\"",
+              "canonical_value": "constplaceholder",
+              "section": null
+            }
+          ]
+        },
+        "FO_ROOT": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/system/mconstph.odf",
+              "line": 1,
+              "value": "\"constPlaceholder\"",
+              "canonical_value": "constplaceholder",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "craft",
+      "corpora": {
+        "STL": {
+          "assignment_count": 4,
+          "file_count": 4,
+          "examples": [
+            {
+              "source": "odf/other/mtest.odf",
+              "line": 210,
+              "value": "\"craft\"",
+              "canonical_value": "craft",
+              "section": "GameObjectClass"
+            },
+            {
+              "source": "odf/other/player.odf",
+              "line": 3,
+              "value": "\"craft\"",
+              "canonical_value": "craft",
+              "section": "GameObject"
+            },
+            {
+              "source": "odf/ships/craft.odf",
+              "line": 120,
+              "value": "\"craft\"",
+              "canonical_value": "craft",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 4,
+          "file_count": 4,
+          "examples": [
+            {
+              "source": "odf/other/mtest.odf",
+              "line": 210,
+              "value": "\"craft\"",
+              "canonical_value": "craft",
+              "section": "GameObjectClass"
+            },
+            {
+              "source": "odf/other/player.odf",
+              "line": 3,
+              "value": "\"craft\"",
+              "canonical_value": "craft",
+              "section": "GameObject"
+            },
+            {
+              "source": "odf/ships/craft.odf",
+              "line": 87,
+              "value": "\"craft\"",
+              "canonical_value": "craft",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 1684,
+          "file_count": 1684,
+          "examples": [
+            {
+              "source": "odf/system/bor_adaptor_EE.odf",
+              "line": 218,
+              "value": "\"craft\"",
+              "canonical_value": "craft",
+              "section": null
+            },
+            {
+              "source": "odf/system/bor_adaptor_EE_M.odf",
+              "line": 221,
+              "value": "\"craft\"",
+              "canonical_value": "craft",
+              "section": null
+            },
+            {
+              "source": "odf/system/bor_adaptor_EO.odf",
+              "line": 223,
+              "value": "\"craft\"",
+              "canonical_value": "craft",
+              "section": null
+            }
+          ]
+        },
+        "FO_ROOT": {
+          "assignment_count": 322,
+          "file_count": 322,
+          "examples": [
+            {
+              "source": "odf/system/8472artillery.odf",
+              "line": 76,
+              "value": "\"Craft\"",
+              "canonical_value": "craft",
+              "section": null
+            },
+            {
+              "source": "odf/system/8472artilleryr2.odf",
+              "line": 77,
+              "value": "\"Craft\"",
+              "canonical_value": "craft",
+              "section": null
+            },
+            {
+              "source": "odf/system/8472artilleryr3.odf",
+              "line": 75,
+              "value": "\"Craft\"",
+              "canonical_value": "craft",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "detectcloak",
+      "corpora": {
+        "STL": {
+          "assignment_count": 4,
+          "file_count": 4,
+          "examples": [
+            {
+              "source": "odf/special_weapons/cloakdetect1.odf",
+              "line": 22,
+              "value": "\"detectcloak\"",
+              "canonical_value": "detectcloak",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/cloakdetect2.odf",
+              "line": 22,
+              "value": "\"detectcloak\"",
+              "canonical_value": "detectcloak",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/cloakdetect3.odf",
+              "line": 22,
+              "value": "\"detectcloak\"",
+              "canonical_value": "detectcloak",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 7,
+          "file_count": 7,
+          "examples": [
+            {
+              "source": "odf/special_weapons/gdetect1.odf",
+              "line": 22,
+              "value": "\"detectcloak\"",
+              "canonical_value": "detectcloak",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/gdetect2.odf",
+              "line": 22,
+              "value": "\"detectcloak\"",
+              "canonical_value": "detectcloak",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/gdetect3.odf",
+              "line": 22,
+              "value": "\"detectcloak\"",
+              "canonical_value": "detectcloak",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 9,
+          "file_count": 9,
+          "examples": [
+            {
+              "source": "odf/special_weapons/gdetect1.odf",
+              "line": 22,
+              "value": "\"detectcloak\"",
+              "canonical_value": "detectcloak",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/gdetect2.odf",
+              "line": 22,
+              "value": "\"detectcloak\"",
+              "canonical_value": "detectcloak",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/gdetect3.odf",
+              "line": 22,
+              "value": "\"detectcloak\"",
+              "canonical_value": "detectcloak",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 5,
+          "file_count": 5,
+          "examples": [
+            {
+              "source": "odf/system/tachdetectgrid.odf",
+              "line": 28,
+              "value": "\"detectcloak\"",
+              "canonical_value": "detectcloak",
+              "section": null
+            },
+            {
+              "source": "odf/system/tachdetectgrid2.odf",
+              "line": 25,
+              "value": "\"detectcloak\"",
+              "canonical_value": "detectcloak",
+              "section": null
+            },
+            {
+              "source": "odf/system/tachdetectgrid8472.odf",
+              "line": 25,
+              "value": "\"detectcloak\"",
+              "canonical_value": "detectcloak",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "evolver",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/ships/8472_passive.odf",
+              "line": 3,
+              "value": "\"evolver\"",
+              "canonical_value": "evolver",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 2,
+          "file_count": 2,
+          "examples": [
+            {
+              "source": "odf/ships/8472_active.odf",
+              "line": 3,
+              "value": "\"evolver\"",
+              "canonical_value": "evolver",
+              "section": null
+            },
+            {
+              "source": "odf/ships/8472_passive.odf",
+              "line": 3,
+              "value": "\"evolver\"",
+              "canonical_value": "evolver",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 22,
+          "file_count": 22,
+          "examples": [
+            {
+              "source": "odf/system/bor_dodeca_IL.odf",
+              "line": 220,
+              "value": "\"evolver\"",
+              "canonical_value": "evolver",
+              "section": null
+            },
+            {
+              "source": "odf/system/bor_dodeca_RL.odf",
+              "line": 220,
+              "value": "\"evolver\"",
+              "canonical_value": "evolver",
+              "section": null
+            },
+            {
+              "source": "odf/system/bor_dodeca_VL.odf",
+              "line": 220,
+              "value": "\"evolver\"",
+              "canonical_value": "evolver",
+              "section": null
+            }
+          ]
+        },
+        "FO_ROOT": {
+          "assignment_count": 6,
+          "file_count": 6,
+          "examples": [
+            {
+              "source": "odf/system/8472active.odf",
+              "line": 66,
+              "value": "\"evolver\"",
+              "canonical_value": "evolver",
+              "section": null
+            },
+            {
+              "source": "odf/system/8472passive.odf",
+              "line": 62,
+              "value": "\"evolver\"",
+              "canonical_value": "evolver",
+              "section": null
+            },
+            {
+              "source": "odf/system/nbre_battleshipDP.odf",
+              "line": 21,
+              "value": "\"evolver\"",
+              "canonical_value": "evolver",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "explosion",
+      "corpora": {
+        "STL": {
+          "assignment_count": 3,
+          "file_count": 3,
+          "examples": [
+            {
+              "source": "odf/Explosions/xArtillery.odf",
+              "line": 2,
+              "value": "\"explosion\"",
+              "canonical_value": "explosion",
+              "section": null
+            },
+            {
+              "source": "odf/Explosions/xMine.odf",
+              "line": 2,
+              "value": "\"explosion\"",
+              "canonical_value": "explosion",
+              "section": null
+            },
+            {
+              "source": "odf/Explosions/xSelfDestruct.odf",
+              "line": 2,
+              "value": "\"explosion\"",
+              "canonical_value": "explosion",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        }
+      },
+      "absent_from_baselines": true
+    },
+    {
+      "value": "grenade",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/other/shell.odf",
+              "line": 2,
+              "value": "\"grenade\"",
+              "canonical_value": "grenade",
+              "section": "OrdnanceClass"
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/other/shell.odf",
+              "line": 2,
+              "value": "\"grenade\"",
+              "canonical_value": "grenade",
+              "section": "OrdnanceClass"
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/other/shell.odf",
+              "line": 2,
+              "value": "\"grenade\"",
+              "canonical_value": "grenade",
+              "section": "OrdnanceClass"
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "launcher",
+      "corpora": {
+        "STL": {
+          "assignment_count": 3,
+          "file_count": 3,
+          "examples": [
+            {
+              "source": "odf/special_weapons/gpoleron.odf",
+              "line": 37,
+              "value": "\"launcher\"",
+              "canonical_value": "launcher",
+              "section": null
+            },
+            {
+              "source": "odf/weapons/Photons/f_tractor_bm.odf",
+              "line": 23,
+              "value": "\"launcher\"",
+              "canonical_value": "launcher",
+              "section": null
+            },
+            {
+              "source": "odf/weapons/Photons/photon.odf",
+              "line": 19,
+              "value": "\"launcher\"",
+              "canonical_value": "launcher",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 5,
+          "file_count": 5,
+          "examples": [
+            {
+              "source": "odf/special_weapons/gkcteam.odf",
+              "line": 35,
+              "value": "\"launcher\"",
+              "canonical_value": "launcher",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/gmanheim.odf",
+              "line": 32,
+              "value": "\"launcher\"",
+              "canonical_value": "launcher",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/gplasmac.odf",
+              "line": 32,
+              "value": "\"launcher\"",
+              "canonical_value": "launcher",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 11,
+          "file_count": 11,
+          "examples": [
+            {
+              "source": "odf/special_weapons/Ccolonypod.odf",
+              "line": 31,
+              "value": "\"launcher\"",
+              "canonical_value": "launcher",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/fcolonypod.odf",
+              "line": 31,
+              "value": "\"launcher\"",
+              "canonical_value": "launcher",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/gcolpod.odf",
+              "line": 31,
+              "value": "\"launcher\"",
+              "canonical_value": "launcher",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 65,
+          "file_count": 65,
+          "examples": [
+            {
+              "source": "odf/system/bor_board_adap.odf",
+              "line": 35,
+              "value": "\"launcher\"",
+              "canonical_value": "launcher",
+              "section": null
+            },
+            {
+              "source": "odf/system/bor_board_assi.odf",
+              "line": 35,
+              "value": "\"launcher\"",
+              "canonical_value": "launcher",
+              "section": null
+            },
+            {
+              "source": "odf/system/bor_board_cube.odf",
+              "line": 35,
+              "value": "\"launcher\"",
+              "canonical_value": "launcher",
+              "section": null
+            }
+          ]
+        },
+        "FO_ROOT": {
+          "assignment_count": 5,
+          "file_count": 5,
+          "examples": [
+            {
+              "source": "odf/system/nbre_dampening.odf",
+              "line": 8,
+              "value": "\"launcher\"",
+              "canonical_value": "launcher",
+              "section": null
+            },
+            {
+              "source": "odf/system/nfer_disblast.odf",
+              "line": 9,
+              "value": "\"launcher\"",
+              "canonical_value": "launcher",
+              "section": null
+            },
+            {
+              "source": "odf/system/trigger_effect.odf",
+              "line": 4,
+              "value": "\"launcher\"",
+              "canonical_value": "launcher",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "long_range_sensor",
+      "corpora": {
+        "STL": {
+          "assignment_count": 2,
+          "file_count": 2,
+          "examples": [
+            {
+              "source": "odf/special_weapons/long_range_sensor.odf",
+              "line": 46,
+              "value": "\"long_range_sensor\"",
+              "canonical_value": "long_range_sensor",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/long_range_sensoro.odf",
+              "line": 2,
+              "value": "\"long_range_sensor\"",
+              "canonical_value": "long_range_sensor",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        }
+      },
+      "absent_from_baselines": true
+    },
+    {
+      "value": "minelayer",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/special_weapons/gchainp.odf",
+              "line": 40,
+              "value": "\"minelayer\"",
+              "canonical_value": "minelayer",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 3,
+          "file_count": 3,
+          "examples": [
+            {
+              "source": "odf/special_weapons/gamine.odf",
+              "line": 32,
+              "value": "\"minelayer\"",
+              "canonical_value": "minelayer",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/gchainp.odf",
+              "line": 35,
+              "value": "\"minelayer\"",
+              "canonical_value": "minelayer",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/ggrvmine.odf",
+              "line": 32,
+              "value": "\"minelayer\"",
+              "canonical_value": "minelayer",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 3,
+          "file_count": 3,
+          "examples": [
+            {
+              "source": "odf/special_weapons/gamine.odf",
+              "line": 38,
+              "value": "\"minelayer\"",
+              "canonical_value": "minelayer",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/gchainp.odf",
+              "line": 41,
+              "value": "\"minelayer\"",
+              "canonical_value": "minelayer",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/ggrvmine.odf",
+              "line": 38,
+              "value": "\"minelayer\"",
+              "canonical_value": "minelayer",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 9,
+          "file_count": 9,
+          "examples": [
+            {
+              "source": "odf/system/fed_antimattermine.odf",
+              "line": 36,
+              "value": "\"minelayer\"",
+              "canonical_value": "minelayer",
+              "section": null
+            },
+            {
+              "source": "odf/system/fed_probe.odf",
+              "line": 37,
+              "value": "\"minelayer\"",
+              "canonical_value": "minelayer",
+              "section": null
+            },
+            {
+              "source": "odf/system/fed_probe_rom.odf",
+              "line": 37,
+              "value": "\"minelayer\"",
+              "canonical_value": "minelayer",
+              "section": null
+            }
+          ]
+        },
+        "FO_ROOT": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/system/gamine.odf",
+              "line": 38,
+              "value": "\"minelayer\"",
+              "canonical_value": "minelayer",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "nebula_obj",
+      "corpora": {
+        "STL": {
+          "assignment_count": 7,
+          "file_count": 7,
+          "examples": [
+            {
+              "source": "odf/other/mnebula10.odf",
+              "line": 2,
+              "value": "\"nebula_obj\"",
+              "canonical_value": "nebula_obj",
+              "section": null
+            },
+            {
+              "source": "odf/other/mnebula12.odf",
+              "line": 2,
+              "value": "\"nebula_obj\"",
+              "canonical_value": "nebula_obj",
+              "section": null
+            },
+            {
+              "source": "odf/other/mnebula13.odf",
+              "line": 2,
+              "value": "\"nebula_obj\"",
+              "canonical_value": "nebula_obj",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 5,
+          "file_count": 5,
+          "examples": [
+            {
+              "source": "odf/other/mnebula1.odf",
+              "line": 2,
+              "value": "\"nebula_obj\"",
+              "canonical_value": "nebula_obj",
+              "section": null
+            },
+            {
+              "source": "odf/other/mnebula2.odf",
+              "line": 2,
+              "value": "\"nebula_obj\"",
+              "canonical_value": "nebula_obj",
+              "section": null
+            },
+            {
+              "source": "odf/other/mnebula3.odf",
+              "line": 2,
+              "value": "\"nebula_obj\"",
+              "canonical_value": "nebula_obj",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 7,
+          "file_count": 7,
+          "examples": [
+            {
+              "source": "odf/other/FluidicNebula.odf",
+              "line": 2,
+              "value": "\"nebula_obj\"",
+              "canonical_value": "nebula_obj",
+              "section": null
+            },
+            {
+              "source": "odf/other/mnebula10.odf",
+              "line": 2,
+              "value": "\"nebula_obj\"",
+              "canonical_value": "nebula_obj",
+              "section": null
+            },
+            {
+              "source": "odf/other/mnebula12.odf",
+              "line": 2,
+              "value": "\"nebula_obj\"",
+              "canonical_value": "nebula_obj",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 11,
+          "file_count": 11,
+          "examples": [
+            {
+              "source": "odf/system/map_nebula_crystalid.odf",
+              "line": 52,
+              "value": "\"nebula_obj\"",
+              "canonical_value": "nebula_obj",
+              "section": null
+            },
+            {
+              "source": "odf/system/map_nebula_crystalidset.odf",
+              "line": 52,
+              "value": "\"nebula_obj\"",
+              "canonical_value": "nebula_obj",
+              "section": null
+            },
+            {
+              "source": "odf/system/map_nebula_fluid.odf",
+              "line": 48,
+              "value": "\"nebula_obj\"",
+              "canonical_value": "nebula_obj",
+              "section": null
+            }
+          ]
+        },
+        "FO_ROOT": {
+          "assignment_count": 13,
+          "file_count": 13,
+          "examples": [
+            {
+              "source": "odf/system/map_nebula_crystalid.odf",
+              "line": 1,
+              "value": "\"nebula_obj\"",
+              "canonical_value": "nebula_obj",
+              "section": null
+            },
+            {
+              "source": "odf/system/map_nebula_crystalidset.odf",
+              "line": 4,
+              "value": "\"nebula_obj\"",
+              "canonical_value": "nebula_obj",
+              "section": null
+            },
+            {
+              "source": "odf/system/map_nebula_fluid.odf",
+              "line": 1,
+              "value": "\"nebula_obj\"",
+              "canonical_value": "nebula_obj",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "nebula_set",
+      "corpora": {
+        "STL": {
+          "assignment_count": 2,
+          "file_count": 2,
+          "examples": [
+            {
+              "source": "odf/other/nebulaset.odf",
+              "line": 6,
+              "value": "\"nebula_set\"",
+              "canonical_value": "nebula_set",
+              "section": null
+            },
+            {
+              "source": "odf/other/nebulaset1.odf",
+              "line": 6,
+              "value": "\"nebula_set\"",
+              "canonical_value": "nebula_set",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        }
+      },
+      "absent_from_baselines": true
+    },
+    {
+      "value": "p_mining",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/stations/orbital.odf",
+              "line": 37,
+              "value": "\"p_mining\"",
+              "canonical_value": "p_mining",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/stations/orbital.odf",
+              "line": 37,
+              "value": "\"p_mining\"",
+              "canonical_value": "p_mining",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "pdlbeam",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/special_weapons/pdlaser.odf",
+              "line": 2,
+              "value": "\"PDLBeam\"",
+              "canonical_value": "pdlbeam",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/special_weapons/pdlaser.odf",
+              "line": 2,
+              "value": "\"PDLBeam\"",
+              "canonical_value": "pdlbeam",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/special_weapons/pdlaser.odf",
+              "line": 2,
+              "value": "\"PDLBeam\"",
+              "canonical_value": "pdlbeam",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/system/fed_pointdefenseo.odf",
+              "line": 20,
+              "value": "\"PDLBeam\"",
+              "canonical_value": "pdlbeam",
+              "section": null
+            }
+          ]
+        },
+        "FO_ROOT": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "phaser",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/weapons/Phasers/phasero.odf",
+              "line": 4,
+              "value": "\"phaser\"",
+              "canonical_value": "phaser",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 2,
+          "file_count": 2,
+          "examples": [
+            {
+              "source": "odf/special_weapons/uballbm.odf",
+              "line": 2,
+              "value": "\"phaser\"",
+              "canonical_value": "phaser",
+              "section": null
+            },
+            {
+              "source": "odf/weapons/Phasers/phasero.odf",
+              "line": 4,
+              "value": "\"phaser\"",
+              "canonical_value": "phaser",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 4,
+          "file_count": 4,
+          "examples": [
+            {
+              "source": "odf/special_weapons/borgIonBeam.odf",
+              "line": 5,
+              "value": "\"phaser\"",
+              "canonical_value": "phaser",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/quantumEffect.odf",
+              "line": 1,
+              "value": "\"phaser\"",
+              "canonical_value": "phaser",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/uballbm.odf",
+              "line": 2,
+              "value": "\"phaser\"",
+              "canonical_value": "phaser",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 983,
+          "file_count": 983,
+          "examples": [
+            {
+              "source": "odf/system/all_dummyweapono.odf",
+              "line": 22,
+              "value": "\"phaser\"",
+              "canonical_value": "phaser",
+              "section": null
+            },
+            {
+              "source": "odf/system/bor_slizer_adapo.odf",
+              "line": 858,
+              "value": "\"phaser\"",
+              "canonical_value": "phaser",
+              "section": null
+            },
+            {
+              "source": "odf/system/bor_slizer_assio.odf",
+              "line": 858,
+              "value": "\"phaser\"",
+              "canonical_value": "phaser",
+              "section": null
+            }
+          ]
+        },
+        "FO_ROOT": {
+          "assignment_count": 117,
+          "file_count": 117,
+          "examples": [
+            {
+              "source": "odf/system/8472W_basebeam2io.odf",
+              "line": 1,
+              "value": "\"phaser\"",
+              "canonical_value": "phaser",
+              "section": null
+            },
+            {
+              "source": "odf/system/8472W_basebeam2o.odf",
+              "line": 1,
+              "value": "\"phaser\"",
+              "canonical_value": "phaser",
+              "section": null
+            },
+            {
+              "source": "odf/system/8472W_basebeamio.odf",
+              "line": 1,
+              "value": "\"phaser\"",
+              "canonical_value": "phaser",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "photontorpedo",
+      "corpora": {
+        "STL": {
+          "assignment_count": 2,
+          "file_count": 2,
+          "examples": [
+            {
+              "source": "odf/weapons/photons/fbattlephotono.odf",
+              "line": 4,
+              "value": "\"photontorpedo\"",
+              "canonical_value": "photontorpedo",
+              "section": null
+            },
+            {
+              "source": "odf/weapons/Photons/photono.odf",
+              "line": 4,
+              "value": "\"photontorpedo\"",
+              "canonical_value": "photontorpedo",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/weapons/Photons/photono.odf",
+              "line": 4,
+              "value": "\"photontorpedo\"",
+              "canonical_value": "photontorpedo",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 9,
+          "file_count": 9,
+          "examples": [
+            {
+              "source": "odf/weapons/Photons/fbattlephotono.odf",
+              "line": 4,
+              "value": "\"photontorpedo\"",
+              "canonical_value": "photontorpedo",
+              "section": null
+            },
+            {
+              "source": "odf/weapons/Photons/fbphotono.odf",
+              "line": 4,
+              "value": "\"photontorpedo\"",
+              "canonical_value": "photontorpedo",
+              "section": null
+            },
+            {
+              "source": "odf/weapons/Photons/fbridgephotono.odf",
+              "line": 4,
+              "value": "\"photontorpedo\"",
+              "canonical_value": "photontorpedo",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 8,
+          "file_count": 8,
+          "examples": [
+            {
+              "source": "odf/system/kli_compound_romo.odf",
+              "line": 430,
+              "value": "\"photontorpedo\"",
+              "canonical_value": "photontorpedo",
+              "section": null
+            },
+            {
+              "source": "odf/system/kli_compoundo.odf",
+              "line": 430,
+              "value": "\"photontorpedo\"",
+              "canonical_value": "photontorpedo",
+              "section": null
+            },
+            {
+              "source": "odf/system/kliW_luspet3o.odf",
+              "line": 615,
+              "value": "\"photontorpedo\"",
+              "canonical_value": "photontorpedo",
+              "section": null
+            }
+          ]
+        },
+        "FO_ROOT": {
+          "assignment_count": 35,
+          "file_count": 35,
+          "examples": [
+            {
+              "source": "odf/system/borgW_cruistorpo.odf",
+              "line": 17,
+              "value": "\"photontorpedo\"",
+              "canonical_value": "photontorpedo",
+              "section": null
+            },
+            {
+              "source": "odf/system/borgW_desttorpo.odf",
+              "line": 144,
+              "value": "\"photontorpedo\"",
+              "canonical_value": "photontorpedo",
+              "section": null
+            },
+            {
+              "source": "odf/system/borgW_esctorpo.odf",
+              "line": 299,
+              "value": "\"photontorpedo\"",
+              "canonical_value": "photontorpedo",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "planet",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/stations/planet.odf",
+              "line": 3,
+              "value": "\"planet\"",
+              "canonical_value": "planet",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/stations/planet.odf",
+              "line": 3,
+              "value": "\"planet\"",
+              "canonical_value": "planet",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "planet_obj",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/other/mplanet.odf",
+              "line": 2,
+              "value": "\"planet_obj\"",
+              "canonical_value": "planet_obj",
+              "section": "GameObjectClass"
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 15,
+          "file_count": 15,
+          "examples": [
+            {
+              "source": "odf/other/Bcolect1.odf",
+              "line": 2,
+              "value": "\"planet_obj\"",
+              "canonical_value": "planet_obj",
+              "section": "GameObjectClass"
+            },
+            {
+              "source": "odf/other/Bcolect2.odf",
+              "line": 2,
+              "value": "\"planet_obj\"",
+              "canonical_value": "planet_obj",
+              "section": "GameObjectClass"
+            },
+            {
+              "source": "odf/other/Bcolect3.odf",
+              "line": 2,
+              "value": "\"planet_obj\"",
+              "canonical_value": "planet_obj",
+              "section": "GameObjectClass"
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/other/mplanet.odf",
+              "line": 2,
+              "value": "\"planet_obj\"",
+              "canonical_value": "planet_obj",
+              "section": "GameObjectClass"
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "pointdefenselaser",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/special_weapons/gpdlaser.odf",
+              "line": 41,
+              "value": "\"PointDefenseLaser\"",
+              "canonical_value": "pointdefenselaser",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/special_weapons/gpdlaser.odf",
+              "line": 35,
+              "value": "\"PointDefenseLaser\"",
+              "canonical_value": "pointdefenselaser",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/special_weapons/gpdlaser.odf",
+              "line": 41,
+              "value": "\"PointDefenseLaser\"",
+              "canonical_value": "pointdefenselaser",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "polerontorpedo",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/special_weapons/poleron.odf",
+              "line": 2,
+              "value": "\"polerontorpedo\"",
+              "canonical_value": "polerontorpedo",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/special_weapons/poleron.odf",
+              "line": 2,
+              "value": "\"polerontorpedo\"",
+              "canonical_value": "polerontorpedo",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/special_weapons/poleron.odf",
+              "line": 2,
+              "value": "\"polerontorpedo\"",
+              "canonical_value": "polerontorpedo",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/system/Wdampo.odf",
+              "line": 13,
+              "value": "\"polerontorpedo\"",
+              "canonical_value": "polerontorpedo",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "pphaser",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/weapons/Pulse/pulseo.odf",
+              "line": 4,
+              "value": "\"pphaser\"",
+              "canonical_value": "pphaser",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/weapons/Pulse/pulseo.odf",
+              "line": 4,
+              "value": "\"pphaser\"",
+              "canonical_value": "pphaser",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/weapons/Pulse/pulseo.odf",
+              "line": 4,
+              "value": "\"pphaser\"",
+              "canonical_value": "pphaser",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 7,
+          "file_count": 7,
+          "examples": [
+            {
+              "source": "odf/system/dom_breachingr4o.odf",
+              "line": 1754,
+              "value": "\"pphaser\"",
+              "canonical_value": "pphaser",
+              "section": null
+            },
+            {
+              "source": "odf/system/dom_breachingr5o.odf",
+              "line": 1754,
+              "value": "\"pphaser\"",
+              "canonical_value": "pphaser",
+              "section": null
+            },
+            {
+              "source": "odf/system/dom_counterweaponryo.odf",
+              "line": 1893,
+              "value": "\"pphaser\"",
+              "canonical_value": "pphaser",
+              "section": null
+            }
+          ]
+        },
+        "FO_ROOT": {
+          "assignment_count": 3,
+          "file_count": 3,
+          "examples": [
+            {
+              "source": "odf/system/dom_collisiono.odf",
+              "line": 59,
+              "value": "\"pphaser\"",
+              "canonical_value": "pphaser",
+              "section": null
+            },
+            {
+              "source": "odf/system/kli_collisiono.odf",
+              "line": 59,
+              "value": "\"pphaser\"",
+              "canonical_value": "pphaser",
+              "section": null
+            },
+            {
+              "source": "odf/system/nferW_marauder1o.odf",
+              "line": 1,
+              "value": "\"pphaser\"",
+              "canonical_value": "pphaser",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "research",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/stations/research.odf",
+              "line": 18,
+              "value": "\"research\"",
+              "canonical_value": "research",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/stations/research.odf",
+              "line": 17,
+              "value": "\"research\"",
+              "canonical_value": "research",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/stations/research.odf",
+              "line": 17,
+              "value": "\"research\"",
+              "canonical_value": "research",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 5,
+          "file_count": 5,
+          "examples": [
+            {
+              "source": "odf/system/dom_supersensor.odf",
+              "line": 131,
+              "value": "\"research\"",
+              "canonical_value": "research",
+              "section": null
+            },
+            {
+              "source": "odf/system/fed_sf_commandY.odf",
+              "line": 131,
+              "value": "\"research\"",
+              "canonical_value": "research",
+              "section": null
+            },
+            {
+              "source": "odf/system/fed_sf_commandZ.odf",
+              "line": 132,
+              "value": "\"research\"",
+              "canonical_value": "research",
+              "section": null
+            }
+          ]
+        },
+        "FO_ROOT": {
+          "assignment_count": 8,
+          "file_count": 8,
+          "examples": [
+            {
+              "source": "odf/system/8472reinforcement.odf",
+              "line": 14,
+              "value": "\"research\"",
+              "canonical_value": "research",
+              "section": null
+            },
+            {
+              "source": "odf/system/breinforcement.odf",
+              "line": 9,
+              "value": "\"research\"",
+              "canonical_value": "research",
+              "section": null
+            },
+            {
+              "source": "odf/system/creinforcement.odf",
+              "line": 12,
+              "value": "\"research\"",
+              "canonical_value": "research",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "resource",
+      "corpora": {
+        "STL": {
+          "assignment_count": 3,
+          "file_count": 3,
+          "examples": [
+            {
+              "source": "odf/other/ResourceLatinum.odf",
+              "line": 10,
+              "value": "\"resource\"",
+              "canonical_value": "resource",
+              "section": null
+            },
+            {
+              "source": "odf/other/ResourceMoon.odf",
+              "line": 8,
+              "value": "\"resource\"",
+              "canonical_value": "resource",
+              "section": null
+            },
+            {
+              "source": "odf/other/ResourcePlanet.odf",
+              "line": 4,
+              "value": "\"resource\"",
+              "canonical_value": "resource",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        }
+      },
+      "absent_from_baselines": true
+    },
+    {
+      "value": "scrap",
+      "corpora": {
+        "STL": {
+          "assignment_count": 16,
+          "file_count": 16,
+          "examples": [
+            {
+              "source": "odf/other/asteroid.odf",
+              "line": 3,
+              "value": "\"scrap\"",
+              "canonical_value": "scrap",
+              "section": "GameObjectClass"
+            },
+            {
+              "source": "odf/other/asteroid2.odf",
+              "line": 3,
+              "value": "\"scrap\"",
+              "canonical_value": "scrap",
+              "section": "GameObjectClass"
+            },
+            {
+              "source": "odf/other/asteroid3.odf",
+              "line": 3,
+              "value": "\"scrap\"",
+              "canonical_value": "scrap",
+              "section": "GameObjectClass"
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 4,
+          "file_count": 4,
+          "examples": [
+            {
+              "source": "odf/other/asteroid.odf",
+              "line": 3,
+              "value": "\"scrap\"",
+              "canonical_value": "scrap",
+              "section": "GameObjectClass"
+            },
+            {
+              "source": "odf/other/mcomet.odf",
+              "line": 2,
+              "value": "\"scrap\"",
+              "canonical_value": "scrap",
+              "section": "GameObjectClass"
+            },
+            {
+              "source": "odf/other/mdmoon.odf",
+              "line": 2,
+              "value": "\"scrap\"",
+              "canonical_value": "scrap",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 4,
+          "file_count": 4,
+          "examples": [
+            {
+              "source": "odf/other/asteroid.odf",
+              "line": 3,
+              "value": "\"scrap\"",
+              "canonical_value": "scrap",
+              "section": "GameObjectClass"
+            },
+            {
+              "source": "odf/other/mcomet.odf",
+              "line": 2,
+              "value": "\"scrap\"",
+              "canonical_value": "scrap",
+              "section": "GameObjectClass"
+            },
+            {
+              "source": "odf/other/mdmoon.odf",
+              "line": 3,
+              "value": "\"scrap\"",
+              "canonical_value": "scrap",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 17,
+          "file_count": 17,
+          "examples": [
+            {
+              "source": "odf/system/map_dilithium_moon1.odf",
+              "line": 33,
+              "value": "\"scrap\"",
+              "canonical_value": "scrap",
+              "section": null
+            },
+            {
+              "source": "odf/system/map_dilithium_moon2.odf",
+              "line": 33,
+              "value": "\"scrap\"",
+              "canonical_value": "scrap",
+              "section": null
+            },
+            {
+              "source": "odf/system/map_dilithium_moon3.odf",
+              "line": 33,
+              "value": "\"scrap\"",
+              "canonical_value": "scrap",
+              "section": null
+            }
+          ]
+        },
+        "FO_ROOT": {
+          "assignment_count": 18,
+          "file_count": 18,
+          "examples": [
+            {
+              "source": "odf/system/map_biomatter_moon.odf",
+              "line": 1,
+              "value": "\"scrap\"",
+              "canonical_value": "scrap",
+              "section": null
+            },
+            {
+              "source": "odf/system/map_dilithium_moon1.odf",
+              "line": 1,
+              "value": "\"scrap\"",
+              "canonical_value": "scrap",
+              "section": null
+            },
+            {
+              "source": "odf/system/map_dilithium_moon2.odf",
+              "line": 1,
+              "value": "\"scrap\"",
+              "canonical_value": "scrap",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "selfdestruct",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/special_weapons/gselfdes.odf",
+              "line": 41,
+              "value": "\"selfdestruct\"",
+              "canonical_value": "selfdestruct",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/special_weapons/gselfdes.odf",
+              "line": 38,
+              "value": "\"selfdestruct\"",
+              "canonical_value": "selfdestruct",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/special_weapons/gselfdes.odf",
+              "line": 39,
+              "value": "\"selfdestruct\"",
+              "canonical_value": "selfdestruct",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "shipyard",
+      "corpora": {
+        "STL": {
+          "assignment_count": 2,
+          "file_count": 2,
+          "examples": [
+            {
+              "source": "odf/stations/8472_FluidicGate.odf",
+              "line": 95,
+              "value": "\"shipyard\"",
+              "canonical_value": "shipyard",
+              "section": null
+            },
+            {
+              "source": "odf/stations/fyard.odf",
+              "line": 103,
+              "value": "\"shipyard\"",
+              "canonical_value": "shipyard",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 13,
+          "file_count": 13,
+          "examples": [
+            {
+              "source": "odf/other/zkahless.odf",
+              "line": 233,
+              "value": "\"shipyard\"",
+              "canonical_value": "shipyard",
+              "section": null
+            },
+            {
+              "source": "odf/stations/byard.odf",
+              "line": 88,
+              "value": "\"shipyard\"",
+              "canonical_value": "shipyard",
+              "section": null
+            },
+            {
+              "source": "odf/stations/byard2.odf",
+              "line": 91,
+              "value": "\"shipyard\"",
+              "canonical_value": "shipyard",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 15,
+          "file_count": 15,
+          "examples": [
+            {
+              "source": "odf/stations/8472_FluidicGate.odf",
+              "line": 95,
+              "value": "\"shipyard\"",
+              "canonical_value": "shipyard",
+              "section": null
+            },
+            {
+              "source": "odf/stations/brecycle.odf",
+              "line": 96,
+              "value": "\"shipyard\"",
+              "canonical_value": "shipyard",
+              "section": null
+            },
+            {
+              "source": "odf/stations/byard.odf",
+              "line": 109,
+              "value": "\"shipyard\"",
+              "canonical_value": "shipyard",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 259,
+          "file_count": 259,
+          "examples": [
+            {
+              "source": "odf/system/bor_adap_matrix_dom.odf",
+              "line": 196,
+              "value": "\"shipyard\"",
+              "canonical_value": "shipyard",
+              "section": null
+            },
+            {
+              "source": "odf/system/bor_adap_matrix_domA.odf",
+              "line": 203,
+              "value": "\"shipyard\"",
+              "canonical_value": "shipyard",
+              "section": null
+            },
+            {
+              "source": "odf/system/bor_adap_matrix_fed.odf",
+              "line": 196,
+              "value": "\"shipyard\"",
+              "canonical_value": "shipyard",
+              "section": null
+            }
+          ]
+        },
+        "FO_ROOT": {
+          "assignment_count": 31,
+          "file_count": 31,
+          "examples": [
+            {
+              "source": "odf/system/8472basicyard.odf",
+              "line": 18,
+              "value": "\"shipyard\"",
+              "canonical_value": "shipyard",
+              "section": null
+            },
+            {
+              "source": "odf/system/8472gate.odf",
+              "line": 7,
+              "value": "\"shipyard\"",
+              "canonical_value": "shipyard",
+              "section": null
+            },
+            {
+              "source": "odf/system/8472supportresearch.odf",
+              "line": 13,
+              "value": "\"shipyard\"",
+              "canonical_value": "shipyard",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "shockwave",
+      "corpora": {
+        "STL": {
+          "assignment_count": 3,
+          "file_count": 3,
+          "examples": [
+            {
+              "source": "odf/Explosions/swArtillery.odf",
+              "line": 2,
+              "value": "\"shockwave\"",
+              "canonical_value": "shockwave",
+              "section": null
+            },
+            {
+              "source": "odf/Explosions/swMine.odf",
+              "line": 2,
+              "value": "\"shockwave\"",
+              "canonical_value": "shockwave",
+              "section": null
+            },
+            {
+              "source": "odf/Explosions/swSelfDestruct.odf",
+              "line": 2,
+              "value": "\"shockwave\"",
+              "canonical_value": "shockwave",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        }
+      },
+      "absent_from_baselines": true
+    },
+    {
+      "value": "shockwavexplode",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/weapons/Photons/artillery_shockwave_ord.odf",
+              "line": 2,
+              "value": "\"shockwavexplode\"",
+              "canonical_value": "shockwavexplode",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 5,
+          "file_count": 5,
+          "examples": [
+            {
+              "source": "odf/other/xselfd.odf",
+              "line": 2,
+              "value": "\"shockwavexplode\"",
+              "canonical_value": "shockwavexplode",
+              "section": null
+            },
+            {
+              "source": "odf/other/xshock.odf",
+              "line": 2,
+              "value": "\"shockwavexplode\"",
+              "canonical_value": "shockwavexplode",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/wholowav.odf",
+              "line": 2,
+              "value": "\"shockwavexplode\"",
+              "canonical_value": "shockwavexplode",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 17,
+          "file_count": 17,
+          "examples": [
+            {
+              "source": "odf/other/CloakEnhancerWave.odf",
+              "line": 2,
+              "value": "\"shockwavexplode\"",
+              "canonical_value": "shockwavexplode",
+              "section": null
+            },
+            {
+              "source": "odf/other/SensorScramblerWave.odf",
+              "line": 2,
+              "value": "\"shockwavexplode\"",
+              "canonical_value": "shockwavexplode",
+              "section": null
+            },
+            {
+              "source": "odf/other/WeaponEnhancerWave.odf",
+              "line": 2,
+              "value": "\"shockwavexplode\"",
+              "canonical_value": "shockwavexplode",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 19,
+          "file_count": 19,
+          "examples": [
+            {
+              "source": "odf/system/basic_shockwave.odf",
+              "line": 15,
+              "value": "\"shockwavexplode\"",
+              "canonical_value": "shockwavexplode",
+              "section": null
+            },
+            {
+              "source": "odf/system/dom_alphawhitew.odf",
+              "line": 14,
+              "value": "\"shockwavexplode\"",
+              "canonical_value": "shockwavexplode",
+              "section": null
+            },
+            {
+              "source": "odf/system/dom_rangeboostw.odf",
+              "line": 14,
+              "value": "\"shockwavexplode\"",
+              "canonical_value": "shockwavexplode",
+              "section": null
+            }
+          ]
+        },
+        "FO_ROOT": {
+          "assignment_count": 7,
+          "file_count": 7,
+          "examples": [
+            {
+              "source": "odf/system/all_xartil.odf",
+              "line": 2,
+              "value": "\"shockwavexplode\"",
+              "canonical_value": "shockwavexplode",
+              "section": null
+            },
+            {
+              "source": "odf/system/all_xartilr.odf",
+              "line": 2,
+              "value": "\"shockwavexplode\"",
+              "canonical_value": "shockwavexplode",
+              "section": null
+            },
+            {
+              "source": "odf/system/bxartil.odf",
+              "line": 2,
+              "value": "\"shockwavexplode\"",
+              "canonical_value": "shockwavexplode",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "squadron",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/squads/fsquad.odf",
+              "line": 1,
+              "value": "\"squadron\"",
+              "canonical_value": "squadron",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        }
+      },
+      "absent_from_baselines": true
+    },
+    {
+      "value": "starbase",
+      "corpora": {
+        "STL": {
+          "assignment_count": 81,
+          "file_count": 81,
+          "examples": [
+            {
+              "source": "odf/other/spacecollector.odf",
+              "line": 25,
+              "value": "\"starbase\"",
+              "canonical_value": "starbase",
+              "section": null
+            },
+            {
+              "source": "odf/ships/8472_mothership.odf",
+              "line": 149,
+              "value": "\"starbase\"",
+              "canonical_value": "starbase",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/distribution_node.odf",
+              "line": 33,
+              "value": "\"starbase\"",
+              "canonical_value": "starbase",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 6,
+          "file_count": 6,
+          "examples": [
+            {
+              "source": "odf/stations/bbase.odf",
+              "line": 193,
+              "value": "\"starbase\"",
+              "canonical_value": "starbase",
+              "section": null
+            },
+            {
+              "source": "odf/stations/fbase.odf",
+              "line": 197,
+              "value": "\"starbase\"",
+              "canonical_value": "starbase",
+              "section": null
+            },
+            {
+              "source": "odf/stations/fbaseHQ.odf",
+              "line": 177,
+              "value": "\"starbase\"",
+              "canonical_value": "starbase",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 9,
+          "file_count": 9,
+          "examples": [
+            {
+              "source": "odf/ships/8472_heromothership.odf",
+              "line": 130,
+              "value": "\"starbase\"",
+              "canonical_value": "starbase",
+              "section": null
+            },
+            {
+              "source": "odf/ships/8472_mothership.odf",
+              "line": 149,
+              "value": "\"starbase\"",
+              "canonical_value": "starbase",
+              "section": null
+            },
+            {
+              "source": "odf/stations/bbase.odf",
+              "line": 206,
+              "value": "\"starbase\"",
+              "canonical_value": "starbase",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 45,
+          "file_count": 45,
+          "examples": [
+            {
+              "source": "odf/system/8472base.odf",
+              "line": 43,
+              "value": "\"starbase\"",
+              "canonical_value": "starbase",
+              "section": null
+            },
+            {
+              "source": "odf/system/8472baseb.odf",
+              "line": 46,
+              "value": "\"starbase\"",
+              "canonical_value": "starbase",
+              "section": null
+            },
+            {
+              "source": "odf/system/8472basebt.odf",
+              "line": 43,
+              "value": "\"starbase\"",
+              "canonical_value": "starbase",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "tractor_bm",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/weapons/Photons/tractor_bm.odf",
+              "line": 3,
+              "value": "\"tractor_bm\"",
+              "canonical_value": "tractor_bm",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 2,
+          "file_count": 2,
+          "examples": [
+            {
+              "source": "odf/special_weapons/tracbm.odf",
+              "line": 2,
+              "value": "\"tractor_bm\"",
+              "canonical_value": "tractor_bm",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/tracbmo.odf",
+              "line": 2,
+              "value": "\"tractor_bm\"",
+              "canonical_value": "tractor_bm",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 2,
+          "file_count": 2,
+          "examples": [
+            {
+              "source": "odf/special_weapons/tracbm.odf",
+              "line": 2,
+              "value": "\"tractor_bm\"",
+              "canonical_value": "tractor_bm",
+              "section": null
+            },
+            {
+              "source": "odf/special_weapons/tracbmo.odf",
+              "line": 2,
+              "value": "\"tractor_bm\"",
+              "canonical_value": "tractor_bm",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/system/npc_tractorbeamo.odf",
+              "line": 23,
+              "value": "\"tractor_bm\"",
+              "canonical_value": "tractor_bm",
+              "section": null
+            }
+          ]
+        },
+        "FO_ROOT": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/system/npc_tractorbeamo.odf",
+              "line": 1,
+              "value": "\"tractor_bm\"",
+              "canonical_value": "tractor_bm",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    },
+    {
+      "value": "transwarpportal",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/other/transwarp_portal.odf",
+              "line": 27,
+              "value": "\"transwarpPortal\"",
+              "canonical_value": "transwarpportal",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        }
+      },
+      "absent_from_baselines": true
+    },
+    {
+      "value": "turret",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/ships/fcruise1turr.odf",
+              "line": 3,
+              "value": "\"turret\"",
+              "canonical_value": "turret",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        }
+      },
+      "absent_from_baselines": true
+    },
+    {
+      "value": "warp",
+      "corpora": {
+        "STL": {
+          "assignment_count": 1,
+          "file_count": 1,
+          "examples": [
+            {
+              "source": "odf/special_weapons/gwarp.odf",
+              "line": 37,
+              "value": "\"warp\"",
+              "canonical_value": "warp",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        },
+        "FO_ROOT": {
+          "assignment_count": 0,
+          "file_count": 0,
+          "examples": []
+        }
+      },
+      "absent_from_baselines": true
+    },
+    {
+      "value": "wormhole_obj",
+      "corpora": {
+        "STL": {
+          "assignment_count": 3,
+          "file_count": 3,
+          "examples": [
+            {
+              "source": "odf/other/mwrmhole.odf",
+              "line": 5,
+              "value": "\"wormhole_obj\"",
+              "canonical_value": "wormhole_obj",
+              "section": null
+            },
+            {
+              "source": "odf/other/wborgate.odf",
+              "line": 5,
+              "value": "\"wormhole_obj\"",
+              "canonical_value": "wormhole_obj",
+              "section": null
+            },
+            {
+              "source": "odf/other/wporthole.odf",
+              "line": 5,
+              "value": "\"wormhole_obj\"",
+              "canonical_value": "wormhole_obj",
+              "section": null
+            }
+          ]
+        },
+        "STA1 Classic Mod": {
+          "assignment_count": 3,
+          "file_count": 3,
+          "examples": [
+            {
+              "source": "odf/other/mprmgate.odf",
+              "line": 5,
+              "value": "\"wormhole_obj\"",
+              "canonical_value": "wormhole_obj",
+              "section": null
+            },
+            {
+              "source": "odf/other/mwrmhole.odf",
+              "line": 5,
+              "value": "\"wormhole_obj\"",
+              "canonical_value": "wormhole_obj",
+              "section": null
+            },
+            {
+              "source": "odf/other/wborgate.odf",
+              "line": 5,
+              "value": "\"wormhole_obj\"",
+              "canonical_value": "wormhole_obj",
+              "section": null
+            }
+          ]
+        },
+        "STA2 Classic Mod": {
+          "assignment_count": 7,
+          "file_count": 7,
+          "examples": [
+            {
+              "source": "odf/other/borg_portal_effect.odf",
+              "line": 5,
+              "value": "\"wormhole_obj\"",
+              "canonical_value": "wormhole_obj",
+              "section": null
+            },
+            {
+              "source": "odf/other/fluidicrift.odf",
+              "line": 5,
+              "value": "\"wormhole_obj\"",
+              "canonical_value": "wormhole_obj",
+              "section": null
+            },
+            {
+              "source": "odf/other/Fluidicrift2.odf",
+              "line": 6,
+              "value": "\"wormhole_obj\"",
+              "canonical_value": "wormhole_obj",
+              "section": null
+            }
+          ]
+        },
+        "Fleet Ops 4.0": {
+          "assignment_count": 3,
+          "file_count": 3,
+          "examples": [
+            {
+              "source": "odf/system/effect_warp.odf",
+              "line": 45,
+              "value": "\"wormhole_obj\"",
+              "canonical_value": "wormhole_obj",
+              "section": null
+            },
+            {
+              "source": "odf/system/effect_warp2.odf",
+              "line": 44,
+              "value": "\"wormhole_obj\"",
+              "canonical_value": "wormhole_obj",
+              "section": null
+            },
+            {
+              "source": "odf/system/map_wormhole.odf",
+              "line": 36,
+              "value": "\"wormhole_obj\"",
+              "canonical_value": "wormhole_obj",
+              "section": null
+            }
+          ]
+        },
+        "FO_ROOT": {
+          "assignment_count": 4,
+          "file_count": 4,
+          "examples": [
+            {
+              "source": "odf/system/map_bwormhole.odf",
+              "line": 1,
+              "value": "\"wormhole_obj\"",
+              "canonical_value": "wormhole_obj",
+              "section": null
+            },
+            {
+              "source": "odf/system/map_fwormhole.odf",
+              "line": 1,
+              "value": "\"wormhole_obj\"",
+              "canonical_value": "wormhole_obj",
+              "section": null
+            },
+            {
+              "source": "odf/system/map_fwormhole2.odf",
+              "line": 1,
+              "value": "\"wormhole_obj\"",
+              "canonical_value": "wormhole_obj",
+              "section": null
+            }
+          ]
+        }
+      },
+      "absent_from_baselines": false
+    }
+  ]
+}

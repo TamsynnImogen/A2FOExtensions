@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "result": "Static configuration/assets validated and deployed; native visual acceptance pending",
+  "evidence": [
+    "114 combat ODFs changed only by visual shield-value mode",
+    "All source texture bytes preserved and local project copies pinned",
+    "GUI global table preserves parent bytes plus early include",
+    "Medium and tall geometry clears native controls",
+    "197 payload files byte-identical across two full builds",
+    "Installed module selections preserved exactly"
+  ],
+  "known_visual_degradation": "If native ring sprites fail to draw, percent labels remain without ring; treat as failed visual acceptance",
+  "validation_checks": 17373,
+  "latest_receipt": "/home/tamsynn/A2FOHookExtensions/mods/FO4Nexus/deployment-20261101T190258Z.json",
+  "backup": "/home/tamsynn/A2FOHookExtensions/mods/FO4Nexus/revisions/nexus-ui-0.2-20261101T190222Z"
+}

@@ -1,0 +1,12 @@
+[package]
+name = "a2fo_native11_assets"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+a2fo_native11_model = { path = "../a2fo_native11_model" }
+a2fmt = { path = "../../third_party/armada2-refit/menu-renderer/a2fmt" }

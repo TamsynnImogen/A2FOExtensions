@@ -1,0 +1,57 @@
+A2FOExtensions - tri-forward directional shields first pass
+
+ODF mode:
+  directionalShields = 0  native bubble / disabled
+  directionalShields = 1  existing quad
+  directionalShields = 2  tri-forward (forward / port / starboard, 120 degrees each)
+
+Automatic strength distribution:
+  Any omitted active strength, or an active strength explicitly set to 0,
+  receives an equal share of maxShields remaining after explicit strengths.
+
+Example:
+  maxShields = 900
+  directionalShields = 2
+  forwardShieldStrength = 400
+
+Result:
+  Forward   400
+  Aft         0 (inactive)
+  Port      250
+  Starboard 250
+
+All three can be automatic:
+  maxShields = 900
+  directionalShields = 2
+
+Result: 300 / 0 / 300 / 300.
+
+If every active strength is explicitly positive, maxShields may still be
+omitted and is derived from their sum (existing A1 compatibility behaviour).
+
+Required gui_global.spr entries for the tri art:
+  dstc shield_tri_center 0 0 128 128
+  dsts shield_tri_side   0 0 128 128
+
+Expected texture files:
+  shield_tri_center.tga
+  shield_tri_side.tga
+
+The side texture is treated as the PORT version. CraftIdentity uses the same
+dsts sprite with horizontally mirrored U coordinates for STARBOARD.
+
+Tri-forward default 128x128 logical segment areas:
+  Forward:   10  0 108 64
+  Port:       0 48  72 80
+  Starboard: 56 48  72 80
+
+Existing per-facing GUI Area controls and per-Craft *ShieldPos commands still
+override these defaults independently.
+
+TEST NOTE:
+Core host tests passed for legacy quad routing, tri-forward F/P/S routing,
+inactive aft state, initialization/recharge, and 0/0 inactive save-state
+validation. The Windows DLLs were not built in this environment. The one
+runtime experiment to verify is whether Fleet Ops accepts negative texture U
+width for the starboard mirror. If it does not, use a separate mirrored
+starboard sprite in the next patch.

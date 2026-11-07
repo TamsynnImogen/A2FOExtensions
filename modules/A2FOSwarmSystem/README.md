@@ -100,3 +100,13 @@ visibility test is reused before rendering, so ambient traffic follows the
 same visibility/spectator policy and cannot reveal a hidden host. Unsupported
 executables leave both stock passes unchanged and log that the runtime is
 disabled.
+
+## Built-in availability
+
+`A2FOExtensions.dll` provides this feature under the original
+`A2FOSwarmSystem` selection name, with independent menu policy. After an
+activation-generation change, render-only instances are dropped at the next
+`SIMULATION` boundary and rendering stays suppressed until the new generation
+is synchronized. Cleanup does not run from menu or render threads. The
+standalone SDK target remains available, but normal releases do not require its
+DLL and stale copies are ignored during discovery.

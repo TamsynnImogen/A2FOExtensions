@@ -1,0 +1,12 @@
+A2FOExtensions directionalShields mode 4
+========================================
+
+Mode 4 adds two 180-degree shield hemispheres:
+  forward / aft
+
+SPR entry expected by A2FOCraftIdentity:
+  dsh shield_hemi 0 0 128 128
+
+The same upper-half mask is used for both facings; the aft copy is flipped
+vertically at draw time. Port/starboard are inactive (0/0). Existing
+Forward/Aft Area and value-text GUI CFG overrides remain available.

@@ -24,12 +24,16 @@ constexpr std::uint8_t kRemoveFootprintBytes[] = {0x55,0x8b,0xec,0x53,0x56,0x8b,
 // The placement clear signature is verified alongside its argument pushes in
 // CraftClass::CanPlaceHere. All nine stack arguments remain native.
 constexpr std::uint8_t kPlacementClearBytes[] = {0x55,0x8b,0xec,0x83,0xec,0x4c};
-A2FO_InlineHook g_action{}, g_render_footprints{}, g_footprint{}, g_can_place{}, g_placement_clear{};
-A2FO_InlineHook g_build{};
-const void* g_build_process = nullptr;
-const void* g_placement_class = nullptr;
-unsigned g_placement_turns = 0;
-unsigned g_ui_footprint_depth = 0;
+auto& g_action = g_state.action;
+auto& g_render_footprints = g_state.render_footprints;
+auto& g_footprint = g_state.footprint;
+auto& g_can_place = g_state.can_place;
+auto& g_placement_clear = g_state.placement_clear;
+auto& g_build = g_state.build;
+auto& g_build_process = g_state.build_process;
+auto& g_placement_class = g_state.placement_class;
+auto& g_placement_turns = g_state.placement_turns;
+auto& g_ui_footprint_depth = g_state.ui_footprint_depth;
 using Action = void* (__cdecl*)(void*, const void*, const float*, bool*);
 using RenderFootprints = void (__fastcall*)(void*, void*, void*, float);
 using Footprint = void (__fastcall*)(void*, void*, float, float, float*, float*, float*, float*);
@@ -61,7 +65,7 @@ struct UiFootprintScope {
     ~UiFootprintScope() { --g_ui_footprint_depth; }
 };
 unsigned ui_turns(const void* cls) {
-    if (!g_ready || !g_ui_footprint_depth || cls != placement_class()) return 0;
+    if (!runtime_enabled() || !g_ui_footprint_depth || cls != placement_class()) return 0;
     g_control.observe(reinterpret_cast<std::uintptr_t>(cls));
     return g_control.turns;
 }

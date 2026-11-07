@@ -1,0 +1,2949 @@
+{
+  "methodology": "Lead-curated interpretations from authored ODF comments and observed usage, including explicit obsolete/unused warnings; no runtime confirmation or binary consumer claims.",
+  "entries": [
+    {
+      "family": "albedo",
+      "meaning": "Controls how much light scatters inside the nebula cloud. The source describes scattering, rather than object surface reflectance.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "The scattering equation, clamp range and interaction with Extinction are unknown.",
+      "follow_up": "Find how nebula rendering combines Albedo and Extinction.",
+      "sources": [
+        {
+          "source": "odf/other/mnebula6.odf",
+          "line": 106,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.9"
+        }
+      ]
+    },
+    {
+      "family": "attacksoundgroup",
+      "meaning": "Names an audio resource/group associated with nebula attacks/lightning; the supplied asset names and adjacent event fields support this interpretation.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Precise trigger, spatialization and distinction between group and individual sound lookup are unverified.",
+      "follow_up": "Identify the audio event that consumes attacksoundgroup.",
+      "sources": [
+        {
+          "source": "odf/other/mnebula6.odf",
+          "line": 21,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_GRP_Nebula_Lightning\""
+        }
+      ]
+    },
+    {
+      "family": "avoidanceuse",
+      "meaning": "Likely enables or disables collision-avoidance steering for an object; flying asteroid definitions set zero.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "observed 0/1 flag",
+      "caveats": "Zero may disable only a specific avoidance controller, not collision geometry or all steering.",
+      "follow_up": "Find which avoidance controller checks the flag and how it differs from collision prevention.",
+      "sources": [
+        {
+          "source": "odf/other/flyingasteroid.odf",
+          "line": 108,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0;"
+        }
+      ]
+    },
+    {
+      "family": "bankalpha",
+      "meaning": "Intended banking acceleration/deceleration. Class physics comments describe that role, but the base file says it appears ineffective in destination and direct-control modes.",
+      "basis": "documented",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "unknown",
+      "caveats": "Conflicting comments suggest an obsolete or controller-specific field, not a verified feature.",
+      "follow_up": "Find any live consumer of bankAlpha and identify the control mode.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 51,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1;"
+        },
+        {
+          "source": "odf/other/k_brel_physics.odf",
+          "line": 18,
+          "reason": "Authored comments and/or surrounding definitions with observed value 3;"
+        }
+      ]
+    },
+    {
+      "family": "bankalphafractionatrest",
+      "meaning": "An old bank angular-acceleration tuning field, apparently intended as the at-rest fraction of angular acceleration. The base groups these settings under a comment saying they do not seem to do anything.",
+      "basis": "inferred",
+      "confidence": "low",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "dimensionless fraction intended; runtime use unknown",
+      "caveats": "Its intended analogy with Omega fields does not establish an active Alpha consumer.",
+      "follow_up": "Locate a live read-and-use path for bankalphafractionatrest, not merely a parser read.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 155,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1.3333333333333333;"
+        },
+        {
+          "source": "odf/other/class_scout_physics.odf",
+          "line": 60,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1;"
+        }
+      ]
+    },
+    {
+      "family": "bankalphamaxspeedfraction",
+      "meaning": "An old bank angular-acceleration tuning field, apparently intended as the speed fraction for reaching nominal angular acceleration. The base groups these settings under a comment saying they do not seem to do anything.",
+      "basis": "inferred",
+      "confidence": "low",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "dimensionless fraction intended; runtime use unknown",
+      "caveats": "Its intended analogy with Omega fields does not establish an active Alpha consumer.",
+      "follow_up": "Locate a live read-and-use path for bankalphamaxspeedfraction, not merely a parser read.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 158,
+          "reason": "Authored comments and/or surrounding definitions with observed value .25;"
+        }
+      ]
+    },
+    {
+      "family": "bankomega",
+      "meaning": "Defines a maximum banking rate in older class physics definitions. The newer base uses minBankOmega/maxBankOmega endpoints; its comments say doubling the parameter doubles bank rate.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "unknown",
+      "caveats": "Single-field versus endpoint-field precedence and direct-control behavior are unknown.",
+      "follow_up": "Determine which physics class consumes bankOmega and how it combines with min/maxBankOmega.",
+      "sources": [
+        {
+          "source": "odf/other/class_science_physics.odf",
+          "line": 31,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1.5;"
+        }
+      ]
+    },
+    {
+      "family": "bankomegafractionatrest",
+      "meaning": "Controls banking responsiveness at zero throttle relative to its bank-rate parameter, by analogy with the documented turnOmegaFractionAtRest family and explicit class comments.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "relative factor",
+      "caveats": "The base warns that fractions above one use a nontrivial mapping for turn rates; banking may differ.",
+      "follow_up": "Recover the zero-throttle banking calculation rather than assuming a simple multiplier.",
+      "sources": [
+        {
+          "source": "odf/other/class_scout_physics.odf",
+          "line": 59,
+          "reason": "Authored comments and/or surrounding definitions with observed value .2222;"
+        },
+        {
+          "source": "odf/other/class_science_physics.odf",
+          "line": 43,
+          "reason": "Authored comments and/or surrounding definitions with observed value .6;"
+        }
+      ]
+    },
+    {
+      "family": "bankomegamaxspeedfraction",
+      "meaning": "Sets the speed fraction at which bank responsiveness reaches its nominal rate; below this, the documented turn example blends from its at-rest fraction.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "fraction of maximum ship speed",
+      "caveats": "The turn comment is internally inconsistent about endpoints and accidentally mentions bankOmega; the exact curve needs consumer evidence.",
+      "follow_up": "Recover the bank rate-versus-throttle curve and behavior for fractions outside 0..1.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 76,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1;"
+        }
+      ]
+    },
+    {
+      "family": "blobchaos",
+      "meaning": "An unexplained scalar in the nebula blob-generation block. It may vary placement or shape disorder, but all observed values are zero and no comment defines the operation.",
+      "basis": "unresolved",
+      "confidence": "low",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "Exact consumer, default and range behavior remain unverified.",
+      "follow_up": "Find its geometry consumer and compare nonzero values.",
+      "sources": [
+        {
+          "source": "odf/other/mnebula6.odf",
+          "line": 89,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0"
+        }
+      ]
+    },
+    {
+      "family": "blobdensity",
+      "meaning": "Controls the number/density of blobs used to construct procedural nebula geometry; the comment calls it number of blobs even though the value is fractional.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "A value of 2.5 prevents treating this as a literal integer count.",
+      "follow_up": "Resolve count versus density and the conversion to generated blobs.",
+      "sources": [
+        {
+          "source": "odf/other/mnebula6.odf",
+          "line": 86,
+          "reason": "Authored comments and/or surrounding definitions with observed value 2.5"
+        }
+      ]
+    },
+    {
+      "family": "blobsize",
+      "meaning": "Likely sets the size of the blobs forming the nebula, alongside BlobDensity and SizeVariance.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "The file provides no radius-versus-diameter definition or physical units.",
+      "follow_up": "Determine what geometric measurement BlobSize scales.",
+      "sources": [
+        {
+          "source": "odf/other/mnebula6.odf",
+          "line": 87,
+          "reason": "Authored comments and/or surrounding definitions with observed value 600"
+        }
+      ]
+    },
+    {
+      "family": "breakmajorsoundgroup",
+      "meaning": "Names an audio resource/group associated with major component-break explosions; the supplied asset names and adjacent event fields support this interpretation.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Precise trigger, spatialization and distinction between group and individual sound lookup are unverified.",
+      "follow_up": "Identify the audio event that consumes breakmajorsoundgroup.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 217,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_GRP_EXP_Ship_Medium\""
+        },
+        {
+          "source": "odf/other/flyingasteroid.odf",
+          "line": 135,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_GRP_Asteroid_Rock\""
+        }
+      ]
+    },
+    {
+      "family": "breakminorsoundgroup",
+      "meaning": "Names an audio resource/group associated with secondary/minor component-break explosions; the supplied asset names and adjacent event fields support this interpretation.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Precise trigger, spatialization and distinction between group and individual sound lookup are unverified.",
+      "follow_up": "Identify the audio event that consumes breakminorsoundgroup.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 218,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_GRP_EXP_Ship_Small\""
+        },
+        {
+          "source": "odf/other/flyingasteroid.odf",
+          "line": 136,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_GRP_Asteroid_Rock\""
+        }
+      ]
+    },
+    {
+      "family": "breakparticlesystemsmajor",
+      "meaning": "Lists particle systems for the initial explosion when a component such as a nacelle breaks off.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Exact consumer, default and range behavior remain unverified.",
+      "follow_up": "Determine attachment, list playback and component-break event ownership.",
+      "sources": [
+        {
+          "source": "odf/other/test.odf",
+          "line": 35,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"pssparks_02\" \"psexplosion_5\""
+        },
+        {
+          "source": "odf/ships/F_Norway.odf",
+          "line": 136,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"pssparks_02\" \"psexplosion_3\"\"psexplosion_7\""
+        }
+      ]
+    },
+    {
+      "family": "breakparticlesystemssecondary",
+      "meaning": "Lists effects for the precursor/secondary explosion before the main nacelle-break explosion.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "The ship comment establishes ordering but not an exact delay for this field.",
+      "follow_up": "Recover relative event timing and attachment points.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 154,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"psexplosion_blast_wide2\""
+        },
+        {
+          "source": "odf/ships/class_scout.odf",
+          "line": 139,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"explosionb\""
+        }
+      ]
+    },
+    {
+      "family": "can_undock",
+      "meaning": "Marks whether the contextual command menu offers undocking; shipyards set 1 while a transwarp portal sets 0.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "ui",
+      "value_form": "numeric scalar",
+      "units": "observed 0/1 flag",
+      "caveats": "The UI flag does not itself prove a gameplay operation exists or can execute.",
+      "follow_up": "Determine the menu filter and whether the order dispatcher also checks can_undock.",
+      "sources": [
+        {
+          "source": "odf/stations/shipyard.odf",
+          "line": 59,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1"
+        },
+        {
+          "source": "odf/other/transwarp_portal.odf",
+          "line": 63,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0"
+        }
+      ]
+    },
+    {
+      "family": "can_upgrade",
+      "meaning": "Marks whether the contextual command menu offers upgrading; shipyards set 1 while a transwarp portal sets 0.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "ui",
+      "value_form": "numeric scalar",
+      "units": "observed 0/1 flag",
+      "caveats": "The UI flag does not itself prove a gameplay operation exists or can execute.",
+      "follow_up": "Determine the menu filter and whether the order dispatcher also checks can_upgrade.",
+      "sources": [
+        {
+          "source": "odf/stations/shipyard.odf",
+          "line": 60,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1"
+        },
+        {
+          "source": "odf/other/transwarp_portal.odf",
+          "line": 64,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0"
+        }
+      ]
+    },
+    {
+      "family": "color<N>",
+      "meaning": "Supplies the three color components for indexed flare layer N.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "presentation",
+      "value_form": "space-separated numeric tuple",
+      "units": "three color components",
+      "caveats": "Layer indexing is observed; coordinate frame, scale and exact resize rule are not documented.",
+      "follow_up": "Determine color normalization, alpha handling and compositing.",
+      "sources": [
+        {
+          "source": "odf/other/lens_flare.odf",
+          "line": 18,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.12 0.07 0.02"
+        },
+        {
+          "source": "odf/other/lens_flare.odf",
+          "line": 24,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.2 0.2 0.2"
+        }
+      ]
+    },
+    {
+      "family": "commandpointcost",
+      "meaning": "Likely a command-point acquisition/selection cost for the object; the station base places it in its Cost block. This may be roster purchasing rather than a continuously reserved population cap.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar",
+      "units": "command points suggested by name",
+      "caveats": "Spending, reservation, refunds and relation to production points are unverified.",
+      "follow_up": "Find the ship-selection/production point consumer and determine when points are deducted or released.",
+      "sources": [
+        {
+          "source": "odf/stations/station.odf",
+          "line": 143,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0"
+        },
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 40,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0"
+        }
+      ]
+    },
+    {
+      "family": "decalnames",
+      "meaning": "Provides named decal definitions such as damageBurn, damageMelt and damageScorch, apparently a resource catalogue for damage decals.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Enumeration versus preload behavior and reference lookup are unknown.",
+      "follow_up": "Trace registration of names and their use by hull damage effects.",
+      "sources": [
+        {
+          "source": "odf/other/decal.odf",
+          "line": 1,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"damageBurn\" \"damageMelt\" \"damageScorch\""
+        }
+      ]
+    },
+    {
+      "family": "dedicatedrepairpoints",
+      "meaning": "Overrides cfg_DedicatedRepairPoints from the configuration. Repair craft and normal craft use different values, suggesting a dedicated repair allocation or rate.",
+      "basis": "documented",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "The override is explicit; whether the quantity is points per update, per second or a repair budget is not defined.",
+      "follow_up": "Recover the overridden configuration consumer and repair allocation units.",
+      "sources": [
+        {
+          "source": "odf/ships/Repair_borg.odf",
+          "line": 5,
+          "reason": "Authored comments and/or surrounding definitions with observed value 16.0"
+        },
+        {
+          "source": "odf/ships/Repair_borgent.odf",
+          "line": 5,
+          "reason": "Authored comments and/or surrounding definitions with observed value 10.0"
+        }
+      ]
+    },
+    {
+      "family": "defaultsize",
+      "meaning": "Specifies the nebula extents as a three-component vector.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "presentation",
+      "value_form": "comma-separated numeric tuple",
+      "units": "unknown",
+      "caveats": "Axis order and full extents versus half extents are not specified.",
+      "follow_up": "Recover axis ordering and bounding-volume construction.",
+      "sources": [
+        {
+          "source": "odf/other/mnebula6.odf",
+          "line": 118,
+          "reason": "Authored comments and/or surrounding definitions with observed value 900, 400, 900"
+        }
+      ]
+    },
+    {
+      "family": "distance<N>",
+      "meaning": "Positions indexed flare layer N along the flare arrangement, with observed negative and greater-than-one values.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "Layer indexing is observed; coordinate frame, scale and exact resize rule are not documented.",
+      "follow_up": "Recover the source-to-screen-center axis and origin convention.",
+      "sources": [
+        {
+          "source": "odf/other/lens_flare.odf",
+          "line": 17,
+          "reason": "Authored comments and/or surrounding definitions with observed value -0.20"
+        },
+        {
+          "source": "odf/other/lens_flare.odf",
+          "line": 23,
+          "reason": "Authored comments and/or surrounding definitions with observed value -0.30"
+        }
+      ]
+    },
+    {
+      "family": "easytractortarget",
+      "meaning": "Likely marks an object as eligible/easier for tractor-beam interaction; asteroid examples set one.",
+      "basis": "inferred",
+      "confidence": "low",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "observed 0/1 flag",
+      "caveats": "Target eligibility, strength scaling and any size/resistance bypass are not specified.",
+      "follow_up": "Identify the targeting or tractor-force branch controlled by easyTractorTarget.",
+      "sources": [
+        {
+          "source": "odf/other/flyingasteroid.odf",
+          "line": 110,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1;"
+        }
+      ]
+    },
+    {
+      "family": "edenginesound",
+      "meaning": "Names an audio resource/group associated with energy-distribution feedback for engines; the supplied asset names and adjacent event fields support this interpretation.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Precise trigger, spatialization and distinction between group and individual sound lookup are unverified.",
+      "follow_up": "Identify the audio event that consumes edenginesound.",
+      "sources": [
+        {
+          "source": "odf/other/fed.odf",
+          "line": 22,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_ENG_FED_Energy_Engines\""
+        },
+        {
+          "source": "odf/other/rom.odf",
+          "line": 27,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_ENG_ROM_Energy_Engines\""
+        }
+      ]
+    },
+    {
+      "family": "edshieldsound",
+      "meaning": "Names an audio resource/group associated with energy-distribution feedback for shields; the supplied asset names and adjacent event fields support this interpretation.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Precise trigger, spatialization and distinction between group and individual sound lookup are unverified.",
+      "follow_up": "Identify the audio event that consumes edshieldsound.",
+      "sources": [
+        {
+          "source": "odf/other/fed.odf",
+          "line": 23,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_ENG_FED_Energy_Shields\""
+        },
+        {
+          "source": "odf/other/rom.odf",
+          "line": 28,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_ENG_ROM_Energy_Shields\""
+        }
+      ]
+    },
+    {
+      "family": "edweaponsound",
+      "meaning": "Names an audio resource/group associated with energy-distribution feedback for weapons; the supplied asset names and adjacent event fields support this interpretation.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Precise trigger, spatialization and distinction between group and individual sound lookup are unverified.",
+      "follow_up": "Identify the audio event that consumes edweaponsound.",
+      "sources": [
+        {
+          "source": "odf/other/fed.odf",
+          "line": 24,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_ENG_FED_Energy_Weapons\""
+        },
+        {
+          "source": "odf/other/rom.odf",
+          "line": 29,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_ENG_ROM_Energy_Weapons\""
+        }
+      ]
+    },
+    {
+      "family": "endyear",
+      "meaning": "Likely defines the latest year of availability for the craft/object, forming an era-selection interval.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar",
+      "units": "year number",
+      "caveats": "Inclusive endpoints, availability UI versus build filtering and out-of-era objects are unverified.",
+      "follow_up": "Find the era/ship-selection filter and determine interval boundary handling for endyear.",
+      "sources": [
+        {
+          "source": "odf/ships/K_D_3.odf",
+          "line": 41,
+          "reason": "Authored comments and/or surrounding definitions with observed value 2300"
+        },
+        {
+          "source": "odf/ships/F_Nova.odf",
+          "line": 65,
+          "reason": "Authored comments and/or surrounding definitions with observed value 2400"
+        }
+      ]
+    },
+    {
+      "family": "enginemaxhitpoints",
+      "meaning": "Sets the high hit-point endpoint for the engine system. Station hull comments label the pair as level-1 and level-5 values.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "system hit points",
+      "caveats": "Repeated hull assignments occur in one station; runtime duplicate precedence and interpolation are not established.",
+      "follow_up": "Recover how the engine level selects or interpolates hit-point capacity.",
+      "sources": [
+        {
+          "source": "odf/other/flyingasteroid.odf",
+          "line": 97,
+          "reason": "Authored comments and/or surrounding definitions with observed value 210;"
+        }
+      ]
+    },
+    {
+      "family": "enginemaxstatistic",
+      "meaning": "Likely the high engine-performance endpoint paired with the speed scaling factor engineMinStatistic.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "unknown",
+      "caveats": "Endpoint scale differs dramatically between base craft and asteroid data.",
+      "follow_up": "Determine normalization and interpolation with enginesLevel/min/maxLevel.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 69,
+          "reason": "Authored comments and/or surrounding definitions with observed value 2"
+        },
+        {
+          "source": "odf/other/flyingasteroid.odf",
+          "line": 99,
+          "reason": "Authored comments and/or surrounding definitions with observed value 100;"
+        }
+      ]
+    },
+    {
+      "family": "engineminhitpoints",
+      "meaning": "Sets the low hit-point endpoint for the engine system. Station hull comments label the pair as level-1 and level-5 values.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "system hit points",
+      "caveats": "Repeated hull assignments occur in one station; runtime duplicate precedence and interpolation are not established.",
+      "follow_up": "Recover how the engine level selects or interpolates hit-point capacity.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 67,
+          "reason": "Authored comments and/or surrounding definitions with observed value 100"
+        },
+        {
+          "source": "odf/other/flyingasteroid.odf",
+          "line": 96,
+          "reason": "Authored comments and/or surrounding definitions with observed value 170;"
+        }
+      ]
+    },
+    {
+      "family": "engineminstatistic",
+      "meaning": "The low endpoint for the engine performance statistic used as a speed scaling factor; paired with engineMaxStatistic.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "performance scale/rating, normalization unknown",
+      "caveats": "craft.odf uses 1..2 while flying-asteroid definitions use 100..100; do not assume one universal scale.",
+      "follow_up": "Recover the level-to-statistic mapping and consumers of this endpoint.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 68,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1"
+        },
+        {
+          "source": "odf/other/flyingasteroid.odf",
+          "line": 98,
+          "reason": "Authored comments and/or surrounding definitions with observed value 100;"
+        }
+      ]
+    },
+    {
+      "family": "engineslevel",
+      "meaning": "Sets the general upgradeable engines statistic displayed to the player. The ODF labels these values as system levels, separate from hit-point endpoints.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar",
+      "units": "system-level rating, exact scale unknown",
+      "caveats": "The conversion from level to current hit points or performance is not recovered.",
+      "follow_up": "Recover how engineslevel feeds damage, performance and upgrade calculations.",
+      "sources": [
+        {
+          "source": "odf/ships/K_D_3.odf",
+          "line": 27,
+          "reason": "Authored comments and/or surrounding definitions with observed value 875"
+        },
+        {
+          "source": "odf/ships/K_D_7.odf",
+          "line": 29,
+          "reason": "Authored comments and/or surrounding definitions with observed value 710"
+        }
+      ]
+    },
+    {
+      "family": "enginestartonesound",
+      "meaning": "Names an audio resource/group associated with a first engine-start audio stage; the supplied asset names and adjacent event fields support this interpretation.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Precise trigger, spatialization and distinction between group and individual sound lookup are unverified.",
+      "follow_up": "Identify the audio event that consumes enginestartonesound.",
+      "sources": [
+        {
+          "source": "odf/other/fed.odf",
+          "line": 26,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_ENG_FED_Startup_1\""
+        },
+        {
+          "source": "odf/other/rom.odf",
+          "line": 31,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_ENG_ROM_Startup_1\""
+        }
+      ]
+    },
+    {
+      "family": "enginestarttwosound",
+      "meaning": "Names an audio resource/group associated with a second engine-start audio stage; the supplied asset names and adjacent event fields support this interpretation.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Precise trigger, spatialization and distinction between group and individual sound lookup are unverified.",
+      "follow_up": "Identify the audio event that consumes enginestarttwosound.",
+      "sources": [
+        {
+          "source": "odf/other/fed.odf",
+          "line": 27,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_ENG_FED_Startup_2\""
+        },
+        {
+          "source": "odf/other/rom.odf",
+          "line": 32,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_ENG_ROM_Startup_2\""
+        }
+      ]
+    },
+    {
+      "family": "evasion<N>",
+      "meaning": "Defines a captain evasion-skill level row, changing chance to be hit. The triple follows the bonus/XP/extra-information schema, with negative bonus values.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "comma-separated numeric tuple",
+      "units": "hit-chance modifier, XP threshold, auxiliary value",
+      "caveats": "The level4 timed comment is not sufficient to infer the underlying probability calculation.",
+      "follow_up": "Determine how the negative bonus affects opposing targeting and timed level4 behavior.",
+      "sources": [
+        {
+          "source": "odf/other/fed.odf",
+          "line": 187,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.0,   500.0,  0.0"
+        },
+        {
+          "source": "odf/other/fed.odf",
+          "line": 191,
+          "reason": "Authored comments and/or surrounding definitions with observed value -0.50,  500.0, 30.0"
+        }
+      ]
+    },
+    {
+      "family": "explosionmajorsoundgroup",
+      "meaning": "Names an audio resource/group associated with the major death explosion; the supplied asset names and adjacent event fields support this interpretation.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Precise trigger, spatialization and distinction between group and individual sound lookup are unverified.",
+      "follow_up": "Identify the audio event that consumes explosionmajorsoundgroup.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 215,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_GRP_EXP_Ship_Large\""
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 149,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_GRP_EXP_Station\""
+        }
+      ]
+    },
+    {
+      "family": "explosionminorsoundgroup",
+      "meaning": "Names an audio resource/group associated with minor pre-destruction explosions; the supplied asset names and adjacent event fields support this interpretation.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Precise trigger, spatialization and distinction between group and individual sound lookup are unverified.",
+      "follow_up": "Identify the audio event that consumes explosionminorsoundgroup.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 216,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_GRP_EXP_Ship_Small\""
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 150,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_GRP_EXP_Station\""
+        }
+      ]
+    },
+    {
+      "family": "explosionparticlesystemsmajor",
+      "meaning": "Lists particle systems when a dying craft finally explodes and breaks into chunks.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Exact consumer, default and range behavior remain unverified.",
+      "follow_up": "Recover major-explosion event timing and placement of multiple systems.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 143,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"psexplosion_major\""
+        },
+        {
+          "source": "odf/ships/class_scout.odf",
+          "line": 128,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"psexplosion_minor\""
+        }
+      ]
+    },
+    {
+      "family": "explosionparticlesystemsminor",
+      "meaning": "Lists small explosions played in succession while the dying ship drifts, before final breakup.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Exact consumer, default and range behavior remain unverified.",
+      "follow_up": "Recover sequencing, repeated emission and cancellation/removal behavior.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 145,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"psexplosion_blast_wide1\""
+        },
+        {
+          "source": "odf/ships/class_scout.odf",
+          "line": 130,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"explosionb\""
+        }
+      ]
+    },
+    {
+      "family": "extinction",
+      "meaning": "Controls absorption of light by the nebula cloud matter.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "No scale, distance convention or absorption equation is documented.",
+      "follow_up": "Recover the absorption equation and its dependence on cloud depth.",
+      "sources": [
+        {
+          "source": "odf/other/mnebula6.odf",
+          "line": 108,
+          "reason": "Authored comments and/or surrounding definitions with observed value 8.0"
+        }
+      ]
+    },
+    {
+      "family": "flarefadespeed",
+      "meaning": "Controls how quickly a flare fades when its source becomes obstructed.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "This is a speed parameter, not proven to be a duration in seconds.",
+      "follow_up": "Recover fade integration and whether reveal uses the same speed.",
+      "sources": [
+        {
+          "source": "odf/other/lens_flare.odf",
+          "line": 9,
+          "reason": "Authored comments and/or surrounding definitions with observed value 2.0"
+        }
+      ]
+    },
+    {
+      "family": "flareminvisibility",
+      "meaning": "Requires a minimum visible fraction of the source before displaying its lens flare.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "visible fraction; source calls it percentage and uses 0.4",
+      "caveats": "Exact consumer, default and range behavior remain unverified.",
+      "follow_up": "Determine how source visibility is measured and whether the threshold has hysteresis.",
+      "sources": [
+        {
+          "source": "odf/other/lens_flare.odf",
+          "line": 12,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.4"
+        }
+      ]
+    },
+    {
+      "family": "flashbrightness",
+      "meaning": "Likely scales reveal-flash intensity.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "Exact consumer, default and range behavior remain unverified.",
+      "follow_up": "Recover intensity scaling and saturation behavior.",
+      "sources": [
+        {
+          "source": "odf/other/lens_flare.odf",
+          "line": 5,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1.0"
+        }
+      ]
+    },
+    {
+      "family": "flashsize",
+      "meaning": "Likely scales the reveal flash sprite.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "Exact consumer, default and range behavior remain unverified.",
+      "follow_up": "Determine whether scale is relative to the source or screen dimensions.",
+      "sources": [
+        {
+          "source": "odf/other/lens_flare.odf",
+          "line": 4,
+          "reason": "Authored comments and/or surrounding definitions with observed value 3.0"
+        }
+      ]
+    },
+    {
+      "family": "flashspeed",
+      "meaning": "A timing or animation-speed parameter of the reveal flash; the file does not define the waveform.",
+      "basis": "unresolved",
+      "confidence": "low",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "Exact consumer, default and range behavior remain unverified.",
+      "follow_up": "Determine whether it controls growth, fade or animation playback.",
+      "sources": [
+        {
+          "source": "odf/other/lens_flare.odf",
+          "line": 3,
+          "reason": "Authored comments and/or surrounding definitions with observed value .75"
+        }
+      ]
+    },
+    {
+      "family": "flashsprite",
+      "meaning": "Names the sprite for the bright flash shown when the flare is revealed.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Exact consumer, default and range behavior remain unverified.",
+      "follow_up": "Identify reveal/occlusion events and sprite lookup rules.",
+      "sources": [
+        {
+          "source": "odf/other/lens_flare.odf",
+          "line": 2,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"x_light_star\""
+        }
+      ]
+    },
+    {
+      "family": "flashtriggerspeed",
+      "meaning": "An unexplained trigger-speed scalar associated with the lens-flare flash.",
+      "basis": "unresolved",
+      "confidence": "low",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "Exact consumer, default and range behavior remain unverified.",
+      "follow_up": "Determine whether it sets a visibility-change threshold, repeat delay or pulse speed.",
+      "sources": [
+        {
+          "source": "odf/other/lens_flare.odf",
+          "line": 6,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.3"
+        }
+      ]
+    },
+    {
+      "family": "geometrybias",
+      "meaning": "Weights the central nebula blob relative to its tentacles, according to the adjacent comment.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "Exact consumer, default and range behavior remain unverified.",
+      "follow_up": "Determine the bias formula and whether negative values are valid.",
+      "sources": [
+        {
+          "source": "odf/other/mnebula6.odf",
+          "line": 91,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0"
+        }
+      ]
+    },
+    {
+      "family": "has_orders",
+      "meaning": "Likely marks objects as accepting or exposing orders in the contextual menu system.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "ui",
+      "value_form": "numeric scalar",
+      "units": "observed 0/1 flag",
+      "caveats": "The UI flag does not itself prove a gameplay operation exists or can execute.",
+      "follow_up": "Determine the menu filter and whether the order dispatcher also checks has_orders.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 132,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1"
+        },
+        {
+          "source": "odf/other/transwarp_portal.odf",
+          "line": 34,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0"
+        }
+      ]
+    },
+    {
+      "family": "hasengines",
+      "meaning": "Declares whether the craft has a engine system. Base craft definitions enable it and organize related properties beneath it.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "observed 0/1 flag",
+      "caveats": "Whether zero removes a system, disables interactions, or only affects UI is not established.",
+      "follow_up": "Trace which system-creation and targeting paths test hasengines.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 66,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 48,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0"
+        }
+      ]
+    },
+    {
+      "family": "hashull",
+      "meaning": "Declares whether the craft has a hull system. Base craft definitions enable it and organize related properties beneath it.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "observed 0/1 flag",
+      "caveats": "Whether zero removes a system, disables interactions, or only affects UI is not established.",
+      "follow_up": "Trace which system-creation and targeting paths test hashull.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 44,
+          "reason": "Direct Hull System / we have a hull system comments."
+        }
+      ]
+    },
+    {
+      "family": "hassensors",
+      "meaning": "Declares whether the craft has a sensor system. Base craft definitions enable it and organize related properties beneath it.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "observed 0/1 flag",
+      "caveats": "Whether zero removes a system, disables interactions, or only affects UI is not established.",
+      "follow_up": "Trace which system-creation and targeting paths test hassensors.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 76,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1"
+        },
+        {
+          "source": "odf/ships/K_D_3.odf",
+          "line": 127,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1;"
+        }
+      ]
+    },
+    {
+      "family": "hasshield",
+      "meaning": "A singular-spelling shield-presence flag in many ship definitions. It probably indicates a shield system, but the base also uses hasShields.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "observed 0/1 flag",
+      "caveats": "Singular/plural aliasing or typo behavior is unknown; both spellings are preserved.",
+      "follow_up": "Check which spellings the Legacy parser consumes and whether one overrides the other.",
+      "sources": [
+        {
+          "source": "odf/ships/K_D_3.odf",
+          "line": 124,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1;"
+        },
+        {
+          "source": "odf/ships/B_ent_cube.odf",
+          "line": 135,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0;"
+        }
+      ]
+    },
+    {
+      "family": "hasshields",
+      "meaning": "Declares whether the craft has a shield system. Base craft definitions enable it and organize related properties beneath it.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar",
+      "units": "observed 0/1 flag",
+      "caveats": "Whether zero removes a system, disables interactions, or only affects UI is not established.",
+      "follow_up": "Trace which system-creation and targeting paths test hasshields.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 52,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1"
+        },
+        {
+          "source": "odf/ships/F_NX_01.odf",
+          "line": 27,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0"
+        }
+      ]
+    },
+    {
+      "family": "hasweapons",
+      "meaning": "Declares whether the craft has a weapon system. Base craft definitions enable it and organize related properties beneath it.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "observed 0/1 flag",
+      "caveats": "Whether zero removes a system, disables interactions, or only affects UI is not established.",
+      "follow_up": "Trace which system-creation and targeting paths test hasweapons.",
+      "sources": [
+        {
+          "source": "odf/ships/craft.odf",
+          "line": 79,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1"
+        },
+        {
+          "source": "odf/stations/station.odf",
+          "line": 59,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0"
+        }
+      ]
+    },
+    {
+      "family": "height<N>",
+      "meaning": "Sets a separate vertical size for indexed flare layer N, paired with widthN.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "Layer indexing is observed; coordinate frame, scale and exact resize rule are not documented.",
+      "follow_up": "Determine height units and how it overrides sizeN.",
+      "sources": [
+        {
+          "source": "odf/other/lens_flare.odf",
+          "line": 43,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.2"
+        },
+        {
+          "source": "odf/other/lens_flare.odf",
+          "line": 51,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.8"
+        }
+      ]
+    },
+    {
+      "family": "hulllevel",
+      "meaning": "Sets the general upgradeable hull statistic displayed to the player. The ODF labels these values as system levels, separate from hit-point endpoints.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar",
+      "units": "system-level rating, exact scale unknown",
+      "caveats": "The conversion from level to current hit points or performance is not recovered.",
+      "follow_up": "Recover how hulllevel feeds damage, performance and upgrade calculations.",
+      "sources": [
+        {
+          "source": "odf/ships/B_tng_rectanglebomb.odf",
+          "line": 27,
+          "reason": "Authored comments and/or surrounding definitions with observed value 800"
+        },
+        {
+          "source": "odf/stations/command.odf",
+          "line": 7,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1200"
+        }
+      ]
+    },
+    {
+      "family": "hullmaxhitpoints",
+      "meaning": "Sets the high hit-point endpoint for the hull system. Station hull comments label the pair as level-1 and level-5 values.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "system hit points",
+      "caveats": "Repeated hull assignments occur in one station; runtime duplicate precedence and interpolation are not established.",
+      "follow_up": "Recover how the hull level selects or interpolates hit-point capacity.",
+      "sources": [
+        {
+          "source": "odf/other/flyingasteroid_LARGE.odf",
+          "line": 70,
+          "reason": "Authored comments and/or surrounding definitions with observed value 250;"
+        },
+        {
+          "source": "odf/stations/ent03_fed_station.odf",
+          "line": 77,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1200"
+        }
+      ]
+    },
+    {
+      "family": "hullminhitpoints",
+      "meaning": "Sets the low hit-point endpoint for the hull system. Station hull comments label the pair as level-1 and level-5 values.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "system hit points",
+      "caveats": "Repeated hull assignments occur in one station; runtime duplicate precedence and interpolation are not established.",
+      "follow_up": "Recover how the hull level selects or interpolates hit-point capacity.",
+      "sources": [
+        {
+          "source": "odf/stations/ent03_fed_station.odf",
+          "line": 76,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1000"
+        },
+        {
+          "source": "odf/stations/ent03_fed_station.odf",
+          "line": 88,
+          "reason": "Authored comments and/or surrounding definitions with observed value 2500"
+        }
+      ]
+    },
+    {
+      "family": "isasteroid",
+      "meaning": "Marks an asteroid definition as asteroid-like, probably for categorization or special handling.",
+      "basis": "inferred",
+      "confidence": "low",
+      "role": "schema",
+      "value_form": "numeric scalar",
+      "units": "observed 0/1 flag",
+      "caveats": "The sole surviving definition does not identify any behavior controlled by the flag.",
+      "follow_up": "Find the classification consumer and whether the field is legacy/dead data.",
+      "sources": [
+        {
+          "source": "odf/other/aster.odf",
+          "line": 12,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1"
+        }
+      ]
+    },
+    {
+      "family": "klaxonsound",
+      "meaning": "Names an audio resource/group associated with the faction warning/klaxon; the supplied asset names and adjacent event fields support this interpretation.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Precise trigger, spatialization and distinction between group and individual sound lookup are unverified.",
+      "follow_up": "Identify the audio event that consumes klaxonsound.",
+      "sources": [
+        {
+          "source": "odf/other/fed.odf",
+          "line": 25,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_AMB_FED_Klaxon\""
+        },
+        {
+          "source": "odf/other/rom.odf",
+          "line": 30,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_AMB_ROM_Klaxon\""
+        }
+      ]
+    },
+    {
+      "family": "levelouttime",
+      "meaning": "Original intent: begin leveling the craft this many seconds before reaching the end of its path. The base annotates it as read but unused, while class files still override it.",
+      "basis": "documented",
+      "confidence": "medium",
+      "role": "presentation",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "seconds per authored comment",
+      "caveats": "A declared value is not evidence of a functioning leveling timer.",
+      "follow_up": "Determine whether any path controller actually uses levelOutTime.",
+      "sources": [
+        {
+          "source": "odf/other/class_scout_physics.odf",
+          "line": 97,
+          "reason": "Authored comments and/or surrounding definitions with observed value 9;"
+        },
+        {
+          "source": "odf/other/class_destroyer_physics.odf",
+          "line": 98,
+          "reason": "Authored comments and/or surrounding definitions with observed value .001;"
+        }
+      ]
+    },
+    {
+      "family": "massscale",
+      "meaning": "Multiplies ship mass calculated from its size under an equal-density assumption; 1.0 is normal.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "dimensionless multiplier",
+      "caveats": "Exact consumer, default and range behavior remain unverified.",
+      "follow_up": "Determine whether mass affects collision impulses, movement, break effects or multiple paths.",
+      "sources": [
+        {
+          "source": "odf/ships/class_support.odf",
+          "line": 124,
+          "reason": "Authored comments and/or surrounding definitions with observed value 5.0;"
+        },
+        {
+          "source": "odf/ships/class_artillery.odf",
+          "line": 136,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1.0;"
+        }
+      ]
+    },
+    {
+      "family": "maxbackwardaccel",
+      "meaning": "Likely the maximum-Engine-stat endpoint for backward acceleration, using the minFoo/maxFoo Engine-stat convention.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "unknown",
+      "caveats": "The forward-acceleration comment also mentions backward movement, and old backwardAccel is annotated unused; these may be separate or obsolete paths.",
+      "follow_up": "Determine whether min/maxBackwardAccel are actually used independently of forward acceleration.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 26,
+          "reason": "Authored comments and/or surrounding definitions with observed value 80.0;"
+        },
+        {
+          "source": "odf/other/class_scout_physics.odf",
+          "line": 16,
+          "reason": "Authored comments and/or surrounding definitions with observed value 160.0;"
+        }
+      ]
+    },
+    {
+      "family": "maxbankangle",
+      "meaning": "Maximum bank angle for a destination-mode turn. The source recommends matching the direct-control full-speed maximum to avoid inconsistent presentation.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "presentation",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "angle; degrees likely but not explicitly declared here",
+      "caveats": "Exact consumer, default and range behavior remain unverified.",
+      "follow_up": "Recover the clamp and whether zero disables all banking controllers.",
+      "sources": [
+        {
+          "source": "odf/other/class_destroyer_physics.odf",
+          "line": 69,
+          "reason": "Authored comments and/or surrounding definitions with observed value 50;"
+        },
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 88,
+          "reason": "Authored comments and/or surrounding definitions with observed value 45;"
+        }
+      ]
+    },
+    {
+      "family": "maxbankomega",
+      "meaning": "Sets the maximum-Engine-stat endpoint for banking-rate parameter. craft_physics.odf explains that minFoo/maxFoo depend on the ship Engine stat, rather than being throttle limits.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "unknown",
+      "caveats": "Exact interpolation, conversion units and damaged-engine interaction are unverified.",
+      "follow_up": "Recover Engine-stat interpolation and the banking-rate parameter consumer.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 47,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1.5;"
+        },
+        {
+          "source": "odf/other/craft_borg_physics.odf",
+          "line": 71,
+          "reason": "Authored comments and/or surrounding definitions with observed value .02;"
+        }
+      ]
+    },
+    {
+      "family": "maxdcbankangleatfullspeed",
+      "meaning": "Sets the full-speed endpoint of maximum bank angle in direct-control mode. The source describes a linear interpolation between the two endpoints with current speed.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "angle; likely degrees, not explicitly specified",
+      "caveats": "Destination-mode maxBankAngle is a separate setting.",
+      "follow_up": "Recover speed normalization, endpoint clamps and mode switching.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 94,
+          "reason": "Authored comments and/or surrounding definitions with observed value 45"
+        },
+        {
+          "source": "odf/other/class_scout_physics.odf",
+          "line": 74,
+          "reason": "Authored comments and/or surrounding definitions with observed value 25"
+        }
+      ]
+    },
+    {
+      "family": "maxdcbankangleatzerospeed",
+      "meaning": "Sets the zero-speed endpoint of maximum bank angle in direct-control mode. The source describes a linear interpolation between the two endpoints with current speed.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "angle; likely degrees, not explicitly specified",
+      "caveats": "Destination-mode maxBankAngle is a separate setting.",
+      "follow_up": "Recover speed normalization, endpoint clamps and mode switching.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 93,
+          "reason": "Authored comments and/or surrounding definitions with observed value 10"
+        },
+        {
+          "source": "odf/other/class_scout_physics.odf",
+          "line": 73,
+          "reason": "Authored comments and/or surrounding definitions with observed value 2"
+        }
+      ]
+    },
+    {
+      "family": "maxforwardaccel",
+      "meaning": "Sets the maximum-Engine-stat endpoint for forward/backward translational acceleration. craft_physics.odf explains that minFoo/maxFoo depend on the ship Engine stat, rather than being throttle limits.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "unknown",
+      "caveats": "Exact interpolation, conversion units and damaged-engine interaction are unverified. The forward field comment says it also applies backward; separate backward fields still require checking.",
+      "follow_up": "Recover Engine-stat interpolation and the forward/backward translational acceleration consumer.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 23,
+          "reason": "Authored comments and/or surrounding definitions with observed value 40.0;"
+        },
+        {
+          "source": "odf/other/class_scout_physics.odf",
+          "line": 13,
+          "reason": "Authored comments and/or surrounding definitions with observed value 80.0;"
+        }
+      ]
+    },
+    {
+      "family": "maxpitchomega",
+      "meaning": "Sets the maximum-Engine-stat endpoint for maximum pitch rate. craft_physics.odf explains that minFoo/maxFoo depend on the ship Engine stat, rather than being throttle limits.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "unknown",
+      "caveats": "Exact interpolation, conversion units and damaged-engine interaction are unverified.",
+      "follow_up": "Recover Engine-stat interpolation and the maximum pitch rate consumer.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 38,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1.3;"
+        },
+        {
+          "source": "odf/other/k_brel_physics.odf",
+          "line": 5,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1.1;"
+        }
+      ]
+    },
+    {
+      "family": "maxshieldhitpoints",
+      "meaning": "Likely directly specifies a shield hit-point capacity/maximum; it appears in station tweaks and ship SHIELD VALUES blocks.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar",
+      "units": "shield hit points",
+      "caveats": "Relationship to shieldMin/MaxHitPoints, shieldLevel and facing pools is unknown.",
+      "follow_up": "Identify which shield-capacity field wins when endpoint and direct maximum fields coexist.",
+      "sources": [
+        {
+          "source": "odf/stations/K_Tos_Shipyard.odf",
+          "line": 16,
+          "reason": "Authored comments and/or surrounding definitions with observed value 100"
+        },
+        {
+          "source": "odf/ships/v_surak.odf",
+          "line": 105,
+          "reason": "Authored comments and/or surrounding definitions with observed value 250"
+        }
+      ]
+    },
+    {
+      "family": "maxshipspeed",
+      "meaning": "Sets the maximum-Engine-stat endpoint for full-throttle impulse speed. craft_physics.odf explains that minFoo/maxFoo depend on the ship Engine stat, rather than being throttle limits.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "unknown",
+      "caveats": "A low-stat top-speed setting is not a minimum allowed travel speed.",
+      "follow_up": "Recover Engine-stat interpolation and the full-throttle impulse speed consumer.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 55,
+          "reason": "Authored comments and/or surrounding definitions with observed value 250.0;"
+        },
+        {
+          "source": "odf/other/class_scout_physics.odf",
+          "line": 42,
+          "reason": "Authored comments and/or surrounding definitions with observed value 450.0;"
+        }
+      ]
+    },
+    {
+      "family": "maxspeedfractionforbank",
+      "meaning": "An old speed-fraction threshold for beginning banking. The comments describe the original intent but group the base settings as obsolete or obscure.",
+      "basis": "documented",
+      "confidence": "medium",
+      "role": "presentation",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "fraction of maximum impulse speed",
+      "caveats": "No separate meaning for the min/max pair is specified, and current use is doubtful.",
+      "follow_up": "Determine whether these thresholds gate banking or have been replaced by newer angle/rate fields.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 110,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.1;"
+        },
+        {
+          "source": "odf/other/class_scout_physics.odf",
+          "line": 80,
+          "reason": "Authored comments and/or surrounding definitions with observed value .2;"
+        }
+      ]
+    },
+    {
+      "family": "maxturnomega",
+      "meaning": "Sets the maximum-Engine-stat endpoint for maximum yaw turning rate. craft_physics.odf explains that minFoo/maxFoo depend on the ship Engine stat, rather than being throttle limits.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "unknown",
+      "caveats": "Exact interpolation, conversion units and damaged-engine interaction are unverified.",
+      "follow_up": "Recover Engine-stat interpolation and the maximum yaw turning rate consumer.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 31,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1.3;"
+        },
+        {
+          "source": "odf/other/craft_borg_physics.odf",
+          "line": 57,
+          "reason": "Authored comments and/or surrounding definitions with observed value .02;"
+        }
+      ]
+    },
+    {
+      "family": "menuobject<N>",
+      "meaning": "Lists indexed ODF targets in the object-editor/menu hierarchy: e_fed points to era, Enterprise and station submenus. The entries may refer to submenus or placeable objects depending on the target ODF.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "ui",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Index start, gaps, target classification and missing-file behavior are unverified.",
+      "follow_up": "Trace the menu loader and distinguish submenu navigation from object placement.",
+      "sources": [
+        {
+          "source": "odf/other/e_fed.odf",
+          "line": 2,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ef_ent_comba.odf\""
+        },
+        {
+          "source": "odf/other/e_fed.odf",
+          "line": 3,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ef_tos_comba.odf\""
+        }
+      ]
+    },
+    {
+      "family": "minbackwardaccel",
+      "meaning": "Likely the minimum-Engine-stat endpoint for backward acceleration, using the minFoo/maxFoo Engine-stat convention.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "unknown",
+      "caveats": "The forward-acceleration comment also mentions backward movement, and old backwardAccel is annotated unused; these may be separate or obsolete paths.",
+      "follow_up": "Determine whether min/maxBackwardAccel are actually used independently of forward acceleration.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 25,
+          "reason": "Authored comments and/or surrounding definitions with observed value 40.0;"
+        },
+        {
+          "source": "odf/other/class_cruiser_physics.odf",
+          "line": 15,
+          "reason": "Authored comments and/or surrounding definitions with observed value 30.0;"
+        }
+      ]
+    },
+    {
+      "family": "minbankomega",
+      "meaning": "Sets the minimum-Engine-stat endpoint for banking-rate parameter. craft_physics.odf explains that minFoo/maxFoo depend on the ship Engine stat, rather than being throttle limits.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "unknown",
+      "caveats": "Exact interpolation, conversion units and damaged-engine interaction are unverified.",
+      "follow_up": "Recover Engine-stat interpolation and the banking-rate parameter consumer.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 46,
+          "reason": "Authored comments and/or surrounding definitions with observed value .6;"
+        },
+        {
+          "source": "odf/other/craft_borg_physics.odf",
+          "line": 70,
+          "reason": "Authored comments and/or surrounding definitions with observed value .01;"
+        }
+      ]
+    },
+    {
+      "family": "minforwardaccel",
+      "meaning": "Sets the minimum-Engine-stat endpoint for forward/backward translational acceleration. craft_physics.odf explains that minFoo/maxFoo depend on the ship Engine stat, rather than being throttle limits.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "unknown",
+      "caveats": "Exact interpolation, conversion units and damaged-engine interaction are unverified. The forward field comment says it also applies backward; separate backward fields still require checking.",
+      "follow_up": "Recover Engine-stat interpolation and the forward/backward translational acceleration consumer.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 22,
+          "reason": "Authored comments and/or surrounding definitions with observed value 20.0;"
+        },
+        {
+          "source": "odf/other/class_scout_physics.odf",
+          "line": 12,
+          "reason": "Authored comments and/or surrounding definitions with observed value 20.0;"
+        }
+      ]
+    },
+    {
+      "family": "minpitchomega",
+      "meaning": "Sets the minimum-Engine-stat endpoint for maximum pitch rate. craft_physics.odf explains that minFoo/maxFoo depend on the ship Engine stat, rather than being throttle limits.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "unknown",
+      "caveats": "Exact interpolation, conversion units and damaged-engine interaction are unverified.",
+      "follow_up": "Recover Engine-stat interpolation and the maximum pitch rate consumer.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 37,
+          "reason": "Authored comments and/or surrounding definitions with observed value .3;"
+        },
+        {
+          "source": "odf/other/k_brel_physics.odf",
+          "line": 4,
+          "reason": "Authored comments and/or surrounding definitions with observed value .1;"
+        }
+      ]
+    },
+    {
+      "family": "minshipspeed",
+      "meaning": "Sets the minimum-Engine-stat endpoint for full-throttle impulse speed. craft_physics.odf explains that minFoo/maxFoo depend on the ship Engine stat, rather than being throttle limits.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "unknown",
+      "caveats": "A low-stat top-speed setting is not a minimum allowed travel speed.",
+      "follow_up": "Recover Engine-stat interpolation and the full-throttle impulse speed consumer.",
+      "sources": [
+        {
+          "source": "odf/other/class_support_physics.odf",
+          "line": 16,
+          "reason": "Authored comments and/or surrounding definitions with observed value 100.0;"
+        },
+        {
+          "source": "odf/other/r_transport_physics.odf",
+          "line": 6,
+          "reason": "Authored comments and/or surrounding definitions with observed value 75.0;"
+        }
+      ]
+    },
+    {
+      "family": "minspeedfractionforbank",
+      "meaning": "An old speed-fraction threshold for beginning banking. The comments describe the original intent but group the base settings as obsolete or obscure.",
+      "basis": "documented",
+      "confidence": "medium",
+      "role": "presentation",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "fraction of maximum impulse speed",
+      "caveats": "No separate meaning for the min/max pair is specified, and current use is doubtful.",
+      "follow_up": "Determine whether these thresholds gate banking or have been replaced by newer angle/rate fields.",
+      "sources": [
+        {
+          "source": "odf/other/class_artillery_physics.odf",
+          "line": 53,
+          "reason": "Authored comments and/or surrounding definitions with observed value .05;"
+        },
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 109,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.01;"
+        }
+      ]
+    },
+    {
+      "family": "minturnomega",
+      "meaning": "Sets the minimum-Engine-stat endpoint for maximum yaw turning rate. craft_physics.odf explains that minFoo/maxFoo depend on the ship Engine stat, rather than being throttle limits.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "unknown",
+      "caveats": "Exact interpolation, conversion units and damaged-engine interaction are unverified.",
+      "follow_up": "Recover Engine-stat interpolation and the maximum yaw turning rate consumer.",
+      "sources": [
+        {
+          "source": "odf/other/craft_borg_physics.odf",
+          "line": 56,
+          "reason": "Authored comments and/or surrounding definitions with observed value .01;"
+        },
+        {
+          "source": "odf/other/class_scout_physics.odf",
+          "line": 19,
+          "reason": "Authored comments and/or surrounding definitions with observed value .3;"
+        }
+      ]
+    },
+    {
+      "family": "music",
+      "meaning": "Names a race music-playlist ODF; the faction file explicitly labels it Music play list.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Exact consumer, default and range behavior remain unverified.",
+      "follow_up": "Recover playlist inheritance and how race selection chooses it.",
+      "sources": [
+        {
+          "source": "odf/other/fed.odf",
+          "line": 19,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"fed_music.odf\""
+        },
+        {
+          "source": "odf/other/rom.odf",
+          "line": 24,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"rom_music.odf\""
+        }
+      ]
+    },
+    {
+      "family": "musicdefeat",
+      "meaning": "Lists music resources for the defeat; names of the referenced ST_MUSIC assets corroborate the intended event.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Selection order, randomization, transition conditions and looping are not specified.",
+      "follow_up": "Determine which event selects musicdefeat and how multiple tracks are scheduled.",
+      "sources": [
+        {
+          "source": "odf/other/fed_music.odf",
+          "line": 4,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_MUSIC_FED_DEFEAT_1\""
+        },
+        {
+          "source": "odf/other/kli_music.odf",
+          "line": 4,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_MUSIC_KLI_DEFEAT_1\""
+        }
+      ]
+    },
+    {
+      "family": "musichigh",
+      "meaning": "Lists music resources for the high-intensity/action state; names of the referenced ST_MUSIC assets corroborate the intended event.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Selection order, randomization, transition conditions and looping are not specified.",
+      "follow_up": "Determine which event selects musichigh and how multiple tracks are scheduled.",
+      "sources": [
+        {
+          "source": "odf/other/fed_music.odf",
+          "line": 2,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_MUSIC_FED_HIGH_1\" \"ST_MUSIC_FED_HIGH_2\""
+        },
+        {
+          "source": "odf/other/kli_music.odf",
+          "line": 2,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_MUSIC_KLI_HIGH_1\" \"ST_MUSIC_KLI_HIGH_2\" \"ST_MUSIC_KLI_HIGH_3\""
+        }
+      ]
+    },
+    {
+      "family": "musiclow",
+      "meaning": "Lists music resources for the low-intensity/quiet state; names of the referenced ST_MUSIC assets corroborate the intended event.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Selection order, randomization, transition conditions and looping are not specified.",
+      "follow_up": "Determine which event selects musiclow and how multiple tracks are scheduled.",
+      "sources": [
+        {
+          "source": "odf/other/fed_music.odf",
+          "line": 1,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_MUSIC_FED_LOW_1\" \"ST_MUSIC_FED_LOW_2\" \"ST_MUSIC_FED_LOW_3\" \"ST_MUSIC_FED_LOW"
+        },
+        {
+          "source": "odf/other/kli_music.odf",
+          "line": 1,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_MUSIC_KLI_LOW_1\" \"ST_MUSIC_KLI_LOW_2\""
+        }
+      ]
+    },
+    {
+      "family": "musicshiplost",
+      "meaning": "Lists music resources for the ship-loss event; names of the referenced ST_MUSIC assets corroborate the intended event.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Selection order, randomization, transition conditions and looping are not specified.",
+      "follow_up": "Determine which event selects musicshiplost and how multiple tracks are scheduled.",
+      "sources": [
+        {
+          "source": "odf/other/fed_music.odf",
+          "line": 5,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_MUSIC_FED_SHIP_LOST_1\""
+        },
+        {
+          "source": "odf/other/kli_music.odf",
+          "line": 5,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_MUSIC_KLI_SHIP_LOST_1\""
+        }
+      ]
+    },
+    {
+      "family": "musicvictory",
+      "meaning": "Lists music resources for the victory; names of the referenced ST_MUSIC assets corroborate the intended event.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Selection order, randomization, transition conditions and looping are not specified.",
+      "follow_up": "Determine which event selects musicvictory and how multiple tracks are scheduled.",
+      "sources": [
+        {
+          "source": "odf/other/fed_music.odf",
+          "line": 3,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_MUSIC_FED_VICTORY_1\" \"ST_MUSIC_FED_VICTORY_2\" \"ST_MUSIC_FED_VICTORY_3\""
+        },
+        {
+          "source": "odf/other/kli_music.odf",
+          "line": 3,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_MUSIC_KLI_VICTORY_1\""
+        }
+      ]
+    },
+    {
+      "family": "noisetype",
+      "meaning": "Selects a nebula noise mode. The source explicitly lists 0, 1 and 2 as supported values but does not name their algorithms.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "enum values 0, 1, 2 documented",
+      "caveats": "Exact consumer, default and range behavior remain unverified.",
+      "follow_up": "Identify the three algorithm branches and fallback for other values.",
+      "sources": [
+        {
+          "source": "odf/other/mnebula6.odf",
+          "line": 102,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1"
+        }
+      ]
+    },
+    {
+      "family": "numberofplayableraces",
+      "meaning": "Sets the declared number of playable races, observed as four in races.odf.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "schema",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "The number may bound list enumeration rather than independently enable/disable factions.",
+      "follow_up": "Recover faction-list indexing and how nonplayable races are handled.",
+      "sources": [
+        {
+          "source": "odf/other/races.odf",
+          "line": 2,
+          "reason": "Authored comments and/or surrounding definitions with observed value 4"
+        }
+      ]
+    },
+    {
+      "family": "perlinoctaves",
+      "meaning": "Controls the number of noise contributions: more octaves give finer variation and fewer produce a smoother surface.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "Exact consumer, default and range behavior remain unverified.",
+      "follow_up": "Recover permitted octave counts and persistence weighting.",
+      "sources": [
+        {
+          "source": "odf/other/mnebula6.odf",
+          "line": 100,
+          "reason": "Authored comments and/or surrounding definitions with observed value 2"
+        }
+      ]
+    },
+    {
+      "family": "perlinscale",
+      "meaning": "Adjusts the main geometric detail of the nebula; the source says higher values produce more tentacles.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "The exact frequency/coordinate scaling is not specified.",
+      "follow_up": "Recover how noise coordinates and density thresholds use the scale.",
+      "sources": [
+        {
+          "source": "odf/other/mnebula6.odf",
+          "line": 96,
+          "reason": "Authored comments and/or surrounding definitions with observed value 2"
+        }
+      ]
+    },
+    {
+      "family": "perlintiling",
+      "meaning": "A nebula noise/geometry setting likely controlling spatial repetition or tiling scale.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "No comment establishes whether this is a period, distance or count.",
+      "follow_up": "Trace the parameter into the noise coordinate calculation.",
+      "sources": [
+        {
+          "source": "odf/other/mnebula6.odf",
+          "line": 93,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1000"
+        }
+      ]
+    },
+    {
+      "family": "pitchalphamaxspeedfraction",
+      "meaning": "An old pitch angular-acceleration tuning field, apparently intended as the speed fraction for reaching nominal angular acceleration. The base groups these settings under a comment saying they do not seem to do anything.",
+      "basis": "inferred",
+      "confidence": "low",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "dimensionless fraction intended; runtime use unknown",
+      "caveats": "Its intended analogy with Omega fields does not establish an active Alpha consumer.",
+      "follow_up": "Locate a live read-and-use path for pitchalphamaxspeedfraction, not merely a parser read.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 157,
+          "reason": "Authored comments and/or surrounding definitions with observed value .25;"
+        },
+        {
+          "source": "odf/other/class_scout_physics.odf",
+          "line": 54,
+          "reason": "Authored comments and/or surrounding definitions with observed value .2;"
+        }
+      ]
+    },
+    {
+      "family": "pitchdefaultscale",
+      "meaning": "Intended scale for returning toward pitchDefault while resting; old comments say nonpositive values preserve the previous pitch. An inline note associates it with sMaxAccelController.",
+      "basis": "documented",
+      "confidence": "medium",
+      "role": "presentation",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "unknown",
+      "caveats": "The base labels this area obsolete/obscure; this is intended controller behavior, not confirmed execution.",
+      "follow_up": "Verify whether the Legacy build still uses sMaxAccelController and this parameter.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 123,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1.0;"
+        },
+        {
+          "source": "odf/other/k_brel_physics.odf",
+          "line": 15,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1.0;"
+        }
+      ]
+    },
+    {
+      "family": "pitchomegamaxspeedfraction",
+      "meaning": "Sets the speed fraction at which pitch responsiveness reaches its nominal rate; below this, the documented turn example blends from its at-rest fraction.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "fraction of maximum ship speed",
+      "caveats": "The turn comment is internally inconsistent about endpoints and accidentally mentions bankOmega; the exact curve needs consumer evidence.",
+      "follow_up": "Recover the pitch rate-versus-throttle curve and behavior for fractions outside 0..1.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 75,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.25;"
+        }
+      ]
+    },
+    {
+      "family": "planetracetexture",
+      "meaning": "Names the race-specific planet texture, likely for captured/owned-planet appearance. The source explicitly calls it a planet race-specific texture.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Capture/ownership switching is inferred from the asset name, not documented event logic.",
+      "follow_up": "Determine which planet material is replaced and when ownership refreshes it.",
+      "sources": [
+        {
+          "source": "odf/other/fed.odf",
+          "line": 56,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"fed_capture\""
+        },
+        {
+          "source": "odf/other/rom.odf",
+          "line": 61,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"romulan_capture\""
+        }
+      ]
+    },
+    {
+      "family": "primarycolor",
+      "meaning": "Sets the dominant nebula color.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "presentation",
+      "value_form": "space-separated numeric tuple",
+      "units": "three observed color components; normalization not explicitly documented",
+      "caveats": "Exact consumer, default and range behavior remain unverified.",
+      "follow_up": "Determine color range and blending with SecondaryColor.",
+      "sources": [
+        {
+          "source": "odf/other/mnebula6.odf",
+          "line": 114,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.5 0.5 0"
+        },
+        {
+          "source": "odf/other/mnebula7.odf",
+          "line": 115,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.5 0 0"
+        }
+      ]
+    },
+    {
+      "family": "raceicon",
+      "meaning": "Names the faction/race icon sprite.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Specific UI panels and fallback handling are unknown.",
+      "follow_up": "Identify race-selection, roster and HUD consumers of the icon.",
+      "sources": [
+        {
+          "source": "odf/other/fed.odf",
+          "line": 65,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"race_icon_fed\""
+        },
+        {
+          "source": "odf/other/rom.odf",
+          "line": 71,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"race_icon_rom\""
+        }
+      ]
+    },
+    {
+      "family": "reallength",
+      "meaning": "Likely sets the intended physical/model length used for scaling a vessel or station. It consistently sits in CHANGE THE SCALE blocks.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "world-length scale, physical meter equivalence unverified",
+      "caveats": "Axis, bounding-box measurement, collision scale and interaction with scaleM3D are unknown.",
+      "follow_up": "Recover the geometric measurement used to scale a model to realLength.",
+      "sources": [
+        {
+          "source": "odf/ships/K_Neghvar.odf",
+          "line": 130,
+          "reason": "Authored comments and/or surrounding definitions with observed value 725"
+        },
+        {
+          "source": "odf/ships/k_tos_boss.odf",
+          "line": 110,
+          "reason": "Authored comments and/or surrounding definitions with observed value 800"
+        }
+      ]
+    },
+    {
+      "family": "receivesrandomsystemdamage",
+      "meaning": "A likely opt-out flag for random subsystem damage; several Borg hulls explicitly set it to zero.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar",
+      "units": "observed 0/1 flag",
+      "caveats": "This does not prove immunity to targeted system hits or destruction effects.",
+      "follow_up": "Determine which damage path checks the flag and how targeted hits interact.",
+      "sources": [
+        {
+          "source": "odf/ships/B_tng_cube.odf",
+          "line": 122,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0"
+        }
+      ]
+    },
+    {
+      "family": "repair<N>",
+      "meaning": "Defines a captain repair-skill level row. The first component is a repair-rate multiplier, the second an XP threshold and the third extra information; the level4 row explicitly switches to self-repair and does not use the multiplier.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "comma-separated numeric tuple",
+      "units": "repair multiplier, XP threshold, auxiliary value",
+      "caveats": "The self-repair activation and targets/rates are not defined by the data.",
+      "follow_up": "Recover the level4 branch and which repair process earlier multipliers affect.",
+      "sources": [
+        {
+          "source": "odf/other/fed.odf",
+          "line": 194,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1.0,  500.0, 0.0"
+        },
+        {
+          "source": "odf/other/fed.odf",
+          "line": 198,
+          "reason": "Authored comments and/or surrounding definitions with observed value 4.0,  500.0, 0.0"
+        }
+      ]
+    },
+    {
+      "family": "resize<N>",
+      "meaning": "A flag on selected flare layers, likely controlling resizing of those layers.",
+      "basis": "inferred",
+      "confidence": "low",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "Layer indexing is observed; coordinate frame, scale and exact resize rule are not documented.",
+      "follow_up": "Find what resizeN changes and which event triggers resizing.",
+      "sources": [
+        {
+          "source": "odf/other/lens_flare.odf",
+          "line": 31,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1"
+        }
+      ]
+    },
+    {
+      "family": "scalem3d",
+      "meaning": "Scales an M3D model; nebula comments explicitly describe changing M3D scale and ship blocks use the same name.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "dimensionless scale intended",
+      "caveats": "Global versus per-axis scaling and precedence with realLength are unverified.",
+      "follow_up": "Determine how scaleM3D combines with realLength and object/editor scale.",
+      "sources": [
+        {
+          "source": "odf/ships/Castellani.odf",
+          "line": 36,
+          "reason": "Authored comments and/or surrounding definitions with observed value 4.5"
+        },
+        {
+          "source": "odf/ships/F_Enterprise_E.odf",
+          "line": 83,
+          "reason": "Authored comments and/or surrounding definitions with observed value 5"
+        }
+      ]
+    },
+    {
+      "family": "secondarycolor",
+      "meaning": "Sets the nebula secondary color.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "presentation",
+      "value_form": "comma-separated numeric tuple",
+      "units": "three observed color components; normalization not explicitly documented",
+      "caveats": "Exact consumer, default and range behavior remain unverified.",
+      "follow_up": "Determine which density or light regions use the secondary color.",
+      "sources": [
+        {
+          "source": "odf/other/mnebula6.odf",
+          "line": 116,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0,0,0"
+        }
+      ]
+    },
+    {
+      "family": "sensorslevel",
+      "meaning": "Sets the general upgradeable sensors statistic displayed to the player. The ODF labels these values as system levels, separate from hit-point endpoints.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar",
+      "units": "system-level rating, exact scale unknown",
+      "caveats": "The conversion from level to current hit points or performance is not recovered.",
+      "follow_up": "Recover how sensorslevel feeds damage, performance and upgrade calculations.",
+      "sources": [
+        {
+          "source": "odf/ships/K_Death_Rite.odf",
+          "line": 30,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1050"
+        },
+        {
+          "source": "odf/ships/K_Death_Rite_Detector.odf",
+          "line": 31,
+          "reason": "Authored comments and/or surrounding definitions with observed value 700"
+        }
+      ]
+    },
+    {
+      "family": "shielddamagedcolor",
+      "meaning": "Sets the shield effect color in the damaged condition. The race comment explicitly uses components out of 1 rather than 255.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "presentation",
+      "value_form": "space-separated numeric tuple",
+      "units": "normalized three-component color",
+      "caveats": "The health threshold and blend versus discrete switch are not specified.",
+      "follow_up": "Recover the shield-health color transition rule and RGB channel ordering.",
+      "sources": [
+        {
+          "source": "odf/other/fed.odf",
+          "line": 210,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.32 0.5 0.69"
+        },
+        {
+          "source": "odf/other/rom.odf",
+          "line": 209,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.0 0.5 0.0"
+        }
+      ]
+    },
+    {
+      "family": "shieldhealthycolor",
+      "meaning": "Sets the shield effect color in the healthy condition. The race comment explicitly uses components out of 1 rather than 255.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "presentation",
+      "value_form": "space-separated numeric tuple",
+      "units": "normalized three-component color",
+      "caveats": "The health threshold and blend versus discrete switch are not specified.",
+      "follow_up": "Recover the shield-health color transition rule and RGB channel ordering.",
+      "sources": [
+        {
+          "source": "odf/other/fed.odf",
+          "line": 209,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.32 0.5 0.69"
+        },
+        {
+          "source": "odf/other/rom.odf",
+          "line": 208,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.0 0.5 0.0"
+        }
+      ]
+    },
+    {
+      "family": "shieldslevel",
+      "meaning": "Sets the general upgradeable shields statistic displayed to the player. The ODF labels these values as system levels, separate from hit-point endpoints.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar",
+      "units": "system-level rating, exact scale unknown",
+      "caveats": "The conversion from level to current hit points or performance is not recovered.",
+      "follow_up": "Recover how shieldslevel feeds damage, performance and upgrade calculations.",
+      "sources": [
+        {
+          "source": "odf/ships/K_D_3.odf",
+          "line": 28,
+          "reason": "Authored comments and/or surrounding definitions with observed value 600"
+        },
+        {
+          "source": "odf/ships/K_D_7.odf",
+          "line": 30,
+          "reason": "Authored comments and/or surrounding definitions with observed value 900"
+        }
+      ]
+    },
+    {
+      "family": "sidedraghalflife",
+      "meaning": "Intended time for sideways velocity to halve, controlling side-slip/skidding. Old comments say zero removes side-slip and one means a one-second halving time.",
+      "basis": "documented",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "seconds per authored example",
+      "caveats": "Annotated as read and possibly used, inside the obsolete/obscure block.",
+      "follow_up": "Recover the lateral damping equation, zero handling and active controller.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 140,
+          "reason": "Authored comments and/or surrounding definitions with observed value .3;"
+        }
+      ]
+    },
+    {
+      "family": "sizevariance",
+      "meaning": "Likely controls variation of nebula blob sizes around BlobSize.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "The only sampled value is zero; absolute versus relative spread and distribution are unknown.",
+      "follow_up": "Recover the size-variation distribution and scaling.",
+      "sources": [
+        {
+          "source": "odf/other/mnebula6.odf",
+          "line": 88,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0"
+        }
+      ]
+    },
+    {
+      "family": "special<N>",
+      "meaning": "Defines the race-specific captain special-skill table. Federation Command reduces the apparent damage to functioning systems, whereas Klingon Honor gives temporary hit/damage bonuses after a finishing blow; identical keys do not represent one universal ability.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "comma-separated numeric tuple",
+      "units": "race-specific bonus, XP threshold, auxiliary value/timing",
+      "caveats": "Triple components and final-level exceptions must be interpreted by race; Borg/Romulan rows may be placeholders.",
+      "follow_up": "Recover each race-specific special branch, duration handling and unsupported-race fallback.",
+      "sources": [
+        {
+          "source": "odf/other/kling.odf",
+          "line": 204,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.0,   500.0, 0.0"
+        },
+        {
+          "source": "odf/other/fed.odf",
+          "line": 202,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.0,   500.0, 0.0"
+        }
+      ]
+    },
+    {
+      "family": "splattexturename",
+      "meaning": "Names a texture used by the nebula generator/renderer; the observed nebula_density asset suggests a density or splat map.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Density sampling versus sprite rendering is not established.",
+      "follow_up": "Find the texture binding and channel usage in the nebula renderer.",
+      "sources": [
+        {
+          "source": "odf/other/mnebula6.odf",
+          "line": 120,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"nebula_density\""
+        }
+      ]
+    },
+    {
+      "family": "sprite<N>",
+      "meaning": "Names the sprite for indexed flare layer N; layer comments identify rays, streaks, rings and spots.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Layer indexing is observed; coordinate frame, scale and exact resize rule are not documented.",
+      "follow_up": "Recover layer enumeration and sprite-resource lookup.",
+      "sources": [
+        {
+          "source": "odf/other/lens_flare.odf",
+          "line": 21,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"x_sunflare_03\""
+        },
+        {
+          "source": "odf/other/lens_flare.odf",
+          "line": 118,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"x_sunflare_03\""
+        }
+      ]
+    },
+    {
+      "family": "spritedensity",
+      "meaning": "Controls the population/density of nebula sprites relative to a sprite-sized volume.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "The density sampling and volume formula are unknown.",
+      "follow_up": "Determine how SpriteDensity and SpriteSize determine the generated count.",
+      "sources": [
+        {
+          "source": "odf/other/mnebula6.odf",
+          "line": 112,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1.1"
+        }
+      ]
+    },
+    {
+      "family": "spritesize",
+      "meaning": "Sets the size of sprites used to render the procedural nebula.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "World or screen space and radius-versus-width remain unknown.",
+      "follow_up": "Recover sprite geometry scaling and interaction with model scale.",
+      "sources": [
+        {
+          "source": "odf/other/mnebula6.odf",
+          "line": 110,
+          "reason": "Authored comments and/or surrounding definitions with observed value 200.0"
+        }
+      ]
+    },
+    {
+      "family": "startyear",
+      "meaning": "Likely defines the earliest year of availability for the craft/object, forming an era-selection interval.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar",
+      "units": "year number",
+      "caveats": "Inclusive endpoints, availability UI versus build filtering and out-of-era objects are unverified.",
+      "follow_up": "Find the era/ship-selection filter and determine interval boundary handling for startyear.",
+      "sources": [
+        {
+          "source": "odf/ships/F_UberBirdofPrey.odf",
+          "line": 42,
+          "reason": "Authored comments and/or surrounding definitions with observed value 2000"
+        },
+        {
+          "source": "odf/ships/K_D_3.odf",
+          "line": 40,
+          "reason": "Authored comments and/or surrounding definitions with observed value 2253"
+        }
+      ]
+    },
+    {
+      "family": "suppresseswarp",
+      "meaning": "A flag indicating whether a nebula prevents warping. A zero value is explicitly annotated as allowing warp in that nebula.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar",
+      "units": "observed 0/1 flag",
+      "caveats": "Affected volume, entry/exit handling and warp already in progress are unknown.",
+      "follow_up": "Determine whether it blocks warp activation, cancels travel, or both.",
+      "sources": [
+        {
+          "source": "odf/other/mnebula12.odf",
+          "line": 83,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0"
+        },
+        {
+          "source": "odf/other/mnebula13.odf",
+          "line": 86,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1"
+        }
+      ]
+    },
+    {
+      "family": "targeting<N>",
+      "meaning": "Defines a captain targeting-skill level row. The race file describes each triple as bonus, XP until the next level, and extra information; targeting affects chance to hit.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "comma-separated numeric tuple",
+      "units": "hit-chance bonus, XP threshold, auxiliary value",
+      "caveats": "Level4 comments mention 95% for 30 seconds although the first value remains 0.50; simple addition is not proven.",
+      "follow_up": "Recover indexed level progression, bonus formula and interpretation of the third component.",
+      "sources": [
+        {
+          "source": "odf/other/fed.odf",
+          "line": 180,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.0,   500.0,  0.0"
+        },
+        {
+          "source": "odf/other/fed.odf",
+          "line": 184,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.50,  500.0, 30.0"
+        }
+      ]
+    },
+    {
+      "family": "texturename",
+      "meaning": "Names the texture resource for a nebula-set definition, observed as nebula_test.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "The map layout and relationship to UnitsPerTexel are unknown.",
+      "follow_up": "Trace which nebula-set texture channels are consumed.",
+      "sources": [
+        {
+          "source": "odf/other/nebulaset.odf",
+          "line": 15,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"nebula_test\""
+        },
+        {
+          "source": "odf/other/nebulaset1.odf",
+          "line": 15,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"nebula_test1\""
+        }
+      ]
+    },
+    {
+      "family": "tractorbeamcolor",
+      "meaning": "Sets the faction tractor-beam color as three components.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "presentation",
+      "value_form": "space-separated numeric tuple",
+      "units": "three color components; normalization inferred from samples",
+      "caveats": "Exact consumer, default and range behavior remain unverified.",
+      "follow_up": "Determine color normalization and interaction with beam sprite/material.",
+      "sources": [
+        {
+          "source": "odf/other/fed.odf",
+          "line": 213,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0 .1 .5"
+        }
+      ]
+    },
+    {
+      "family": "transience",
+      "meaning": "Controls the decrease of noise over successive octaves.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "Division, attenuation curve and allowed range are not documented.",
+      "follow_up": "Determine how each octave amplitude is derived from Transience.",
+      "sources": [
+        {
+          "source": "odf/other/mnebula6.odf",
+          "line": 104,
+          "reason": "Authored comments and/or surrounding definitions with observed value 2"
+        }
+      ]
+    },
+    {
+      "family": "turnalphamaxspeedfraction",
+      "meaning": "An old turn angular-acceleration tuning field, apparently intended as the speed fraction for reaching nominal angular acceleration. The base groups these settings under a comment saying they do not seem to do anything.",
+      "basis": "inferred",
+      "confidence": "low",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "dimensionless fraction intended; runtime use unknown",
+      "caveats": "Its intended analogy with Omega fields does not establish an active Alpha consumer.",
+      "follow_up": "Locate a live read-and-use path for turnalphamaxspeedfraction, not merely a parser read.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 156,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.25;"
+        },
+        {
+          "source": "odf/other/class_scout_physics.odf",
+          "line": 52,
+          "reason": "Authored comments and/or surrounding definitions with observed value .2;"
+        }
+      ]
+    },
+    {
+      "family": "turnomegamaxspeedfraction",
+      "meaning": "Sets the speed fraction at which turn responsiveness reaches its nominal rate; below this, the documented turn example blends from its at-rest fraction.",
+      "basis": "documented",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "fraction of maximum ship speed",
+      "caveats": "The turn comment is internally inconsistent about endpoints and accidentally mentions bankOmega; the exact curve needs consumer evidence.",
+      "follow_up": "Recover the turn rate-versus-throttle curve and behavior for fractions outside 0..1.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 74,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.25;"
+        },
+        {
+          "source": "odf/other/class_scout_physics.odf",
+          "line": 51,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.25;"
+        }
+      ]
+    },
+    {
+      "family": "unitspertexel",
+      "meaning": "Likely maps nebula-set texture pixels to world-space distance. The texture resource and numeric scale are defined together.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "likely world units per texture pixel; not confirmed",
+      "caveats": "Exact consumer, default and range behavior remain unverified.",
+      "follow_up": "Recover how texel coordinates map to generated nebula positions.",
+      "sources": [
+        {
+          "source": "odf/other/nebulaset.odf",
+          "line": 16,
+          "reason": "Authored comments and/or surrounding definitions with observed value 200"
+        }
+      ]
+    },
+    {
+      "family": "useradialmenu",
+      "meaning": "Likely opts an object into the radial/context command menu; the surviving example enables it on a flying asteroid.",
+      "basis": "inferred",
+      "confidence": "low",
+      "role": "ui",
+      "value_form": "numeric scalar",
+      "units": "observed 0/1 flag",
+      "caveats": "The UI flag does not itself prove a gameplay operation exists or can execute.",
+      "follow_up": "Determine the menu filter and whether the order dispatcher also checks useradialmenu.",
+      "sources": [
+        {
+          "source": "odf/other/flyingasteroid.odf",
+          "line": 61,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1"
+        }
+      ]
+    },
+    {
+      "family": "verticalaccel",
+      "meaning": "Intended limit for vertical acceleration; class-file comments describe that purpose. The base says these fields are read but seem unused.",
+      "basis": "documented",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "world-distance/time convention unknown",
+      "caveats": "Class variants say it does not seem to have an effect; not a confirmed new movement capability.",
+      "follow_up": "Trace whether any active movement controller uses verticalaccel.",
+      "sources": [
+        {
+          "source": "odf/other/craft_borg_physics.odf",
+          "line": 20,
+          "reason": "Authored comments and/or surrounding definitions with observed value 200"
+        },
+        {
+          "source": "odf/other/class_science_physics.odf",
+          "line": 6,
+          "reason": "Authored comments and/or surrounding definitions with observed value 60"
+        }
+      ]
+    },
+    {
+      "family": "verticaldraghalflife",
+      "meaning": "Intended vertical counterpart of the velocity-half-life damping parameter. The base explicitly annotates it as read but unused.",
+      "basis": "documented",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "seconds by adjoining half-life comments",
+      "caveats": "Vertical damping is an intended interpretation, not a demonstrated live effect.",
+      "follow_up": "Check whether there is a vertical damping consumer after the parser read.",
+      "sources": [
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 141,
+          "reason": "Authored comments and/or surrounding definitions with observed value .1;"
+        }
+      ]
+    },
+    {
+      "family": "verticalspeed",
+      "meaning": "Intended limit for vertical travel speed; class-file comments describe that purpose. The base says these fields are read but seem unused.",
+      "basis": "documented",
+      "confidence": "medium",
+      "role": "gameplay",
+      "value_form": "numeric scalar with observed trailing semicolon",
+      "units": "world-distance/time convention unknown",
+      "caveats": "Class variants say it does not seem to have an effect; not a confirmed new movement capability.",
+      "follow_up": "Trace whether any active movement controller uses verticalspeed.",
+      "sources": [
+        {
+          "source": "odf/other/craft_borg_physics.odf",
+          "line": 17,
+          "reason": "Authored comments and/or surrounding definitions with observed value 200"
+        },
+        {
+          "source": "odf/other/craft_physics.odf",
+          "line": 126,
+          "reason": "Authored comments and/or surrounding definitions with observed value 500;"
+        }
+      ]
+    },
+    {
+      "family": "warpinsound",
+      "meaning": "Names an audio resource/group associated with entering warp; the supplied asset names and adjacent event fields support this interpretation.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Precise trigger, spatialization and distinction between group and individual sound lookup are unverified.",
+      "follow_up": "Identify the audio event that consumes warpinsound.",
+      "sources": [
+        {
+          "source": "odf/other/fed.odf",
+          "line": 28,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_AMB_FED_Warp_In\""
+        },
+        {
+          "source": "odf/other/rom.odf",
+          "line": 33,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_AMB_ROM_Warp_In\""
+        }
+      ]
+    },
+    {
+      "family": "warpoutsound",
+      "meaning": "Names an audio resource/group associated with leaving warp; the supplied asset names and adjacent event fields support this interpretation.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "asset",
+      "value_form": "quoted resource/name or quoted string list",
+      "units": "unknown",
+      "caveats": "Precise trigger, spatialization and distinction between group and individual sound lookup are unverified.",
+      "follow_up": "Identify the audio event that consumes warpoutsound.",
+      "sources": [
+        {
+          "source": "odf/other/fed.odf",
+          "line": 29,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_AMB_FED_Warp_Out\""
+        },
+        {
+          "source": "odf/other/rom.odf",
+          "line": 34,
+          "reason": "Authored comments and/or surrounding definitions with observed value \"ST_AMB_ROM_Warp_Out\""
+        }
+      ]
+    },
+    {
+      "family": "weaponslevel",
+      "meaning": "Sets the general upgradeable weapons statistic displayed to the player. The ODF labels these values as system levels, separate from hit-point endpoints.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar",
+      "units": "system-level rating, exact scale unknown",
+      "caveats": "The conversion from level to current hit points or performance is not recovered.",
+      "follow_up": "Recover how weaponslevel feeds damage, performance and upgrade calculations.",
+      "sources": [
+        {
+          "source": "odf/ships/K_D_3.odf",
+          "line": 25,
+          "reason": "Authored comments and/or surrounding definitions with observed value 900"
+        },
+        {
+          "source": "odf/ships/K_D_7.odf",
+          "line": 27,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1100"
+        }
+      ]
+    },
+    {
+      "family": "width<N>",
+      "meaning": "Sets a separate horizontal size for indexed flare layer N, used by the horizontal/vertical streak entries.",
+      "basis": "inferred",
+      "confidence": "medium",
+      "role": "presentation",
+      "value_form": "numeric scalar",
+      "units": "unknown",
+      "caveats": "Layer indexing is observed; coordinate frame, scale and exact resize rule are not documented.",
+      "follow_up": "Determine width units and how it overrides sizeN.",
+      "sources": [
+        {
+          "source": "odf/other/lens_flare.odf",
+          "line": 42,
+          "reason": "Authored comments and/or surrounding definitions with observed value 1.35"
+        },
+        {
+          "source": "odf/other/lens_flare.odf",
+          "line": 50,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.2"
+        }
+      ]
+    },
+    {
+      "family": "xpdamagegiven",
+      "meaning": "Adds captain experience for each point of damage inflicted on an enemy.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar",
+      "units": "XP per damage point per authored comment",
+      "caveats": "Damage credited before/after mitigation and eligible attacks are unknown.",
+      "follow_up": "Recover the experience award event and which captain/object receives credit.",
+      "sources": [
+        {
+          "source": "odf/other/fed.odf",
+          "line": 174,
+          "reason": "Authored comments and/or surrounding definitions with observed value 100.0"
+        }
+      ]
+    },
+    {
+      "family": "xpdamagetaken",
+      "meaning": "Adds captain experience for each point of damage received from an enemy.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar",
+      "units": "XP per damage point per authored comment",
+      "caveats": "Shield/hull distinctions, friendly damage and credit recipient are unknown.",
+      "follow_up": "Recover the experience award event and which captain/object receives credit.",
+      "sources": [
+        {
+          "source": "odf/other/fed.odf",
+          "line": 175,
+          "reason": "Authored comments and/or surrounding definitions with observed value 100.0"
+        }
+      ]
+    },
+    {
+      "family": "xpdestroyed",
+      "meaning": "Adds experience when an enemy craft is destroyed.",
+      "basis": "documented",
+      "confidence": "high",
+      "role": "gameplay",
+      "value_form": "numeric scalar",
+      "units": "XP per destroyed enemy craft per authored comment",
+      "caveats": "Kill credit, shared credit and object categories are unknown.",
+      "follow_up": "Recover the experience award event and which captain/object receives credit.",
+      "sources": [
+        {
+          "source": "odf/other/fed.odf",
+          "line": 176,
+          "reason": "Authored comments and/or surrounding definitions with observed value 0.0"
+        }
+      ]
+    }
+  ]
+}

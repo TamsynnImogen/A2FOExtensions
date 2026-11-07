@@ -11,6 +11,10 @@
 #include "../../sdk/include/a2fo_module_api.h"
 #include "../../sdk/include/a2fo_supported_armada.hpp"
 #include "../A2FOAnimations/api.hpp"
+#include "../../rust/module_runtime_b3_ffi.h"
+#ifdef A2FO_BUILTIN_FEATURE
+#include "../../core/builtin_modules.hpp"
+#endif
 
 #include <windows.h>
 
@@ -81,10 +85,18 @@ A2FO_AnimationsEvaluateFn g_controlled_evaluate = nullptr;
 A2FO_AnimationsControlledFn g_controlled_instance = nullptr;
 void resolve_animation_controller() noexcept {
     if (g_controlled_evaluate && g_controlled_instance) return;
-    HMODULE module = GetModuleHandleA("A2FOAnimations.dll");
-    if (!module) return;
-    auto evaluate = GetProcAddress(module, "A2FO_AnimationsEvaluate");
-    auto controlled = GetProcAddress(module, "A2FO_AnimationsControlled");
+    HMODULE module = GetModuleHandleA("A2FOExtensions.dll");
+    auto evaluate = module
+        ? GetProcAddress(module, "A2FO_AnimationsEvaluate") : nullptr;
+    auto controlled = module
+        ? GetProcAddress(module, "A2FO_AnimationsControlled") : nullptr;
+    if (!evaluate || !controlled) {
+        module = GetModuleHandleA("A2FOAnimations.dll");
+        evaluate = module
+            ? GetProcAddress(module, "A2FO_AnimationsEvaluate") : nullptr;
+        controlled = module
+            ? GetProcAddress(module, "A2FO_AnimationsControlled") : nullptr;
+    }
     std::memcpy(&g_controlled_evaluate, &evaluate, sizeof(evaluate));
     std::memcpy(&g_controlled_instance, &controlled, sizeof(controlled));
 }
@@ -114,13 +126,29 @@ struct DatabaseCache {
 
 std::array<DatabaseCache, kDatabaseCacheSlots> g_database_caches{};
 
+bool live_runtime_enabled() noexcept {
+    if (!g_runtime_ready) return false;
+#ifdef A2FO_BUILTIN_FEATURE
+    static std::uint64_t last_activation = 0;
+    const auto activation = a2fo::builtin_module_activation(A2FO_BUILTIN_FEATURE);
+    const auto reset=[](void*,std::uint32_t,std::uint32_t) noexcept -> std::uint64_t {
+        for(auto& cache:g_database_caches)cache.evaluation_valid=false;
+        return 1;
+    };
+    return a2fo_rs_hardpoints_live(1,activation,&last_activation,nullptr,reset)!=0;
+#else
+    const auto noop=[](void*,std::uint32_t,std::uint32_t) noexcept -> std::uint64_t {return 1;};
+    return a2fo_rs_hardpoints_live(1,1,nullptr,nullptr,noop)!=0;
+#endif
+}
+
 void* at(HMODULE module, std::uintptr_t rva) noexcept {
     return reinterpret_cast<void*>(
         reinterpret_cast<std::uintptr_t>(module) + rva);
 }
 
 void log_line(const char* message) noexcept {
-    if (g_api && g_api->log && message) g_api->log(kModuleName, message);
+    try {if (g_api && g_api->log && message) g_api->log(kModuleName, message);}catch(...){}
 }
 
 bool readable_range(const void* pointer, std::size_t size) noexcept {
@@ -332,72 +360,56 @@ void* resolve_visible_node(DatabaseCache& cache, void* logical_node) noexcept {
     return visible_node;
 }
 
-void evaluate_matrix_channels(
-    void* instance, DatabaseCache& cache) noexcept {
-    resolve_animation_controller();
-    if (g_controlled_instance && g_controlled_evaluate && g_controlled_instance(instance)) {
-        // Shared database transforms may have been changed by another rendered
-        // instance since the last query. Reapply every controlled pose.
-        cache.evaluation_valid = false;
-        bool applied = true;
-        for (const MatrixChannel& channel : cache.matrix_channels) {
-            if (!g_controlled_evaluate(instance, channel.channel, nullptr)) {
-                applied = false;
-                break;
-            }
+struct EvaluationContext {
+    void* instance;DatabaseCache* cache;float saved_current=0,saved_start=0,start=0,evaluation_time=0;
+    bool triggered=false;
+};
+std::uint64_t evaluation_operation(void* opaque,std::uint32_t op,std::uint32_t) noexcept {
+    auto& c=*static_cast<EvaluationContext*>(opaque);auto& cache=*c.cache;
+    try {switch(op) {
+    case 0:resolve_animation_controller();return 1;
+    case 1:return g_controlled_instance && g_controlled_evaluate && g_controlled_instance(c.instance);
+    case 2:cache.evaluation_valid=false;return 1;
+    case 3:
+        for(const MatrixChannel& channel:cache.matrix_channels)
+            if(!g_controlled_evaluate(c.instance,channel.channel,nullptr))return 0;
+        return 1;
+    case 4: {
+        c.saved_current=read_live_at<float>(at(g_armada,kAnimationCurrentTimeRva),0,0.0f);
+        c.saved_start=read_live_at<float>(at(g_armada,kAnimationStartTimeRva),0,0.0f);
+        c.triggered=read_live_at<std::uint8_t>(c.instance,kAnimationTriggeredOffset,0)!=0;
+        c.start=c.triggered?read_live_at<float>(c.instance,kAnimationStartOffset,0.0f):0.0f;
+        using SetStartTime=float(__cdecl*)(float);using ForceFirstFrame=void(__cdecl*)();
+        if(c.triggered)reinterpret_cast<SetStartTime>(at(g_armada,kAnimationSetStartTimeRva))(c.start);
+        else reinterpret_cast<ForceFirstFrame>(at(g_armada,kAnimationForceFirstFrameRva))();
+        c.evaluation_time=read_live_at<float>(at(g_armada,kAnimationCurrentTimeRva),0,0.0f);
+        return 1;
+    }
+    case 5:return cache.evaluation_valid && cache.last_evaluated_instance==c.instance &&
+        cache.last_triggered==c.triggered && cache.last_current_time==c.evaluation_time &&
+        (!c.triggered || cache.last_start_time==c.start);
+    case 6:
+        for(const MatrixChannel& channel:cache.matrix_channels)
+            a2fo_animated_hardpoints_call_thiscall_1(channel.evaluate_and_play,channel.channel,0);
+        return 1;
+    case 7:
+        std::memcpy(at(g_armada,kAnimationCurrentTimeRva),&c.saved_current,sizeof(c.saved_current));
+        std::memcpy(at(g_armada,kAnimationStartTimeRva),&c.saved_start,sizeof(c.saved_start));return 1;
+    case 8:
+        cache.last_evaluated_instance=c.instance;cache.last_current_time=c.evaluation_time;
+        cache.last_start_time=c.start;cache.last_triggered=c.triggered;cache.evaluation_valid=true;return 1;
+    default:return 0;
+    }}catch(...){
+        if(op==4){
+            std::memcpy(at(g_armada,kAnimationCurrentTimeRva),&c.saved_current,sizeof(c.saved_current));
+            std::memcpy(at(g_armada,kAnimationStartTimeRva),&c.saved_start,sizeof(c.saved_start));
         }
-        if (applied) return;
+        return 0;
     }
-    const float saved_current = read_live_at<float>(
-        at(g_armada, kAnimationCurrentTimeRva), 0, 0.0f);
-    const float saved_start = read_live_at<float>(
-        at(g_armada, kAnimationStartTimeRva), 0, 0.0f);
-    const bool triggered =
-        read_live_at<std::uint8_t>(
-            instance, kAnimationTriggeredOffset, 0) != 0;
-    const float start = triggered
-        ? read_live_at<float>(instance, kAnimationStartOffset, 0.0f)
-        : 0.0f;
-
-    using SetStartTime = float(__cdecl*)(float);
-    using ForceFirstFrame = void(__cdecl*)();
-    if (triggered) {
-        reinterpret_cast<SetStartTime>(
-            at(g_armada, kAnimationSetStartTimeRva))(start);
-    } else {
-        reinterpret_cast<ForceFirstFrame>(
-            at(g_armada, kAnimationForceFirstFrameRva))();
-    }
-    const float evaluation_time = read_live_at<float>(
-        at(g_armada, kAnimationCurrentTimeRva), 0, 0.0f);
-
-    if (cache.evaluation_valid &&
-        cache.last_evaluated_instance == instance &&
-        cache.last_triggered == triggered &&
-        cache.last_current_time == evaluation_time &&
-        ((!triggered) || cache.last_start_time == start)) {
-        std::memcpy(at(g_armada, kAnimationCurrentTimeRva),
-                    &saved_current, sizeof(saved_current));
-        std::memcpy(at(g_armada, kAnimationStartTimeRva),
-                    &saved_start, sizeof(saved_start));
-        return;
-    }
-
-    for (const MatrixChannel& channel : cache.matrix_channels) {
-        a2fo_animated_hardpoints_call_thiscall_1(
-            channel.evaluate_and_play, channel.channel, 0);
-    }
-
-    std::memcpy(at(g_armada, kAnimationCurrentTimeRva),
-                &saved_current, sizeof(saved_current));
-    std::memcpy(at(g_armada, kAnimationStartTimeRva),
-                &saved_start, sizeof(saved_start));
-
-    cache.last_evaluated_instance = instance;
-    cache.last_current_time = evaluation_time;
-    cache.last_start_time = start;
-    cache.last_triggered = triggered;
-    cache.evaluation_valid = true;
+}
+void evaluate_matrix_channels(void* instance,DatabaseCache& cache) noexcept {
+    EvaluationContext context{instance,&cache};
+    a2fo_rs_hardpoints_evaluate(&context,evaluation_operation);
 }
 
 void* animated_visible_node(void* instance, void* logical_node) noexcept {
@@ -427,30 +439,27 @@ std::uintptr_t call_original(const A2FO_InlineHook& hook, void* instance,
         reinterpret_cast<std::uintptr_t>(node));
 }
 
+struct QueryContext {const A2FO_InlineHook* hook;void* instance;void* output;void* node;void* selected=nullptr;};
+std::uint64_t query_operation(void* opaque,std::uint32_t op,std::uint32_t) noexcept {
+    auto& c=*static_cast<QueryContext*>(opaque);
+    try {switch(op) {
+    case 0:return live_runtime_enabled();
+    case 1:g_inside_lookup=true;return 1;
+    case 2:c.selected=animated_visible_node(c.instance,c.node);return 1;
+    case 3:return call_original(*c.hook,c.instance,c.output,c.selected?c.selected:c.node);
+    case 4:g_inside_lookup=false;return 1;
+    default:return 0;
+    }}catch(...){return 0;}
+}
 std::uintptr_t __attribute__((fastcall)) world_position_hook(
     void* instance, void*, void* output, void* node) noexcept {
-    if (!g_runtime_ready || g_inside_lookup) {
-        return call_original(g_world_position_hook, instance, output, node);
-    }
-    g_inside_lookup = true;
-    void* selected = animated_visible_node(instance, node);
-    const std::uintptr_t result = call_original(
-        g_world_position_hook, instance, output, selected ? selected : node);
-    g_inside_lookup = false;
-    return result;
+    QueryContext context{&g_world_position_hook,instance,output,node};
+    return a2fo_rs_hardpoints_query(g_inside_lookup,&context,query_operation);
 }
-
 std::uintptr_t __attribute__((fastcall)) world_transform_hook(
     void* instance, void*, void* output, void* node) noexcept {
-    if (!g_runtime_ready || g_inside_lookup) {
-        return call_original(g_world_transform_hook, instance, output, node);
-    }
-    g_inside_lookup = true;
-    void* selected = animated_visible_node(instance, node);
-    const std::uintptr_t result = call_original(
-        g_world_transform_hook, instance, output, selected ? selected : node);
-    g_inside_lookup = false;
-    return result;
+    QueryContext context{&g_world_transform_hook,instance,output,node};
+    return a2fo_rs_hardpoints_query(g_inside_lookup,&context,query_operation);
 }
 
 bool preflight() noexcept {
@@ -488,45 +497,35 @@ bool preflight() noexcept {
     return true;
 }
 
-bool install_hooks() noexcept {
-    if (!g_api || !g_api->install_inline_hook || !preflight()) return false;
-    bool installed = g_api->install_inline_hook(
-        at(g_armada, kInstanceGetWorldPositionRva),
-        reinterpret_cast<void*>(&world_position_hook),
-        kExpectedWorldPosition.size(), kExpectedWorldPosition.data(),
-        &g_world_position_hook);
-    installed = g_api->install_inline_hook(
-        at(g_armada, kInstanceGetWorldTransformRva),
-        reinterpret_cast<void*>(&world_transform_hook),
-        kExpectedWorldTransform.size(), kExpectedWorldTransform.data(),
-        &g_world_transform_hook) && installed;
-    if (!installed) {
-        log_line("Could not install both checked world-transform hooks; "
-                 "installed hooks remain pass-through");
-    }
-    return installed;
+std::uint64_t init_operation(void* opaque,std::uint32_t op,std::uint32_t arg) noexcept {
+    const auto* api=static_cast<const A2FO_ModuleApi*>(opaque);
+    try {switch(op) {
+    case 0:g_api=api;g_armada=static_cast<HMODULE>(api->armada_module());return g_armada!=nullptr;
+    case 1:return g_api && g_api->install_inline_hook && preflight();
+    case 2:return g_api->install_inline_hook(at(g_armada,kInstanceGetWorldPositionRva),
+        reinterpret_cast<void*>(&world_position_hook),kExpectedWorldPosition.size(),
+        kExpectedWorldPosition.data(),&g_world_position_hook);
+    case 3:return g_api->install_inline_hook(at(g_armada,kInstanceGetWorldTransformRva),
+        reinterpret_cast<void*>(&world_transform_hook),kExpectedWorldTransform.size(),
+        kExpectedWorldTransform.data(),&g_world_transform_hook);
+    case 4:log_line("Could not install both checked world-transform hooks; installed hooks remain pass-through");return 1;
+    case 5:g_runtime_ready=arg!=0;return 1;
+    case 6:log_line(arg?"Hardpoint matrix-channel playback initialized":
+        "Hardpoint matrix-channel module loaded with runtime disabled");return 1;
+    default:return 0;
+    }}catch(...){return 0;}
 }
 
 }  // namespace
 
 extern "C" __declspec(dllexport)
 bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
-    if (!api || api->struct_size < A2FO_MODULE_API_V4_BASE_SIZE ||
-        api->api_version != A2FO_MODULE_API_VERSION || !api->log ||
-        !api->armada_module || !api->install_inline_hook) {
-        return false;
-    }
-    g_api = api;
-    g_armada = static_cast<HMODULE>(api->armada_module());
-    if (!g_armada) return false;
-
-    g_runtime_ready = install_hooks();
-    log_line(g_runtime_ready
-                 ? "Hardpoint matrix-channel playback initialized"
-                 : "Hardpoint matrix-channel module loaded with runtime disabled");
+    const bool valid=api && api->struct_size>=A2FO_MODULE_API_V4_BASE_SIZE &&
+        api->api_version==A2FO_MODULE_API_VERSION && api->log && api->armada_module &&
+        api->install_inline_hook;
     // Hooks are process-lifetime patches. Keep the DLL resident even if a
     // later hook failed so any installed entry remains a safe pass-through.
-    return true;
+    return a2fo_rs_hardpoints_init(valid,const_cast<A2FO_ModuleApi*>(api),init_operation)!=0;
 }
 
 extern "C" __declspec(dllexport)

@@ -35,71 +35,68 @@ float general_mesh_colour(const void* source, std::size_t offset) noexcept {
 }  // namespace
 
 extern "C" bool a2fo_nebula_general_mesh_enabled() noexcept {
-    return g_hooks_ready && g_dxvk_backend_active &&
-        InterlockedCompareExchange(&g_runtime_enabled, 0, 0) != 0 &&
-        InterlockedCompareExchange(&g_fast_nonbump_shader_rejected, 0, 0) == 0 &&
-        g_craft_render_overflow == 0;
+    const auto step=+[](void*,std::uint32_t op,std::uintptr_t) noexcept -> std::uintptr_t {
+        switch(op){
+        case 0:return g_hooks_ready;
+        case 1:return g_dxvk_backend_active;
+        case 2:return InterlockedCompareExchange(&g_runtime_enabled,0,0)!=0;
+        case 3:return InterlockedCompareExchange(&g_fast_nonbump_shader_rejected,0,0)==0;
+        case 4:return g_craft_render_overflow==0;
+        default:return 0;
+        }
+    };
+    return a2fo_rs_stage10_core_render_flow(0,nullptr,step,0)!=0;
 }
 
 extern "C" void __cdecl a2fo_nebula_general_mesh_selector(
-    unsigned reason, void* mesh, void* wrapper) noexcept {
-    g_general_render_mesh = nullptr;
-    if (!a2fo_nebula_general_mesh_enabled() ||
-        !readable_range(mesh, 0x130)) return;
-
-    if (InterlockedCompareExchange(&g_general_mesh_logged, 1, 0) == 0) {
-        log_line("General fast MeshVB routing enabled: complete material state, preserved alpha selection, per-group transparent index sorting");
-    }
-    if (reason != 4 && reason != 5) {
-        if (InterlockedIncrement(&g_general_mesh_fallback_logs) <= 16) {
-            const void* groups = read_at<const void*>(mesh, 0x104, nullptr);
-            const void* lighting = read_at<const void*>(groups, 0x14, nullptr);
+    unsigned reason,void* mesh,void* wrapper) noexcept {
+    g_general_render_mesh=nullptr;
+    g_m3d_active_render_mesh=nullptr;
+    struct Context {unsigned reason;void* mesh;void* wrapper;void* material=nullptr;IDirect3DDevice8* device=nullptr;};
+    Context context{reason,mesh,wrapper};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t arg) noexcept -> std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(op){
+        case 0:return a2fo_nebula_general_mesh_enabled();
+        case 1:return readable_range(c.mesh,0x130);
+        case 2:return refit_cloak_diagnostics_enabled();
+        case 3:report_refit_cloak_mesh(current_render_craft(),c.reason,general_mesh_uses_dot3(c.mesh),registered_m3d_mesh(c.mesh));return 0;
+        case 4:return InterlockedCompareExchange(&g_general_mesh_logged,1,0)==0;
+        case 5:log_line("General fast MeshVB routing enabled: complete material state, preserved alpha selection, per-group transparent index sorting");return 0;
+        case 7:return InterlockedIncrement(&g_general_mesh_fallback_logs)<=16;
+        case 8:{
+            const void* groups=read_at<const void*>(c.mesh,0x104,nullptr);
+            const void* lighting=read_at<const void*>(groups,0x14,nullptr);
             char message[256]{};
-            std::snprintf(message, sizeof(message),
+            std::snprintf(message,sizeof(message),
                 "General MeshVB unsupported route: reason=%u flags=0x%lx model=%d vertices=%lu groups=%d cloak=%d craft=%p mesh=%p",
-                reason, static_cast<unsigned long>(read_at<DWORD>(mesh, 0x12c, 0)),
-                read_at<int>(lighting, 0x40, -1),
-                static_cast<unsigned long>(read_at<DWORD>(mesh, 0xc8, 0)),
-                read_at<int>(mesh, 0x100, 0),
-                static_cast<int>(current_craft_cloak_state(current_render_craft())),
-                current_render_craft(), mesh);
-            log_line(message);
+                c.reason,static_cast<unsigned long>(read_at<DWORD>(c.mesh,0x12c,0)),
+                read_at<int>(lighting,0x40,-1),static_cast<unsigned long>(read_at<DWORD>(c.mesh,0xc8,0)),
+                read_at<int>(c.mesh,0x100,0),static_cast<int>(current_craft_cloak_state(current_render_craft())),current_render_craft(),c.mesh);
+            log_line(message);return 0;}
+        case 9:g_general_render_mesh=c.mesh;return 0;
+        case 10:return registered_m3d_mesh(c.mesh);
+        case 11:g_m3d_active_render_mesh=c.mesh;return 0;
+        case 12:c.material=read_at<void*>(c.wrapper,kStormCurrentMaterialOffset,nullptr);return 0;
+        case 13:return g_cloak_composite.selected;
+        case 14:return g_cloak_composite.material==c.material;
+        case 15:g_cloak_composite.alpha_sort=true;return 0;
+        case 16:return general_mesh_uses_dot3(c.mesh);
+        case 17:clear_cloak_composite_selection();return 0;
+        case 18:return static_cast<std::uint32_t>(static_cast<int>(current_craft_cloak_state(current_render_craft())));
+        case 19:return general_mesh_has_bump(c.mesh);
+        case 20:return read_at<DWORD>(c.material,0x20,D3DBLEND_ZERO)==D3DBLEND_ZERO;
+        case 21:return fast_nonbump_requested_for_draw();
+        case 22:c.device=read_at<IDirect3DDevice8*>(c.wrapper,kStormDeviceOffset,nullptr);return c.device!=nullptr;
+        case 23:return active_storm_device_wrapper(c.device)==c.wrapper;
+        case 24:adopt_live_device(c.device);return 0;
+        case 25:return c.material!=nullptr;
+        case 26:return prepare_cloak_composite(c.material);
+        case 27:g_cloak_composite.alpha_sort=arg!=0;return 0;
+        default:return 0;
         }
-        return;
-    }
-    g_general_render_mesh = mesh;
-    void* material = read_at<void*>(wrapper, kStormCurrentMaterialOffset, nullptr);
-    if (reason == 5 && g_cloak_composite.selected &&
-        g_cloak_composite.material == material) {
-        // Alpha admission already preflighted the compositor. Do not erase
-        // it because Fleet Ops substituted a MeshVB virtual method. Only
-        // the actual FO DOT3 draw hooks consume this 68-byte shader; native
-        // StandardMeshVB draws do not enter those hooks.
-        g_cloak_composite.alpha_sort = true;
-        return;
-    }
-    if (!general_mesh_uses_dot3(mesh)) {
-        // Never select the 68-byte compositor on a native 32-byte stream.
-        clear_cloak_composite_selection();
-        return;
-    }
-
-    const int cloak = static_cast<int>(
-        current_craft_cloak_state(current_render_craft()));
-    if (reason == 4 && general_mesh_has_bump(mesh) &&
-        read_at<DWORD>(material, 0x20, D3DBLEND_ZERO) == D3DBLEND_ZERO &&
-        !(cloak >= 1 && cloak <= 3) &&
-        !fast_nonbump_requested_for_draw()) {
-        // Already GPU MeshVB: retain visible normal-map lighting instead of
-        // replacing authored bump maps with the cloak's geometric normal.
-        return;
-    }
-
-    auto* device = read_at<IDirect3DDevice8*>(wrapper, kStormDeviceOffset, nullptr);
-    if (!device || active_storm_device_wrapper(device) != wrapper) return;
-    adopt_live_device(device);
-    if (!material || !prepare_cloak_composite(material)) return;
-    g_cloak_composite.alpha_sort = reason == 5;
+    };
+    a2fo_rs_stage10_core_render_flow(1,&context,step,reason);
 }
 
 extern "C" void __cdecl a2fo_nebula_general_mesh_material(

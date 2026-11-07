@@ -1,0 +1,92 @@
+{
+  "checked_at_utc": "2026-09-30T15:44:37.845283+00:00",
+  "tool_source_sha256": {
+    "tools/audit_stl_odf_commands.py": "a9bc3a1406157b102b50f197232fcbf1122880ac2075797323a9c96070596f0e",
+    "tools/render_stl_odf_audit.py": "ec260bec388c174ef07feacac5e97709518da8ca265c95b1103d69caf376f37c",
+    "tests/stl_odf_audit_test.py": "a6bfb9f13935c6753a8407eb75b112c807e03d349e84f18deed92cff63c6a275"
+  },
+  "focused_test_command": "python3 -m unittest discover -s tests -p stl_odf_audit_test.py -v",
+  "focused_tests": {
+    "passed": 7,
+    "failed": 0
+  },
+  "input_hash_validation": {
+    "files": 14383,
+    "mismatches": 0
+  },
+  "source_attribution_validation": {
+    "candidate_occurrences": 14829,
+    "source_line_mismatches": 0,
+    "extension_literal_references": 116,
+    "extension_reference_mismatches": 0
+  },
+  "markdown_links": {
+    "broken": 0
+  },
+  "result_counts": {
+    "corpora": {
+      "STL": {
+        "files": 1732,
+        "assignments": 27726,
+        "exact_keys": 1604,
+        "families": 1263,
+        "commented_assignments": 1466,
+        "classlabels": 173,
+        "anomalies": 35,
+        "archives": 0
+      },
+      "STA1 Classic Mod": {
+        "files": 494,
+        "assignments": 7983,
+        "exact_keys": 1799,
+        "families": 1453,
+        "commented_assignments": 216,
+        "classlabels": 197,
+        "anomalies": 3,
+        "archives": 3
+      },
+      "STA2 Classic Mod": {
+        "files": 1097,
+        "assignments": 17498,
+        "exact_keys": 1968,
+        "families": 1555,
+        "commented_assignments": 698,
+        "classlabels": 311,
+        "anomalies": 24,
+        "archives": 1
+      },
+      "Fleet Ops 4.0": {
+        "files": 9364,
+        "assignments": 384513,
+        "exact_keys": 3051,
+        "families": 2220,
+        "commented_assignments": 97,
+        "classlabels": 9125,
+        "anomalies": 18,
+        "archives": 0
+      },
+      "FO_ROOT": {
+        "files": 1696,
+        "assignments": 82699,
+        "exact_keys": 2428,
+        "families": 1772,
+        "commented_assignments": 2030,
+        "classlabels": 1519,
+        "anomalies": 38,
+        "archives": 2
+      }
+    },
+    "stl_exact_keys": 1604,
+    "candidate_occurrences": 14829,
+    "candidate_keys": 678,
+    "candidate_families": 535,
+    "comment_only_occurrences": 313,
+    "stl_classlabels_absent_baselines": 10
+  },
+  "limits": [
+    "Static lexical comparison only",
+    "No runtime support or gameplay acceptance established",
+    "Direct assignments retained without resolving include or loader precedence",
+    "Malformed source is exposed as anomalies with quote recovery heuristic"
+  ]
+}

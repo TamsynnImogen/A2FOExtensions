@@ -1,0 +1,8 @@
+// Noxter breeder mock-up: prototypes deliberately have no research prerequisites.
+nox_breeder.odf 0
+nox_breeder_scout.odf 0
+nox_breeder_destroy.odf 0
+nox_seed_scout.odf 0
+nox_seed_destroy.odf 0
+nox_scout.odf 0
+nox_destroy.odf 0

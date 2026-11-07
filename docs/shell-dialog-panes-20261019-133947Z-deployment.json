@@ -1,0 +1,114 @@
+{
+  "status": "v16 deployed; full restart and native desktop/Admiral Log acceptance pending",
+  "timestamp_utc": "20261019-133947Z",
+  "target": "/home/tamsynn/NVMeData/Fleet Ops Roots",
+  "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/shell-dialog-panes-20261019-133947Z",
+  "installed": {
+    "Data/modules/A2FOShellDisplay.dll": "506ae54e9ea852c1b07e2daeea0a060ec28894bd62dbb302843a8f29b4add85b"
+  },
+  "previous_module_sha256": "6128b018199b2166fb9431ca23ad9202156aa79f9b66b683361d28e3f6569602",
+  "diagnosis": "The eight Admiral Log DS_CONTROL owned popup panes registered as independent full-screen roots; secondary native forms/panes also appeared in taskbar and Alt-Tab.",
+  "fix": "Only exact FO pane callback RVA 0x1d0850 inherits registered parent canvas. Preserve desktop-anchored owned-popup coordinates and fit pane descendants only. Known registered secondary forms and verified owned game dialogs use TOOLWINDOW with APPWINDOW cleared; ownership, activation, child styles and primary windows retained.",
+  "evidence": {
+    "Armada_pane_dialog_resource": "0x123; style 0x82000440 = WS_POPUP + DS_CONTROL, not WS_CHILD",
+    "Armada_create_callback_operand_VA": "0x5e3bf9",
+    "FO_callback_RVA": "0x1d0850",
+    "FO_callback_install_RVA": "0x1d0a14",
+    "native_registration_RVA": "0x173a64",
+    "before_log": "build/shell-dialog-fix/before-fix-A2FOExtensions.log"
+  },
+  "verification": {
+    "results": [
+      {
+        "name": "lifecycle",
+        "exit_code": 0,
+        "argv": [
+          "build/shell_canvas_lifecycle_test.exe"
+        ]
+      },
+      {
+        "name": "canvas",
+        "exit_code": 0,
+        "argv": [
+          "build/shell_canvas_test.exe"
+        ]
+      },
+      {
+        "name": "dialog",
+        "exit_code": 0,
+        "argv": [
+          "build/shell_canvas_dialog_test.exe"
+        ]
+      },
+      {
+        "name": "scroll",
+        "exit_code": 0,
+        "argv": [
+          "build/shell_canvas_scroll_test.exe"
+        ]
+      },
+      {
+        "name": "intro",
+        "exit_code": 0,
+        "argv": [
+          "build/shell_intro_test.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll"
+        ]
+      },
+      {
+        "name": "native-intro",
+        "exit_code": 0,
+        "argv": [
+          "build/shell_native_intro_test.exe"
+        ]
+      },
+      {
+        "name": "dll-smoke",
+        "exit_code": 0,
+        "argv": [
+          "build/shell_display_native_smoke.exe",
+          "build/modules/A2FOShellDisplay.dll",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe",
+          "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll"
+        ]
+      }
+    ],
+    "candidate_sha256": "506ae54e9ea852c1b07e2daeea0a060ec28894bd62dbb302843a8f29b4add85b",
+    "native_game_acceptance": false
+  },
+  "tests_log_directory": "build/shell-dialog-fix",
+  "review": "Independent read-only canvas and lifecycle fixture review: no concrete defect found. Native taskbar refresh and complete game layout remain manual acceptance.",
+  "protected_unchanged": {
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOArmadaProfiles.txt": "08ffa42a487354a7959fa5d4b184eb8120b331d2bca62284ac59f0da1cb52dac",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.dll": "45be55e79afe53365dc26f1e4238bfcd9d74120299215b52bca6458f072d4b05",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.ini": "8830d04dbcd3d5c45671748cc8a3999cbb5e52f5ff19636d3f01a42c8bb9abdd",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe": "817b1ddb9876cfb9c5d781b42d2513de48fef9cbdbc408aa43c878c573581a18",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/STA2 Classic Mod/info.ini": "9f599f3f5217d0219d80ef0dd8a01990a72e9995b51a0b5cc372ff709cf77976",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/info.ini": "68cef7963cf436691dc775dae6efc07d9ed4a9545d1b71f596b1d3b8a76061ac",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/RefitScene/Menu/map.ini": "cc370d017744facc01eecb91dca2b9d1f02461de9794fab60149c46b1dde7b2d",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/RefitScene/Render3D.ini": "66ac89a0f313f8b0f8a85e25fcab25929cba7d4f454146bc30e3a81d1f98ef2f",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/info.ini": "d40efd9f80bc8e07d95186ede2ddd2a44277c758f45ac58171712f8eaa9a7192",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/A2FORefitScene.dll": "f817596a3e7205cf7d2acb2b36055015b5cc58a52ed5fba04218051dd1261562",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/licenses/armada2-refit.txt": "35a427baddf84b00c8925cb5604fb20a93d667dabd952a105ceefe62a23465b7",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/licenses/libm-0.2.16.txt": "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/licenses/noto-sans-condensed-OFL.txt": "cee9892f9f0cc8fe882c9e9537ee6a89621d86ee7ceaf70b02e2b2b1c25c061a",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/licenses/noto-sans-condensed-SOURCE.txt": "2449c7043de655fe9faaa36ef115d9a1c85dd5d07768440bfa6c772d60da8ac9",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/settings_saves_logs/Settings.xml": "71b25b86c867398e4aa12b5676e58faed6809e67d8aacf380f4b329e027add77",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll": "3fd18eeee4201a9a1297ac26b3eb88f78c5f72e8c55a62c25179f1d4932e4c11",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/STA2 Classic Mod/odf/other/loadscreen.odf": "ebc063bf3bf67715f379f29bfd47326c80b0cd73b1311ddfb7f40e543b2dc537",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/dxwrapper.ini": "afa66517a2b7980ee10dc005afd0bcadb9eebb81a601fa97647aaa5ed0ab3c36",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/d3d8.dll": "ec6d494fbdcef42908e86f01f4f54342619f8d442519b4ab751c3b298c5a8437",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/d3d9.dll": "00bc142e98ddad1e334a4d88fa630038e092b0758b3d79e295172b181a4c772d",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/dxwrapper.dll": "bd5948e583d213176c21197433b1e6ce48a9730fae45863085bde33464b232fa",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FORefitMenus.ini": "1f89a024b235963548a7c9b6cc12a2f28f11d4d8811099689bbf5dccda9d74f9",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FORefitMenus.dll": "b2f5a9e6139e66a5c7031a29c014426defbbc747b5e1e5c8ac7afaf5e81e1c3b"
+  },
+  "source_sha256": {
+    "modules/A2FOShellDisplay/canvas.cpp": "3e3b591dd1b2d63c438a7c21d17dd37a45750676302a71454c28806f69f6c0eb",
+    "modules/A2FOShellDisplay/module.cpp": "a855228e314080d25c364eaefaafe7072d84587ffa322c1f9c8bf61bf0ee77c3",
+    "modules/A2FOShellDisplay/README.md": "5e9b3faa1395a0537ce17991db3380f4be1c75b90f81278409a02a15263b97e3",
+    "tests/shell_canvas_lifecycle_test.cpp": "7f10356d1b9f29e0c06b3d04ef48a485fb0f07e32e204376288d3c0d50c16c15"
+  },
+  "rollback": "Exit game, restore backup Data/modules/A2FOShellDisplay.dll to installed Data/modules, restart."
+}

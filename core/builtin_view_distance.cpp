@@ -1,0 +1,12 @@
+#define A2FO_REFIT_BUILTIN 1
+#define a2fo_refit_bridge a2fo_builtin_view_bridge
+#define a2fo_refit_value_bits a2fo_builtin_view_value_bits
+#define a2fo_refit_parser_visits a2fo_builtin_view_parser_visits
+#define a2fo_refit_data_a a2fo_builtin_view_data_a
+#define a2fo_refit_data_b a2fo_builtin_view_data_b
+#define A2FO_ModuleInit A2FOBuiltinViewDistance_Init
+#define A2FO_ModuleShutdown A2FOBuiltinViewDistance_Shutdown
+#define A2FORefit_QueryStatus A2FOBuiltinViewDistance_QueryStatus
+#define A2FORefit_BuiltinReady A2FOBuiltinViewDistance_Ready
+#define A2FORefit_SetEnabled A2FOBuiltinViewDistance_SetEnabled
+#include "../modules/A2FOViewDistance/module.cpp"

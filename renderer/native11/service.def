@@ -1,0 +1,3 @@
+LIBRARY A2FONative11Renderer
+EXPORTS
+    A2FO_Native11_GetInterface

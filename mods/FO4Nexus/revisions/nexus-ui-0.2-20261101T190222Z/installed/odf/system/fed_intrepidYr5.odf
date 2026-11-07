@@ -1,0 +1,163 @@
+// --- File identity and inheritance ---
+basename = "fed_intrepid"
+originalclass = "fed_intrepidY"
+
+// --- Display and localization ---
+unitname = "Intrepid Class"
+tooltip = "Intrepid Class [Nexus]"
+verbosetooltip = "AUTOTOOLTIP-fed_intrepidYr5.odf"
+race = "unitedfederation"
+possiblecraftnames = "USS Amsterdam" "USS Apache" "USS Arctica" "USS Atlantica" "USS Ayer" "USS Badland" "USS Bailey" "USS Barracuda" "USS Basilone" "USS Blumberg" "USS Bonaparte" "USS Bosch" "USS Boynton" "USS Budapest" "USS Bynar" "USS Calabria" "USS Cavalry" "USS Charles" "USS Commeron" "USS Crick" "USS Crowell" "USS Danan" "USS Davis" "USS Delaware" "USS Dessalines" "USS Devi" "USS Dutton" "USS Elliot" "USS Essex" "USS Evans" "USS Fahrenheit" "USS Falcata" "USS Gallant" "USS Gettysburg" "USS Harrison" "USS Hartman" "USS Hawkins" "USS Henderson" "USS Hessen" "USS Hinto" "USS Hoplite" "USS Hotspur" "USS Hunting Fox" "USS Icarus" "USS Inchon" "USS Jain" "USS Jarl" "USS Jerusalem" "USS Khe Sanh" "USS Knox" "USS Kyushu" "USS Lafayette" "USS Lamia" "USS Laplace" "USS Lewis" "USS Lynx" "USS Martinez" "USS Maryland" "USS Mayflower" "USS Meyers" "USS Monk" "USS Morningstar" "USS Muir" "USS Ocean" "USS Ottawa" "USS Palladio" "USS Panther" "USS Patton" "USS Providence" "USS Rand" "USS Regatta" "USS Reno" "USS Rhino" "USS Rollins" "USS Roswell" "USS San Diego" "USS Savior" "USS Scepter" "USS Schilt" "USS Shorter" "USS Sierra" "USS Silver Flare" "USS Singer" "USS Solomon" "USS Spiculum" "USS Stephen" "USS Teagarden" "USS Teich" "USS Templar" "USS Thresher" "USS Timberwolf" "USS Trafalgar" "USS Vegas" "USS Verite" "USS Vesuv" "USS Vicksburg" "USS Wasserman" "USS Windcatcher" "USS Zechariah" "USS Zephyr"
+hotkeylabel = "GAME-HOTKEY-I"
+shipclass = "cruiser"
+
+// --- Construction and costs ---
+buildtime = 82
+officercost = 0
+crewcost = 85
+dilithiumcost = 397
+latinumcost = 128
+biomattercost = 18
+
+// --- Hull, shields, crew, and energy ---
+maxhealth = 121
+curhealth = 121
+healthrate = 0.370
+maxshields = 404
+curshields = 404
+shieldrate = 1.023
+maxspecialenergy = 168
+specialenergyrate = 1.400
+specialenergydisplaymode = 1
+shielddelay = 2
+
+// --- Subsystems, damage, and repair ---
+shieldgeneratorhitpoints = 35
+engineshitpoints = 35
+weaponshitpoints = 35
+lifesupporthitpoints = 35
+sensorshitpoints = 35
+enginesrepairtime = 1.0
+lifesupportrepairtime = 0.25
+weaponsrepairtime = 1.0
+shieldgeneratorrepairtime = 1.0
+sensorsrepairtime = 1.0
+enginescrewloss = 10.0f
+lifesupportcrewloss = 10.0f
+weaponscrewloss = 10.0f
+shieldgeneratorcrewloss = 10.0f
+sensorscrewloss = 5.0f
+lifesupportloss = 2
+engineshitpercent = 7.0f
+lifesupporthitpercent = 7.0f
+weaponshitpercent = 7.0f
+shieldgeneratorhitpercent = 1.0f
+sensorshitpercent = 0
+crewhitpercent = 7.0f
+hullhitpercent = 71.0f
+
+// --- Weapons and ordnance ---
+weapon1 = "fedW_intrepidYr51"
+weapon2 = "nx_fedW_intrepidYr52"
+weapon3 = "fed_tricobalt"
+weapon4 = "passive_autodef"
+weapon5 = "passive_gelpacks2"
+weapon6 = "all_veteran4"
+maxextraweapons = 10
+
+// --- Accuracy, hardpoints, and targeting ---
+weaponhardpoints1 = "hp03" "hp04" "hp05" "hp06" "hp07" "hp08" "hp09" "hp10"
+weaponhardpoints2 = "hp01" "hp02"
+weaponhardpoints3 = "hp01"
+weaponhardpoints4 = "root"
+weaponhardpoints5 = "root"
+weaponhardpoints6 = "root"
+weapon1iconpos = 61	50
+weapon2iconpos = 74	50
+weapon3iconpos = 80	40
+weapon4iconpos = 80	60
+weapon5iconpos = 66	50
+hulltargethardpoints = "hp03" "hp04" "hp05" "hp06" "hp07" "hp08" "hp09" "hp10"
+lifesupporttargethardpoints = "hp15" "hp16" "hp17" "hp18"
+weaponstargethardpoints = "hp03" "hp04" "hp05" "hp06" "hp07" "hp08" "hp09" "hp10"
+shieldgeneratortargethardpoints = "hp11" "hp12" "hp13" "hp14"
+sensorstargethardpoints = "hp01" "hp02" "hp19" "hp20" "hp21"
+enginestargethardpoints = "hp22" "hp23" "hp24" "hp25" "hp26" "hp27" "hp28" "hp29"
+criticaltargethardpoints = "hp01" "hp02" "hp19" "hp20" "hp21"
+extraweaponhardpoints = "root"
+
+// --- Artificial intelligence and tactical behavior ---
+attackpower = 1.000
+intrinsicvalue = 1.000
+avoidanceclass = 5
+shiptype = "C"
+rangescan = 800
+damagedscan = 50.0
+ainame = "CraftProcess"
+alert = 1
+can_explore = 1
+combat = 1
+
+// --- Interface and controls ---
+show_sw_autonomy = 1
+show_movement_autonomy = 1
+
+// --- Audio and events ---
+eventselect = "Basic2CruiserSelect"
+eventacknowledge = "Basic2CruiserAcknowledge"
+eventattack = "Basic2CruiserAttack"
+eventstop = "Basic2CruiserStop"
+eventmove = "Basic2CruiserMove"
+eventrepair = "Basic2CruiserRepair"
+eventRepairCombat = "Basic2CruiserRepair"
+eventMoveFleeCombat = "Basic2CruiserMove"
+
+// --- Movement and physics ---
+physicsfile = "smooth_physics_130.odf"
+trekphysicsfile = "smooth_physics_130.odf"
+weldingradius = 0.25
+
+// --- Progression and variants ---
+xplevel = 5
+worthxp = 58
+
+// --- Resource handling and recycling ---
+recycledilithium = 119
+recycletime = 45
+recyclelatinum = 38
+recyclebiomatter = 5
+
+// --- Art, animation, and effects ---
+fireball = "x_large_explosion"
+shieldhit = "shield_fed_hitM"
+shieldhitcritical = "shield_fed_hitcritM"
+shielddown = "shield_fed_down"
+
+// --- Capabilities and object behavior ---
+ship = 1
+has_hitpoints = 1
+has_crew = 1
+transporter = 1
+can_sandd = 1
+buildablebyownerraceonly = 1
+
+// --- Runtime class ---
+classlabel = "craft"
+
+// FO4Nexus overlay
+directionalShields = 1
+forwardShieldStrength = 141
+aftShieldStrength = 60
+portShieldStrength = 101
+starboardShieldStrength = 102
+shieldTooltip = "Directional shields"
+shieldVerboseTooltip = "Four shield facings: forward 35%, aft 15%, port 25%, starboard 25%. Face incoming fire with the strongest shield."
+possibleCaptainNames = "Robin Shaw" "Robin Shaw" "Avery Morgan" "Dara Bennett" "Jordan Vale" "Jordan Vale" "Jordan Vale" "Samira Ellis" "Dara Bennett" "Morgan Hale" "Casey Rowan" "Dara Bennett" "Nadia Clarke" "Alex Mercer" "Riley Quinn" "Samira Ellis" "Dara Bennett" "Robin Shaw" "Leah Winters" "Avery Morgan" "Nadia Clarke" "Leah Winters" "Riley Quinn" "Leah Winters" "Riley Quinn" "Morgan Hale" "Casey Rowan" "Avery Morgan" "Riley Quinn" "Alex Mercer" "Avery Morgan" "Jordan Vale" "Alex Mercer" "Morgan Hale" "Avery Morgan" "Avery Morgan" "Dara Bennett" "Samira Ellis" "Taylor Arden" "Alex Mercer" "Casey Rowan" "Riley Quinn" "Dara Bennett" "Morgan Hale" "Casey Rowan" "Robin Shaw" "Morgan Hale" "Taylor Arden" "Nadia Clarke" "Avery Morgan" "Taylor Arden" "Samira Ellis" "Riley Quinn" "Alex Mercer" "Jordan Vale" "Casey Rowan" "Alex Mercer" "Leah Winters" "Taylor Arden" "Casey Rowan" "Jordan Vale" "Dara Bennett" "Dara Bennett" "Samira Ellis" "Casey Rowan" "Taylor Arden" "Robin Shaw" "Casey Rowan" "Nadia Clarke" "Avery Morgan" "Dara Bennett" "Casey Rowan" "Robin Shaw" "Leah Winters" "Avery Morgan" "Samira Ellis" "Riley Quinn" "Dara Bennett" "Casey Rowan" "Casey Rowan" "Casey Rowan" "Dara Bennett" "Avery Morgan" "Casey Rowan" "Nadia Clarke" "Dara Bennett" "Nadia Clarke" "Riley Quinn" "Riley Quinn" "Robin Shaw" "Robin Shaw" "Samira Ellis" "Riley Quinn" "Robin Shaw" "Casey Rowan" "Samira Ellis" "Robin Shaw" "Leah Winters" "Leah Winters" "Morgan Hale"
+possibleCraftRegistry = "NCC-222594983" "NCC-516579267" "NCC-284662917" "NCC-339247080" "NCC-887040394" "NCC-406695547" "NCC-733298467" "NCC-083602513" "NCC-070331409" "NCC-523981934" "NCC-120019601" "NCC-693440195" "NCC-915838114" "NCC-172362154" "NCC-825383358" "NCC-969676169" "NCC-684543320" "NCC-506835928" "NCC-662824932" "NCC-382437763" "NCC-937759607" "NCC-199928647" "NCC-263565287" "NCC-044978586" "NCC-054758058" "NCC-974675458" "NCC-670715007" "NCC-391019953" "NCC-483569913" "NCC-285601207" "NCC-465417293" "NCC-431078371" "NCC-993423308" "NCC-289741439" "NCC-651940110" "NCC-095921166" "NCC-287020334" "NCC-253795973" "NCC-119367325" "NCC-396804943" "NCC-177268277" "NCC-620491933" "NCC-748075609" "NCC-708466089" "NCC-444035003" "NCC-592361500" "NCC-786582448" "NCC-582844174" "NCC-624054160" "NCC-165123218" "NCC-279817499" "NCC-085096532" "NCC-794450732" "NCC-900484008" "NCC-853828930" "NCC-058175056" "NCC-952215759" "NCC-047227787" "NCC-134349188" "NCC-079220815" "NCC-698434791" "NCC-537240107" "NCC-226871079" "NCC-278519274" "NCC-603606907" "NCC-511844468" "NCC-161629876" "NCC-876008302" "NCC-634605009" "NCC-233723977" "NCC-011920194" "NCC-243564947" "NCC-089118130" "NCC-427687003" "NCC-945928033" "NCC-981495692" "NCC-984809816" "NCC-595898100" "NCC-200060608" "NCC-602944150" "NCC-711901094" "NCC-659258511" "NCC-538339766" "NCC-239878585" "NCC-969879278" "NCC-564864970" "NCC-737029132" "NCC-485407935" "NCC-302934529" "NCC-232580981" "NCC-999453647" "NCC-892204590" "NCC-157955853" "NCC-652789074" "NCC-469019905" "NCC-469283342" "NCC-661717484" "NCC-155277477" "NCC-665495449" "NCC-769806155"
+maxPhotonTorpedoes = 48
+photonTorpedoRate = 0.15
+photonTorpedoRechargeMode = 1
+photonTorpedoDisplayMode = 1
+photonTorpedoValueDisplayMode = 1
+photonTorpedoTooltip = "Photon Torpedoes"
+photonTorpedoVerboseTooltip = "Photon Torpedoes: one round per projectile; automatically reloads."

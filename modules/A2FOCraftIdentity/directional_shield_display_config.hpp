@@ -66,6 +66,14 @@ bool valid_directional_shield_position_mapping(
 bool remap_directional_shield_positions(
     const DirectionalShieldDisplayConfig& config,
     const std::array<RectangleF, 4>& input,
-    std::array<RectangleF, 4>* output) noexcept;
+    std::array<RectangleF, 4>* output,
+    std::array<std::size_t, 4>* source_indices = nullptr) noexcept;
+
+// Built-in defaults use a 128x128 logical canvas. Explicit ODF rectangles
+// already use native UI units and must retain their authored placement/size.
+void scale_directional_shield_default_positions(
+    std::array<RectangleF, 4>* positions,
+    const std::array<bool, 4>& authored_positions,
+    float graphic_width, float graphic_height) noexcept;
 
 }  // namespace a2fo::craft_identity

@@ -92,6 +92,7 @@ weaponIconCriticalColor = 1.00 0.05 0.05
 weaponIconDisabledColor = 0.45 0.45 0.75
 weaponIconDestroyedColor = 0.55 0.10 0.10
 passiveWeaponIconColor = 1.00 0.75 0.10
+resupplyWeaponIconColor = 0.10 1.00 0.10
 specialEnergyIconColor = 1.00 1.00 0.00
 officerIconColor = 1.00 0.50 0.00
 ```
@@ -113,7 +114,10 @@ backward compatibility; if both are absent, the native colour is retained. A
 weapon whose inherited `classLabel` is `UtilityWeapon` is treated as passive:
 its icon uses the fixed optional `passiveWeaponIconColor` and does not inherit
 weapon or subsystem damage status. When that command is absent, the icon
-remains neutral white/grey. Technology-tree availability follows Fleet
+remains neutral white/grey. An A2FOEnergySystems `resupplyweapon` uses the
+same passive presentation while idle and `resupplyWeaponIconColor` (default
+`0.10 1.00 0.10`) while it has a valid receiver in resupply range. This needs
+A2FOEnergySystems loaded; otherwise the icon is ordinary. Technology-tree availability follows Fleet
 Operations' native button policy: when an unsatisfied requirement declares
 `buttonHideUnavailable="true"`, the matching `weaponXiconpos` icon is hidden.
 Otherwise an unavailable normal or special weapon remains visible with the
@@ -276,10 +280,11 @@ draw alongside the ring using the four independently configurable rectangles
 and the separate `directionalShieldValue*Color` health colours above. Omitting
 the ODF command retains the legacy ring-or-two-row fallback behaviour.
 
-The optional 128-by-128 graphic area supplies the origin for a four-arc ring.
-Its width and height should remain `128` because the current renderer uses the
-textures' native logical size. Each Craft ODF may position and resize the
-visible segments inside that area using `x y width height` rectangles:
+The optional graphic area supplies the origin and configured size for a
+four-arc ring. The default segments use a 128-by-128 logical layout scaled to
+that area, so its width and height need not remain `128`. Each Craft ODF may
+specify a segment rectangle as `x y width height`, in native UI units relative
+to the graphic origin:
 
 ```cpp
 forwardShieldPos = 26 0 76 20
@@ -288,11 +293,13 @@ portShieldPos = 0 26 20 76
 starboardShieldPos = 108 26 20 76
 ```
 
-Those values are also the defaults, so existing Craft remain unchanged.
-Commands may be supplied independently and inherit through the ODF chain;
-missing facings retain their default rectangle. Width and height must be
-positive. The renderer scales only the selected Craft's submitted segment and
-restores the shared GUI sprite immediately after each draw.
+Those values are also the defaults and form a valid layout at 128-by-128, so
+existing Craft remain unchanged. Explicit rectangles are used as supplied;
+they are not normalized or scaled by the graphic dimensions and are not
+constrained to `128`. Commands may be supplied independently and inherit
+through the ODF chain; missing facings retain their default rectangle. A GUI
+per-facing `Area` override takes precedence over the ODF rectangle. The
+renderer restores the shared GUI sprite immediately after each draw.
 
 Global display behavior belongs in the active `ART_CFG.h`:
 
@@ -407,3 +414,66 @@ This completed-CraftClass boundary also forwards optional class observers to
 the shield, nebula-renderer, and texture-variant modules. The texture observer
 registers numbered subsystem damage meshes without competing for a second
 CraftClass constructor hook.
+
+
+## Checkpoint — 2026-10-28: six render/UI families complete behind native adapters
+
+This batch completes the remaining portable controllers and source/headless
+validation for A2FOCraftIdentity (module and object editor),
+A2FODirectionalShields, A2FOFeaturePack (recursive ODF, buildyard pseudo-technology,
+queue enhancements and upgrade pods), A2FOShellDisplay (Bink and canvas),
+A2FORGBTextures and A2FOTextureVariants: eleven inventory units in total.
+
+Rust now controls CraftIdentity first-match fields/atlas lookup, full-byte string
+trim, display-mode suffix admission, drawn predicates and visible hover setup;
+RGB DDS/TGA publication traversal and precedence; FeaturePack ODF hash-chain
+membership; directional effect-tree traversal; canvas ancestry, point-map pass
+order and reverse lease selection; and texture scorch admission, publication
+comparison and hardpoint selection. Native failure/reset paths and lazy reads
+are preserved. Canvas ancestry releases each borrowed record before the next
+lookup. Full u32 scorch bands and raw effect pointers remain data, separate
+from callback error metadata. Display-mode suffix whitespace is classified
+before the parsed-range decision, as in the original CRT path.
+
+This is portable-controller completion, not a pure-Rust binary. Native code
+retains Win32/COM/GDI/CRT and engine calls, hooks/signatures/addresses, checked
+fields, native strings/maps/iterators/locks, exception scopes, exact GNU x87
+projection/geometry/rounding primitives, and FeaturePack's existing STL sort.
+The sort retains casefold-equivalent filename ordering and comparator/allocation
+exception behavior. Object-editor and Bink controllers were already in Rust;
+this batch supplies their current build and headless validation. Existing native
+kernel files and ABI boundaries are pinned rather than rewritten speculatively.
+
+Validation passed: 249 Rust tests; formatting, host/i686 Windows Clippy, both
+release archives, integrated DLL and all six standalone DLLs. Twenty native
+suites produced 267 matching before/current trace pairs (534 executions,
+6,832 stdout lines), with inherited mutation and allocation-failure cases.
+A direct production Bink fixture compares 276 numeric rows across 12 x87 modes;
+canvas fixtures cover ancestry depth bounds, reverse/scoped leases and point
+mapping. Seven additional directional tree cases cover signed branches, missing
+and unreadable nodes, the head sentinel and cycle bound in both module forms.
+A separate production scorch comparison passes 228 rows across all 12 x87
+precision/rounding modes, including guards, boundary bands, modulo hardpoint
+selection, publication state, raw sticky/C1 status, CW and stack balance.
+Built-in batch9 admission also passes. Runtime fixture assets are isolated per
+execution and retained; both sides see the same logical working-directory path.
+
+The source boundary check preserves 56 complete native files and all text
+outside 16 approved controller bodies plus new adapter helpers in six files.
+All 417 source-referenced Rust implementations link (the verifier checks 420
+including three defaults). Core 197 exports/ordinals and each standalone export
+set remain identical, with no new system imports. The build pins 791 product
+inputs including owned .inl files. Six objects depending on changed sources
+were rebuilt; remaining cache entries and 7,851 third-party source pins were
+verified against the passed Squadrons predecessor. Original/current fixtures
+use independently pinned pre-batch and candidate Rust archives. Established
+fixture-only GNU ABI/custom allocator diagnostic flags remain recorded in the
+compile commands. Failed link/probe attempts are preserved.
+
+Evidence: build/rust-migration-stage10/render-ui-batch/checkpoint/validation.json.
+The eleven units are completed_pending_census. Official totals remain 116/151
+with 35 uncredited units: seventeen completed units await the shared strict
+census refresh, and eighteen units remain unfinished. Frozen membership,
+baseline provenance and strict archive/common-DLL bindings are unchanged.
+Canonical artifacts and earlier checkpoints are preserved. No deployment or
+real game launch occurred; GPU and in-game acceptance remain pending.

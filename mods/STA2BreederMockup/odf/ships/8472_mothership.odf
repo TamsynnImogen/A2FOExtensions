@@ -1,0 +1,183 @@
+#include "station.odf"
+
+//Race which can build ship & starting race of ship
+race = "species8472"
+
+// This ship is built from another ship, not a starbase (used by AIP build lists)
+//THIS NEVER SHOULD HAVE BEEN TRUEshipIsBuiltByShips = 1
+
+//Name of Ship class in Ship Display window & in edit mode & tooltip
+unitName = "Mother"
+
+//tooltips
+tooltip = "8472_MOTHER"
+verboseTooltip = "8472_MOTHER_V"
+
+//Can decommission itself anywhere
+recyclesInPlace = 1
+
+//Amount of time required to build ship
+buildTime = 200.0
+
+//Number of officers required to build this ship
+officerCost = 2
+
+// amount of biomatter needed to build this ship
+biomatterCost = 4500
+
+//Max Shield Strength & Begining Shield Strength <500
+maxHealth = 2500
+
+// Hitpoints
+
+shieldGeneratorHitPoints = 500
+enginesHitPoints = 1000
+weaponsHitPoints = 500
+lifeSupportHitPoints = 500
+sensorsHitPoints = 500
+
+//Rate at which shield recharges (points per second... we think)
+shieldRate = 4.2
+
+//Shield absorbs all damage until it's gone
+shieldProtection = 1.0
+
+//**********************************************************************
+//Construction Parameters
+buildItem0 = "8472_active"
+buildItem1 = "8472_passive"
+
+//Hardpoint location for building.
+buildHardpoint = "hp01"
+//**********************************************************************
+
+//**********************************************************************
+//Worker Bee Parameters
+
+// Name of the worker bee SOD.
+//workerBeeName = "cbee"
+//weldingBeamWidth = 5.0
+
+//**********************************************************************
+//SHIP NAMES
+
+//Possible Craft Names
+possibleCraftNames = 
+	"Mother-U7E25" "Mother-U6B84" "Mother-U1Y14" "Mother-U6O96" 
+	"Mother-U2G66" "Mother-U1V84" "Mother-U8R83" "Mother-U3Q34" 
+	"Mother-U1F51" "Mother-U6M37" "Mother-U8N36" "Mother-U9D29" 
+	"Mother-U9G93" "Mother-U9N56" "Mother-U1M90" "Mother-U5F59" 
+	"Mother-U8H19" "Mother-U6M05" "Mother-U7H42" "Mother-U3S93" 
+	"Mother-U7Y57" "Mother-U8J24" "Mother-U9K28" "Mother-U0G28" 
+	"Mother-U0L08" "Mother-U0P85" "Mother-U8T60" "Mother-U1M56" 
+	"Mother-U1A83" "Mother-U2Z96" "Mother-U2F83" "Mother-U3X51" 
+
+
+//**********************************************************************
+//MESSAGE & SOUND PARAMETERS
+
+eventSelect = "BattleSelect"
+eventAcknowledge = "BattleAcknowledge"
+eventAttack = "BattleAttack"
+eventStop = "BattleStop"
+eventMove = "BattleMove"
+eventRepair = "BattleRepair"
+eventRepairCombat = "BattleRepair"
+eventMoveFleeCombat = "BattleMove"
+
+
+
+//**********************************************************************
+//ART PARAMETERS & WEAPON NAMES
+
+
+
+animation=2
+
+// Pulse Phaser
+weapon1 = "spmpulse"
+weaponHardpoints1 = "hp02"
+
+// Pulse Phaser
+weapon2 = "spmpulse"
+weaponHardpoints2 = "hp03"
+
+// Pulse Phaser
+weapon3 = "spmpulse"
+weaponHardpoints3 = "hp04"
+
+// Pulse Phaser
+weapon4 = "spmpulse"
+weaponHardpoints4 = "hp05"
+
+// Pulse Phaser
+weapon5 = "spmpulse"
+weaponHardpoints5 = "hp21"
+
+// Pulse Phaser
+weapon6 = "spmpulse"
+weaponHardpoints6 = "hp22"
+
+// Pulse Phaser
+weapon7 = "spmpulse"
+weaponHardpoints7 = "hp23"
+
+// Pulse Phaser
+weapon8 = "spmpulse"
+weaponHardpoints8 = "hp24"
+
+
+// Hardpoints to hit for various systems and other locations.
+enginesTargetHardpoints = "hp06" "hp07" "hp08" "hp09" "hp10"
+lifeSupportTargetHardpoints = "hp12" "hp13" "hp14" "hp15" "hp16"
+weaponsTargetHardpoints = "hp02" "hp03" "hp04" "hp05"
+shieldGeneratorTargetHardpoints = "hp17" "hp18" "hp19" "hp20"
+sensorsTargetHardpoints =  "hp12" "hp13" "hp14" "hp15" "hp16"
+hullTargetHardpoints =  "hp06" "hp07" "hp08" "hp09" "hp10" "hp11" 
+"hp12" "hp13" "hp14" "hp15" "hp16"
+criticalTargetHardpoints =  "hp06" "hp07" "hp08" "hp09" "hp10" "hp11" 
+"hp12" "hp13" "hp14" "hp15" "hp16" "hp17" "hp18" "hp19" "hp20"
+//**********************************************************************
+
+
+physicsFile = "8472_smotPhys.odf"
+
+//**********************************************************************
+//PROGRAMMING PARAMETERS WHICH SHOULD NOT BE CHANGED & UNUSED PARAMETERS
+
+//Runtime class label for instantiation of object.
+classLabel = "starbase"
+
+//**********************************************************************
+
+//**********************************************************************
+//KEYMAP LABEL
+// Obsolete, use hotkeyLabel
+// keymapLabel = "starbase"
+hotkeyLabel = "HOTKEY_F6"
+
+// added to change to a Shipyard from a construction ship..this is the name of the SOD
+baseName = "8472_mother"
+
+// So it recomputes the rally point.
+alwaysRecomputeRallyPoint = 1
+
+//************************************************************
+// Brian additions for context sensitive menus
+alert = 1
+combat = 1
+transporter = 0
+facility = 0
+ship = 1
+is_starbase = 0
+builder_ship = 1
+SHOW_MOVEMENT_AUTONOMY = 1
+SHOW_SW_AUTONOMY = 1
+can_repair = 0
+canShipyardRepair = 0
+can_sandd = 1
+can_explore = 1
+
+// Noxter breeder mock-up: normal Mother production remains available.
+breederMother = 1
+breederRadius = 800

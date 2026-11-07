@@ -1,0 +1,61 @@
+{
+  "status": "Corrected DLL deployed; fresh in-game visual acceptance pending restart",
+  "timestamp_utc": "20261019-124211Z",
+  "target": "/home/tamsynn/NVMeData/Fleet Ops Roots",
+  "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/mission-menu-backdrop-fo-20261019-124211Z",
+  "installed": {
+    "Data/modules/A2FORefitMenus.dll": "b2f5a9e6139e66a5c7031a29c014426defbbc747b5e1e5c8ac7afaf5e81e1c3b"
+  },
+  "previous_module_sha256": "27428d2c9f9f63c5e899f3e9e85b3bacec4a366adafc601d08b3c2a9b8349d5a",
+  "diagnosis": "Fresh log reported observer unavailable. FO Cleanshot_Init replaces ChatDisplay::Render entry before module startup, so original-only preflight rejected it.",
+  "fix": "Accept only original entry or exact verified FO PUSH/RET callback and executable original-prologue gateway. Patch separate stock CALL; forward through engine entry, preserving Cleanshot suppression.",
+  "bindings": {
+    "Armada_mission_call_RVA": "0x198a16",
+    "Armada_chat_entry_RVA": "0x11d3c0",
+    "FO_callback_RVA": "0x1cf0b4",
+    "FO_gateway_slot_RVA": "0x2469d4",
+    "FO_counter_RVA": "0x20fff4"
+  },
+  "verification": {
+    "component_console_cases": "8/8 passed, including actual FO callback replay, wrong targets/gateways/callback bytes/non-executable page refusal, original ECX forwarding, Cleanshot suppression, owner-thread/cache/shutdown checks",
+    "real_dll_console_cases": "19/19 passed against installed ArmadaL and FO data mappings",
+    "candidate_hash_verified_during_tests": "b2f5a9e6139e66a5c7031a29c014426defbbc747b5e1e5c8ac7afaf5e81e1c3b",
+    "native_game_acceptance": false
+  },
+  "tests_log": "build/refit-loading/mission-backdrop-fo-final-console.log",
+  "previous_failure_log": "build/refit-loading/mission-backdrop-startup-failure.log",
+  "protected_unchanged": {
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOArmadaProfiles.txt": "08ffa42a487354a7959fa5d4b184eb8120b331d2bca62284ac59f0da1cb52dac",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.dll": "45be55e79afe53365dc26f1e4238bfcd9d74120299215b52bca6458f072d4b05",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.ini": "8830d04dbcd3d5c45671748cc8a3999cbb5e52f5ff19636d3f01a42c8bb9abdd",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe": "817b1ddb9876cfb9c5d781b42d2513de48fef9cbdbc408aa43c878c573581a18",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/STA2 Classic Mod/info.ini": "9f599f3f5217d0219d80ef0dd8a01990a72e9995b51a0b5cc372ff709cf77976",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/info.ini": "68cef7963cf436691dc775dae6efc07d9ed4a9545d1b71f596b1d3b8a76061ac",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/RefitScene/Menu/map.ini": "cc370d017744facc01eecb91dca2b9d1f02461de9794fab60149c46b1dde7b2d",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/RefitScene/Render3D.ini": "66ac89a0f313f8b0f8a85e25fcab25929cba7d4f454146bc30e3a81d1f98ef2f",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/info.ini": "d40efd9f80bc8e07d95186ede2ddd2a44277c758f45ac58171712f8eaa9a7192",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOShellDisplay.dll": "6128b018199b2166fb9431ca23ad9202156aa79f9b66b683361d28e3f6569602",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/A2FORefitScene.dll": "f817596a3e7205cf7d2acb2b36055015b5cc58a52ed5fba04218051dd1261562",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/licenses/armada2-refit.txt": "35a427baddf84b00c8925cb5604fb20a93d667dabd952a105ceefe62a23465b7",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/licenses/libm-0.2.16.txt": "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/licenses/noto-sans-condensed-OFL.txt": "cee9892f9f0cc8fe882c9e9537ee6a89621d86ee7ceaf70b02e2b2b1c25c061a",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/licenses/noto-sans-condensed-SOURCE.txt": "2449c7043de655fe9faaa36ef115d9a1c85dd5d07768440bfa6c772d60da8ac9",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/settings_saves_logs/Settings.xml": "71b25b86c867398e4aa12b5676e58faed6809e67d8aacf380f4b329e027add77",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll": "3fd18eeee4201a9a1297ac26b3eb88f78c5f72e8c55a62c25179f1d4932e4c11",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/STA2 Classic Mod/odf/other/loadscreen.odf": "ebc063bf3bf67715f379f29bfd47326c80b0cd73b1311ddfb7f40e543b2dc537",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/dxwrapper.ini": "afa66517a2b7980ee10dc005afd0bcadb9eebb81a601fa97647aaa5ed0ab3c36",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/d3d8.dll": "ec6d494fbdcef42908e86f01f4f54342619f8d442519b4ab751c3b298c5a8437",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/d3d9.dll": "00bc142e98ddad1e334a4d88fa630038e092b0758b3d79e295172b181a4c772d",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/dxwrapper.dll": "bd5948e583d213176c21197433b1e6ce48a9730fae45863085bde33464b232fa",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FORefitMenus.ini": "1f89a024b235963548a7c9b6cc12a2f28f11d4d8811099689bbf5dccda9d74f9"
+  },
+  "source_sha256": {
+    "modules/A2FORefitMenus/mission_backdrop.cpp": "c7cacf25d60d29160ef7506d3b56a4ab2bfceb72f7313e214b48248370b68ae5",
+    "modules/A2FORefitMenus/mission_backdrop.hpp": "489b1e534cf67df677678ce74997bbdb31a8043794406670cba7449cc823621c",
+    "modules/A2FORefitMenus/module.cpp": "c4340e7f1ba69b8ea4c707704a5763ee8688e87fcee36f0cd52c3608ecc26d90",
+    "tests/refit_mission_backdrop_native.cpp": "382d33eac16ffde16fbe3c4c5699e4a7b493ba2012db6b59a8a7f638f989d07f",
+    "tests/refit_menu_native.cpp": "a8e58c75a701df6126d16e50b2165d927a033cee9a65841221f7ef1b2ee5f88e",
+    "tests/support/refit_fo_chat_fixture.hpp": "ada1518aae8bc9389a2e6554c3936c954aafc64100bf9b4e2406db9150504144",
+    "tools/run_refit_mission_backdrop_tests.py": "e09df2df363d87fd38cb434a1572835bcad5b1a5398f9c04029fbd79e3676f72"
+  }
+}

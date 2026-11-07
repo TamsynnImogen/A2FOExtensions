@@ -64,6 +64,19 @@ Fleet Ops' selection array has a checked 30-handle capacity.
 
 ## Configuration boundary
 
+Research stations can also opt into selecting their attached shipyards as a
+group with `selectPodsTogether = 1`. Clicking the main station or any of its
+attached yards selects the main station and all surviving same-owner yards in
+that station's native pod list. Shift-toggle removes/adds the whole group;
+separate station complexes stay separate. This does not create a squadron,
+compress the selection to one icon, reserve a numbered fleet, or change costs.
+The flag defaults off and is accepted only on `classLabel = "research"` roots.
+Shipyard children retain their own build queues and native behavior. Group
+expansion uses the existing checked 30-handle selection limit, with no partial
+addition when the full group would exceed it. Native attachment lists rebuild
+the relation after load; no new save fields are written. Manual gameplay and
+save/load acceptance remain required.
+
 `parse_definition()` consumes **effective inherited ODF fields**, matching the
 core SDK's field representation. It is not a second filesystem/ODF loader.
 The native adapter receives those resolved inherited fields through the existing
@@ -369,3 +382,53 @@ separate cost/time commands are needed on `fsquad.odf`.
 This revision still requires a new-skirmish in-game check: verify the build
 tooltip and debit, lose members, repair all survivors at `fyard`, wait for the
 paid replacements to launch and confirm the badge returns to `5/5`.
+
+
+## Checkpoint — 2026-10-28: A2FOSquadrons portable conversion complete
+
+Rust now owns the remaining bar member traversal, health-value accumulation,
+weighted colour admission/accumulation/division, repair-yard distance/radius
+policy, retry arithmetic/admission, strict additional-cost parsing, peer snapshot
+and duplicate-selection scans, and active-technology bounds/counter policy.
+The existing Rust class/economics, production, squad registry, selection,
+reinforcement and lifecycle controllers remain in use. Normal paid replacement
+cost/build-time and native yard completion behavior are preserved.
+
+C++ retains the exact hooks and addresses, checked engine-memory access,
+thiscall/SDK/Win32 calls, native containers/string lifetimes, lock and exception
+scopes, provider invocation, and native registration marshalling. Rust numeric
+kernels reproduce the original GNU++17/O2 x87 instruction order and spills.
+Whole-hook parity exposed an overflow C1 difference missed by isolated arithmetic
+references; the final Rust values-output copy also preserves the original x87
+reload/spill. Earlier failed evidence and candidate artifacts are retained. The new numeric
+fixture also avoids a legacy test helper that forced PC24 for PC53/64
+economics names; historical fixtures are preserved and actual control words
+are asserted throughout the new matrix.
+
+Validation passed: 229 Rust tests, formatting, host/i686 Windows Clippy, both
+release archives, integrated/standalone DLLs and built-in batch9 admission.
+All 134 original/current trace pairs (268 native executions, 8,200 equal
+stdout lines) match across standalone and built-in forms. These include 12 x87
+precision/rounding modes, 624 bar sample rows, 1,056 distance/radius rows,
+336 full retry-update rows, strict parser cases, nested same-bar/provider reentry,
+selection mutation, sequential launch/paid repair, and expected native hook
+termination. Numeric fixtures compare raw float words, sticky flags/C1, control
+word and stack balance. All 79 referenced Rust implementations link; 197
+integrated and three standalone exports/ordinals are unchanged, with no new
+system imports. Sixty-eight native functions/layout guards and SDK/ASM pins
+remain intact.
+
+The build pins 781 product inputs, including all 14 owned .inl files. Six cached
+objects depending on owned .inl files were rebuilt; remaining incremental native
+cache and 7,851 third-party source pins were authenticated. This prospectively
+extends source coverage beyond earlier component maps; earlier receipts remain
+unchanged. Canonical root artifacts and existing checkpoints are preserved.
+
+Evidence: build/rust-migration-stage10/squadrons/checkpoint/validation.json.
+Squadrons is completed_pending_census. Strict totals remain 116/151 with 35
+uncredited records: six completed components await a shared census refresh,
+and 29 other units remain. No strict archive/common-DLL binding was relaxed.
+Candidate artifacts are isolated under squadrons/candidate. Nothing was deployed
+and no game was launched; GPU and in-game acceptance, including a fresh-skirmish
+paid reinforcement check, remain pending. This conversion does not establish a
+fix for any previously observed in-game repair failure.

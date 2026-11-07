@@ -1,0 +1,47 @@
+A2FOExtensions directionalShields = 3 (tri-rear)
+=====================================================
+
+Mode mapping
+------------
+  directionalShields = 0  native shield bubble
+  directionalShields = 1  quad
+  directionalShields = 2  tri-forward
+  directionalShields = 3  tri-rear
+
+Tri-rear active stores
+----------------------
+  Forward    inactive (0/0)
+  Aft        active, 120-degree sector
+  Port       active, 120-degree sector
+  Starboard  active, 120-degree sector
+
+Example
+-------
+  maxShields = 900
+  directionalShields = 3
+  aftShieldStrength = 400
+
+The missing port/starboard values are auto-filled from maxShields:
+  Forward 0
+  Aft 400
+  Port 250
+  Starboard 250
+
+Sprites
+-------
+No new SPR entries are required beyond mode 2:
+
+  dstc shield_tri_center 0 0 128 128
+  dsts shield_tri_side   0 0 128 128
+
+Mode 3 reuses the same textures with vertical UV mirroring. Starboard uses
+both horizontal and vertical mirroring.
+
+Default mode-3 logical positions inside the 128x128 graphic:
+  Forward:    inactive
+  Aft:        10 64 108 64
+  Port:       0 0 72 80
+  Starboard:  56 0 72 80
+
+Existing GUI Area entries and per-Craft *ShieldPos commands override these
+defaults independently.

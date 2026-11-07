@@ -9,7 +9,11 @@
  */
 
 #include "../../sdk/include/a2fo_module_api.h"
+#ifdef A2FO_BUILTIN_FEATURE
+#include "../../core/builtin_modules.hpp"
+#endif
 #include "edit_menu_odf.hpp"
+#include "../../rust/module_runtime_b5_ffi.h"
 
 #include <windows.h>
 
@@ -496,123 +500,230 @@ bool ancestor_contains(const std::string& node) {
             g_breadcrumbs.end();
 }
 
-void enter_selected_submenu(void* edit_menu) {
-    const std::int32_t root_index = read_at<std::int32_t>(
-        edit_menu, kEditMenuSelectedRootOffset, -1);
-    const std::int32_t build_index = read_at<std::int32_t>(
-        edit_menu, kEditMenuSelectedBuildItemOffset, -1);
-    NativeRootMenu* slot = root_slot(root_index);
-    if (!slot || build_index < 0 ||
-        build_index >= static_cast<std::int32_t>(
-            a2fo::edit_menu::kEntryCount)) {
-        return;
-    }
-    if (g_scratch_installed &&
-        (g_active_edit_menu != edit_menu || g_active_root != root_index)) {
-        restore_original_root();
-        slot = root_slot(root_index);
-        if (!slot) return;
-    }
-
-    const std::string target_name = safe_native_string(
-        slot->build_menus[static_cast<std::size_t>(build_index)].source_name);
-    const a2fo::edit_menu::MenuNode* target = load_node(target_name);
-    if (!target || !target->is_submenu()) return;
-
-    const std::string target_key = target->source_name;
-    std::string parent = g_current_node;
-    if (!g_scratch_installed) {
-        parent = a2fo::edit_menu::normalize_odf_name(
-            safe_native_string(slot->source_name));
-    }
-    if (target_key == parent || ancestor_contains(target_key)) {
-        log_once("cycle:" + target_key,
-                 "Stopped recursive edit-menu cycle at '" +
-                     target_key + "'");
-        write_at(edit_menu, kEditMenuLevelOffset, std::int32_t{1});
-        return;
-    }
-    if (g_breadcrumbs.size() + 1 >= kMaximumDepth) {
-        log_once("depth:" + target_key,
-                 "Stopped recursive edit menu at its 32-level safety limit");
-        write_at(edit_menu, kEditMenuLevelOffset, std::int32_t{1});
-        return;
-    }
-
-    g_breadcrumbs.push_back(parent);
-    if (!install_node(*target, edit_menu, root_index)) {
-        g_breadcrumbs.pop_back();
-        log_once("install:" + target_key,
-                 "Could not install recursive edit-menu node '" +
-                     target_key + "'");
-        write_at(edit_menu, kEditMenuLevelOffset, std::int32_t{1});
-        return;
-    }
-    write_at(edit_menu, kEditMenuLevelOffset, std::int32_t{1});
-    log_once("enter:" + target_key,
-             "Recursive edit-menu navigation entered '" + target_key + "'");
-}
-
-void leave_recursive_submenu(void* edit_menu) {
-    if (!g_scratch_installed || g_breadcrumbs.empty()) {
-        restore_original_root();
-        return;
-    }
-    if (g_breadcrumbs.size() == 1) {
-        restore_original_root();
-        write_at(edit_menu, kEditMenuLevelOffset, std::int32_t{1});
-        return;
-    }
-
-    const std::string parent_key = g_breadcrumbs.back();
-    g_breadcrumbs.pop_back();
-    const a2fo::edit_menu::MenuNode* parent = load_node(parent_key);
-    if (!parent || !install_node(*parent, edit_menu, g_active_root)) {
-        restore_original_root();
-        return;
-    }
-    write_at(edit_menu, kEditMenuLevelOffset, std::int32_t{1});
-}
-
-void process_level_transition(void* edit_menu,
-                              std::int32_t before,
-                              std::int32_t after) {
-    if (!edit_menu) return;
-    if (g_scratch_installed && g_active_edit_menu != edit_menu) {
-        restore_original_root();
-    }
-    if (before == 1 && after == 2) {
-        enter_selected_submenu(edit_menu);
-        return;
-    }
-    if (g_scratch_installed && before == 1 && after == 0) {
-        leave_recursive_submenu(edit_menu);
-        return;
-    }
-    if (g_scratch_installed && (after < 0 || after > 2)) {
-        restore_original_root();
-    }
-}
-
-void __attribute__((fastcall)) edit_menu_update_hook(
-    void* edit_menu, void*) noexcept {
-    const std::int32_t before = read_at<std::int32_t>(
-        edit_menu, kEditMenuLevelOffset, -1);
-    a2fo_edit_menu_call_thiscall_0(
-        g_edit_menu_update_hook.gateway, edit_menu);
-    if (!g_runtime_ready || !edit_menu || g_processing_hook) return;
-    const std::int32_t after = read_at<std::int32_t>(
-        edit_menu, kEditMenuLevelOffset, -1);
-
-    g_processing_hook = true;
+struct EnterContext {
+    void* edit_menu;
+    std::int32_t root_index = -1;
+    std::int32_t build_index = -1;
+    NativeRootMenu* slot = nullptr;
+    const a2fo::edit_menu::MenuNode* target = nullptr;
+    std::string target_key;
+    std::string parent;
+};
+std::uint64_t enter_op(void* opaque, std::uint32_t operation,
+                       std::uint32_t) noexcept {
+    auto& context = *static_cast<EnterContext*>(opaque);
     try {
-        process_level_transition(edit_menu, before, after);
+    switch (operation) {
+        case 0:
+            context.root_index = read_at<std::int32_t>(
+                context.edit_menu, kEditMenuSelectedRootOffset, -1);
+            context.build_index = read_at<std::int32_t>(
+                context.edit_menu, kEditMenuSelectedBuildItemOffset, -1);
+            context.slot = root_slot(context.root_index);
+            return context.slot && context.build_index >= 0 &&
+                context.build_index < static_cast<std::int32_t>(a2fo::edit_menu::kEntryCount);
+        case 1:
+            if (g_scratch_installed &&
+                (g_active_edit_menu != context.edit_menu ||
+                 g_active_root != context.root_index)) {
+                restore_original_root();
+                context.slot = root_slot(context.root_index);
+            }
+            return context.slot != nullptr;
+        case 2: {
+            const std::string target_name = safe_native_string(
+                context.slot->build_menus[static_cast<std::size_t>(
+                    context.build_index)].source_name);
+            context.target = load_node(target_name);
+            if (!context.target || !context.target->is_submenu()) return 0;
+            context.target_key = context.target->source_name;
+            context.parent = g_current_node;
+            if (!g_scratch_installed) {
+                context.parent = a2fo::edit_menu::normalize_odf_name(
+                    safe_native_string(context.slot->source_name));
+            }
+            return 1;
+        }
+        case 3:
+            return context.target_key == context.parent ||
+                ancestor_contains(context.target_key);
+        case 4:
+            log_once("cycle:" + context.target_key,
+                     "Stopped recursive edit-menu cycle at '" +
+                         context.target_key + "'");
+            write_at(context.edit_menu, kEditMenuLevelOffset, std::int32_t{1});
+            return 0;
+        case 5: return g_breadcrumbs.size() + 1 >= kMaximumDepth;
+        case 6:
+            log_once("depth:" + context.target_key,
+                     "Stopped recursive edit menu at its 32-level safety limit");
+            write_at(context.edit_menu, kEditMenuLevelOffset, std::int32_t{1});
+            return 0;
+        case 7: g_breadcrumbs.push_back(context.parent); return 0;
+        case 8: return install_node(*context.target, context.edit_menu,
+                                    context.root_index);
+        case 9:
+            g_breadcrumbs.pop_back();
+            log_once("install:" + context.target_key,
+                     "Could not install recursive edit-menu node '" +
+                         context.target_key + "'");
+            write_at(context.edit_menu, kEditMenuLevelOffset, std::int32_t{1});
+            return 0;
+        case 10:
+            write_at(context.edit_menu, kEditMenuLevelOffset, std::int32_t{1});
+            log_once("enter:" + context.target_key,
+                     "Recursive edit-menu navigation entered '" +
+                         context.target_key + "'");
+            return 0;
+    }
+    return 0;
     } catch (...) {
         restore_original_root();
         log_once("runtime-exception",
                  "Recursive edit-menu navigation was reset after an exception");
+        return UINT64_MAX;
     }
-    g_processing_hook = false;
+}
+void enter_selected_submenu(void* edit_menu) {
+    EnterContext context{};
+    context.edit_menu = edit_menu;
+    a2fo_rs_edit_enter(&context, &enter_op);
+}
+
+std::uint64_t leave_op(void* opaque, std::uint32_t operation,
+                       std::uint32_t) noexcept {
+    void* edit_menu = opaque;
+    try {
+    switch (operation) {
+        case 0: return g_scratch_installed && !g_breadcrumbs.empty();
+        case 1: restore_original_root(); return 0;
+        case 2: return g_breadcrumbs.size() == 1;
+        case 3:
+            restore_original_root();
+            write_at(edit_menu, kEditMenuLevelOffset, std::int32_t{1});
+            return 0;
+        case 4: {
+            const std::string parent_key = g_breadcrumbs.back();
+            g_breadcrumbs.pop_back();
+            const a2fo::edit_menu::MenuNode* parent = load_node(parent_key);
+            return parent && install_node(*parent, edit_menu, g_active_root);
+        }
+        case 5:
+            write_at(edit_menu, kEditMenuLevelOffset, std::int32_t{1});
+            return 0;
+    }
+    return 0;
+    } catch (...) {
+        restore_original_root();
+        log_once("runtime-exception",
+                 "Recursive edit-menu navigation was reset after an exception");
+        return UINT64_MAX;
+    }
+}
+void leave_recursive_submenu(void* edit_menu) {
+    a2fo_rs_edit_leave(edit_menu, &leave_op);
+}
+
+struct TransitionContext {void* edit_menu;};
+std::uint64_t transition_op(void* opaque, std::uint32_t operation,
+                            std::uint32_t) {
+    auto& context = *static_cast<TransitionContext*>(opaque);
+    switch (operation) {
+        case 0:
+            if (g_scratch_installed && g_active_edit_menu != context.edit_menu)
+                restore_original_root();
+            return 0;
+        case 1: return g_scratch_installed;
+        case 2: enter_selected_submenu(context.edit_menu); return 0;
+        case 3: leave_recursive_submenu(context.edit_menu); return 0;
+        case 4: restore_original_root(); return 0;
+    }
+    return 0;
+}
+void process_level_transition(void* edit_menu,
+                              std::int32_t before,
+                              std::int32_t after) {
+    TransitionContext context{edit_menu};
+    a2fo_rs_edit_transition(edit_menu != nullptr, before, after,
+                            &context, &transition_op);
+}
+
+struct UpdateContext {
+    void* edit_menu;
+    std::uint64_t activation = 1;
+    std::int32_t before = -1;
+    std::int32_t after = -1;
+};
+std::uint64_t update_op(void* opaque, std::uint32_t operation,
+                        std::uint32_t argument) noexcept {
+    auto& context = *static_cast<UpdateContext*>(opaque);
+    switch (operation) {
+        case 0:
+#ifdef A2FO_BUILTIN_FEATURE
+            context.activation = a2fo::builtin_module_activation(A2FO_BUILTIN_FEATURE);
+#endif
+            return context.activation;
+        case 1:
+#ifdef A2FO_BUILTIN_FEATURE
+        {
+            static std::uint64_t previous_activation = 0;
+            if (!g_processing_hook && previous_activation != context.activation) {
+                const bool owned = g_scratch_installed &&
+                    g_active_edit_menu == context.edit_menu;
+                restore_original_root();
+                if (owned) write_at(context.edit_menu, kEditMenuLevelOffset,
+                                    std::int32_t{1});
+                previous_activation = context.activation;
+            }
+        }
+#endif
+            return 0;
+        case 2:
+            context.before = read_at<std::int32_t>(context.edit_menu,
+                                                   kEditMenuLevelOffset, -1);
+            return 0;
+        case 3:
+            a2fo_edit_menu_call_thiscall_0(
+                g_edit_menu_update_hook.gateway, context.edit_menu);
+            return 0;
+        case 4:
+#ifdef A2FO_BUILTIN_FEATURE
+            return a2fo::builtin_module_activation(A2FO_BUILTIN_FEATURE);
+#else
+            return context.activation;
+#endif
+        case 5:
+            if (!g_processing_hook) {
+                const bool owned = g_scratch_installed &&
+                    g_active_edit_menu == context.edit_menu;
+                restore_original_root();
+                if (owned) write_at(context.edit_menu, kEditMenuLevelOffset,
+                                    std::int32_t{1});
+            }
+            return 0;
+        case 6: return g_runtime_ready && context.edit_menu && !g_processing_hook;
+        case 7:
+            context.after = read_at<std::int32_t>(context.edit_menu,
+                                                  kEditMenuLevelOffset, -1);
+            return 0;
+        case 8: g_processing_hook = argument != 0; return 0;
+        case 9:
+            try {
+                process_level_transition(context.edit_menu,
+                                         context.before, context.after);
+            } catch (...) {
+                restore_original_root();
+                log_once("runtime-exception",
+                    "Recursive edit-menu navigation was reset after an exception");
+            }
+            return 0;
+    }
+    return 0;
+}
+void __attribute__((fastcall)) edit_menu_update_hook(
+    void* edit_menu, void*) noexcept {
+    UpdateContext context{edit_menu};
+    a2fo_rs_edit_update(&context, &update_op);
 }
 
 bool preflight_signatures() {
@@ -633,18 +744,55 @@ bool preflight_signatures() {
     return true;
 }
 
-bool install_runtime_hook() {
-    if (!g_api || !g_api->install_inline_hook || !g_armada) return false;
-    if (!preflight_signatures()) {
-        log_line("Supported ArmadaL edit-menu signatures were not found; "
-                 "runtime disabled");
-        return false;
+std::uint64_t edit_init_op(void* opaque, std::uint32_t operation,
+                           std::uint32_t argument) noexcept {
+    const auto* api = static_cast<const A2FO_ModuleApi*>(opaque);
+    switch (operation) {
+        case 0:
+            g_api = api;
+            g_armada = static_cast<HMODULE>(api->armada_module());
+            return g_armada != nullptr;
+        case 1:
+            try { index_odf_files(); }
+            catch (...) { log_line("Could not index edit-menu ODF files"); }
+            return 0;
+        case 2:
+            try {
+                if (preflight_signatures()) return 1;
+                log_line("Supported ArmadaL edit-menu signatures were not found; "
+                         "runtime disabled");
+            } catch (...) {
+                log_line("Supported ArmadaL edit-menu signatures were not found; "
+                         "runtime disabled");
+            }
+            return 0;
+        case 3:
+            try {
+                return api->install_inline_hook(
+                    at(g_armada, kEditMenuUpdateRva),
+                    reinterpret_cast<void*>(&edit_menu_update_hook),
+                    kExpectedEditMenuUpdate.size(), kExpectedEditMenuUpdate.data(),
+                    &g_edit_menu_update_hook);
+            } catch (...) { return 0; }
+        case 4:
+            g_runtime_ready = argument != 0;
+            try {
+                log_line(std::string("Recursive edit-menu module") +
+                    (g_runtime_ready
+                        ? " initialized; buildItem targets may contain buildItem commands recursively"
+                        : " loaded with runtime disabled") +
+                    "; indexed " + std::to_string(g_odf_paths.size()) +
+                    " loose ODF basename(s)");
+            } catch (...) { }
+            return 0;
     }
-    return g_api->install_inline_hook(
-        at(g_armada, kEditMenuUpdateRva),
-        reinterpret_cast<void*>(&edit_menu_update_hook),
-        kExpectedEditMenuUpdate.size(), kExpectedEditMenuUpdate.data(),
-        &g_edit_menu_update_hook);
+    return 0;
+}
+std::uint64_t edit_shutdown_op(void*, std::uint32_t operation,
+                               std::uint32_t) noexcept {
+    if (operation == 0) return g_scratch_installed;
+    if (operation == 1) restore_original_root();
+    return 0;
 }
 
 }  // namespace
@@ -657,29 +805,11 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
         !api->extension_root_count || !api->extension_root) {
         return false;
     }
-    g_api = api;
-    g_armada = static_cast<HMODULE>(api->armada_module());
-    if (!g_armada) return false;
-
-    try {
-        index_odf_files();
-    } catch (...) {
-        log_line("Could not index edit-menu ODF files");
-    }
-    g_runtime_ready = install_runtime_hook();
-    log_line(std::string("Recursive edit-menu module") +
-             (g_runtime_ready
-                  ? " initialized; buildItem targets may contain buildItem "
-                    "commands recursively"
-                  : " loaded with runtime disabled") +
-             "; indexed " + std::to_string(g_odf_paths.size()) +
-             " loose ODF basename(s)");
-    // Inline hooks are process-lifetime patches. Even a failed setup keeps
-    // this DLL resident so an installed hook can remain a safe pass-through.
-    return true;
+    return a2fo_rs_edit_init(true, const_cast<A2FO_ModuleApi*>(api),
+                             &edit_init_op) != 0;
 }
 
 extern "C" __declspec(dllexport)
 void A2FO_CALL A2FO_ModuleShutdown() {
-    if (g_scratch_installed) restore_original_root();
+    a2fo_rs_edit_shutdown(nullptr, &edit_shutdown_op);
 }

@@ -1,0 +1,224 @@
+[
+  {
+    "file": "Engine_Changelog.txt",
+    "mtime": "2026-09-14T02:14:28+00:00",
+    "size": 38274,
+    "sha256": "22eb00c6893f4ccced1efad9563f0310ee725a3186419461c734c1c6ae39cccf"
+  },
+  {
+    "file": "Roots_Download_Version.txt",
+    "mtime": "2026-07-19T02:46:48+00:00",
+    "size": 28,
+    "sha256": "51ca9b53d0c65d91e0c69bcf742aa8167036161111a15b5f7432545470ec234e"
+  },
+  {
+    "file": "A2FOFleetOpsProfiles.txt",
+    "mtime": "2026-10-23T18:03:27.330598+00:00",
+    "size": 247,
+    "sha256": "1a29f85740d6d62c2fb8af479c12acf6644f9de8b82c2c32f83ab18aeb0cb33e"
+  },
+  {
+    "file": "gamescope-mode-watch.log",
+    "mtime": "2026-08-03T21:17:59.758825+00:00",
+    "size": 232,
+    "sha256": "1cc77a84f77714944a7539a63dc818d86c76fce1e27fd7a68f21b12f614b8c87"
+  },
+  {
+    "file": "Old_FOReadme.txt",
+    "mtime": "2012-10-21T11:44:58+00:00",
+    "size": 161281,
+    "sha256": "20e7d505fbfe95b81f5463ee349b4999ee85f7d3a72c71be680d6be76290cd35"
+  },
+  {
+    "file": "gamescope-window-trace.log",
+    "mtime": "2026-08-03T21:18:15.534702+00:00",
+    "size": 6052,
+    "sha256": "8d91e91adb0c3b4357bc7addbfbc93a85acc8350311ae7fafcc7061a298b006a"
+  },
+  {
+    "file": "Data/NetHelp.txt",
+    "mtime": "2001-11-01T20:23:32+00:00",
+    "size": 3887,
+    "sha256": "9e0e467e56d995522085136db84957e6dcea72c42971d90698437d47c84eded1"
+  },
+  {
+    "file": "Data/Credits.txt",
+    "mtime": "2007-10-03T15:05:20+00:00",
+    "size": 8303,
+    "sha256": "4c4b21e71c965194d674585db8a5df6f834e2d009952c601608041ada2ec4999"
+  },
+  {
+    "file": "Data/A2FOExtensions.log",
+    "mtime": "2026-11-01T19:02:29.691210+00:00",
+    "size": 167427,
+    "sha256": "0aca1e5c07ab5cd62a6ae6993c7bf82601607ad41fc5f25cb10a8afc3cee99ae"
+  },
+  {
+    "file": "Data/A2FOStartupProxy.log",
+    "mtime": "2026-11-01T18:48:03.630684+00:00",
+    "size": 286054,
+    "sha256": "e83fe1719f7c1a304fb6da1b51959619467898e49c9ec4ed51829d33bd6fc4bd"
+  },
+  {
+    "file": "Data/A2FOMissions-fault.log",
+    "mtime": "2026-11-01T18:48:06.408664+00:00",
+    "size": 92,
+    "sha256": "862e775d97a45bbbed6b53a9b7085c1306b1b314703052e2e8a17f355452b2d7"
+  },
+  {
+    "file": "Data/Fleet Ops Credits.txt",
+    "mtime": "2007-10-03T16:05:20+00:00",
+    "size": 8303,
+    "sha256": "4c4b21e71c965194d674585db8a5df6f834e2d009952c601608041ada2ec4999"
+  },
+  {
+    "file": "Data/bugreport.txt",
+    "mtime": "2026-10-18T23:33:22.971282+00:00",
+    "size": 11089,
+    "sha256": "5b0e18bb82e04665839d0a85813277c524e55b3042590ac9ad0ad7b2ee8c2a7f"
+  },
+  {
+    "file": "Data/License.txt",
+    "mtime": "2001-10-31T11:22:40+00:00",
+    "size": 5408,
+    "sha256": "b3e1fb17a1d2c8d5bf74ea568cf67efaef466e4e5564e729e932af66dae79a09"
+  },
+  {
+    "file": "Data/A2FOArmadaProfiles.txt",
+    "mtime": "2026-10-23T18:03:27.329932+00:00",
+    "size": 862,
+    "sha256": "bcf249d95beefc8d8cde23a61277874a299f0b45be3d6c80b2671dcb903e846d"
+  },
+  {
+    "file": "Data/A2FORenderer.log",
+    "mtime": "2026-11-01T18:48:03.729683+00:00",
+    "size": 183476,
+    "sha256": "fed33d0d0fcd6992b8679bcc564ad3d3fe4e570de686b919fe395f4feca29f50"
+  },
+  {
+    "file": "Data/Mods/Fleet Ops 4.0/NetHelp.txt",
+    "mtime": "2001-11-01T20:23:32+00:00",
+    "size": 3887,
+    "sha256": "9e0e467e56d995522085136db84957e6dcea72c42971d90698437d47c84eded1"
+  },
+  {
+    "file": "Data/Mods/Fleet Ops 4.0/avatar differences.txt",
+    "mtime": "2016-08-21T15:02:30+00:00",
+    "size": 223,
+    "sha256": "ab2a043c4afd370870596785c545b97cdf44490e6c6e2b90f8b77e4a5aa87db5"
+  },
+  {
+    "file": "Data/Mods/Fleet Ops 4.0/Credits.txt",
+    "mtime": "2007-10-03T15:05:20+00:00",
+    "size": 8303,
+    "sha256": "4c4b21e71c965194d674585db8a5df6f834e2d009952c601608041ada2ec4999"
+  },
+  {
+    "file": "Data/Mods/Fleet Ops 4.0/License.txt",
+    "mtime": "2001-10-31T11:22:40+00:00",
+    "size": 5408,
+    "sha256": "b3e1fb17a1d2c8d5bf74ea568cf67efaef466e4e5564e729e932af66dae79a09"
+  },
+  {
+    "file": "Data/CrashReports/report-134370527088071850-316.status.txt",
+    "mtime": "2026-10-21T10:39:13.070377+00:00",
+    "size": 32,
+    "sha256": "29d74dd5c348df52a2700b87f69e99c2d162ce2b7f7829615d4b1221c87ff76e"
+  },
+  {
+    "file": "Data/CrashReports/report-134370707724315070-316.status.txt",
+    "mtime": "2026-10-21T15:39:50.388818+00:00",
+    "size": 32,
+    "sha256": "29d74dd5c348df52a2700b87f69e99c2d162ce2b7f7829615d4b1221c87ff76e"
+  },
+  {
+    "file": "Data/CrashReports/report-134370965333732610-316.status.txt",
+    "mtime": "2026-10-21T22:49:11.881659+00:00",
+    "size": 32,
+    "sha256": "29d74dd5c348df52a2700b87f69e99c2d162ce2b7f7829615d4b1221c87ff76e"
+  },
+  {
+    "file": "Data/CrashReports/report-134370968935663750-320.status.txt",
+    "mtime": "2026-10-21T22:55:21.447992+00:00",
+    "size": 32,
+    "sha256": "29d74dd5c348df52a2700b87f69e99c2d162ce2b7f7829615d4b1221c87ff76e"
+  },
+  {
+    "file": "Data/CrashReports/report-134370538400919110-316.status.txt",
+    "mtime": "2026-10-21T10:58:12.909745+00:00",
+    "size": 32,
+    "sha256": "29d74dd5c348df52a2700b87f69e99c2d162ce2b7f7829615d4b1221c87ff76e"
+  },
+  {
+    "file": "Data/CrashReports/report-134370670843082070-320.status.txt",
+    "mtime": "2026-10-21T14:38:21.795029+00:00",
+    "size": 32,
+    "sha256": "29d74dd5c348df52a2700b87f69e99c2d162ce2b7f7829615d4b1221c87ff76e"
+  },
+  {
+    "file": "Data/CrashReports/report-134370982549836650-316.status.txt",
+    "mtime": "2026-10-21T23:17:53.965988+00:00",
+    "size": 32,
+    "sha256": "29d74dd5c348df52a2700b87f69e99c2d162ce2b7f7829615d4b1221c87ff76e"
+  },
+  {
+    "file": "Data/CrashReports/report-134370966196843720-316.status.txt",
+    "mtime": "2026-10-21T22:50:45.050851+00:00",
+    "size": 32,
+    "sha256": "29d74dd5c348df52a2700b87f69e99c2d162ce2b7f7829615d4b1221c87ff76e"
+  },
+  {
+    "file": "Data/CrashReports/report-134370978246013900-316.status.txt",
+    "mtime": "2026-10-21T23:10:42.549290+00:00",
+    "size": 32,
+    "sha256": "29d74dd5c348df52a2700b87f69e99c2d162ce2b7f7829615d4b1221c87ff76e"
+  },
+  {
+    "file": "Data/CrashReports/report-134370657890973080-316.status.txt",
+    "mtime": "2026-10-21T14:17:24.680065+00:00",
+    "size": 32,
+    "sha256": "29d74dd5c348df52a2700b87f69e99c2d162ce2b7f7829615d4b1221c87ff76e"
+  },
+  {
+    "file": "Data/CrashReports/report-134370667349284680-316.status.txt",
+    "mtime": "2026-10-21T14:32:31.785003+00:00",
+    "size": 32,
+    "sha256": "29d74dd5c348df52a2700b87f69e99c2d162ce2b7f7829615d4b1221c87ff76e"
+  },
+  {
+    "file": "Data/CrashReports/report-134371296118047410-316.status.txt",
+    "mtime": "2026-10-22T08:00:34.043272+00:00",
+    "size": 32,
+    "sha256": "29d74dd5c348df52a2700b87f69e99c2d162ce2b7f7829615d4b1221c87ff76e"
+  },
+  {
+    "file": "Data/CrashReports/report-134370643014658920-316.status.txt",
+    "mtime": "2026-10-21T13:52:37.592642+00:00",
+    "size": 32,
+    "sha256": "29d74dd5c348df52a2700b87f69e99c2d162ce2b7f7829615d4b1221c87ff76e"
+  },
+  {
+    "file": "Data/CrashReports/report-134371293155372020-316.status.txt",
+    "mtime": "2026-10-22T07:56:47.633257+00:00",
+    "size": 32,
+    "sha256": "29d74dd5c348df52a2700b87f69e99c2d162ce2b7f7829615d4b1221c87ff76e"
+  },
+  {
+    "file": "Data/CrashReports/report-134370710082599110-320.status.txt",
+    "mtime": "2026-10-21T15:43:44.989697+00:00",
+    "size": 32,
+    "sha256": "29d74dd5c348df52a2700b87f69e99c2d162ce2b7f7829615d4b1221c87ff76e"
+  },
+  {
+    "file": "Data/CrashReports/report-134371308752574810-320.status.txt",
+    "mtime": "2026-10-22T08:21:32.964365+00:00",
+    "size": 32,
+    "sha256": "29d74dd5c348df52a2700b87f69e99c2d162ce2b7f7829615d4b1221c87ff76e"
+  },
+  {
+    "file": "Data/settings_saves_logs/mods/FO4 Nexus/Settings.xml",
+    "mtime": "2026-11-01T19:02:32.318190+00:00",
+    "size": 2208,
+    "sha256": "b71c1f1c72b22d89bc8bd698bc7632ea0723116351ef64dc781ff320e2d5faee"
+  }
+]

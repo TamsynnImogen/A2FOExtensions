@@ -1,0 +1,141 @@
+// --- File identity and inheritance ---
+basename = "kli_field_yard"
+
+// --- Display and localization ---
+unitname = "Field Yard"
+tooltip = "Field Yard"
+verbosetooltip = "AUTOTOOLTIP-kli_field_yardY.odf"
+race = "klingonempire"
+possiblecraftnames =
+    "Ejyowaw" "Cha'puj" "Ko'Va" "QeD botlh" "NuH botlh" "Qab'a'Qach"
+    "Deh'Qua B'lah" "Deh'Qua Nuq" "Deh'Qua Vak" "Deh'Qua Q'tu"
+    "Deh'Qua Kaq" "Deh'Qua N'quth" "Deh'Qua LuQ" "Deh'Qua Boq"
+    "Kang Center" "K'Vril Center" "D'uok Center" "Var'Qap Center"
+    "NuQ'uq Center" "Baht Center" "Qu'Toh Center" "Q'ntar Center"
+    "Duj'a'Qach" "Duj Qach"
+hotkeylabel = "GAME-HOTKEY-F3"
+
+// --- Construction and costs ---
+buildtime = 30
+officercost = 0
+crewcost = 200
+dilithiumcost = 350
+latinumcost = 88
+builditem0 = "kli_field_yardP1Y"
+builditem1 = "kli_field_yardP2Y"
+builditem2 = "kli_field_yardP3Y"
+builditem3 = "kli_field_yardP4"
+builditem0provided = 2
+builditem1provided = 2
+builditem2provided = 2
+builditem3provided = 1
+
+// --- Hull, shields, crew, and energy ---
+maxhealth = 1851
+curhealth = 1851
+healthrate = 2.294
+maxshields = 1851
+curshields = 1851
+shieldrate = 4.588
+specialenergydisplaymode = 1
+shielddelay = 2
+repairyellow = 2.0f
+repairred = 4.0f
+
+// --- Subsystems, damage, and repair ---
+shieldgeneratorhitpoints = 648
+engineshitpoints = 0
+weaponshitpoints = 0
+lifesupporthitpoints = 648
+sensorshitpoints = 648
+enginesrepairtime = 0.25
+lifesupportrepairtime = 0.0625
+weaponsrepairtime = 0.25
+shieldgeneratorrepairtime = 0.25
+sensorsrepairtime = 0.25
+enginescrewloss = 5.0f
+lifesupportcrewloss = 5.0f
+weaponscrewloss = 8.0f
+shieldgeneratorcrewloss = 8.0f
+sensorscrewloss = 5.0f
+lifesupportloss = 0.5
+engineshitpercent = 0.0f
+lifesupporthitpercent = 7.0f
+weaponshitpercent = 7.0f
+shieldgeneratorhitpercent = 1.0f
+sensorshitpercent = 0
+crewhitpercent = 7.0f
+hullhitpercent = 78.0f
+
+// --- Weapons and ordnance ---
+maxextraweapons = 10
+
+// --- Accuracy, hardpoints, and targeting ---
+hulltargethardpoints = "hp08" "hp09" "hp10" "hp11" "hp12" "hp13" "hp14" "hp15" "hp16" "hp17" "hp18"
+lifesupporttargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06" "hp07"
+weaponstargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06" "hp07"
+shieldgeneratortargethardpoints = "hp08" "hp09" "hp10" "hp11" "hp12" "hp13" "hp14" "hp15" "hp16" "hp17" "hp18"
+sensorstargethardpoints = "hp08" "hp09" "hp10" "hp11" "hp12" "hp13" "hp14" "hp15" "hp16" "hp17" "hp18"
+enginestargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06" "hp07"
+criticaltargethardpoints = "hp01" "hp02" "hp03" "hp04" "hp05" "hp06" "hp07"
+extraweaponhardpoints = "root"
+podhardpoints = "hp100" "hp101" "hp102" "hp103" "hp104" "hp105" "hp106" "hp107" "hp108" "hp109"
+
+// --- Artificial intelligence and tactical behavior ---
+attackpower = 0.000
+intrinsicvalue = 0.000
+avoidanceclass = 9
+rangescan = 600
+damagedscan = 50.0f
+ainame = "StarbaseProcess"
+alert = 1
+combat = 1
+
+// --- Interface and controls ---
+show_sw_autonomy = 1
+show_movement_autonomy = 1
+overlaysod = "kli_s_shuttlesS"
+
+// --- Audio and events ---
+eventselect = "KlingonFieldYardSelect"
+eventacknowledge = "StarbaseAcknowledge"
+eventattack = "StarbaseAttack"
+eventdecommission = "StarbaseDecommission"
+
+// --- Movement and physics ---
+footprintbuffer = 170.0f
+northbuffer = 220.0
+weldingradius = 1.0
+
+// --- Progression and variants ---
+worthxp = 165
+research = 1
+
+// --- Resource handling and recycling ---
+recycledilithium = 105
+recycletime = 17
+recyclelatinum = 26
+recyclebiomatter = 0
+checkvalidresourceinterval = 10.0f
+
+// --- Art, animation, and effects ---
+fireball = "x_building_explosion"
+shieldhit = "shield_kli_hitXL"
+shieldhitcritical = "shield_kli_hitcritXL"
+shielddown = "shield_kli_down"
+selecthighlight = 1
+
+// --- Capabilities and object behavior ---
+has_hitpoints = 1
+has_crew = 1
+transporter = 1
+can_sandd = 0
+buildablebyownerraceonly = 1
+is_starbase = 1
+facility = 1
+
+// --- Runtime class ---
+classlabel = "research"
+
+// A2FOSquadrons: select this station and its attached shipyards together.
+selectPodsTogether = 1

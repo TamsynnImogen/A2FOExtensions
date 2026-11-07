@@ -1,0 +1,31 @@
+[package]
+name = "a2fo-media"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "a2fo_media"
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+oxideav-core = "=0.1.42"
+oxideav-mp4 = { path = "../../third_party/rust-media/oxideav-mp4" }
+oxideav-mkv = { path = "../../third_party/rust-media/oxideav-mkv" }
+oxideav-h264 = { path = "../../third_party/rust-media/oxideav-h264" }
+oxideav-vp9 = { path = "../../third_party/rust-media/oxideav-vp9" }
+oxideav-aac = { path = "../../third_party/rust-media/oxideav-aac" }
+oxideav-opus = { path = "../../third_party/rust-media/oxideav-opus" }
+oxideav-vorbis = { path = "../../third_party/rust-media/oxideav-vorbis" }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_Media_Multimedia", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "Win32_System_LibraryLoader", "Win32_System_SystemInformation"] }
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = "thin"
+panic = "unwind"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

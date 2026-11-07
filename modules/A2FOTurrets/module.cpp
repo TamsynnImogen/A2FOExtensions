@@ -10,6 +10,7 @@
 #include "../../sdk/include/a2fo_module_api.h"
 #include "turret_combat.hpp"
 #include "turret_math.hpp"
+#include "../../rust/stage8_a_turrets_ffi.h"
 
 #include <windows.h>
 
@@ -20,6 +21,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <limits>
 #include <string>
 #include <unordered_map>
@@ -208,22 +210,52 @@ void log_line(const std::string& message) noexcept {
     if (g_api && g_api->log) g_api->log(kModuleName, message.c_str());
 }
 
-void resolve_shield_observers() noexcept {
-    HMODULE shields = GetModuleHandleA(kAlwaysShowShieldsModuleName);
-    FARPROC class_export = shields
-        ? GetProcAddress(shields, kShieldClassObserverExport)
-        : nullptr;
-    static_assert(sizeof(class_export) == sizeof(g_shield_class_observer),
+struct TurretShieldObserverContext {
+    HMODULE provider = nullptr;
+    FARPROC class_export = nullptr;
+};
+
+std::uintptr_t turret_shield_observer_step(void* opaque, std::uint32_t op,
+                                         std::uintptr_t arg) noexcept {
+    auto& context = *static_cast<TurretShieldObserverContext*>(opaque);
+    switch (op) {
+    case 0:
+        context.provider = GetModuleHandleA("A2FOExtensions.dll");
+        return reinterpret_cast<std::uintptr_t>(context.provider);
+    case 1:
+        context.class_export = GetProcAddress(
+            context.provider, kShieldClassObserverExport);
+        return reinterpret_cast<std::uintptr_t>(context.class_export);
+    case 2:
+        context.provider = GetModuleHandleA(kAlwaysShowShieldsModuleName);
+        return reinterpret_cast<std::uintptr_t>(context.provider);
+    case 3:
+        context.class_export = GetProcAddress(
+            context.provider, kShieldClassObserverExport);
+        return reinterpret_cast<std::uintptr_t>(context.class_export);
+    case 4:
+        context.class_export = reinterpret_cast<FARPROC>(arg);
+    static_assert(sizeof(context.class_export) ==
+                  sizeof(g_shield_class_observer),
                   "unexpected function-pointer size");
-    std::memcpy(&g_shield_class_observer, &class_export,
+    std::memcpy(&g_shield_class_observer, &context.class_export,
                 sizeof(g_shield_class_observer));
-    if (!g_shield_class_observer) {
-        g_shield_class_observer = nullptr;
-        return;
+        return 1;
+    case 5: return g_shield_class_observer != nullptr;
+    case 6: g_shield_class_observer = nullptr; return 1;
+    case 7:
+        log_line(
+            "Shield visibility callbacks linked through "
+            "A2FOAlwaysShowShields");
+        return 1;
+    default: return 0;
     }
-    log_line(
-        "Shield visibility callbacks linked through "
-        "A2FOAlwaysShowShields");
+}
+
+void resolve_shield_observers() noexcept {
+    TurretShieldObserverContext context{};
+    a2fo_rs_stage8_turrets_resolve_shield_observers(
+        &turret_shield_observer_step, &context);
 }
 
 void* at(HMODULE module, std::uintptr_t rva) noexcept {
@@ -308,378 +340,732 @@ void copy_class_odf_name(void* object_class_pointer, char* output,
 void trim_string(std::string* value) {
     if (!value) return;
     std::size_t begin = 0;
-    while (begin < value->size() &&
-           std::isspace(static_cast<unsigned char>((*value)[begin]))) {
-        ++begin;
-    }
     std::size_t end = value->size();
-    while (end > begin &&
-           std::isspace(static_cast<unsigned char>((*value)[end - 1]))) {
-        --end;
-    }
+    const auto ctype = +[](void*, std::uint32_t op,
+                           std::uintptr_t byte) noexcept -> std::uintptr_t {
+        const auto character = static_cast<unsigned char>(byte);
+        return op == 0 ? std::isspace(character) != 0
+                       : static_cast<std::uintptr_t>(std::tolower(character));
+    };
+    a2fo_rs_stage8_turrets_trim(
+        reinterpret_cast<const std::uint8_t*>(value->data()),
+        value->size(), ctype, nullptr, &begin, &end);
     *value = value->substr(begin, end - begin);
 }
 
+struct TurretNormalizeOdfContext {
+    std::string* value;
+    std::exception_ptr exception{};
+};
+
+std::uintptr_t turret_normalize_odf_step(void* opaque, std::uint32_t op,
+                                       std::uintptr_t) noexcept {
+    auto& context = *static_cast<TurretNormalizeOdfContext*>(opaque);
+    if (context.exception) return std::numeric_limits<std::uintptr_t>::max();
+    try {
+    switch (op) {
+    case 0: return context.value != nullptr;
+    case 1: trim_string(context.value); return 1;
+    case 2: {
+        const auto ctype = +[](void*, std::uint32_t,
+                               std::uintptr_t byte) noexcept -> std::uintptr_t {
+            return static_cast<std::uintptr_t>(
+                std::tolower(static_cast<unsigned char>(byte)));
+        };
+        return a2fo_rs_stage8_turrets_odf_suffix(
+            reinterpret_cast<const std::uint8_t*>(context.value->data()),
+            context.value->size(), ctype, nullptr);
+    }
+    case 3: context.value->resize(context.value->size() - 4); return 1;
+    default: return 0;
+    }
+    } catch (...) {
+        context.exception = std::current_exception();
+        return std::numeric_limits<std::uintptr_t>::max();
+    }
+}
+
 void normalize_odf_basename(std::string* value) {
-    if (!value) return;
-    trim_string(value);
-    if (value->size() >= 4) {
-        const std::size_t offset = value->size() - 4;
-        if ((*value)[offset] == '.' &&
-            std::tolower(static_cast<unsigned char>((*value)[offset + 1])) == 'o' &&
-            std::tolower(static_cast<unsigned char>((*value)[offset + 2])) == 'd' &&
-            std::tolower(static_cast<unsigned char>((*value)[offset + 3])) == 'f') {
-            value->resize(offset);
-        }
+    TurretNormalizeOdfContext context{value};
+    a2fo_rs_stage8_turrets_normalize_odf(
+        &turret_normalize_odf_step, &context);
+    if (context.exception) std::rethrow_exception(context.exception);
+}
+
+struct TurretParameterStringContext {
+    void* parameter_db;
+    const char* key;
+    std::string* output;
+    std::array<char, 260> value{};
+};
+
+std::uintptr_t turret_parameter_string_step(void* opaque, std::uint32_t op,
+                                          std::uintptr_t) noexcept {
+    auto& context = *static_cast<TurretParameterStringContext*>(opaque);
+    switch (op) {
+    case 0: return context.parameter_db != nullptr;
+    case 1: return context.key != nullptr;
+    case 2: return *context.key != '\0';
+    case 3: return context.output != nullptr;
+    case 4: return g_armada != nullptr;
+    case 5:
+        return a2fo_turret_call_thiscall_4(
+            at(g_armada, kParameterDbGetStringRva), context.parameter_db,
+            reinterpret_cast<std::uintptr_t>(context.key),
+            reinterpret_cast<std::uintptr_t>(context.value.data()),
+            static_cast<std::uintptr_t>(context.value.size()),
+            reinterpret_cast<std::uintptr_t>(""));
+    case 6: context.value.back() = '\0'; return 1;
+    case 7: return context.value[0] != '\0';
+    case 8:
+        try {
+            *context.output = context.value.data();
+            return 1;
+        } catch (...) { return 0; }
+    case 9:
+        try { trim_string(context.output); return 1; }
+        catch (...) { return 0; }
+    case 10: return !context.output->empty();
+    default: return 0;
     }
 }
 
 bool read_parameter_string(void* parameter_db, const char* key,
                            std::string* output) noexcept {
-    if (!parameter_db || !key || !*key || !output || !g_armada) {
-        return false;
-    }
-    std::array<char, 260> value{};
-    const std::uintptr_t found = a2fo_turret_call_thiscall_4(
-        at(g_armada, kParameterDbGetStringRva), parameter_db,
-        reinterpret_cast<std::uintptr_t>(key),
-        reinterpret_cast<std::uintptr_t>(value.data()),
-        static_cast<std::uintptr_t>(value.size()),
-        reinterpret_cast<std::uintptr_t>(""));
-    value.back() = '\0';
-    if ((found & 0xffu) == 0 || value[0] == '\0') return false;
-    try {
-        *output = value.data();
-        trim_string(output);
-        return !output->empty();
-    } catch (...) {
-        return false;
+    TurretParameterStringContext context{parameter_db, key, output, {}};
+    return a2fo_rs_stage8_turrets_read_parameter_string(
+        &turret_parameter_string_step, &context) != 0;
+}
+
+struct TurretFloatContext {
+    const std::string* text;
+    float* output;
+    char* end = nullptr;
+    float parsed = 0.0f;
+};
+
+std::uintptr_t turret_float_step(void* opaque, std::uint32_t op,
+                               std::uintptr_t arg) noexcept {
+    auto& context = *static_cast<TurretFloatContext*>(opaque);
+    switch (op) {
+    case 0: return context.output != nullptr;
+    case 1: return !context.text->empty();
+    case 2:
+        errno = 0;
+        context.parsed = std::strtof(context.text->c_str(), &context.end);
+        return 1;
+    case 3: return context.end != context.text->c_str();
+    case 4: return errno != ERANGE;
+    case 5: return std::isfinite(context.parsed);
+    case 6: return static_cast<unsigned char>(*context.end);
+    case 7: return static_cast<unsigned char>(*context.end);
+    case 8: return std::isspace(static_cast<unsigned char>(arg)) != 0;
+    case 9: ++context.end; return 1;
+    case 10: *context.output = context.parsed; return 1;
+    default: return 0;
     }
 }
 
 bool parse_float(const std::string& text, float* output) noexcept {
-    if (!output || text.empty()) return false;
-    char* end = nullptr;
-    errno = 0;
-    const float parsed = std::strtof(text.c_str(), &end);
-    if (end == text.c_str() || errno == ERANGE || !std::isfinite(parsed)) {
-        return false;
+    TurretFloatContext context{&text, output};
+    return a2fo_rs_stage8_turrets_parse_float(
+        &turret_float_step, &context) != 0;
+}
+
+struct TurretParameterFloatContext {
+    void* parameter_db;
+    const char* key;
+    float* output;
+    std::string value;
+};
+
+std::uintptr_t turret_parameter_float_step(void* opaque, std::uint32_t op,
+                                         std::uintptr_t) noexcept {
+    auto& context = *static_cast<TurretParameterFloatContext*>(opaque);
+    switch (op) {
+    case 0: return read_parameter_string(context.parameter_db, context.key,
+        &context.value);
+    case 1: return parse_float(context.value, context.output);
+    default: return 0;
     }
-    if (*end == 'f' || *end == 'F') ++end;
-    while (*end && std::isspace(static_cast<unsigned char>(*end))) ++end;
-    if (*end != '\0') return false;
-    *output = parsed;
-    return true;
 }
 
 bool read_parameter_float(void* parameter_db, const char* key,
                           float* output) noexcept {
+    TurretParameterFloatContext context{parameter_db, key, output, {}};
+    return a2fo_rs_stage8_turrets_read_parameter_float(
+        &turret_parameter_float_step, &context) != 0;
+}
+
+struct TurretParameterBoolContext {
+    void* parameter_db;
+    const char* key;
+    bool* output;
     std::string value;
-    return read_parameter_string(parameter_db, key, &value) &&
-        parse_float(value, output);
+};
+
+std::uintptr_t turret_parameter_bool_step(void* opaque, std::uint32_t op,
+                                        std::uintptr_t arg) noexcept {
+    auto& context = *static_cast<TurretParameterBoolContext*>(opaque);
+    switch (op) {
+    case 0: return context.output != nullptr;
+    case 1:
+        return read_parameter_string(
+            context.parameter_db, context.key, &context.value);
+    case 2: return context.value.size();
+    case 3: {
+        char& character = context.value[arg];
+        character = static_cast<char>(
+            std::tolower(static_cast<unsigned char>(character)));
+        return static_cast<unsigned char>(character);
+    }
+    case 4: *context.output = arg != 0; return 1;
+    default: return 0;
+    }
 }
 
 bool read_parameter_bool(void* parameter_db, const char* key,
                          bool* output) noexcept {
-    if (!output) return false;
-    std::string value;
-    if (!read_parameter_string(parameter_db, key, &value)) return false;
-    for (char& character : value) {
+    TurretParameterBoolContext context{parameter_db, key, output, {}};
+    return a2fo_rs_stage8_turrets_read_parameter_bool(
+        &turret_parameter_bool_step, &context) != 0;
+}
+
+struct TurretSemanticContext {
+    void* parameter_db;
+    std::array<char, 64> label{};
+};
+
+std::uintptr_t turret_semantic_step(void* opaque, std::uint32_t op,
+                                  std::uintptr_t arg) noexcept {
+    auto& context = *static_cast<TurretSemanticContext*>(opaque);
+    switch (op) {
+    case 0:
+        return g_api && g_api->get_original_classlabel &&
+            context.parameter_db;
+    case 1:
+        return g_api->get_original_classlabel(
+            context.parameter_db, context.label.data(),
+            static_cast<std::uint32_t>(context.label.size()));
+    case 2: {
+        char& character = context.label[arg];
         character = static_cast<char>(
             std::tolower(static_cast<unsigned char>(character)));
+        return 1;
     }
-    if (value == "1" || value == "true" || value == "yes") {
-        *output = true;
-        return true;
+    case 3: return static_cast<unsigned char>(context.label[arg]);
+    default: return 0;
     }
-    if (value == "0" || value == "false" || value == "no") {
-        *output = false;
-        return true;
-    }
-    return false;
 }
 
 bool is_semantic_turret(void* parameter_db) noexcept {
-    if (!g_api || !g_api->get_original_classlabel || !parameter_db) {
-        return false;
-    }
-    std::array<char, 64> label{};
-    if (!g_api->get_original_classlabel(
-            parameter_db, label.data(),
-            static_cast<std::uint32_t>(label.size()))) {
-        return false;
-    }
-    for (char& character : label) {
-        character = static_cast<char>(
-            std::tolower(static_cast<unsigned char>(character)));
-    }
-    return std::strcmp(label.data(), "turret") == 0;
+    TurretSemanticContext context{parameter_db, {}};
+    return a2fo_rs_stage8_turrets_is_semantic_turret(
+        &turret_semantic_step, &context) != 0;
 }
 
 void normalize_turret_config(TurretClassConfig* config) noexcept {
     if (!config) return;
-    AimLimits& limits = config->limits;
-    limits.yaw_min_degrees = a2fo::turrets::clamp_value(
-        limits.yaw_min_degrees, -180.0f, 180.0f);
-    limits.yaw_max_degrees = a2fo::turrets::clamp_value(
-        limits.yaw_max_degrees, -180.0f, 180.0f);
-    if (limits.yaw_min_degrees > limits.yaw_max_degrees) {
-        std::swap(limits.yaw_min_degrees, limits.yaw_max_degrees);
+    A2FO_Stage8TurretAim aim{
+        config->limits.yaw_min_degrees,
+        config->limits.yaw_max_degrees,
+        config->limits.pitch_min_degrees,
+        config->limits.pitch_max_degrees,
+        config->limits.yaw_rate_degrees,
+        config->limits.pitch_rate_degrees,
+        config->rest.yaw_degrees,
+        config->rest.pitch_degrees};
+    a2fo_rs_stage8_turrets_normalize(&aim);
+    config->limits.yaw_min_degrees = aim.yaw_min;
+    config->limits.yaw_max_degrees = aim.yaw_max;
+    config->limits.pitch_min_degrees = aim.pitch_min;
+    config->limits.pitch_max_degrees = aim.pitch_max;
+    config->limits.yaw_rate_degrees = aim.yaw_rate;
+    config->limits.pitch_rate_degrees = aim.pitch_rate;
+    config->rest.yaw_degrees = aim.rest_yaw;
+    config->rest.pitch_degrees = aim.rest_pitch;
+}
+
+struct TurretClassContext {
+    void* class_object = nullptr;
+    void* parameter_db = nullptr;
+    char odf_name[128]{};
+    TurretClassConfig config{};
+    ParentClassConfig parent{};
+    std::size_t index = 0;
+    char turret_key[32]{};
+    char hardpoint_key[40]{};
+    std::string turret_odf;
+    std::string hardpoint;
+    bool has_turret = false;
+    bool has_hardpoint = false;
+    std::exception_ptr exception{};
+};
+
+std::uintptr_t turret_class_step(void* opaque, std::uint32_t op,
+                                 std::uintptr_t arg) noexcept {
+    auto& c = *static_cast<TurretClassContext*>(opaque);
+    if (c.exception) return std::numeric_limits<std::uintptr_t>::max();
+    try {
+        switch (op) {
+        case 0: return g_runtime_ready && c.class_object && c.parameter_db;
+        case 1:
+            copy_class_odf_name(c.class_object, c.odf_name,
+                                sizeof(c.odf_name));
+            return 1;
+        case 2: return is_semantic_turret(c.parameter_db);
+        case 3: c.config.odf_name = c.odf_name; return 1;
+        case 4:
+            switch (arg) {
+            case 0: read_parameter_float(c.parameter_db, "turretYawMin",
+                &c.config.limits.yaw_min_degrees); break;
+            case 1: read_parameter_float(c.parameter_db, "turretYawMax",
+                &c.config.limits.yaw_max_degrees); break;
+            case 2: read_parameter_float(c.parameter_db, "turretPitchMin",
+                &c.config.limits.pitch_min_degrees); break;
+            case 3: read_parameter_float(c.parameter_db, "turretPitchMax",
+                &c.config.limits.pitch_max_degrees); break;
+            case 4: read_parameter_float(c.parameter_db, "turretYawRate",
+                &c.config.limits.yaw_rate_degrees); break;
+            case 5: read_parameter_float(c.parameter_db, "turretPitchRate",
+                &c.config.limits.pitch_rate_degrees); break;
+            case 6: read_parameter_float(c.parameter_db, "turretRestYaw",
+                &c.config.rest.yaw_degrees); break;
+            case 7: read_parameter_float(c.parameter_db, "turretRestPitch",
+                &c.config.rest.pitch_degrees); break;
+            case 8: read_parameter_bool(c.parameter_db, "turretReturnToRest",
+                &c.config.return_to_rest); break;
+            default: return 0;
+            }
+            return 1;
+        case 5: normalize_turret_config(&c.config); return 1;
+        case 6:
+            try { g_turret_classes[c.class_object] = c.config; }
+            catch (...) {
+                log_line("Could not retain a turret class policy");
+                return 0;
+            }
+            return 1;
+        case 7: {
+            char message[384]{};
+            std::snprintf(message, sizeof(message),
+                "Registered turret ODF '%s': yaw %.1f..%.1f @ %.1f deg/s, "
+                "pitch %.1f..%.1f @ %.1f deg/s",
+                c.odf_name[0] ? c.odf_name : "<unknown>",
+                c.config.limits.yaw_min_degrees,
+                c.config.limits.yaw_max_degrees,
+                c.config.limits.yaw_rate_degrees,
+                c.config.limits.pitch_min_degrees,
+                c.config.limits.pitch_max_degrees,
+                c.config.limits.pitch_rate_degrees);
+            log_line(message);
+            return 1;
+        }
+        case 8: c.parent.odf_name = c.odf_name; return 1;
+        case 9:
+            c.index = arg;
+            std::snprintf(c.turret_key, sizeof(c.turret_key), "turret%lu",
+                          static_cast<unsigned long>(c.index));
+            std::snprintf(c.hardpoint_key, sizeof(c.hardpoint_key),
+                          "turretHardpoint%lu",
+                          static_cast<unsigned long>(c.index));
+            c.turret_odf.clear();
+            c.hardpoint.clear();
+            return 1;
+        case 10:
+            c.has_turret = read_parameter_string(
+                c.parameter_db, c.turret_key, &c.turret_odf);
+            return c.has_turret;
+        case 11:
+            c.has_hardpoint = read_parameter_string(
+                c.parameter_db, c.hardpoint_key, &c.hardpoint);
+            return c.has_hardpoint;
+        case 12: {
+            char message[320]{};
+            std::snprintf(message, sizeof(message),
+                "Skipping incomplete turret pair %lu on '%s' "
+                "(%s is missing)",
+                static_cast<unsigned long>(c.index),
+                c.odf_name[0] ? c.odf_name : "<unknown>",
+                c.has_turret ? c.hardpoint_key : c.turret_key);
+            log_line(message);
+            return 1;
+        }
+        case 13: normalize_odf_basename(&c.turret_odf); return 1;
+        case 14: trim_string(&c.hardpoint); return 1;
+        case 15: return !c.turret_odf.empty() && !c.hardpoint.empty();
+        case 16:
+            try {
+                c.parent.mounts.push_back(MountClassConfig{
+                    static_cast<std::uint32_t>(c.index),
+                    std::move(c.turret_odf), std::move(c.hardpoint)});
+            } catch (...) {
+                log_line("Could not retain an indexed turret pair");
+                return 0;
+            }
+            return 1;
+        case 17: return c.parent.mounts.size();
+        case 18:
+            try {
+                const std::size_t count = c.parent.mounts.size();
+                g_parent_classes[c.class_object] = std::move(c.parent);
+                char message[256]{};
+                std::snprintf(message, sizeof(message),
+                    "Registered %lu hull turret mount%s on '%s'",
+                    static_cast<unsigned long>(count),
+                    count == 1 ? "" : "s",
+                    c.odf_name[0] ? c.odf_name : "<unknown>");
+                log_line(message);
+            } catch (...) {
+                log_line("Could not retain a parent turret policy");
+            }
+            return 1;
+        case 19: {
+            std::string{}.swap(c.turret_odf);
+            std::string{}.swap(c.hardpoint);
+            return 1;
+        }
+        default: return 0;
+        }
+    } catch (...) {
+        c.exception = std::current_exception();
+        return std::numeric_limits<std::uintptr_t>::max();
     }
-    limits.pitch_min_degrees = a2fo::turrets::clamp_value(
-        limits.pitch_min_degrees, -90.0f, 90.0f);
-    limits.pitch_max_degrees = a2fo::turrets::clamp_value(
-        limits.pitch_max_degrees, -90.0f, 90.0f);
-    if (limits.pitch_min_degrees > limits.pitch_max_degrees) {
-        std::swap(limits.pitch_min_degrees, limits.pitch_max_degrees);
-    }
-    limits.yaw_rate_degrees = a2fo::turrets::clamp_value(
-        limits.yaw_rate_degrees, 0.0f, 3600.0f);
-    limits.pitch_rate_degrees = a2fo::turrets::clamp_value(
-        limits.pitch_rate_degrees, 0.0f, 3600.0f);
-    config->rest.yaw_degrees = a2fo::turrets::clamp_value(
-        config->rest.yaw_degrees, limits.yaw_min_degrees,
-        limits.yaw_max_degrees);
-    config->rest.pitch_degrees = a2fo::turrets::clamp_value(
-        config->rest.pitch_degrees, limits.pitch_min_degrees,
-        limits.pitch_max_degrees);
 }
 
 void register_class_policy(void* class_object, void* parameter_db) noexcept {
-    if (!g_runtime_ready || !class_object || !parameter_db) return;
+    TurretClassContext context{};
+    context.class_object = class_object;
+    context.parameter_db = parameter_db;
+    a2fo_rs_stage8_turrets_register_class(&turret_class_step, &context);
+    if (context.exception) std::rethrow_exception(context.exception);
+}
 
-    char odf_name[128]{};
-    copy_class_odf_name(class_object, odf_name, sizeof(odf_name));
-    if (is_semantic_turret(parameter_db)) {
-        TurretClassConfig config{};
-        config.odf_name = odf_name;
-        read_parameter_float(parameter_db, "turretYawMin",
-                             &config.limits.yaw_min_degrees);
-        read_parameter_float(parameter_db, "turretYawMax",
-                             &config.limits.yaw_max_degrees);
-        read_parameter_float(parameter_db, "turretPitchMin",
-                             &config.limits.pitch_min_degrees);
-        read_parameter_float(parameter_db, "turretPitchMax",
-                             &config.limits.pitch_max_degrees);
-        read_parameter_float(parameter_db, "turretYawRate",
-                             &config.limits.yaw_rate_degrees);
-        read_parameter_float(parameter_db, "turretPitchRate",
-                             &config.limits.pitch_rate_degrees);
-        read_parameter_float(parameter_db, "turretRestYaw",
-                             &config.rest.yaw_degrees);
-        read_parameter_float(parameter_db, "turretRestPitch",
-                             &config.rest.pitch_degrees);
-        read_parameter_bool(parameter_db, "turretReturnToRest",
-                            &config.return_to_rest);
-        normalize_turret_config(&config);
-        try {
-            g_turret_classes[class_object] = config;
-        } catch (...) {
-            log_line("Could not retain a turret class policy");
-            return;
-        }
-        char message[384]{};
-        std::snprintf(
-            message, sizeof(message),
-            "Registered turret ODF '%s': yaw %.1f..%.1f @ %.1f deg/s, "
-            "pitch %.1f..%.1f @ %.1f deg/s",
-            odf_name[0] ? odf_name : "<unknown>",
-            config.limits.yaw_min_degrees,
-            config.limits.yaw_max_degrees,
-            config.limits.yaw_rate_degrees,
-            config.limits.pitch_min_degrees,
-            config.limits.pitch_max_degrees,
-            config.limits.pitch_rate_degrees);
-        log_line(message);
-    }
+struct TurretClassConstructContext {
+    void* self;
+    void* parent_class;
+    void* parameter_db;
+    std::uintptr_t result = 0;
+    std::exception_ptr exception{};
+};
 
-    ParentClassConfig parent{};
-    parent.odf_name = odf_name;
-    for (std::size_t index = 0; index <= kMaximumTurrets; ++index) {
-        char turret_key[32]{};
-        char hardpoint_key[40]{};
-        std::snprintf(turret_key, sizeof(turret_key), "turret%lu",
-                      static_cast<unsigned long>(index));
-        std::snprintf(hardpoint_key, sizeof(hardpoint_key),
-                      "turretHardpoint%lu",
-                      static_cast<unsigned long>(index));
-        std::string turret_odf;
-        std::string hardpoint;
-        const bool has_turret = read_parameter_string(
-            parameter_db, turret_key, &turret_odf);
-        const bool has_hardpoint = read_parameter_string(
-            parameter_db, hardpoint_key, &hardpoint);
-        if (!has_turret && !has_hardpoint) continue;
-        if (!has_turret || !has_hardpoint) {
-            char message[320]{};
-            std::snprintf(
-                message, sizeof(message),
-                "Skipping incomplete turret pair %lu on '%s' "
-                "(%s is missing)",
-                static_cast<unsigned long>(index),
-                odf_name[0] ? odf_name : "<unknown>",
-                has_turret ? hardpoint_key : turret_key);
-            log_line(message);
-            continue;
-        }
-        normalize_odf_basename(&turret_odf);
-        trim_string(&hardpoint);
-        if (turret_odf.empty() || hardpoint.empty()) continue;
+std::uintptr_t turret_class_construct_step(void* opaque, std::uint32_t op,
+                                         std::uintptr_t) noexcept {
+    auto& context = *static_cast<TurretClassConstructContext*>(opaque);
+    switch (op) {
+    case 0:
+        context.result = a2fo_turret_call_thiscall_2(
+            g_class_constructor_original, context.self,
+            reinterpret_cast<std::uintptr_t>(context.parent_class),
+            reinterpret_cast<std::uintptr_t>(context.parameter_db));
+        return 1;
+    case 1:
         try {
-            parent.mounts.push_back(MountClassConfig{
-                static_cast<std::uint32_t>(index),
-                std::move(turret_odf), std::move(hardpoint)});
+            register_class_policy(context.self, context.parameter_db);
+            return 1;
         } catch (...) {
-            log_line("Could not retain an indexed turret pair");
-            return;
+            context.exception = std::current_exception();
+            return std::numeric_limits<std::uintptr_t>::max();
         }
-    }
-    if (parent.mounts.empty()) return;
-    try {
-        const std::size_t count = parent.mounts.size();
-        g_parent_classes[class_object] = std::move(parent);
-        char message[256]{};
-        std::snprintf(
-            message, sizeof(message),
-            "Registered %lu hull turret mount%s on '%s'",
-            static_cast<unsigned long>(count), count == 1 ? "" : "s",
-            odf_name[0] ? odf_name : "<unknown>");
-        log_line(message);
-    } catch (...) {
-        log_line("Could not retain a parent turret policy");
+    case 2:
+        if (g_shield_class_observer) {
+            g_shield_class_observer(context.self, context.parameter_db);
+        }
+        return 1;
+    default: return 0;
     }
 }
 
 std::uintptr_t __attribute__((fastcall)) game_object_class_constructor_hook(
     void* self, void*, void* parent_class, void* parameter_db) noexcept {
-    const std::uintptr_t result = a2fo_turret_call_thiscall_2(
-        g_class_constructor_original, self,
-        reinterpret_cast<std::uintptr_t>(parent_class),
-        reinterpret_cast<std::uintptr_t>(parameter_db));
-    register_class_policy(self, parameter_db);
-    if (g_shield_class_observer) {
-        g_shield_class_observer(self, parameter_db);
+    TurretClassConstructContext context{self, parent_class, parameter_db};
+    a2fo_rs_stage8_turrets_class_construct(
+        &turret_class_construct_step, &context);
+    if (context.exception) std::rethrow_exception(context.exception);
+    return context.result;
+}
+
+struct TurretParentContext {
+    void* object = nullptr;
+    void* object_class = nullptr;
+    const ParentClassConfig* configured = nullptr;
+    ParentRuntime runtime{};
+    ParentRuntime* result = nullptr;
+};
+
+std::uintptr_t turret_parent_step(void* opaque, std::uint32_t op,
+                                std::uintptr_t arg) noexcept {
+    auto& context = *static_cast<TurretParentContext*>(opaque);
+    switch (op) {
+    case 0: return context.object && !object_expired(context.object);
+    case 1: return object_handle(context.object);
+    case 2: {
+        const auto found = g_parents.find(static_cast<std::uint32_t>(arg));
+        if (found == g_parents.end()) return 0;
+        context.result = &found->second;
+        return 1;
     }
-    return result;
+    case 3:
+        context.object_class = object_class(context.object);
+        return 1;
+    case 4: {
+        const auto found = g_parent_classes.find(context.object_class);
+        if (found == g_parent_classes.end()) return 0;
+        context.configured = &found->second;
+        context.runtime.object_class = context.object_class;
+        return 1;
+    }
+    case 5: return context.configured->mounts.size();
+    case 6:
+        try {
+            context.runtime.mounts.reserve(arg);
+            return 1;
+        } catch (...) { return 0; }
+    case 7:
+        try {
+            context.runtime.mounts.push_back(
+                MountRuntime{context.configured->mounts[arg]});
+            return 1;
+        } catch (...) { return 0; }
+    case 8:
+        try {
+            const auto inserted = g_parents.emplace(
+                static_cast<std::uint32_t>(arg), std::move(context.runtime));
+            context.result = inserted.second ? &inserted.first->second : nullptr;
+            return 1;
+        } catch (...) { return 0; }
+    case 9:
+        log_line("Could not allocate per-object turret state");
+        return 1;
+    default: return 0;
+    }
 }
 
 ParentRuntime* ensure_parent_runtime(void* parent) noexcept {
-    if (!parent || object_expired(parent)) return nullptr;
-    const std::uint32_t handle = object_handle(parent);
-    if (handle == 0) return nullptr;
-    const auto present = g_parents.find(handle);
-    if (present != g_parents.end()) return &present->second;
+    TurretParentContext context{};
+    context.object = parent;
+    a2fo_rs_stage8_turrets_ensure_parent(&turret_parent_step, &context);
+    return context.result;
+}
 
-    void* class_pointer = object_class(parent);
-    const auto configured = g_parent_classes.find(class_pointer);
-    if (configured == g_parent_classes.end()) return nullptr;
-    ParentRuntime runtime{};
-    runtime.object_class = class_pointer;
-    try {
-        runtime.mounts.reserve(configured->second.mounts.size());
-        for (const MountClassConfig& config : configured->second.mounts) {
-            runtime.mounts.push_back(MountRuntime{config});
-        }
-        const auto inserted = g_parents.emplace(handle, std::move(runtime));
-        return inserted.second ? &inserted.first->second : nullptr;
-    } catch (...) {
-        log_line("Could not allocate per-object turret state");
-        return nullptr;
+struct TurretMountContext {
+    ParentRuntime* parent = nullptr;
+    std::uint32_t requested = 0;
+    MountRuntime* result = nullptr;
+};
+
+std::uintptr_t turret_mount_step(void* opaque, std::uint32_t op,
+                               std::uintptr_t arg) noexcept {
+    auto& context = *static_cast<TurretMountContext*>(opaque);
+    switch (op) {
+    case 0: return context.parent ? context.parent->mounts.size() : 0;
+    case 1:
+        return context.parent->mounts[arg].config.index == context.requested;
+    case 2:
+        context.result = &context.parent->mounts[arg];
+        return 1;
+    default: return 0;
     }
 }
 
 MountRuntime* find_mount(ParentRuntime* parent,
                          std::uint32_t index) noexcept {
-    if (!parent) return nullptr;
-    for (MountRuntime& mount : parent->mounts) {
-        if (mount.config.index == index) return &mount;
-    }
-    return nullptr;
+    TurretMountContext context{parent, index, nullptr};
+    a2fo_rs_stage8_turrets_find_mount(&turret_mount_step, &context);
+    return context.result;
 }
 
-bool resolve_hardpoint(void* parent, MountRuntime* mount) noexcept {
-    if (!parent || !mount || !g_armada) return false;
-    if (mount->hardpoint_resolved) return mount->hardpoint_node != nullptr;
-    mount->hardpoint_resolved = true;
-    void* class_pointer = object_class(parent);
-    void* root = reinterpret_cast<void*>(a2fo_turret_call_thiscall_0(
-        at(g_armada, kGameObjectClassGetHierarchyRootRva), class_pointer));
-    if (root) {
-        mount->hardpoint_node = reinterpret_cast<void*>(
-            a2fo_turret_call_thiscall_1(
-                at(g_armada, kSt3dNodeFindRecursiveRva), root,
-                reinterpret_cast<std::uintptr_t>(
-                    mount->config.hardpoint.c_str())));
+struct TurretHardpointContext {
+    void* parent;
+    MountRuntime* mount;
+};
+
+std::uintptr_t turret_hardpoint_step(void* opaque, std::uint32_t op,
+                                   std::uintptr_t arg) noexcept {
+    auto& context = *static_cast<TurretHardpointContext*>(opaque);
+    switch (op) {
+    case 0: return context.parent && context.mount && g_armada;
+    case 1: return context.mount->hardpoint_resolved;
+    case 2: return context.mount->hardpoint_node != nullptr;
+    case 3: context.mount->hardpoint_resolved = true; return 1;
+    case 4: {
+        void* class_pointer = object_class(context.parent);
+        return a2fo_turret_call_thiscall_0(
+            at(g_armada, kGameObjectClassGetHierarchyRootRva), class_pointer);
     }
-    if (!mount->hardpoint_node) {
+    case 5:
+        context.mount->hardpoint_node = reinterpret_cast<void*>(
+            a2fo_turret_call_thiscall_1(
+                at(g_armada, kSt3dNodeFindRecursiveRva),
+                reinterpret_cast<void*>(arg),
+                reinterpret_cast<std::uintptr_t>(
+                    context.mount->config.hardpoint.c_str())));
+        return 1;
+    case 6: {
         char message[320]{};
         std::snprintf(
             message, sizeof(message),
             "Turret %lu disabled: hardpoint '%s' was not found",
-            static_cast<unsigned long>(mount->config.index),
-            mount->config.hardpoint.c_str());
+            static_cast<unsigned long>(context.mount->config.index),
+            context.mount->config.hardpoint.c_str());
         log_line(message);
-        mount->status = MountStatus::failed;
-        return false;
+        context.mount->status = MountStatus::failed;
+        return 1;
     }
-    return true;
+    default: return 0;
+    }
+}
+
+bool resolve_hardpoint(void* parent, MountRuntime* mount) noexcept {
+    TurretHardpointContext context{parent, mount};
+    return a2fo_rs_stage8_turrets_resolve_hardpoint(
+        &turret_hardpoint_step, &context) != 0;
+}
+
+struct TurretTransformContext {
+    void* parent;
+    MountRuntime* mount;
+    Matrix34* output;
+};
+
+std::uintptr_t turret_transform_step(void* opaque, std::uint32_t op,
+                                   std::uintptr_t) noexcept {
+    auto& context = *static_cast<TurretTransformContext*>(opaque);
+    switch (op) {
+    case 0: return context.parent != nullptr;
+    case 1: return context.mount != nullptr;
+    case 2: return context.output != nullptr;
+    case 3: return resolve_hardpoint(context.parent, context.mount);
+    case 4:
+        return a2fo_turret_call_thiscall_2(
+            at(g_armada, kEntityGetWorldTransformRva), context.parent,
+            reinterpret_cast<std::uintptr_t>(context.output),
+            reinterpret_cast<std::uintptr_t>(context.mount->hardpoint_node));
+    case 5: return reinterpret_cast<std::uintptr_t>(context.output);
+    default: return 0;
+    }
 }
 
 bool mount_world_transform(void* parent, MountRuntime* mount,
                            Matrix34* output) noexcept {
-    if (!parent || !mount || !output || !resolve_hardpoint(parent, mount)) {
-        return false;
+    TurretTransformContext context{parent, mount, output};
+    return a2fo_rs_stage8_turrets_mount_world_transform(
+        &turret_transform_step, &context) != 0;
+}
+
+struct TurretMissionContext {
+    void* object;
+    void* (__cdecl* get_current)() = nullptr;
+    void* mission = nullptr;
+    void* vtable = nullptr;
+    void* add_object = nullptr;
+};
+
+std::uintptr_t turret_mission_step(void* opaque, std::uint32_t op,
+                                 std::uintptr_t) noexcept {
+    auto& context = *static_cast<TurretMissionContext*>(opaque);
+    switch (op) {
+    case 0: return context.object && g_armada;
+    case 1:
+        context.get_current = reinterpret_cast<void* (__cdecl*)()>(
+            at(g_armada, kAiMissionGetCurrentRva));
+        return 1;
+    case 2:
+        context.mission = context.get_current
+            ? context.get_current() : nullptr;
+        return 1;
+    case 3:
+        context.vtable = read_at<void*>(context.mission, 0, nullptr);
+        return 1;
+    case 4:
+        context.add_object = read_at<void*>(
+            context.vtable, 0x18, nullptr);
+        return 1;
+    case 5: return context.mission && context.add_object;
+    case 6:
+        a2fo_turret_call_thiscall_1(context.add_object, context.mission,
+            reinterpret_cast<std::uintptr_t>(context.object));
+        return 1;
+    default: return 0;
     }
-    const std::uintptr_t result = a2fo_turret_call_thiscall_2(
-        at(g_armada, kEntityGetWorldTransformRva), parent,
-        reinterpret_cast<std::uintptr_t>(output),
-        reinterpret_cast<std::uintptr_t>(mount->hardpoint_node));
-    return result == reinterpret_cast<std::uintptr_t>(output);
 }
 
 void add_to_current_mission(void* object) noexcept {
-    if (!object || !g_armada) return;
-    using GetCurrentFn = void* (__cdecl*)();
-    const auto get_current = reinterpret_cast<GetCurrentFn>(
-        at(g_armada, kAiMissionGetCurrentRva));
-    void* mission = get_current ? get_current() : nullptr;
-    void* vtable = read_at<void*>(mission, 0, nullptr);
-    void* add_object = read_at<void*>(vtable, 0x18, nullptr);
-    if (mission && add_object) {
-        a2fo_turret_call_thiscall_1(
-            add_object, mission, reinterpret_cast<std::uintptr_t>(object));
+    TurretMissionContext context{object};
+    a2fo_rs_stage8_turrets_add_to_mission(&turret_mission_step, &context);
+}
+
+struct TurretExpireContext { void* craft; };
+
+std::uintptr_t turret_expire_step(void* opaque, std::uint32_t op,
+                                std::uintptr_t) noexcept {
+    auto& context = *static_cast<TurretExpireContext*>(opaque);
+    switch (op) {
+    case 0: return context.craft != nullptr;
+    case 1: return object_expired(context.craft);
+    case 2: return g_armada != nullptr;
+    case 3:
+        a2fo_turret_call_thiscall_0(
+            at(g_armada, kCraftDoExpireRva), context.craft);
+        return 1;
+    default: return 0;
     }
 }
 
 void expire_craft(void* craft) noexcept {
-    if (!craft || object_expired(craft) || !g_armada) return;
-    a2fo_turret_call_thiscall_0(
-        at(g_armada, kCraftDoExpireRva), craft);
+    TurretExpireContext context{craft};
+    a2fo_rs_stage8_turrets_expire_craft(&turret_expire_step, &context);
+}
+
+struct TurretConstructContext {
+    const MountRuntime* mount;
+    const Matrix34* transform;
+    std::int32_t team;
+    std::uint32_t parent_handle;
+    void* turret_class = nullptr;
+    char label[64]{};
+    void* child = nullptr;
+};
+
+std::uintptr_t turret_construct_step(void* opaque, std::uint32_t op,
+                                   std::uintptr_t) noexcept {
+    auto& context = *static_cast<TurretConstructContext*>(opaque);
+    switch (op) {
+    case 0:
+        return g_armada && !context.mount->config.turret_odf.empty();
+    case 1: {
+        using FindClassFn = void* (__cdecl*)(const char*);
+        const auto find_class = reinterpret_cast<FindClassFn>(
+            at(g_armada, kGameObjectClassFindRva));
+        context.turret_class = find_class
+            ? find_class(context.mount->config.turret_odf.c_str()) : nullptr;
+        return context.turret_class != nullptr;
+    }
+    case 2:
+        std::snprintf(context.label, sizeof(context.label), "%s%08lX:%lu",
+            kLinkedLabelPrefix,
+            static_cast<unsigned long>(context.parent_handle),
+            static_cast<unsigned long>(context.mount->config.index));
+        return 1;
+    case 3:
+        context.child = reinterpret_cast<void*>(a2fo_turret_call_thiscall_4(
+            at(g_armada, kGameObjectClassConstructRva), context.turret_class,
+            reinterpret_cast<std::uintptr_t>(context.transform),
+            static_cast<std::uintptr_t>(context.team), 0,
+            reinterpret_cast<std::uintptr_t>(context.label)));
+        return context.child != nullptr;
+    case 4: add_to_current_mission(context.child); return 1;
+    default: return 0;
+    }
 }
 
 void* construct_turret(const MountRuntime& mount,
                        const Matrix34& transform, std::int32_t team,
                        std::uint32_t parent_handle) noexcept {
-    if (!g_armada || mount.config.turret_odf.empty()) return nullptr;
-    using FindClassFn = void* (__cdecl*)(const char*);
-    const auto find_class = reinterpret_cast<FindClassFn>(
-        at(g_armada, kGameObjectClassFindRva));
-    void* turret_class = find_class
-        ? find_class(mount.config.turret_odf.c_str()) : nullptr;
-    if (!turret_class) return nullptr;
-
-    char label[64]{};
-    std::snprintf(label, sizeof(label), "%s%08lX:%lu",
-                  kLinkedLabelPrefix,
-                  static_cast<unsigned long>(parent_handle),
-                  static_cast<unsigned long>(mount.config.index));
-    void* child = reinterpret_cast<void*>(a2fo_turret_call_thiscall_4(
-        at(g_armada, kGameObjectClassConstructRva), turret_class,
-        reinterpret_cast<std::uintptr_t>(&transform),
-        static_cast<std::uintptr_t>(team), 0,
-        reinterpret_cast<std::uintptr_t>(label)));
-    if (child) add_to_current_mission(child);
-    return child;
+    TurretConstructContext context{&mount, &transform, team, parent_handle};
+    a2fo_rs_stage8_turrets_construct_turret(
+        &turret_construct_step, &context);
+    return context.child;
 }
 
 void log_spawn_failure(void* parent, const MountRuntime& mount,
@@ -697,159 +1083,285 @@ void log_spawn_failure(void* parent, const MountRuntime& mount,
     log_line(message);
 }
 
-void spawn_pending_turrets(void* parent) noexcept {
-    ParentRuntime* runtime = ensure_parent_runtime(parent);
-    if (!runtime) return;
-    const std::uint32_t parent_handle = object_handle(parent);
-    const std::int32_t team = read_at<std::int32_t>(
-        parent, kObjectTeamOffset, 0);
-    for (MountRuntime& mount : runtime->mounts) {
-        if (mount.status == MountStatus::active) {
-            if (!find_entity(mount.child_handle)) {
-                mount.status = MountStatus::destroyed;
-                mount.child_handle = 0;
-            }
-            continue;
-        }
-        if (mount.status != MountStatus::pending) continue;
-        Matrix34 transform{};
-        if (!mount_world_transform(parent, &mount, &transform)) continue;
+struct TurretSpawnContext {
+    void* parent;
+    ParentRuntime* runtime = nullptr;
+    std::vector<MountRuntime>::iterator cursor{};
+    std::vector<MountRuntime>::iterator end{};
+    MountRuntime* mount = nullptr;
+    std::uint32_t parent_handle = 0;
+    std::int32_t team = 0;
+    Matrix34 transform{};
+    void* child = nullptr;
+    std::uint32_t child_handle = 0;
+    const TurretClassConfig* turret_config = nullptr;
+    ChildRuntime child_runtime{};
+};
 
-        mount.status = MountStatus::failed;
-        void* child = construct_turret(
-            mount, transform, team, parent_handle);
-        if (!child) {
-            log_spawn_failure(parent, mount,
-                              "ODF class was not found or construction failed");
-            continue;
-        }
-        const std::uint32_t child_handle = object_handle(child);
-        const auto turret_config = g_turret_classes.find(object_class(child));
-        if (child_handle == 0 || turret_config == g_turret_classes.end()) {
-            log_spawn_failure(
-                parent, mount,
-                "referenced ODF must use classLabel = \"turret\"");
-            expire_craft(child);
-            continue;
-        }
-
-        ChildRuntime child_runtime{};
-        child_runtime.parent_handle = parent_handle;
-        child_runtime.mount_index = mount.config.index;
-        child_runtime.current = turret_config->second.rest;
+std::uintptr_t turret_spawn_step(void* opaque, std::uint32_t op,
+                               std::uintptr_t) noexcept {
+    auto& context = *static_cast<TurretSpawnContext*>(opaque);
+    switch (op) {
+    case 0:
+        context.runtime = ensure_parent_runtime(context.parent);
+        if (!context.runtime) return 0;
+        context.cursor = context.runtime->mounts.begin();
+        context.end = context.runtime->mounts.end();
+        return 1;
+    case 1: context.parent_handle = object_handle(context.parent); return 1;
+    case 2:
+        context.team = read_at<std::int32_t>(
+            context.parent, kObjectTeamOffset, 0);
+        return 1;
+    case 3:
+        if (context.cursor == context.end) return 0;
+        context.mount = &*context.cursor;
+        return 1;
+    case 4: return static_cast<std::uint32_t>(context.mount->status);
+    case 6: return find_entity(context.mount->child_handle) != nullptr;
+    case 7:
+        context.mount->status = MountStatus::destroyed;
+        context.mount->child_handle = 0;
+        return 1;
+    case 8: ++context.cursor; return 1;
+    case 9:
+        context.transform = {};
+        return mount_world_transform(
+            context.parent, context.mount, &context.transform);
+    case 10: context.mount->status = MountStatus::failed; return 1;
+    case 11:
+        context.child = construct_turret(*context.mount, context.transform,
+            context.team, context.parent_handle);
+        return context.child != nullptr;
+    case 12:
+        log_spawn_failure(context.parent, *context.mount,
+            "ODF class was not found or construction failed");
+        return 1;
+    case 13:
+        context.child_handle = object_handle(context.child);
+        return context.child_handle;
+    case 14: {
+        const auto found = g_turret_classes.find(object_class(context.child));
+        context.turret_config = found == g_turret_classes.end()
+            ? nullptr : &found->second;
+        return context.turret_config != nullptr;
+    }
+    case 15:
+        log_spawn_failure(context.parent, *context.mount,
+            "referenced ODF must use classLabel = \"turret\"");
+        return 1;
+    case 16: expire_craft(context.child); return 1;
+    case 17:
+        context.child_runtime = {};
+        context.child_runtime.parent_handle = context.parent_handle;
+        context.child_runtime.mount_index = context.mount->config.index;
+        context.child_runtime.current = context.turret_config->rest;
+        return 1;
+    case 18:
         try {
-            g_children[child_handle] = child_runtime;
-            mount.child_handle = child_handle;
-            mount.status = MountStatus::active;
-        } catch (...) {
-            log_spawn_failure(parent, mount, "runtime state allocation failed");
-            expire_craft(child);
-            continue;
-        }
-
-        // Do not allow a newly constructed child one independent combat tick.
-        prepare_linked_turret_for_simulation(child, child_handle);
-
+            g_children[context.child_handle] = context.child_runtime;
+            context.mount->child_handle = context.child_handle;
+            context.mount->status = MountStatus::active;
+            return 1;
+        } catch (...) { return 0; }
+    case 19:
+        log_spawn_failure(context.parent, *context.mount,
+            "runtime state allocation failed");
+        return 1;
+    case 20:
+        // Prevent an independent combat tick for the newly constructed child.
+        prepare_linked_turret_for_simulation(context.child, context.child_handle);
+        return 1;
+    case 21: {
         const Matrix34 initial = a2fo::turrets::compose_turret_transform(
-            transform, child_runtime.current);
+            context.transform, context.child_runtime.current);
         a2fo_turret_call_thiscall_1(
-            at(g_armada, kGameObjectSetTransformRva), child,
+            at(g_armada, kGameObjectSetTransformRva), context.child,
             reinterpret_cast<std::uintptr_t>(&initial));
+        return 1;
+    }
+    default: return 0;
+    }
+}
+
+void spawn_pending_turrets(void* parent) noexcept {
+    TurretSpawnContext context{};
+    context.parent = parent;
+    a2fo_rs_stage8_turrets_spawn_pending(&turret_spawn_step, &context,
+        static_cast<std::uint32_t>(MountStatus::active),
+        static_cast<std::uint32_t>(MountStatus::pending));
+}
+
+struct TurretLabelContext {
+    const char* label;
+    std::uint32_t* parent_handle;
+    std::uint32_t* mount_index;
+    unsigned long parsed_parent = 0;
+    unsigned long parsed_index = 0;
+    char trailing = '\0';
+};
+
+std::uintptr_t turret_label_step(void* opaque, std::uint32_t op,
+                               std::uintptr_t) noexcept {
+    auto& context = *static_cast<TurretLabelContext*>(opaque);
+    switch (op) {
+    case 0:
+        return context.label && context.parent_handle && context.mount_index;
+    case 1:
+        return std::strncmp(context.label, kLinkedLabelPrefix,
+            sizeof(kLinkedLabelPrefix) - 1) == 0;
+    case 2:
+        return std::sscanf(context.label + sizeof(kLinkedLabelPrefix) - 1,
+            "%8lx:%lu%c", &context.parsed_parent,
+            &context.parsed_index, &context.trailing);
+    case 3: return context.parsed_parent;
+    case 4: return context.parsed_index;
+    case 5:
+        *context.parent_handle = static_cast<std::uint32_t>(
+            context.parsed_parent);
+        *context.mount_index = static_cast<std::uint32_t>(
+            context.parsed_index);
+        return 1;
+    default: return 0;
     }
 }
 
 bool parse_linked_label(const char* label, std::uint32_t* parent_handle,
                         std::uint32_t* mount_index) noexcept {
-    if (!label || !parent_handle || !mount_index ||
-        std::strncmp(label, kLinkedLabelPrefix,
-                     sizeof(kLinkedLabelPrefix) - 1) != 0) {
-        return false;
+    TurretLabelContext context{label, parent_handle, mount_index};
+    return a2fo_rs_stage8_turrets_parse_label(
+        &turret_label_step, &context, kMaximumTurrets) != 0;
+}
+
+struct TurretLoadedContext {
+    void* child;
+    const char* label = nullptr;
+    std::uint32_t parent_handle = 0;
+    std::uint32_t mount_index = 0;
+    std::uint32_t child_handle = 0;
+    ChildRuntime runtime{};
+    void* parent = nullptr;
+    ParentRuntime* parent_runtime = nullptr;
+    MountRuntime* mount = nullptr;
+};
+
+std::uintptr_t turret_loaded_step(void* opaque, std::uint32_t op,
+                                std::uintptr_t) noexcept {
+    auto& context = *static_cast<TurretLoadedContext*>(opaque);
+    switch (op) {
+    case 0: return context.child != nullptr;
+    case 1: return g_turret_classes.find(object_class(context.child)) !=
+        g_turret_classes.end();
+    case 2:
+        context.label = read_at<const char*>(
+            context.child, kObjectLabelOffset, nullptr);
+        return 1;
+    case 3:
+        return parse_linked_label(context.label, &context.parent_handle,
+            &context.mount_index);
+    case 4:
+        if (context.child_handle == 0) {
+            context.child_handle = object_handle(context.child);
+        }
+        return context.child_handle;
+    case 5: {
+        context.runtime = {};
+        context.runtime.parent_handle = context.parent_handle;
+        context.runtime.mount_index = context.mount_index;
+        const auto found = g_turret_classes.find(object_class(context.child));
+        if (found != g_turret_classes.end()) {
+            context.runtime.current = found->second.rest;
+        }
+        return 1;
     }
-    unsigned long parsed_parent = 0;
-    unsigned long parsed_index = 0;
-    char trailing = '\0';
-    const int converted = std::sscanf(
-        label + sizeof(kLinkedLabelPrefix) - 1,
-        "%8lx:%lu%c", &parsed_parent, &parsed_index, &trailing);
-    if (converted != 2 || parsed_parent == 0 ||
-        parsed_index > kMaximumTurrets ||
-        parsed_parent > std::numeric_limits<std::uint32_t>::max()) {
-        return false;
+    case 6:
+        context.parent = find_entity(context.parent_handle);
+        return context.parent != nullptr;
+    case 7:
+        try {
+            g_children[context.child_handle] = context.runtime;
+            return 1;
+        } catch (...) { return 0; }
+    case 8:
+        log_line("Could not restore a loaded turret relationship");
+        return 1;
+    case 9: expire_craft(context.child); return 1;
+    case 10:
+        context.parent_runtime = ensure_parent_runtime(context.parent);
+        return 1;
+    case 11:
+        context.mount = find_mount(context.parent_runtime,
+            context.mount_index);
+        return context.mount != nullptr;
+    case 12:
+        log_line("Loaded turret could not resolve its parent mount; expiring it");
+        return 1;
+    case 13: g_children.erase(context.child_handle); return 1;
+    case 14: return static_cast<std::uint32_t>(context.mount->status);
+    case 15: return context.mount->child_handle;
+    case 16:
+        log_line("Duplicate loaded turret detected; expiring the duplicate");
+        return 1;
+    case 17:
+        context.mount->child_handle = context.child_handle;
+        context.mount->status = MountStatus::active;
+        return 1;
+    default: return 0;
     }
-    *parent_handle = static_cast<std::uint32_t>(parsed_parent);
-    *mount_index = static_cast<std::uint32_t>(parsed_index);
-    return true;
 }
 
 void attach_loaded_turret(void* child) noexcept {
-    if (!child || g_turret_classes.find(object_class(child)) ==
-            g_turret_classes.end()) {
-        return;
-    }
-    const char* label = read_at<const char*>(
-        child, kObjectLabelOffset, nullptr);
-    std::uint32_t parent_handle = 0;
-    std::uint32_t mount_index = 0;
-    if (!parse_linked_label(label, &parent_handle, &mount_index)) return;
-    const std::uint32_t child_handle = object_handle(child);
-    if (child_handle == 0) return;
+    TurretLoadedContext context{};
+    context.child = child;
+    a2fo_rs_stage8_turrets_attach_loaded(&turret_loaded_step, &context,
+        static_cast<std::uint32_t>(MountStatus::active));
+}
 
-    ChildRuntime runtime{};
-    runtime.parent_handle = parent_handle;
-    runtime.mount_index = mount_index;
-    const auto config = g_turret_classes.find(object_class(child));
-    if (config != g_turret_classes.end()) runtime.current = config->second.rest;
+struct TurretOwnershipContext {
+    void* child;
+    void* parent;
+    std::int32_t parent_team = 0;
+    void* parent_race = nullptr;
+};
 
-    void* parent = find_entity(parent_handle);
-    try {
-        g_children[child_handle] = runtime;
-    } catch (...) {
-        log_line("Could not restore a loaded turret relationship");
-        expire_craft(child);
-        return;
+std::uintptr_t turret_ownership_step(void* opaque, std::uint32_t op,
+                                   std::uintptr_t) noexcept {
+    auto& context = *static_cast<TurretOwnershipContext*>(opaque);
+    switch (op) {
+    case 0: return context.child && context.parent && g_armada;
+    case 1:
+        context.parent_team = read_at<std::int32_t>(
+            context.parent, kObjectTeamOffset, 0);
+        return static_cast<std::uint32_t>(context.parent_team);
+    case 2:
+        return static_cast<std::uint32_t>(read_at<std::int32_t>(
+            context.child, kObjectTeamOffset, 0));
+    case 3:
+        context.parent_race = read_at<void*>(
+            context.parent, kObjectRaceOffset, nullptr);
+        return reinterpret_cast<std::uintptr_t>(context.parent_race);
+    case 4:
+        return reinterpret_cast<std::uintptr_t>(read_at<void*>(
+            context.child, kObjectRaceOffset, nullptr));
+    case 5:
+        a2fo_turret_call_thiscall_2(
+            at(g_armada, kGameObjectSwapRaceAndTeamRva), context.child,
+            reinterpret_cast<std::uintptr_t>(context.parent_race),
+            static_cast<std::uintptr_t>(context.parent_team));
+        return 1;
+    case 6:
+        a2fo_turret_call_thiscall_1(
+            at(g_armada, kGameObjectSwapTeamRva), context.child,
+            static_cast<std::uintptr_t>(context.parent_team));
+        return 1;
+    default: return 0;
     }
-
-    // Object PostLoad order is not a public contract. Keep the parsed child
-    // relationship even when its parent has not been published yet; the first
-    // Craft::Simulate reconnects it after the whole object table is restored.
-    if (!parent) return;
-    ParentRuntime* parent_runtime = ensure_parent_runtime(parent);
-    MountRuntime* mount = find_mount(parent_runtime, mount_index);
-    if (!mount) {
-        log_line("Loaded turret could not resolve its parent mount; expiring it");
-        g_children.erase(child_handle);
-        expire_craft(child);
-        return;
-    }
-    if (mount->status == MountStatus::active &&
-        mount->child_handle != child_handle) {
-        log_line("Duplicate loaded turret detected; expiring the duplicate");
-        g_children.erase(child_handle);
-        expire_craft(child);
-        return;
-    }
-    mount->child_handle = child_handle;
-    mount->status = MountStatus::active;
 }
 
 void sync_child_ownership(void* child, void* parent) noexcept {
-    if (!child || !parent || !g_armada) return;
-    const std::int32_t parent_team = read_at<std::int32_t>(
-        parent, kObjectTeamOffset, 0);
-    const std::int32_t child_team = read_at<std::int32_t>(
-        child, kObjectTeamOffset, 0);
-    void* parent_race = read_at<void*>(parent, kObjectRaceOffset, nullptr);
-    void* child_race = read_at<void*>(child, kObjectRaceOffset, nullptr);
-    if (parent_race && parent_race != child_race) {
-        a2fo_turret_call_thiscall_2(
-            at(g_armada, kGameObjectSwapRaceAndTeamRva), child,
-            reinterpret_cast<std::uintptr_t>(parent_race),
-            static_cast<std::uintptr_t>(parent_team));
-    } else if (parent_team != child_team) {
-        a2fo_turret_call_thiscall_1(
-            at(g_armada, kGameObjectSwapTeamRva), child,
-            static_cast<std::uintptr_t>(parent_team));
-    }
+    TurretOwnershipContext context{child, parent};
+    a2fo_rs_stage8_turrets_sync_ownership(
+        &turret_ownership_step, &context);
 }
 
 std::int32_t get_craft_policy(
@@ -859,352 +1371,722 @@ std::int32_t get_craft_policy(
             at(g_armada, getter_rva), craft)));
 }
 
-void sync_craft_policy_value(
-    void* child, void* parent, std::uintptr_t getter_rva,
-    std::uintptr_t setter_rva) noexcept {
-    const std::int32_t parent_value = get_craft_policy(parent, getter_rva);
-    if (get_craft_policy(child, getter_rva) == parent_value) return;
-    a2fo_turret_call_thiscall_1(
-        at(g_armada, setter_rva), child,
-        static_cast<std::uint32_t>(parent_value));
+struct TurretCombatPolicyContext {
+    void* child;
+    void* parent;
+    std::int32_t parent_alert = 0;
+    std::int32_t parent_autonomy = 0;
+};
+
+std::uintptr_t turret_combat_policy_step(void* opaque, std::uint32_t op,
+                                       std::uintptr_t) noexcept {
+    auto& context = *static_cast<TurretCombatPolicyContext*>(opaque);
+    switch (op) {
+    case 0: return context.child && context.parent && g_armada;
+    case 1:
+        context.parent_alert = get_craft_policy(
+            context.parent, kCraftGetAlertStatusRva);
+        return static_cast<std::uint32_t>(context.parent_alert);
+    case 2:
+        return static_cast<std::uint32_t>(get_craft_policy(
+            context.child, kCraftGetAlertStatusRva));
+    case 3:
+        a2fo_turret_call_thiscall_1(
+            at(g_armada, kCraftSetAlertStatusRva), context.child,
+            static_cast<std::uint32_t>(context.parent_alert));
+        return 1;
+    case 4:
+        context.parent_autonomy = get_craft_policy(
+            context.parent, kCraftGetSpecialWeaponAutonomyRva);
+        return static_cast<std::uint32_t>(context.parent_autonomy);
+    case 5:
+        return static_cast<std::uint32_t>(get_craft_policy(
+            context.child, kCraftGetSpecialWeaponAutonomyRva));
+    case 6:
+        a2fo_turret_call_thiscall_1(
+            at(g_armada, kCraftSetSpecialWeaponAutonomyRva), context.child,
+            static_cast<std::uint32_t>(context.parent_autonomy));
+        return 1;
+    default: return 0;
+    }
 }
 
 void sync_child_combat_policy(void* child, void* parent) noexcept {
-    if (!child || !parent || !g_armada) return;
-    // The semantic turret is a complete native Craft, so its CraftProcess
-    // begins with independent policy fields. Copy the host values before the
-    // child's native simulation selects or triggers any weapon target.
-    sync_craft_policy_value(
-        child, parent, kCraftGetAlertStatusRva,
-        kCraftSetAlertStatusRva);
-    sync_craft_policy_value(
-        child, parent, kCraftGetSpecialWeaponAutonomyRva,
-        kCraftSetSpecialWeaponAutonomyRva);
+    TurretCombatPolicyContext context{child, parent};
+    a2fo_rs_stage8_turrets_sync_combat_policy(
+        &turret_combat_policy_step, &context);
+}
+
+struct TurretAttackOrderContext {
+    void* parent;
+    AttackOrder order{};
+    const void* command = nullptr;
+    std::uint32_t command_id = 0;
+    std::uint32_t target_form = 0;
+    std::uint32_t target_handle = 0;
+    void* target = nullptr;
+};
+
+std::uintptr_t turret_attack_order_step(void* opaque, std::uint32_t op,
+                                      std::uintptr_t arg) noexcept {
+    auto& context = *static_cast<TurretAttackOrderContext*>(opaque);
+    switch (op) {
+    case 0: return context.parent && g_armada;
+    case 1:
+        context.command = reinterpret_cast<const void*>(
+            a2fo_turret_call_thiscall_0(
+                at(g_armada, kGameObjectGetCurrentCommandRva),
+                context.parent));
+        return 1;
+    case 2:
+        context.command_id = read_at<std::uint32_t>(
+            context.command, kCommandIdOffset, 0);
+        return 1;
+    case 3:
+        context.target_form = read_at<std::uint32_t>(
+            context.command, kCommandTargetFormOffset, 0);
+        return 1;
+    case 4:
+        context.target_handle = read_at<std::uint32_t>(
+            context.command, kCommandTargetHandleOffset, 0);
+        return 1;
+    case 5:
+        context.target = find_entity(context.target_handle);
+        return reinterpret_cast<std::uintptr_t>(context.target);
+    case 6: return !object_expired(context.target);
+    case 7:
+        context.order.target_handle =
+            a2fo::turrets::attack_order_target_handle(
+                context.command_id, context.target_form,
+                context.target_handle, arg != 0);
+        return context.order.target_handle;
+    case 8: context.order.target = context.target; return 1;
+    case 9:
+        context.order.extra = read_at<std::uint32_t>(
+            context.command, kCommandExtraOffset, 0);
+        return 1;
+    case 10:
+        context.order.flags = read_at<std::uint8_t>(
+            context.command, kCommandFlagsOffset, 0);
+        return 1;
+    default: return 0;
+    }
 }
 
 AttackOrder current_attack_order(void* parent) noexcept {
-    AttackOrder order{};
-    if (!parent || !g_armada) return order;
-    const void* command = reinterpret_cast<const void*>(
-        a2fo_turret_call_thiscall_0(
-            at(g_armada, kGameObjectGetCurrentCommandRva), parent));
-    const std::uint32_t command_id = read_at<std::uint32_t>(
-        command, kCommandIdOffset, 0);
-    const std::uint32_t target_form = read_at<std::uint32_t>(
-        command, kCommandTargetFormOffset, 0);
-    const std::uint32_t target_handle = read_at<std::uint32_t>(
-        command, kCommandTargetHandleOffset, 0);
-    void* target = find_entity(target_handle);
-    const bool target_exists = target && !object_expired(target);
-    order.target_handle = a2fo::turrets::attack_order_target_handle(
-        command_id, target_form, target_handle, target_exists);
-    if (order.target_handle == 0) return order;
-    order.target = target;
-    order.extra = read_at<std::uint32_t>(
-        command, kCommandExtraOffset, 0);
-    order.flags = read_at<std::uint8_t>(
-        command, kCommandFlagsOffset, 0);
-    return order;
+    TurretAttackOrderContext context{};
+    context.parent = parent;
+    a2fo_rs_stage8_turrets_current_attack_order(
+        &turret_attack_order_step, &context);
+    return context.order;
+}
+
+struct TurretChildAttackContext {
+    void* child;
+    const AttackOrder* order;
+    const void* command = nullptr;
+};
+
+std::uintptr_t turret_child_attack_step(void* opaque, std::uint32_t op,
+                                      std::uintptr_t) noexcept {
+    auto& context = *static_cast<TurretChildAttackContext*>(opaque);
+    switch (op) {
+    case 0:
+        context.command = reinterpret_cast<const void*>(
+            a2fo_turret_call_thiscall_0(
+                at(g_armada, kGameObjectGetCurrentCommandRva),
+                context.child));
+        return 1;
+    case 1: return read_at<std::uint32_t>(
+        context.command, kCommandIdOffset, 0);
+    case 2: return read_at<std::uint32_t>(
+        context.command, kCommandTargetFormOffset, 0);
+    case 3: return read_at<std::uint32_t>(
+        context.command, kCommandTargetHandleOffset, 0) ==
+        context.order->target_handle;
+    case 4: return read_at<std::uint32_t>(
+        context.command, kCommandExtraOffset, 0) == context.order->extra;
+    case 5: return read_at<std::uint8_t>(
+        context.command, kCommandFlagsOffset, 0) == context.order->flags;
+    default: return 0;
+    }
 }
 
 bool child_has_attack_order(
     void* child, const AttackOrder& order) noexcept {
-    const void* command = reinterpret_cast<const void*>(
-        a2fo_turret_call_thiscall_0(
-            at(g_armada, kGameObjectGetCurrentCommandRva), child));
-    return read_at<std::uint32_t>(command, kCommandIdOffset, 0) ==
-            a2fo::turrets::kAttackCommand &&
-        read_at<std::uint32_t>(command, kCommandTargetFormOffset, 0) ==
-            a2fo::turrets::kObjectCommandTargetForm &&
-        read_at<std::uint32_t>(command, kCommandTargetHandleOffset, 0) ==
-            order.target_handle &&
-        read_at<std::uint32_t>(command, kCommandExtraOffset, 0) ==
-            order.extra &&
-        read_at<std::uint8_t>(command, kCommandFlagsOffset, 0) ==
-            order.flags;
+    TurretChildAttackContext context{child, &order};
+    return a2fo_rs_stage8_turrets_child_has_attack_order(
+        &turret_child_attack_step, &context,
+        a2fo::turrets::kAttackCommand,
+        a2fo::turrets::kObjectCommandTargetForm) != 0;
+}
+
+struct TurretMirrorOrderContext {
+    void* child;
+    const AttackOrder* order;
+    std::uint32_t previous_target_handle;
+};
+
+std::uintptr_t turret_mirror_order_step(void* opaque, std::uint32_t op,
+                                      std::uintptr_t) noexcept {
+    auto& context = *static_cast<TurretMirrorOrderContext*>(opaque);
+    switch (op) {
+    case 0: return context.order->target_handle;
+    case 1: return reinterpret_cast<std::uintptr_t>(context.order->target);
+    case 2: return child_has_attack_order(context.child, *context.order);
+    case 3:
+        a2fo_turret_call_thiscall_4(
+            at(g_armada, kGameObjectSetObjectCommandRva), context.child,
+            a2fo::turrets::kAttackCommand,
+            reinterpret_cast<std::uintptr_t>(context.order->target),
+            context.order->extra, context.order->flags);
+        return 1;
+    case 4: return context.previous_target_handle;
+    case 5:
+        a2fo_turret_call_thiscall_4(
+            at(g_armada, kGameObjectSetTargetlessCommandRva), context.child,
+            0, 0, 0, 0);
+        return 1;
+    default: return 0;
+    }
 }
 
 void mirror_attack_order(
     void* child, const AttackOrder& order,
     std::uint32_t previous_target_handle) noexcept {
-    if (order.target_handle != 0 && order.target) {
-        if (child_has_attack_order(child, order)) return;
-        a2fo_turret_call_thiscall_4(
-            at(g_armada, kGameObjectSetObjectCommandRva), child,
-            a2fo::turrets::kAttackCommand,
-            reinterpret_cast<std::uintptr_t>(order.target), order.extra,
-            order.flags);
-        return;
+    TurretMirrorOrderContext context{child, &order, previous_target_handle};
+    a2fo_rs_stage8_turrets_mirror_attack_order(
+        &turret_mirror_order_step, &context);
+}
+
+struct TurretInheritedOrderContext {
+    void* child;
+    std::uint32_t child_handle;
+    ChildRuntime* child_runtime;
+    void* parent;
+    std::uint32_t visual_handle = 0;
+    AttackOrder order{};
+    a2fo::turrets::OrderTargetState next{};
+};
+
+std::uintptr_t turret_inherited_order_step(void* opaque, std::uint32_t op,
+                                         std::uintptr_t) noexcept {
+    auto& context = *static_cast<TurretInheritedOrderContext*>(opaque);
+    switch (op) {
+    case 0: return context.child_runtime != nullptr;
+    case 1: {
+        const auto found = g_targets.find(context.child_handle);
+        context.visual_handle = found == g_targets.end() ? 0 : found->second;
+        return 1;
     }
-    if (previous_target_handle == 0) return;
-    // A targetless AiCommand 0 returns the child to ordinary native autonomy
-    // after the host's explicit Attack order has ended.
-    a2fo_turret_call_thiscall_4(
-        at(g_armada, kGameObjectSetTargetlessCommandRva), child,
-        0, 0, 0, 0);
+    case 2: context.order = current_attack_order(context.parent); return 1;
+    case 3:
+        mirror_attack_order(context.child, context.order,
+            context.child_runtime->ordered_target_handle);
+        return 1;
+    case 4:
+        context.next = a2fo::turrets::update_order_target(
+            context.child_runtime->ordered_target_handle,
+            context.order.target_handle, context.visual_handle);
+        return 1;
+    case 5:
+        context.child_runtime->ordered_target_handle =
+            context.next.ordered_target_handle;
+        return 1;
+    case 6:
+        return context.next.visual_target_handle == context.visual_handle;
+    case 7:
+        try {
+            if (context.next.visual_target_handle != 0) {
+                g_targets[context.child_handle] =
+                    context.next.visual_target_handle;
+            } else {
+                g_targets.erase(context.child_handle);
+            }
+            return 1;
+        } catch (...) { return 0; }
+    case 8: g_targets.erase(context.child_handle); return 1;
+    default: return 0;
+    }
 }
 
 void update_inherited_order_target(
     void* child, std::uint32_t child_handle,
     ChildRuntime* child_runtime, void* parent) noexcept {
-    if (!child_runtime) return;
-    const auto visual = g_targets.find(child_handle);
-    const std::uint32_t visual_handle = visual == g_targets.end()
-        ? 0 : visual->second;
-    const AttackOrder order = current_attack_order(parent);
-    mirror_attack_order(
-        child, order, child_runtime->ordered_target_handle);
-    const a2fo::turrets::OrderTargetState next =
-        a2fo::turrets::update_order_target(
-            child_runtime->ordered_target_handle,
-            order.target_handle, visual_handle);
-    child_runtime->ordered_target_handle = next.ordered_target_handle;
-    if (next.visual_target_handle == visual_handle) return;
-    try {
-        if (next.visual_target_handle != 0) {
-            g_targets[child_handle] = next.visual_target_handle;
-        } else {
-            g_targets.erase(child_handle);
-        }
-    } catch (...) {
-        g_targets.erase(child_handle);
+    TurretInheritedOrderContext context{
+        child, child_handle, child_runtime, parent};
+    a2fo_rs_stage8_turrets_update_inherited_order(
+        &turret_inherited_order_step, &context);
+}
+
+struct TurretPrepareContext {
+    void* child;
+    std::uint32_t child_handle;
+    ChildRuntime* child_runtime = nullptr;
+    void* parent = nullptr;
+};
+
+std::uintptr_t turret_prepare_step(void* opaque, std::uint32_t op,
+                                 std::uintptr_t) noexcept {
+    auto& context = *static_cast<TurretPrepareContext*>(opaque);
+    switch (op) {
+    case 0: {
+        const auto found = g_children.find(context.child_handle);
+        if (found == g_children.end()) return 0;
+        context.child_runtime = &found->second;
+        return 1;
+    }
+    case 1:
+        context.parent = find_entity(context.child_runtime->parent_handle);
+        return context.parent != nullptr;
+    case 2: return object_expired(context.parent);
+    case 3: sync_child_ownership(context.child, context.parent); return 1;
+    case 4: sync_child_combat_policy(context.child, context.parent); return 1;
+    case 5:
+        update_inherited_order_target(context.child, context.child_handle,
+            context.child_runtime, context.parent);
+        return 1;
+    default: return 0;
     }
 }
 
 void prepare_linked_turret_for_simulation(
     void* child, std::uint32_t child_handle) noexcept {
-    const auto child_found = g_children.find(child_handle);
-    if (child_found == g_children.end()) return;
-    void* parent = find_entity(child_found->second.parent_handle);
-    if (!parent || object_expired(parent)) return;
-    sync_child_ownership(child, parent);
-    sync_child_combat_policy(child, parent);
-    update_inherited_order_target(
-        child, child_handle, &child_found->second, parent);
+    TurretPrepareContext context{child, child_handle};
+    a2fo_rs_stage8_turrets_prepare_linked(&turret_prepare_step, &context);
+}
+
+struct TurretUpdateContext {
+    void* child;
+    std::uint32_t child_handle;
+    float elapsed_seconds;
+    ChildRuntime* child_runtime = nullptr;
+    void* parent = nullptr;
+    ParentRuntime* parent_runtime = nullptr;
+    MountRuntime* mount = nullptr;
+    Matrix34 mount_transform{};
+    const TurretClassConfig* config = nullptr;
+    AimAngles desired{};
+    void* target = nullptr;
+    const Matrix34* target_transform = nullptr;
+};
+
+std::uintptr_t turret_update_step(void* opaque, std::uint32_t op,
+                                std::uintptr_t) noexcept {
+    auto& context = *static_cast<TurretUpdateContext*>(opaque);
+    switch (op) {
+    case 0: {
+        const auto found = g_children.find(context.child_handle);
+        if (found == g_children.end()) return 0;
+        context.child_runtime = &found->second;
+        return 1;
+    }
+    case 1:
+        context.parent = find_entity(context.child_runtime->parent_handle);
+        return context.parent != nullptr;
+    case 2: return object_expired(context.parent);
+    case 3:
+        context.parent_runtime = ensure_parent_runtime(context.parent);
+        return 1;
+    case 4:
+        context.mount = find_mount(context.parent_runtime,
+            context.child_runtime->mount_index);
+        return 1;
+    case 5:
+        return context.mount && context.mount->status == MountStatus::active &&
+            context.mount->child_handle != 0 &&
+            context.mount->child_handle != context.child_handle;
+    case 6:
+        if (context.mount) {
+            context.mount->child_handle = context.child_handle;
+            context.mount->status = MountStatus::active;
+        }
+        return 1;
+    case 7:
+        context.mount_transform = {};
+        return context.mount && mount_world_transform(context.parent,
+            context.mount, &context.mount_transform);
+    case 8: sync_child_ownership(context.child, context.parent); return 1;
+    case 9: {
+        const auto found = g_turret_classes.find(read_live_at<void*>(
+            context.child, kObjectClassOffset, nullptr));
+        context.config = found == g_turret_classes.end()
+            ? nullptr : &found->second;
+        return context.config != nullptr;
+    }
+    case 10: context.desired = context.child_runtime->current; return 1;
+    case 11: {
+        const auto found = g_targets.find(context.child_handle);
+        context.target = found == g_targets.end()
+            ? nullptr : find_entity(found->second);
+        return reinterpret_cast<std::uintptr_t>(context.target);
+    }
+    case 12: return object_expired(context.target);
+    case 13:
+        context.target_transform = reinterpret_cast<const Matrix34*>(
+            a2fo_turret_call_thiscall_0(
+                at(g_armada, kEntityGetTransformRva), context.target));
+        return context.target_transform != nullptr;
+    case 14: {
+        const float position[3]{
+            context.target_transform->values[9],
+            context.target_transform->values[10],
+            context.target_transform->values[11],
+        };
+        context.desired = a2fo::turrets::calculate_aim_angles(
+            context.mount_transform, position, context.config->limits,
+            context.child_runtime->current);
+        return 1;
+    }
+    case 15: return context.config->return_to_rest;
+    case 16: context.desired = context.config->rest; return 1;
+    case 17:
+        context.child_runtime->current = a2fo::turrets::advance_aim_angles(
+            context.child_runtime->current, context.desired,
+            context.config->limits, context.elapsed_seconds);
+        return 1;
+    case 18: {
+        const Matrix34 transform = a2fo::turrets::compose_turret_transform(
+            context.mount_transform, context.child_runtime->current);
+        a2fo_turret_call_thiscall_1(
+            at(g_armada, kGameObjectSetTransformRva), context.child,
+            reinterpret_cast<std::uintptr_t>(&transform));
+        return 1;
+    }
+    case 19:
+        log_line("Duplicate loaded turret detected; expiring the duplicate");
+        return 1;
+    case 20: expire_craft(context.child); return 1;
+    default: return 0;
+    }
 }
 
 void update_linked_turret(void* child, std::uint32_t child_handle,
                           float elapsed_seconds) noexcept {
-    const auto child_found = g_children.find(child_handle);
-    if (child_found == g_children.end()) return;
-    ChildRuntime& child_runtime = child_found->second;
-    void* parent = find_entity(child_runtime.parent_handle);
-    if (!parent || object_expired(parent)) {
-        expire_craft(child);
-        return;
-    }
-    ParentRuntime* parent_runtime = ensure_parent_runtime(parent);
-    MountRuntime* mount = find_mount(
-        parent_runtime, child_runtime.mount_index);
-    if (mount && mount->status == MountStatus::active &&
-        mount->child_handle != 0 && mount->child_handle != child_handle) {
-        log_line("Duplicate loaded turret detected; expiring the duplicate");
-        expire_craft(child);
-        return;
-    }
-    if (mount) {
-        mount->child_handle = child_handle;
-        mount->status = MountStatus::active;
-    }
-    Matrix34 mount_transform{};
-    if (!mount || !mount_world_transform(
-            parent, mount, &mount_transform)) {
-        expire_craft(child);
-        return;
-    }
-    sync_child_ownership(child, parent);
+    TurretUpdateContext context{child, child_handle, elapsed_seconds};
+    a2fo_rs_stage8_turrets_update_linked(&turret_update_step, &context);
+}
 
-    const auto turret_config = g_turret_classes.find(
-        read_live_at<void*>(child, kObjectClassOffset, nullptr));
-    if (turret_config == g_turret_classes.end()) return;
-    const TurretClassConfig& config = turret_config->second;
-    AimAngles desired = child_runtime.current;
-    const auto target_found = g_targets.find(child_handle);
-    void* target = target_found == g_targets.end()
-        ? nullptr : find_entity(target_found->second);
-    if (target && !object_expired(target)) {
-        const Matrix34* target_transform =
-            reinterpret_cast<const Matrix34*>(
-                a2fo_turret_call_thiscall_0(
-                    at(g_armada, kEntityGetTransformRva), target));
-        if (target_transform) {
-            const float position[3]{
-                target_transform->values[9],
-                target_transform->values[10],
-                target_transform->values[11],
-            };
-            desired = a2fo::turrets::calculate_aim_angles(
-                mount_transform, position, config.limits,
-                child_runtime.current);
-        }
-    } else if (config.return_to_rest) {
-        desired = config.rest;
-    }
+struct TurretUnlinkContext {
+    std::uint32_t child_handle;
+    ChildRuntime* child = nullptr;
+    ParentRuntime* parent = nullptr;
+    MountRuntime* mount = nullptr;
+};
 
-    child_runtime.current = a2fo::turrets::advance_aim_angles(
-        child_runtime.current, desired, config.limits, elapsed_seconds);
-    const Matrix34 transform = a2fo::turrets::compose_turret_transform(
-        mount_transform, child_runtime.current);
-    a2fo_turret_call_thiscall_1(
-        at(g_armada, kGameObjectSetTransformRva), child,
-        reinterpret_cast<std::uintptr_t>(&transform));
+std::uintptr_t turret_unlink_step(void* opaque, std::uint32_t op,
+                                std::uintptr_t) noexcept {
+    auto& context = *static_cast<TurretUnlinkContext*>(opaque);
+    switch (op) {
+    case 0: {
+        const auto found = g_children.find(context.child_handle);
+        if (found == g_children.end()) return 0;
+        context.child = &found->second;
+        return 1;
+    }
+    case 1: {
+        const auto found = g_parents.find(context.child->parent_handle);
+        if (found == g_parents.end()) return 0;
+        context.parent = &found->second;
+        return 1;
+    }
+    case 2:
+        context.mount = find_mount(context.parent,
+            context.child->mount_index);
+        return context.mount != nullptr;
+    case 3: return context.mount->child_handle == context.child_handle;
+    case 4:
+        context.mount->child_handle = 0;
+        context.mount->status = MountStatus::destroyed;
+        return 1;
+    case 5: g_targets.erase(context.child_handle); return 1;
+    case 6: g_children.erase(context.child_handle); return 1;
+    default: return 0;
+    }
 }
 
 void unlink_child(std::uint32_t child_handle) noexcept {
-    const auto child = g_children.find(child_handle);
-    if (child == g_children.end()) {
-        g_targets.erase(child_handle);
-        return;
+    TurretUnlinkContext context{child_handle, nullptr, nullptr, nullptr};
+    a2fo_rs_stage8_turrets_unlink_child(&turret_unlink_step, &context);
+}
+
+struct TurretCleanupContext {
+    std::uint32_t parent_handle;
+    ParentRuntime* parent = nullptr;
+    std::vector<std::uint32_t> children;
+};
+
+std::uintptr_t turret_cleanup_step(void* opaque, std::uint32_t op,
+                                 std::uintptr_t arg) noexcept {
+    auto& context = *static_cast<TurretCleanupContext*>(opaque);
+    switch (op) {
+    case 0: {
+        const auto found = g_parents.find(context.parent_handle);
+        if (found == g_parents.end()) return 0;
+        context.parent = &found->second;
+        return 1;
     }
-    const auto parent = g_parents.find(child->second.parent_handle);
-    if (parent != g_parents.end()) {
-        MountRuntime* mount = find_mount(
-            &parent->second, child->second.mount_index);
-        if (mount && mount->child_handle == child_handle) {
-            mount->child_handle = 0;
-            mount->status = MountStatus::destroyed;
-        }
+    case 1: return context.parent->mounts.size();
+    case 2: return context.parent->mounts[arg].child_handle;
+    case 3:
+        try {
+            context.children.push_back(static_cast<std::uint32_t>(arg));
+            return 1;
+        } catch (...) { return 0; }
+    case 4: g_parents.erase(context.parent_handle); return 1;
+    case 5: return context.children.size();
+    case 6: return context.children[arg];
+    case 7:
+        g_children.erase(static_cast<std::uint32_t>(arg));
+        g_targets.erase(static_cast<std::uint32_t>(arg));
+        return 1;
+    case 8: expire_craft(find_entity(static_cast<std::uint32_t>(arg))); return 1;
+    default: return 0;
     }
-    g_targets.erase(child_handle);
-    g_children.erase(child);
 }
 
 void cleanup_parent(std::uint32_t parent_handle) noexcept {
-    const auto parent = g_parents.find(parent_handle);
-    if (parent == g_parents.end()) return;
-    std::vector<std::uint32_t> children;
-    try {
-        for (const MountRuntime& mount : parent->second.mounts) {
-            if (mount.child_handle != 0) children.push_back(mount.child_handle);
-        }
-    } catch (...) {
-        // The state is still erased below; cleanup must never throw into the
-        // engine even if collecting handles fails under memory pressure.
-    }
-    g_parents.erase(parent);
-    for (const std::uint32_t child_handle : children) {
-        g_children.erase(child_handle);
-        g_targets.erase(child_handle);
-        expire_craft(find_entity(child_handle));
+    TurretCleanupContext context{parent_handle, nullptr, {}};
+    a2fo_rs_stage8_turrets_cleanup_parent(&turret_cleanup_step, &context);
+}
+
+struct TurretCraftEventContext {
+    const A2FO_CraftEvent* event;
+    void* craft = nullptr;
+};
+
+std::uintptr_t turret_craft_event_step(void* opaque, std::uint32_t op,
+                                     std::uintptr_t arg) noexcept {
+    auto& context = *static_cast<TurretCraftEventContext*>(opaque);
+    switch (op) {
+    case 0: return context.event != nullptr;
+    case 1: return context.event->struct_size >= sizeof(*context.event);
+    case 2: return g_runtime_ready;
+    case 3:
+        context.craft = context.event->craft;
+        return context.craft != nullptr;
+    case 4: return context.event->kind;
+    case 5: return object_handle(context.craft);
+    case 6: cleanup_parent(static_cast<std::uint32_t>(arg)); return 1;
+    case 7: unlink_child(static_cast<std::uint32_t>(arg)); return 1;
+    case 8: return !g_parent_classes.empty() || !g_turret_classes.empty();
+    case 9: attach_loaded_turret(context.craft); return 1;
+    case 10: return !g_children.empty() || !g_parent_classes.empty();
+    case 11:
+        return read_live_at<std::uint8_t>(
+            context.craft, kObjectExpiredOffset, 1) == 0;
+    case 12:
+        return read_live_at<std::uint32_t>(
+            context.craft, kObjectHandleOffset, 0);
+    case 13:
+        return g_children.find(static_cast<std::uint32_t>(arg)) !=
+            g_children.end();
+    case 14:
+        prepare_linked_turret_for_simulation(
+            context.craft, static_cast<std::uint32_t>(arg));
+        return 1;
+    case 15:
+        update_linked_turret(context.craft,
+            static_cast<std::uint32_t>(arg), context.event->elapsed_seconds);
+        return 1;
+    case 16:
+        return g_parent_classes.find(read_live_at<void*>(
+            context.craft, kObjectClassOffset, nullptr)) !=
+            g_parent_classes.end();
+    case 17: spawn_pending_turrets(context.craft); return 1;
+    default: return 0;
     }
 }
 
 void A2FO_CALL craft_event_handler(
     const A2FO_CraftEvent* event, void*) {
-    if (!event || event->struct_size < sizeof(*event) ||
-        !g_runtime_ready || !event->craft) {
-        return;
-    }
-    void* craft = event->craft;
-    if (event->kind == A2FO_CRAFT_EVENT_CLEANUP) {
-        const std::uint32_t handle = object_handle(craft);
-        cleanup_parent(handle);
-        unlink_child(handle);
-        return;
-    }
-    if (event->kind == A2FO_CRAFT_EVENT_POST_LOAD) {
-        if (g_parent_classes.empty() && g_turret_classes.empty()) return;
-        attach_loaded_turret(craft);
-        return;
-    }
+    TurretCraftEventContext context{event, nullptr};
+    a2fo_rs_stage8_turrets_craft_event(
+        &turret_craft_event_step, &context, A2FO_CRAFT_EVENT_CLEANUP,
+        A2FO_CRAFT_EVENT_POST_LOAD, A2FO_CRAFT_EVENT_SIMULATE_PRE,
+        A2FO_CRAFT_EVENT_SIMULATE_POST);
+}
 
-    if (g_children.empty() && g_parent_classes.empty()) return;
+struct TurretOwnerContext {
+    void* weapon = nullptr;
+    void* owner = nullptr;
+};
 
-    const bool active =
-        read_live_at<std::uint8_t>(craft, kObjectExpiredOffset, 1) == 0;
-    if (!active) return;
-    const std::uint32_t handle =
-        read_live_at<std::uint32_t>(craft, kObjectHandleOffset, 0);
-    if (event->kind == A2FO_CRAFT_EVENT_SIMULATE_PRE) {
-        // Combat policy must be present before native Craft simulation: that
-        // is where alert/autonomy rules select targets and weapons may fire.
-        if (g_children.find(handle) != g_children.end()) {
-            prepare_linked_turret_for_simulation(craft, handle);
-        }
-        return;
-    }
-    if (event->kind != A2FO_CRAFT_EVENT_SIMULATE_POST) return;
-
-    // Apply the linked transform after native simulation so the child physics
-    // pass cannot move it away from the mount during this frame.
-    if (g_children.find(handle) != g_children.end()) {
-        update_linked_turret(craft, handle, event->elapsed_seconds);
-    }
-    if (g_parent_classes.find(
-            read_live_at<void*>(craft, kObjectClassOffset, nullptr)) !=
-        g_parent_classes.end()) {
-        spawn_pending_turrets(craft);
+std::uintptr_t turret_owner_step(void* opaque, std::uint32_t op,
+                                 std::uintptr_t) noexcept {
+    auto& c = *static_cast<TurretOwnerContext*>(opaque);
+    switch (op) {
+    case 0: return g_runtime_ready && c.weapon && g_armada;
+    case 1:
+        c.owner = reinterpret_cast<void*>(a2fo_turret_call_thiscall_0(
+            at(g_armada, kWeaponGetOwnerRva), c.weapon));
+        return 1;
+    default: return 0;
     }
 }
 
 void* weapon_owner(void* weapon) noexcept {
-    if (!g_runtime_ready || !weapon || !g_armada) return nullptr;
-    return reinterpret_cast<void*>(a2fo_turret_call_thiscall_0(
-        at(g_armada, kWeaponGetOwnerRva), weapon));
+    TurretOwnerContext context{weapon};
+    a2fo_rs_stage8_turrets_weapon_owner(&turret_owner_step, &context);
+    return context.owner;
+}
+
+struct TurretTrackContext {
+    void* owner = nullptr;
+    const void* target = nullptr;
+    std::uint32_t owner_handle = 0;
+    std::uint32_t target_handle = 0;
+};
+
+std::uintptr_t turret_track_step(void* opaque, std::uint32_t op,
+                                 std::uintptr_t) noexcept {
+    auto& c = *static_cast<TurretTrackContext*>(opaque);
+    switch (op) {
+    case 0:
+        return c.owner && g_turret_classes.find(object_class(c.owner)) !=
+            g_turret_classes.end();
+    case 1: c.owner_handle = object_handle(c.owner); return 1;
+    case 2: return c.owner_handle != 0;
+    case 3: c.target_handle = object_handle(c.target); return 1;
+    case 4: return c.target_handle != 0;
+    case 5:
+        try { g_targets[c.owner_handle] = c.target_handle; }
+        catch (...) { g_targets.erase(c.owner_handle); }
+        return 1;
+    case 6: g_targets.erase(c.owner_handle); return 1;
+    default: return 0;
+    }
 }
 
 void track_weapon_target_for_owner(
     void* owner, const void* target) noexcept {
-    if (!owner || g_turret_classes.find(object_class(owner)) ==
-            g_turret_classes.end()) {
-        return;
-    }
-    const std::uint32_t owner_handle = object_handle(owner);
-    if (owner_handle == 0) return;
-    const std::uint32_t target_handle = object_handle(target);
-    try {
-        if (target_handle != 0) {
-            g_targets[owner_handle] = target_handle;
-        } else {
-            g_targets.erase(owner_handle);
-        }
-    } catch (...) {
-        g_targets.erase(owner_handle);
+    TurretTrackContext context{owner, target};
+    a2fo_rs_stage8_turrets_track_target(&turret_track_step, &context);
+}
+
+struct TurretInheritedContext {
+    void* owner = nullptr;
+    std::uint32_t owner_handle = 0;
+    std::unordered_map<std::uint32_t, ChildRuntime>::iterator child{};
+    void* target = nullptr;
+    const void* result = nullptr;
+};
+
+std::uintptr_t turret_inherited_step(void* opaque, std::uint32_t op,
+                                     std::uintptr_t) noexcept {
+    auto& c = *static_cast<TurretInheritedContext*>(opaque);
+    switch (op) {
+    case 0: c.owner_handle = object_handle(c.owner); return 1;
+    case 1:
+        c.child = g_children.find(c.owner_handle);
+        return c.child != g_children.end();
+    case 2: return c.child->second.ordered_target_handle != 0;
+    case 3: c.target = find_entity(c.child->second.ordered_target_handle); return 1;
+    case 4: return c.target != nullptr;
+    case 5: return object_expired(c.target);
+    case 6: c.result = c.target; return 1;
+    default: return 0;
     }
 }
 
 const void* inherited_order_target_for_owner(void* owner) noexcept {
-    const std::uint32_t owner_handle = object_handle(owner);
-    const auto child = g_children.find(owner_handle);
-    if (child == g_children.end() ||
-        child->second.ordered_target_handle == 0) {
-        return nullptr;
+    TurretInheritedContext context{};
+    context.owner = owner;
+    a2fo_rs_stage8_turrets_inherited_target(
+        &turret_inherited_step, &context);
+    return context.result;
+}
+
+struct TurretWeaponContext {
+    const A2FO_WeaponTriggerEvent* event = nullptr;
+    void* weapon = nullptr;
+    const void* target = nullptr;
+    void* owner = nullptr;
+    const void* ordered = nullptr;
+    const void* effective = nullptr;
+    A2FO_Stage8TurretTargetHandles handles{};
+    std::exception_ptr exception{};
+};
+
+std::uintptr_t turret_weapon_step(void* opaque, std::uint32_t op,
+                                  std::uintptr_t) noexcept {
+    auto& c = *static_cast<TurretWeaponContext*>(opaque);
+    if (c.exception) return std::numeric_limits<std::uintptr_t>::max();
+    try {
+        switch (op) {
+        case 0:
+            return c.event && c.event->struct_size >= sizeof(*c.event);
+        case 1: return c.event->kind;
+        case 2: c.weapon = c.event->weapon; return 1;
+        case 3: c.target = c.event->target; return 1;
+        case 4: c.owner = weapon_owner(c.weapon); return 1;
+        case 5:
+            c.ordered = inherited_order_target_for_owner(c.owner);
+            return c.ordered != nullptr;
+        case 6: c.handles.target = object_handle(c.target); return 1;
+        case 7: c.handles.ordered = object_handle(c.ordered); return 1;
+        case 9:
+            track_weapon_target_for_owner(c.owner, c.ordered);
+            return 1;
+        case 10:
+            track_weapon_target_for_owner(c.owner, c.target);
+            return 1;
+        default: return 0;
+        }
+    } catch (...) {
+        c.exception = std::current_exception();
+        return std::numeric_limits<std::uintptr_t>::max();
     }
-    void* target = find_entity(child->second.ordered_target_handle);
-    return target && !object_expired(target) ? target : nullptr;
 }
 
 bool A2FO_CALL weapon_trigger_handler(
     const A2FO_WeaponTriggerEvent* event, void*) {
-    if (!event || event->struct_size < sizeof(*event)) return false;
-    if (event->kind == A2FO_WEAPON_TRIGGER_COMMITTED) return true;
-    if (event->kind != A2FO_WEAPON_TRIGGER_PRECHECK) return false;
-    void* weapon = event->weapon;
-    const void* target = event->target;
-    void* owner = weapon_owner(weapon);
-    const void* ordered_target = inherited_order_target_for_owner(owner);
-    // Trigger is Armada's last weapon boundary. Reject a shot selected for a
-    // different object while the host has an explicit Attack order;
-    // substituting here would bypass native range/CanAttack validation.
-    if (ordered_target &&
-        object_handle(target) != object_handle(ordered_target)) {
-        track_weapon_target_for_owner(owner, ordered_target);
-        return false;
+    TurretWeaponContext context{};
+    context.event = event;
+    const bool result = a2fo_rs_stage8_turrets_weapon_trigger(
+        &turret_weapon_step, &context, &context.handles,
+        A2FO_WEAPON_TRIGGER_COMMITTED, A2FO_WEAPON_TRIGGER_PRECHECK) != 0;
+    if (context.exception) std::rethrow_exception(context.exception);
+    return result;
+}
+
+struct TurretSetTargetContext {
+    void* weapon = nullptr;
+    const void* target = nullptr;
+    void* owner = nullptr;
+    const void* ordered = nullptr;
+    const void* effective = nullptr;
+};
+
+std::uintptr_t turret_set_target_step(void* opaque, std::uint32_t op,
+                                      std::uintptr_t arg) noexcept {
+    auto& c = *static_cast<TurretSetTargetContext*>(opaque);
+    try {
+        switch (op) {
+        case 0: c.owner = weapon_owner(c.weapon); return 1;
+        case 1:
+            c.ordered = inherited_order_target_for_owner(c.owner);
+            return c.ordered != nullptr;
+        case 2: c.effective = arg != 0 ? c.ordered : c.target; return 1;
+        case 3:
+            a2fo_turret_call_thiscall_1(
+                g_weapon_set_target_hook.gateway, c.weapon,
+                reinterpret_cast<std::uintptr_t>(c.effective));
+            return 1;
+        case 4:
+            track_weapon_target_for_owner(c.owner, c.effective);
+            return 1;
+        default: return 0;
+        }
+    } catch (...) {
+        std::terminate();
     }
-    track_weapon_target_for_owner(owner, target);
-    return true;
 }
 
 void __attribute__((fastcall)) weapon_set_target_hook(
     void* weapon, void*, const void* target) noexcept {
-    void* owner = weapon_owner(weapon);
-    const void* ordered_target = inherited_order_target_for_owner(owner);
-    const void* effective_target = ordered_target
-        ? ordered_target : target;
-    a2fo_turret_call_thiscall_1(
-        g_weapon_set_target_hook.gateway, weapon,
-        reinterpret_cast<std::uintptr_t>(effective_target));
-    track_weapon_target_for_owner(owner, effective_target);
+    TurretSetTargetContext context{weapon, target};
+    a2fo_rs_stage8_turrets_set_target(&turret_set_target_step, &context);
 }
 
 template <std::size_t Size>
@@ -1308,170 +2190,187 @@ bool class_constructor_site_supported() noexcept {
     return false;
 }
 
-bool preflight_signatures() noexcept {
-    bool supported = true;
-    supported = class_constructor_site_supported() && supported;
-    supported = checked_signature(
-        "Weapon::SetTarget", kWeaponSetTargetRva,
-        kExpectedWeaponSetTarget) && supported;
-    supported = checked_signature(
-        "Craft::GetAlertStatus", kCraftGetAlertStatusRva,
-        kExpectedCraftGetAlertStatus) && supported;
-    supported = checked_signature(
-        "Craft::SetAlertStatus", kCraftSetAlertStatusRva,
-        kExpectedCraftSetAlertStatus) && supported;
-    supported = checked_signature(
-        "Craft::GetSpecialWeaponAutonomy",
+bool preflight_signature_index(std::size_t index) noexcept {
+    switch (index) {
+    case 0: return class_constructor_site_supported();
+    case 1: return checked_signature("Weapon::SetTarget",
+        kWeaponSetTargetRva, kExpectedWeaponSetTarget);
+    case 2: return checked_signature("Craft::GetAlertStatus",
+        kCraftGetAlertStatusRva, kExpectedCraftGetAlertStatus);
+    case 3: return checked_signature("Craft::SetAlertStatus",
+        kCraftSetAlertStatusRva, kExpectedCraftSetAlertStatus);
+    case 4: return checked_signature("Craft::GetSpecialWeaponAutonomy",
         kCraftGetSpecialWeaponAutonomyRva,
-        kExpectedCraftGetSpecialWeaponAutonomy) && supported;
-    supported = checked_signature(
-        "Craft::SetSpecialWeaponAutonomy",
+        kExpectedCraftGetSpecialWeaponAutonomy);
+    case 5: return checked_signature("Craft::SetSpecialWeaponAutonomy",
         kCraftSetSpecialWeaponAutonomyRva,
-        kExpectedCraftSetSpecialWeaponAutonomy) && supported;
-    supported = checked_signature(
-        "GameObject::GetCurrentCommand",
+        kExpectedCraftSetSpecialWeaponAutonomy);
+    case 6: return checked_signature("GameObject::GetCurrentCommand",
         kGameObjectGetCurrentCommandRva,
-        kExpectedGameObjectGetCurrentCommand) && supported;
-    supported = checked_signature(
-        "GameObject::SetCommand(targetless)",
+        kExpectedGameObjectGetCurrentCommand);
+    case 7: return checked_signature("GameObject::SetCommand(targetless)",
         kGameObjectSetTargetlessCommandRva,
-        kExpectedGameObjectSetTargetlessCommand) && supported;
-    supported = checked_signature(
-        "GameObject::SetCommand(object)",
+        kExpectedGameObjectSetTargetlessCommand);
+    case 8: return checked_signature("GameObject::SetCommand(object)",
         kGameObjectSetObjectCommandRva,
-        kExpectedGameObjectSetObjectCommand) && supported;
-    return supported;
+        kExpectedGameObjectSetObjectCommand);
+    default: return false;
+    }
 }
 
-bool install_class_constructor_hook(const A2FO_ModuleApi* api) noexcept {
-    void* site = at(g_armada, kGameObjectClassConstructorRva);
-    if (signature_matches(kGameObjectClassConstructorRva,
-                          kExpectedGameObjectClassConstructor)) {
-        if (!api->install_inline_hook(
-                site,
-                reinterpret_cast<void*>(
-                    &game_object_class_constructor_hook),
-                sizeof(kExpectedGameObjectClassConstructor),
-                kExpectedGameObjectClassConstructor,
-                &g_class_constructor_hook)) {
-            return false;
-        }
-        g_class_constructor_original = g_class_constructor_hook.gateway;
-        g_chained_fo_class_constructor = false;
-        return g_class_constructor_original != nullptr;
-    }
-
+struct TurretInitContext {
+    const A2FO_ModuleApi* api = nullptr;
+    void* site = nullptr;
     void* destination = nullptr;
     std::size_t patch_length = 0;
-    if (!supported_fleet_ops_detour(
-            kGameObjectClassConstructorRva,
-            kFoGameObjectClassConstructorHandlerRva,
-            kExpectedFoGameObjectClassConstructorHandler,
-            &destination, &patch_length) ||
-        patch_length > 6) {
-        return false;
+    std::exception_ptr exception{};
+    bool installing = false;
+};
+
+std::uintptr_t turret_init_step(void* opaque, std::uint32_t op,
+                                std::uintptr_t arg) noexcept {
+    auto& context = *static_cast<TurretInitContext*>(opaque);
+    if (context.exception) return std::numeric_limits<std::uintptr_t>::max();
+    try {
+        const A2FO_ModuleApi* api = context.api;
+        switch (op) {
+        case 0:
+            return api && api->struct_size >= A2FO_MODULE_API_V4_BASE_SIZE &&
+                api->api_version == A2FO_MODULE_API_VERSION && api->log &&
+                api->armada_module && api->fleetops_module &&
+                api->install_inline_hook && api->patch_jump &&
+                api->register_classlabel_alias &&
+                A2FO_MODULE_API_HAS(api, get_original_classlabel) &&
+                api->get_original_classlabel &&
+                A2FO_MODULE_API_HAS(api, register_classlabel_odf_defaults) &&
+                api->register_classlabel_odf_defaults &&
+                (api->capabilities & A2FO_CAP_ORIGINAL_CLASSLABEL) != 0 &&
+                (api->capabilities & A2FO_CAP_CLASSLABEL_ODF_DEFAULTS) != 0 &&
+                A2FO_MODULE_API_HAS(api, register_weapon_trigger_handler) &&
+                api->register_weapon_trigger_handler &&
+                A2FO_MODULE_API_HAS(api, register_craft_event_handler) &&
+                api->register_craft_event_handler &&
+                (api->capabilities & A2FO_CAP_WEAPON_TRIGGER_EVENTS) != 0 &&
+                (api->capabilities & A2FO_CAP_CRAFT_EVENTS) != 0;
+        case 1: g_api = api; return 1;
+        case 2:
+            g_armada = static_cast<HMODULE>(api->armada_module());
+            return 1;
+        case 3:
+            g_fleet_ops = static_cast<HMODULE>(api->fleetops_module());
+            return 1;
+        case 4: return g_armada && g_fleet_ops;
+        case 5: resolve_shield_observers(); return 1;
+        case 6: return api->register_classlabel_alias(
+            kModuleName, "turret", "sensor");
+        case 7: return api->register_classlabel_odf_defaults(
+            kModuleName, "turret", kTurretDefaults.data(),
+            static_cast<std::uint32_t>(kTurretDefaults.size()));
+        case 8:
+            return A2FO_MODULE_API_HAS(
+                api, register_weapon_trigger_handler_masked) &&
+                api->register_weapon_trigger_handler_masked;
+        case 9: return api->register_weapon_trigger_handler_masked(
+            kModuleName, A2FO_WEAPON_TRIGGER_EVENT_MASK_PRECHECK,
+            &weapon_trigger_handler, nullptr);
+        case 10: return api->register_weapon_trigger_handler(
+            kModuleName, &weapon_trigger_handler, nullptr);
+        case 11: return api->register_craft_event_handler(
+            kModuleName, &craft_event_handler, nullptr);
+        case 12: log_line("Turret semantic policy registration failed"); return 1;
+        case 13: return preflight_signature_index(arg);
+        case 14:
+            log_line("Supported ArmadaL signatures were not found; runtime disabled");
+            return 1;
+        case 15:
+            context.site = at(g_armada, kGameObjectClassConstructorRva);
+            return signature_matches(kGameObjectClassConstructorRva,
+                                     kExpectedGameObjectClassConstructor);
+        case 16:
+            context.installing = true;
+            return api->install_inline_hook(
+                context.site,
+                reinterpret_cast<void*>(&game_object_class_constructor_hook),
+                sizeof(kExpectedGameObjectClassConstructor),
+                kExpectedGameObjectClassConstructor,
+                &g_class_constructor_hook);
+        case 17:
+            g_class_constructor_original = g_class_constructor_hook.gateway;
+            g_chained_fo_class_constructor = false;
+            return g_class_constructor_original != nullptr;
+        case 18:
+            return supported_fleet_ops_detour(
+                kGameObjectClassConstructorRva,
+                kFoGameObjectClassConstructorHandlerRva,
+                kExpectedFoGameObjectClassConstructorHandler,
+                &context.destination, &context.patch_length) &&
+                context.patch_length <= 6;
+        case 19: {
+            std::uint8_t expected_detour[6]{};
+            std::memcpy(expected_detour, context.site, context.patch_length);
+            context.installing = true;
+            return api->patch_jump(
+                context.site,
+                reinterpret_cast<void*>(&game_object_class_constructor_hook),
+                expected_detour, context.patch_length);
+        }
+        case 20:
+            g_class_constructor_original = context.destination;
+            g_chained_fo_class_constructor = true;
+            return 1;
+        case 21:
+            context.installing = true;
+            return api->install_inline_hook(
+                at(g_armada, kWeaponSetTargetRva),
+                reinterpret_cast<void*>(&weapon_set_target_hook),
+                sizeof(kExpectedWeaponSetTarget), kExpectedWeaponSetTarget,
+                &g_weapon_set_target_hook);
+        case 22:
+            log_line("A turret runtime hook could not be installed; hooks fail closed");
+            return 1;
+        case 23:
+            g_runtime_ready = arg != 0;
+            if (g_runtime_ready) {
+                if (g_chained_fo_class_constructor) {
+                    log_line(
+                        "Indexed hull-mounted turret runtime initialized and chained "
+                        "through Fleet Operations class construction; shared Craft "
+                        "and weapon events active");
+                } else {
+                    log_line("Indexed hull-mounted turret runtime initialized");
+                }
+            } else {
+                log_line("Turret classlabel loaded with linked-mount runtime disabled");
+            }
+            return 1;
+        default: return 0;
+        }
+    } catch (...) {
+        context.exception = std::current_exception();
+        return std::numeric_limits<std::uintptr_t>::max();
     }
-    std::uint8_t expected_detour[6]{};
-    std::memcpy(expected_detour, site, patch_length);
-    if (!api->patch_jump(
-            site,
-            reinterpret_cast<void*>(&game_object_class_constructor_hook),
-            expected_detour, patch_length)) {
-        return false;
-    }
-    g_class_constructor_original = destination;
-    g_chained_fo_class_constructor = true;
-    return true;
 }
 
-bool install_runtime_hooks(const A2FO_ModuleApi* api) noexcept {
-    if (!api || !api->install_inline_hook || !g_armada) return false;
-    if (!preflight_signatures()) {
-        log_line("Supported ArmadaL signatures were not found; runtime disabled");
-        return false;
-    }
-    bool installed = true;
-    installed = install_class_constructor_hook(api) && installed;
-    installed = api->install_inline_hook(
-        at(g_armada, kWeaponSetTargetRva),
-        reinterpret_cast<void*>(&weapon_set_target_hook),
-        sizeof(kExpectedWeaponSetTarget), kExpectedWeaponSetTarget,
-        &g_weapon_set_target_hook) && installed;
-    if (!installed) {
-        log_line("A turret runtime hook could not be installed; hooks fail closed");
-    }
-    return installed;
+// install_runtime_hooks was noexcept in the original module.
+void rethrow_install_exception(std::exception_ptr error) noexcept {
+    std::rethrow_exception(error);
 }
 
 }  // namespace
 
 extern "C" __declspec(dllexport)
 bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
-    if (!api || api->struct_size < A2FO_MODULE_API_V4_BASE_SIZE ||
-        api->api_version != A2FO_MODULE_API_VERSION || !api->log ||
-        !api->armada_module || !api->fleetops_module ||
-        !api->install_inline_hook || !api->patch_jump ||
-        !api->register_classlabel_alias ||
-        !A2FO_MODULE_API_HAS(api, get_original_classlabel) ||
-        !api->get_original_classlabel ||
-        !A2FO_MODULE_API_HAS(api, register_classlabel_odf_defaults) ||
-        !api->register_classlabel_odf_defaults ||
-        (api->capabilities & A2FO_CAP_ORIGINAL_CLASSLABEL) == 0 ||
-        (api->capabilities & A2FO_CAP_CLASSLABEL_ODF_DEFAULTS) == 0 ||
-        !A2FO_MODULE_API_HAS(api, register_weapon_trigger_handler) ||
-        !api->register_weapon_trigger_handler ||
-        !A2FO_MODULE_API_HAS(api, register_craft_event_handler) ||
-        !api->register_craft_event_handler ||
-        (api->capabilities & A2FO_CAP_WEAPON_TRIGGER_EVENTS) == 0 ||
-        (api->capabilities & A2FO_CAP_CRAFT_EVENTS) == 0) {
-        return false;
+    TurretInitContext context{};
+    context.api = api;
+    const bool accepted = a2fo_rs_stage8_turrets_init(
+        &turret_init_step, &context) != 0;
+    if (context.exception) {
+        if (context.installing) rethrow_install_exception(context.exception);
+        std::rethrow_exception(context.exception);
     }
-    g_api = api;
-    g_armada = static_cast<HMODULE>(api->armada_module());
-    g_fleet_ops = static_cast<HMODULE>(api->fleetops_module());
-    if (!g_armada || !g_fleet_ops) return false;
-    resolve_shield_observers();
-
-    const bool alias_registered = api->register_classlabel_alias(
-        kModuleName, "turret", "sensor");
-    const bool defaults_registered = api->register_classlabel_odf_defaults(
-        kModuleName, "turret", kTurretDefaults.data(),
-        static_cast<std::uint32_t>(kTurretDefaults.size()));
-    const bool trigger_registered =
-        A2FO_MODULE_API_HAS(
-            api, register_weapon_trigger_handler_masked) &&
-        api->register_weapon_trigger_handler_masked
-            ? api->register_weapon_trigger_handler_masked(
-                  kModuleName,
-                  A2FO_WEAPON_TRIGGER_EVENT_MASK_PRECHECK,
-                  &weapon_trigger_handler, nullptr)
-            : api->register_weapon_trigger_handler(
-                  kModuleName, &weapon_trigger_handler, nullptr);
-    const bool craft_events_registered = api->register_craft_event_handler(
-        kModuleName, &craft_event_handler, nullptr);
-    if (!alias_registered || !defaults_registered || !trigger_registered ||
-        !craft_events_registered) {
-        log_line("Turret semantic policy registration failed");
-        return false;
-    }
-
-    g_runtime_ready = install_runtime_hooks(api);
-    if (g_runtime_ready) {
-        if (g_chained_fo_class_constructor) {
-            log_line(
-                "Indexed hull-mounted turret runtime initialized and chained "
-                "through Fleet Operations class construction; shared Craft "
-                "and weapon events active");
-        } else {
-            log_line("Indexed hull-mounted turret runtime initialized");
-        }
-    } else {
-        log_line("Turret classlabel loaded with linked-mount runtime disabled");
-    }
-    // A failed inline-hook transaction cannot safely unload this DLL after a
-    // successful earlier patch. Keep the module resident and make every hook
-    // a pass-through while g_runtime_ready is false.
-    return true;
+    // Earlier successful patches remain process-lifetime even after a later
+    // hook fails; the disabled runtime still stays resident.
+    return accepted;
 }
 
 extern "C" __declspec(dllexport)

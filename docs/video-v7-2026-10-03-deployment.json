@@ -1,0 +1,41 @@
+{
+  "created_utc": "2026-10-03T09:11:01.200929+00:00",
+  "module": "A2FOVideo",
+  "version": "v7",
+  "source_root": "/home/tamsynn/A2FOHookExtensions",
+  "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/video-v7-20261003T091101Z",
+  "previous": {
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOVideo.dll": "17598fe48e926138bd72760b4a5923e394671a573ca2ff3b9cd899d78eb38dd6",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.log": "1bb4c08bb0af485fb2f6c407c6610f6e77d614e3a0ddb86cc09c010bd19cc6f3"
+  },
+  "unchanged_inputs_sha256": {
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.dll": "74b3274a19f8ca1370b37ee2b8834b9634a638994e83507fd160387efc9bb035",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOShellDisplay.dll": "53ce8ee055e28a374e992f6ad7178bcbace732af1abc4916cfe9739c40b5abf3",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe": "470bf8f4b0196e22fe179d3845cab671e74d9af19cf90a7dafed0b0bbd394318",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll": "d2a0829e87aaa927e27146b90be61fc6359c6cbf3d81aed2c644019dd375b9b6",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/info.ini": "42639e533412cd47a27ab23bdcd16a3a7f3fc23d48c3bbd49f53ccf834bd3da6",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/info.ini": "d5770d5d8fd86cb06e2014a13f189e1342c4b84cd8ca09e79c771d8e6e393e43",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/settings_saves_logs/mods/A2FO Settings Test/Settings.xml": "c1251fe5f87df0550f52560dfd3e83fc7668669712c1b7eb93705dc9cda04051",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/animations/intro.mp4": "e28bcf9aae6fabebfd87f1c727316c2048960ffaa72aa31bcd44118e9e4d6960",
+    "/home/tamsynn/Games/st legacy/animations/MadDocSoftware.bik": "f9a5d1d40f0ecfe07c026e38554c00466c098a6febada1074e853c6ea3f6a6be"
+  },
+  "artifacts": [
+    {
+      "source": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOVideo.dll",
+      "installed": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOVideo.dll",
+      "sha256": "45e741fff9baf644329a9acffe839df6b1532971ed78a1d2e8aba3f2294d3fea"
+    },
+    {
+      "source": "/home/tamsynn/A2FOHookExtensions/build/video-fixtures/MadDocSoftware.mp4",
+      "installed": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/animations/MadDocSoftware.mp4",
+      "sha256": "35ac62ae972d99a5d9ea42aa6914b0718b88e0214405e6525255bcc9df11173a"
+    }
+  ],
+  "verification": [
+    "strict -Werror module build",
+    "real DLL LoadLibrary/GetProcAddress headless smoke",
+    "real embedded libav with synthetic USER32/WinMM host; AAC/Opus/Vorbis/silent/short and MadDoc fixtures",
+    "MadDoc 7907712 non-silent PCM bytes; all queued buffers complete before reset"
+  ],
+  "live_acceptance": "pending manual full restart, windowed/borderless selected geometry, audible Wine output, skip and menu-return"
+}

@@ -1,0 +1,32 @@
+// Shared 8472 Fluidic Gate host. No buildItem list may be inherited here.
+#include "station.odf"
+
+classLabel = "breeder"
+breederClass = 1
+race = "species8472"
+baseName = "8472_FluidicGate"
+scaleSOD = 2.0
+animation = 2
+unitName = "Breeder"
+tooltip = "Breeder"
+buildTime = 25
+biomatterCost = 300
+officerCost = 1
+maxHealth = 1200
+shieldRate = 2.0
+shipIsBuiltByEvolution = 1
+buildHardpoint = "hp01"
+wormhole = "fluidicrift2.odf"
+builder_ship = 1
+transporter = 0
+has_crew = 0
+SHOW_MOVEMENT_AUTONOMY = 1
+SHOW_SW_AUTONOMY = 1
+breederConsumeRadius = 120
+eventSelect = "ShipyardSelect"
+eventAcknowledge = "ShipyardAcknowledge"
+eventDecommission = "ShipyardDecommission"
+shieldGeneratorTargetHardpoints = "hp02" "hp03" "hp04" "hp05" "hp06"
+sensorsTargetHardpoints = "hp02" "hp03" "hp04" "hp05" "hp06"
+hullTargetHardpoints = "hp02" "hp03" "hp04" "hp05" "hp06"
+criticalTargetHardpoints = "hp02" "hp03" "hp04" "hp05" "hp06"

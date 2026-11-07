@@ -1,0 +1,5 @@
+; Merge this section into the EXISTING Data/A2FORenderer.ini only when testing
+; the staged prototype DLL. This is not a replacement renderer configuration.
+; Requires the existing managed DXVK backend and active cloak compositor.
+[Cloak]
+RefitPrototype=1

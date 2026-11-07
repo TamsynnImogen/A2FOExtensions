@@ -1,0 +1,7 @@
+#define _a2fo_call_thiscall_0 _a2fo_builtin_feature_pack_call_thiscall_0
+#define _a2fo_call_thiscall_1 _a2fo_builtin_feature_pack_call_thiscall_1
+#define _a2fo_call_thiscall_2 _a2fo_builtin_feature_pack_call_thiscall_2
+#define _a2fo_call_thiscall_3 _a2fo_builtin_feature_pack_call_thiscall_3
+#define _a2fo_call_thiscall_4 _a2fo_builtin_feature_pack_call_thiscall_4
+#define _a2fo_call_thiscall_7 _a2fo_builtin_feature_pack_call_thiscall_7
+#include "../modules/A2FOFeaturePack/delphi_bridge.S"

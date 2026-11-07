@@ -5,6 +5,7 @@
  */
 
 #include "../../sdk/include/a2fo_module_api.h"
+#include "../../rust/module_runtime_a6_ffi.h"
 
 #include <windows.h>
 
@@ -16,16 +17,15 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <exception>
 #include <sstream>
 #include <string>
 
 namespace {
 
 constexpr const char* kModuleName = "A2FOCheats";
-constexpr const char* kRtsConfigFileName = "RTS_CFG.h";
 constexpr std::streamoff kMaximumRtsConfigSize = 2 * 1024 * 1024;
 constexpr float kDefaultGrantAmount = 10000.0f;
-constexpr float kMaximumConfiguredGrantAmount = 100000000.0f;
 
 // FleetOpsHook.dll 3.2.7 preferred base 0x5a800000.
 constexpr std::uintptr_t kChatRegisterCheatRva = 0x1fc2d0;
@@ -60,7 +60,6 @@ constexpr std::size_t kSelectionHandlesOffset = 0x03d0;
 constexpr std::size_t kGameObjectTeamOffset = 0x00ec;
 constexpr std::size_t kTeamDilithiumOffset = 0x0028;
 constexpr std::int32_t kMaximumSelectionCount = 512;
-constexpr std::int32_t kMaximumTeamCount = 9;
 constexpr std::int32_t kMoveCommand = 4;
 constexpr float kMoveDistance = 200.0f;
 constexpr float kShieldDisableDuration = 10000.0f;
@@ -73,18 +72,6 @@ struct GrantAmounts {
     float crew = kDefaultGrantAmount;
 };
 
-struct GrantField {
-    const char* name;
-    float GrantAmounts::*member;
-};
-
-constexpr std::array<GrantField, 5> kGrantFields{{
-    {"SHOWMETHEMONEY_DILITHIUM", &GrantAmounts::dilithium},
-    {"SHOWMETHEMONEY_TRITANIUM", &GrantAmounts::tritanium},
-    {"SHOWMETHEMONEY_METAL", &GrantAmounts::metal},
-    {"SHOWMETHEMONEY_SUPPLIES", &GrantAmounts::supplies},
-    {"SHOWMETHEMONEY_CREW", &GrantAmounts::crew},
-}};
 
 constexpr char kMoveCheat[] = "m";
 constexpr char kDisableCheat[] = "dis";
@@ -137,13 +124,6 @@ void log_line(const std::string& message) noexcept {
     if (g_api && g_api->log) g_api->log(kModuleName, message.c_str());
 }
 
-std::string join_path(const std::string& left, const std::string& right) {
-    if (left.empty()) return right;
-    if (right.empty()) return left;
-    if (left.back() == '\\' || left.back() == '/') return left + right;
-    return left + "\\" + right;
-}
-
 bool read_small_text_file(const std::string& path, std::string& contents) {
     std::ifstream input(path, std::ios::binary);
     if (!input) return false;
@@ -160,160 +140,74 @@ bool read_small_text_file(const std::string& path, std::string& contents) {
     return input.good() || input.eof();
 }
 
-std::string strip_c_comments(const std::string& input) {
-    std::string output;
-    output.reserve(input.size());
-    bool line_comment = false;
-    bool block_comment = false;
-    for (std::size_t index = 0; index < input.size(); ++index) {
-        const char current = input[index];
-        const char next = index + 1 < input.size() ? input[index + 1] : '\0';
-        if (line_comment) {
-            if (current == '\n' || current == '\r') {
-                line_comment = false;
-                output.push_back(current);
-            } else {
-                output.push_back(' ');
-            }
-            continue;
-        }
-        if (block_comment) {
-            if (current == '*' && next == '/') {
-                output.append("  ");
-                ++index;
-                block_comment = false;
-            } else {
-                output.push_back(
-                    current == '\n' || current == '\r' ? current : ' ');
-            }
-            continue;
-        }
-        if (current == '/' && next == '/') {
-            output.append("  ");
-            ++index;
-            line_comment = true;
-        } else if (current == '/' && next == '*') {
-            output.append("  ");
-            ++index;
-            block_comment = true;
-        } else {
-            output.push_back(current);
-        }
-    }
-    return output;
+struct CheatContext {
+    std::string text;
+    std::exception_ptr error;
+    void* selection = nullptr;
+    void* entity_get = nullptr;
+    void* general_game_type = nullptr;
+    void* current_player = nullptr;
+    void* team_lookup = nullptr;
+};
+std::uintptr_t cheat_native_step(CheatContext&,std::uint32_t,A2foRsCheatValue*);
+A2foRsCheatBytes cheat_bytes(const std::string& text) noexcept {
+    return {reinterpret_cast<const std::uint8_t*>(text.data()),text.size()};
 }
-
-bool identifier_character(char value) noexcept {
-    return (value >= 'a' && value <= 'z') ||
-        (value >= 'A' && value <= 'Z') ||
-        (value >= '0' && value <= '9') || value == '_';
+std::string cheat_text(A2foRsCheatBytes value) {
+    return value.data ? std::string(reinterpret_cast<const char*>(value.data),value.size)
+                      : std::string{};
 }
-
-std::string assignment_identifier(
-    const std::string& statement, std::size_t equals) {
-    std::size_t end = equals;
-    while (end != 0 && !identifier_character(statement[end - 1])) --end;
-    std::size_t begin = end;
-    while (begin != 0 && identifier_character(statement[begin - 1])) --begin;
-    return statement.substr(begin, end - begin);
-}
-
-bool parse_grant_literal(
-    const std::string& statement, std::size_t equals, float& value) noexcept {
-    const char* begin = statement.c_str() + equals + 1;
-    while (*begin == ' ' || *begin == '\t' ||
-           *begin == '\r' || *begin == '\n') {
-        ++begin;
-    }
-    errno = 0;
-    char* end = nullptr;
-    const float parsed = std::strtof(begin, &end);
-    if (end == begin || errno == ERANGE || !std::isfinite(parsed)) {
-        return false;
-    }
-    while (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n') {
-        ++end;
-    }
-    if (*end == 'f' || *end == 'F') {
-        ++end;
-        while (*end == ' ' || *end == '\t' ||
-               *end == '\r' || *end == '\n') {
-            ++end;
-        }
-    }
-    if (*end != '\0' || parsed < 0.0f ||
-        parsed > kMaximumConfiguredGrantAmount) {
-        return false;
-    }
-    value = parsed;
-    return true;
-}
-
-std::uint32_t apply_rts_config(
-    const std::string& contents, const std::string& path) {
-    const std::string source = strip_c_comments(contents);
-    std::uint32_t applied = 0;
-    std::size_t begin = 0;
-    while (begin < source.size()) {
-        const std::size_t semicolon = source.find(';', begin);
-        const std::size_t end = semicolon == std::string::npos
-            ? source.size() : semicolon;
-        const std::string statement = source.substr(begin, end - begin);
-        const std::size_t equals = statement.find('=');
-        if (equals != std::string::npos) {
-            const std::string identifier =
-                assignment_identifier(statement, equals);
-            for (const GrantField& field : kGrantFields) {
-                if (identifier != field.name) continue;
-                float value = 0.0f;
-                if (parse_grant_literal(statement, equals, value)) {
-                    g_grant_amounts.*(field.member) = value;
-                    ++applied;
-                } else {
-                    log_line("Ignored invalid " + identifier + " in " + path);
-                }
-                break;
-            }
-        }
-        if (semicolon == std::string::npos) break;
-        begin = semicolon + 1;
-    }
-    return applied;
-}
-
 std::string format_grant_amount(float value) {
     std::ostringstream output;
     output << value;
     return output.str();
 }
-
-void load_grant_amounts() {
-    g_grant_amounts = GrantAmounts{};
-    std::uint32_t configured_fields = 0;
-    const std::uint32_t root_count = g_api->extension_root_count();
-    for (std::uint32_t index = 0; index < root_count; ++index) {
-        const char* root = g_api->extension_root(index);
-        if (!root || !*root) continue;
-        const std::string path = join_path(root, kRtsConfigFileName);
-        std::string contents;
-        if (!read_small_text_file(path, contents)) continue;
-        const std::uint32_t applied = apply_rts_config(contents, path);
-        if (applied != 0) {
-            configured_fields += applied;
-            log_line("Applied " + std::to_string(applied) +
-                     " showmethemoney value(s) from " + path);
+std::uintptr_t cheat_step(void* opaque,std::uint32_t operation,A2foRsCheatValue* value) noexcept {
+    auto& context=*static_cast<CheatContext*>(opaque);
+    if(context.error)return 0;
+    try {
+        switch(operation){
+        case 0:g_grant_amounts=GrantAmounts{};return g_api->extension_root_count();
+        case 1: {
+            const char* root=g_api->extension_root(static_cast<std::uint32_t>(value->word));
+            if(!root)return 0;
+            value->first={reinterpret_cast<const std::uint8_t*>(root),std::strlen(root)};
+            return 1;
         }
-    }
-    log_line(
-        "showmethemoney grants: Dilithium=" +
-        format_grant_amount(g_grant_amounts.dilithium) +
-        ", Tritanium=" + format_grant_amount(g_grant_amounts.tritanium) +
-        ", Metal=" + format_grant_amount(g_grant_amounts.metal) +
-        ", Supplies=" + format_grant_amount(g_grant_amounts.supplies) +
-        ", Crew=" + format_grant_amount(g_grant_amounts.crew) +
-        (configured_fields == 0 ? " (defaults)" : " (RTS_CFG.h)"));
+        case 2: {
+            context.text.clear();
+            if(!read_small_text_file(cheat_text(value->first),context.text))return 0;
+            value->second=cheat_bytes(context.text);return 1;
+        }
+        case 3: {
+            const std::string input=cheat_text(value->first);
+            errno=0;char* end=nullptr;
+            value->number=std::strtof(input.c_str(),&end);
+            value->word=static_cast<std::uintptr_t>(end-input.c_str());
+            value->other=errno==ERANGE;
+            return 1;
+        }
+        case 4:log_line("Ignored invalid "+cheat_text(value->first)+" in "+cheat_text(value->second));return 1;
+        case 5:log_line("Applied "+std::to_string(value->word)+
+            " showmethemoney value(s) from "+cheat_text(value->first));return 1;
+        case 6: {
+            g_grant_amounts.dilithium=value->vector[0];
+            g_grant_amounts.tritanium=value->vector[1];
+            g_grant_amounts.metal=value->vector[2];
+            g_grant_amounts.supplies=value->vector[3];
+            g_grant_amounts.crew=value->vector[4];
+            log_line("showmethemoney grants: Dilithium="+
+                format_grant_amount(g_grant_amounts.dilithium)+
+                ", Tritanium="+format_grant_amount(g_grant_amounts.tritanium)+
+                ", Metal="+format_grant_amount(g_grant_amounts.metal)+
+                ", Supplies="+format_grant_amount(g_grant_amounts.supplies)+
+                ", Crew="+format_grant_amount(g_grant_amounts.crew)+
+                (value->word==0?" (defaults)":" (RTS_CFG.h)"));return 1;
+        }
+        default:return cheat_native_step(context,operation,value);
+        }
+    }catch(...){context.error=std::current_exception();return 0;}
 }
-
 bool readable_range(const void* address, std::size_t size) noexcept {
     if (!address || size == 0) return false;
     MEMORY_BASIC_INFORMATION info{};
@@ -411,171 +305,19 @@ void* dynamic_cast_object(
         at(g_armada, target_type_rva), 0);
 }
 
-template <typename Visitor>
-bool for_each_selected_craft(
-    Visitor&& visitor, bool stop_after_action = false) noexcept {
-    void* selection_link = read_pointer(
-        at(g_fleet_ops, kSelectionDispatchLinkRva));
-    void* selection = read_pointer(selection_link);
-    if (!selection) return false;
-
-    std::int32_t count = 0;
-    if (!read_value(
-            static_cast<std::uint8_t*>(selection) + kSelectionCountOffset,
-            count) ||
-        count <= 0 || count > kMaximumSelectionCount) {
-        return false;
-    }
-
-    const auto entity_get = function_pointer<EntityGetFunction>(
-        linked_dispatch_function(kEntityGetDispatchLinkRva));
-    if (!entity_get) return false;
-
-    bool acted = false;
-    for (std::int32_t index = count - 1; index >= 0; --index) {
-        std::int32_t handle = 0;
-        const auto* handle_address =
-            static_cast<const std::uint8_t*>(selection) +
-            kSelectionHandlesOffset +
-            static_cast<std::size_t>(index) * sizeof(handle);
-        if (!read_value(handle_address, handle)) continue;
-
-        void* object = entity_get(handle);
-        void* craft = dynamic_cast_object(
-            object, kGameObjectTypeDescriptorRva,
-            kCraftTypeDescriptorRva);
-        if (craft && visitor(craft, handle)) {
-            acted = true;
-            if (stop_after_action) break;
-        }
-    }
-    return acted;
+bool cheat_command(std::uint32_t kind) noexcept {
+    try {
+        CheatContext context{};
+        const bool result=a2fo_rs_runtime_cheats_command(kind,cheat_step,&context)!=0;
+        if(context.error)std::rethrow_exception(context.error);
+        return result;
+    }catch(...){return false;}
 }
-
-bool __cdecl move_selected_hook() noexcept {
-    return for_each_selected_craft([](void* craft, std::int32_t) noexcept {
-        std::array<float, 12> matrix{};
-        const void* matrix_address = a2fo_cheats_call_thiscall_pointer(
-            at(g_armada, kEntityGetTransformRva), craft);
-        if (!readable_range(matrix_address,
-                            matrix.size() * sizeof(matrix[0]))) {
-            return false;
-        }
-        std::memcpy(matrix.data(), matrix_address,
-                    matrix.size() * sizeof(matrix[0]));
-
-        // This is the original Fleet Ops operation: transform local
-        // (0, 0, 200) by the craft matrix and queue AiCommand 4 there.
-        const Vector3 destination{
-            matrix[9] + kMoveDistance * matrix[6],
-            matrix[10] + kMoveDistance * matrix[7],
-            matrix[11] + kMoveDistance * matrix[8],
-        };
-        a2fo_cheats_call_thiscall_command_vector_int(
-            at(g_armada, kQueueCommandVectorRva), craft,
-            kMoveCommand, &destination, 0);
-        return true;
-    });
-}
-
-bool __cdecl disable_selected_shields_hook() noexcept {
-    return for_each_selected_craft([](void* craft, std::int32_t) noexcept {
-        a2fo_cheats_call_thiscall_float(
-            at(g_armada, kDisableShieldGeneratorRva), craft,
-            kShieldDisableDuration);
-        return true;
-    });
-}
-
-bool __cdecl eliminate_selected_team_hook() noexcept {
-    bool eliminated = false;
-    return for_each_selected_craft(
-        [&eliminated](void* craft, std::int32_t) noexcept {
-            if (eliminated) return false;
-
-            std::int32_t team = -1;
-            if (!read_value(
-                    static_cast<const std::uint8_t*>(craft) +
-                        kGameObjectTeamOffset,
-                    team) ||
-                team < 0 || team >= kMaximumTeamCount) {
-                return false;
-            }
-
-            void* game_type_link = read_pointer(
-                at(g_fleet_ops, kGameTypeDispatchLinkRva));
-            void* game_type = read_pointer(game_type_link);
-            void* general_game_type = dynamic_cast_object(
-                game_type, kGameTypeTypeDescriptorRva,
-                kGameTypeGeneralTypeDescriptorRva);
-            if (!general_game_type) return false;
-
-            a2fo_cheats_call_thiscall_int(
-                at(g_armada, kEliminateTeamRva), general_game_type, team);
-            eliminated = true;
-            return true;
-        }, true);
-}
-
-bool __cdecl crash_hook() noexcept {
-    log_line("crash requested; terminating Fleet Operations intentionally");
-    return TerminateProcess(
-               GetCurrentProcess(), EXCEPTION_ACCESS_VIOLATION) != FALSE;
-}
-
-bool __cdecl show_me_the_money_hook() noexcept {
-    const auto current_player = function_pointer<CurrentPlayerFunction>(
-        linked_dispatch_function(kCurrentPlayerDispatchLinkRva));
-    const auto team_lookup = function_pointer<TeamLookupFunction>(
-        linked_dispatch_function(kTeamLookupDispatchLinkRva));
-    if (!current_player || !team_lookup) {
-        log_line("showmethemoney invocation could not resolve the player/team dispatch functions");
-        return false;
-    }
-
-    void* player = current_player();
-    void* team = player ? team_lookup(player) : nullptr;
-    if (!team) {
-        log_line("showmethemoney invocation did not resolve a current Team");
-        return false;
-    }
-
-    float dilithium_before = 0.0f;
-    const bool read_before = read_value(
-        static_cast<const std::uint8_t*>(team) + kTeamDilithiumOffset,
-        dilithium_before);
-
-    const auto add_resource = [team](
-        std::uintptr_t rva, float amount) noexcept {
-        const auto function = function_pointer<AddResourceFunction>(
-            at(g_fleet_ops, rva));
-        function(team, amount);
-    };
-    add_resource(kAddDilithiumRva, g_grant_amounts.dilithium);
-    add_resource(kAddTritaniumRva, g_grant_amounts.tritanium);
-    add_resource(kAddMetalRva, g_grant_amounts.metal);
-    add_resource(kAddSuppliesRva, g_grant_amounts.supplies);
-    // Team::AddCrew clamps the available pool to Team::crewCapacity.
-    a2fo_cheats_call_thiscall_float(
-        at(g_armada, kAddCrewCapacityRva), team, g_grant_amounts.crew);
-    add_resource(kAddCrewRva, g_grant_amounts.crew);
-
-    float dilithium_after = 0.0f;
-    const bool read_after = read_value(
-        static_cast<const std::uint8_t*>(team) + kTeamDilithiumOffset,
-        dilithium_after);
-    if (read_before && read_after) {
-        std::ostringstream message;
-        message << "showmethemoney invoked: Team=" << team
-                << ", Dilithium " << dilithium_before << " -> "
-                << dilithium_after << " (requested +"
-                << g_grant_amounts.dilithium << ')';
-        log_line(message.str());
-    } else {
-        log_line("showmethemoney invoked, but its Team balance could not be inspected");
-    }
-    return true;
-}
+bool __cdecl move_selected_hook() noexcept {return cheat_command(0);}
+bool __cdecl disable_selected_shields_hook() noexcept {return cheat_command(1);}
+bool __cdecl eliminate_selected_team_hook() noexcept {return cheat_command(2);}
+bool __cdecl crash_hook() noexcept {return cheat_command(3);}
+bool __cdecl show_me_the_money_hook() noexcept {return cheat_command(4);}
 
 CheatRegistration* cheat_registry(std::uint32_t& count) noexcept {
     count = 0;
@@ -599,87 +341,12 @@ CheatRegistration* cheat_registry(std::uint32_t& count) noexcept {
     return registrations;
 }
 
-CheatRegistration* find_registered_cheat(const char* command) noexcept {
-    if (!command) return nullptr;
-    const std::size_t command_length = std::strlen(command);
-    std::uint32_t count = 0;
-    CheatRegistration* registrations = cheat_registry(count);
-    for (std::uint32_t index = 0; registrations && index < count; ++index) {
-        const char* registered_command = registrations[index].command;
-        if (readable_range(registered_command, command_length + 1) &&
-            std::memcmp(registered_command, command,
-                        command_length + 1) == 0) {
-            return registrations + index;
-        }
-    }
-    return nullptr;
-}
-
-bool ensure_cheat_registered(
-    const char* command, CheatHandler handler) noexcept {
-    CheatRegistration* registration = find_registered_cheat(command);
-    if (registration) {
-        if (!writable_range(registration, sizeof(*registration))) {
-            return false;
-        }
-        registration->multiplayer_allowed = 0;
-        registration->handler = handler;
-        return true;
-    }
-
-    const auto register_cheat = function_pointer<ChatRegisterCheatFunction>(
-        at(g_fleet_ops, kChatRegisterCheatRva));
-    if (!register_cheat) return false;
-    register_cheat(command, 0, handler);
-    registration = find_registered_cheat(command);
-    return registration && registration->handler == handler;
-}
-
-bool register_debug_cheats() noexcept {
-    // September Roots no longer registers the native money cheat and reuses
-    // its old code for icon rendering. Register our independent handler by
-    // name so that the configured resource grant still has a chat command.
-    const bool money_registered =
-        ensure_cheat_registered(kMoneyCheat, &show_me_the_money_hook);
-    const bool move_registered =
-        ensure_cheat_registered(kMoveCheat, &move_selected_hook);
-    const bool disable_registered = ensure_cheat_registered(
-        kDisableCheat, &disable_selected_shields_hook);
-    const bool crash_registered =
-        ensure_cheat_registered(kCrashCheat, &crash_hook);
-    const bool eliminate_registered = ensure_cheat_registered(
-        kEliminateCheat, &eliminate_selected_team_hook);
-    return money_registered && move_registered && disable_registered && crash_registered &&
-        eliminate_registered;
-}
-
 void __cdecl chat_hook_init_hook() noexcept {
-    const auto original = function_pointer<ChatHookInitFunction>(
-        g_chat_hook_init_hook.gateway);
-    if (original) original();
-    if (!register_debug_cheats()) {
-        log_line("Chat initialization completed, but one or more restored "
-                 "cheat commands could not be registered");
-    }
-}
-
-bool resource_mutator_signatures_match() noexcept {
-    constexpr std::array<std::uintptr_t, 5> mutators{
-        kAddDilithiumRva,
-        kAddTritaniumRva,
-        kAddMetalRva,
-        kAddSuppliesRva,
-        kAddCrewRva,
-    };
-    for (const std::uintptr_t rva : mutators) {
-        const void* address = at(g_fleet_ops, rva);
-        if (!readable_range(address, kExpectedResourceMutator.size()) ||
-            std::memcmp(address, kExpectedResourceMutator.data(),
-                        kExpectedResourceMutator.size()) != 0) {
-            return false;
-        }
-    }
-    return true;
+    try {
+        CheatContext context{};
+        a2fo_rs_runtime_cheats_chat_init(cheat_step,&context);
+        if(context.error)std::rethrow_exception(context.error);
+    }catch(...){log_line("Chat initialization completed, but one or more restored cheat commands could not be registered");}
 }
 
 template <std::size_t Size>
@@ -722,97 +389,183 @@ std::array<std::uint8_t, 5> chat_hook_init_signature() noexcept {
     return signature;
 }
 
+std::uintptr_t cheat_native_step(CheatContext& context,std::uint32_t operation,A2foRsCheatValue* value) {
+    const auto craft=reinterpret_cast<void*>(value->word);
+    switch(operation){
+    case 20: {
+        void* link=read_pointer(at(g_fleet_ops,kSelectionDispatchLinkRva));
+        context.selection=read_pointer(link);
+        if(!context.selection)return 0;
+        std::int32_t count=0;
+        if(!read_value(static_cast<std::uint8_t*>(context.selection)+kSelectionCountOffset,count)||
+           count<=0||count>kMaximumSelectionCount)return 0;
+        context.entity_get=linked_dispatch_function(kEntityGetDispatchLinkRva);
+        return function_pointer<EntityGetFunction>(context.entity_get)?static_cast<std::uintptr_t>(count):0;
+    }
+    case 21: {
+        std::int32_t handle=0;
+        const auto* address=static_cast<const std::uint8_t*>(context.selection)+
+            kSelectionHandlesOffset+value->word*sizeof(handle);
+        if(!read_value(address,handle))return 0;
+        auto get=function_pointer<EntityGetFunction>(context.entity_get);
+        return reinterpret_cast<std::uintptr_t>(dynamic_cast_object(get(handle),
+            kGameObjectTypeDescriptorRva,kCraftTypeDescriptorRva));
+    }
+    case 22: {
+        const void* matrix=a2fo_cheats_call_thiscall_pointer(at(g_armada,kEntityGetTransformRva),craft);
+        if(!readable_range(matrix,sizeof(value->vector)))return 0;
+        std::memcpy(value->vector,matrix,sizeof(value->vector));return 1;
+    }
+    case 23: {
+        const Vector3 destination{
+            value->vector[9]+kMoveDistance*value->vector[6],
+            value->vector[10]+kMoveDistance*value->vector[7],
+            value->vector[11]+kMoveDistance*value->vector[8]};
+        value->vector[0]=destination.x;value->vector[1]=destination.y;
+        value->vector[2]=destination.z;return 1;
+    }
+    case 24: {
+        const Vector3 destination{value->vector[0],value->vector[1],value->vector[2]};
+        a2fo_cheats_call_thiscall_command_vector_int(at(g_armada,kQueueCommandVectorRva),
+            craft,kMoveCommand,&destination,0);return 1;
+    }
+    case 25:a2fo_cheats_call_thiscall_float(at(g_armada,kDisableShieldGeneratorRva),
+            craft,kShieldDisableDuration);return 1;
+    case 26: {
+        std::int32_t team=-1;
+        if(!read_value(static_cast<const std::uint8_t*>(craft)+kGameObjectTeamOffset,team))return static_cast<std::uint32_t>(-1);
+        return static_cast<std::uint32_t>(team);
+    }
+    case 27: {
+        void* link=read_pointer(at(g_fleet_ops,kGameTypeDispatchLinkRva));
+        context.general_game_type=dynamic_cast_object(read_pointer(link),
+            kGameTypeTypeDescriptorRva,kGameTypeGeneralTypeDescriptorRva);
+        return context.general_game_type!=nullptr;
+    }
+    case 28:a2fo_cheats_call_thiscall_int(at(g_armada,kEliminateTeamRva),
+            context.general_game_type,static_cast<std::int32_t>(value->other));return 1;
+    case 29:log_line("crash requested; terminating Fleet Operations intentionally");return 1;
+    case 30:return TerminateProcess(GetCurrentProcess(),EXCEPTION_ACCESS_VIOLATION)!=FALSE;
+    case 31:context.current_player=linked_dispatch_function(kCurrentPlayerDispatchLinkRva);
+        context.team_lookup=linked_dispatch_function(kTeamLookupDispatchLinkRva);
+        return function_pointer<CurrentPlayerFunction>(context.current_player)&&
+            function_pointer<TeamLookupFunction>(context.team_lookup);
+    case 32: {
+        const auto current=function_pointer<CurrentPlayerFunction>(context.current_player);
+        const auto lookup=function_pointer<TeamLookupFunction>(context.team_lookup);
+        void* player=current();return reinterpret_cast<std::uintptr_t>(player?lookup(player):nullptr);
+    }
+    case 33:case 40:return read_value(static_cast<const std::uint8_t*>(craft)+kTeamDilithiumOffset,value->number);
+    case 34:case 35:case 36:case 37:case 39: {
+        const std::uintptr_t rvas[]{kAddDilithiumRva,kAddTritaniumRva,kAddMetalRva,kAddSuppliesRva,kAddCrewRva};
+        const float amounts[]{g_grant_amounts.dilithium,g_grant_amounts.tritanium,
+            g_grant_amounts.metal,g_grant_amounts.supplies,g_grant_amounts.crew};
+        const std::size_t index=operation==39?4:operation-34;
+        function_pointer<AddResourceFunction>(at(g_fleet_ops,rvas[index]))(craft,amounts[index]);return 1;
+    }
+    case 38:a2fo_cheats_call_thiscall_float(at(g_armada,kAddCrewCapacityRva),
+            craft,g_grant_amounts.crew);return 1;
+    case 41:if(value->other){
+            std::ostringstream message;
+            message<<"showmethemoney invoked: Team="<<craft
+                <<", Dilithium "<<value->number<<" -> "<<value->second_number
+                <<" (requested +"<<g_grant_amounts.dilithium<<')';
+            log_line(message.str());
+        }else{log_line("showmethemoney invoked, but its Team balance could not be inspected");}
+        return 1;
+    case 42:log_line("showmethemoney invocation could not resolve the player/team dispatch functions");return 1;
+    case 43:log_line("showmethemoney invocation did not resolve a current Team");return 1;
+    case 50: {std::uint32_t count=0;cheat_registry(count);return count;}
+    case 51: {
+        std::uint32_t count=0;auto* registrations=cheat_registry(count);
+        if(!registrations||value->word>=count)return 0;
+        const char* command=registrations[value->word].command;
+        if(!readable_range(command,value->first.size+1))return 0;
+        value->second={reinterpret_cast<const std::uint8_t*>(command),value->first.size+1};
+        return 1;
+    }
+    case 52:case 54: {
+        std::uint32_t count=0;auto* registrations=cheat_registry(count);
+        if(!registrations||value->word>=count||value->other>=5)return 0;
+        const CheatHandler handlers[]{show_me_the_money_hook,move_selected_hook,
+            disable_selected_shields_hook,crash_hook,eliminate_selected_team_hook};
+        auto& registration=registrations[value->word];
+        if(operation==54)return registration.handler==handlers[value->other];
+        if(!writable_range(&registration,sizeof(registration)))return 0;
+        registration.multiplayer_allowed=0;registration.handler=handlers[value->other];return 1;
+    }
+    case 53: {
+        if(value->word>=5)return 0;
+        const CheatHandler handlers[]{show_me_the_money_hook,move_selected_hook,
+            disable_selected_shields_hook,crash_hook,eliminate_selected_team_hook};
+        const auto register_cheat=function_pointer<ChatRegisterCheatFunction>(
+            at(g_fleet_ops,kChatRegisterCheatRva));
+        if(!register_cheat)return 0;
+        const char* commands[]{kMoneyCheat,kMoveCheat,kDisableCheat,kCrashCheat,kEliminateCheat};
+        register_cheat(commands[value->word],0,handlers[value->word]);return 1;
+    }
+    case 60: {
+        const auto original=function_pointer<ChatHookInitFunction>(g_chat_hook_init_hook.gateway);
+        if(original)original();
+        return 1;
+    }
+    case 61:log_line("Chat initialization completed, but one or more restored cheat commands could not be registered");return 1;
+    case 70:g_armada=static_cast<HMODULE>(g_api->armada_module());
+        g_fleet_ops=static_cast<HMODULE>(g_api->fleetops_module());
+        return g_armada&&g_fleet_ops;
+    case 71:log_line("Armada or Fleet Operations image unavailable; cheat extension disabled");
+        g_api=nullptr;g_armada=nullptr;g_fleet_ops=nullptr;return 1;
+    case 72:return signature_matches(g_fleet_ops,kShowMeTheMoneyRva,repurposed_money_signature());
+    case 73:switch(value->word){
+        case 0:return signature_matches(g_fleet_ops,kChatRegisterCheatRva,kExpectedChatRegisterCheat);
+        case 1:return signature_matches(g_armada,kAddCrewCapacityRva,kExpectedAddCrewCapacity);
+        case 2:return signature_matches(g_armada,kDisableShieldGeneratorRva,kExpectedDisableShieldGenerator);
+        case 3:return signature_matches(g_armada,kEntityGetTransformRva,kExpectedEntityGetTransform);
+        case 4:return signature_matches(g_armada,kQueueCommandVectorRva,kExpectedQueueCommandVector);
+        case 5:return signature_matches(g_armada,kEliminateTeamRva,kExpectedEliminateTeam);
+        case 6:case 7:case 8:case 9:case 10: {
+            const std::uintptr_t rvas[]{kAddDilithiumRva,kAddTritaniumRva,kAddMetalRva,kAddSuppliesRva,kAddCrewRva};
+            const void* address=at(g_fleet_ops,rvas[value->word-6]);
+            return readable_range(address,kExpectedResourceMutator.size())&&
+                std::memcmp(address,kExpectedResourceMutator.data(),kExpectedResourceMutator.size())==0;
+        }
+        case 11:return signature_matches(g_fleet_ops,kShowMeTheMoneyRva,show_me_the_money_signature());
+        case 12:return signature_matches(g_fleet_ops,kChatHookInitRva,chat_hook_init_signature());
+        default:return 0;
+    }
+    case 74:log_line("Cheat dependency signature mismatch; extension disabled");
+        g_api=nullptr;g_armada=nullptr;g_fleet_ops=nullptr;return 1;
+    case 75: {const auto signature=show_me_the_money_signature();
+        return g_api->install_inline_hook(at(g_fleet_ops,kShowMeTheMoneyRva),
+            reinterpret_cast<void*>(&show_me_the_money_hook),signature.size(),signature.data(),
+            &g_show_me_the_money_hook);}
+    case 76:log_line("showmethemoney handler installation failed; cheat extension disabled");return 1;
+    case 77:log_line("September Fleet Ops money entry is used by icon rendering; registering showmethemoney directly without detouring it");return 1;
+    case 78: {const auto signature=chat_hook_init_signature();
+        return g_api->install_inline_hook(at(g_fleet_ops,kChatHookInitRva),
+            reinterpret_cast<void*>(&chat_hook_init_hook),signature.size(),signature.data(),
+            &g_chat_hook_init_hook);}
+    case 79:log_line(value->word?
+        "Chat initialization hook installation failed; cheat extension disabled":
+        "Chat initialization hook installation failed; restored debug cheats disabled, showmethemoney remains active");return 1;
+    case 81: {std::uint32_t count=0;return cheat_registry(count)!=nullptr;}
+    case 82:log_line("Existing chat registry found, but one or more restored cheat commands could not be registered");return 1;
+    case 83:log_line("Cheat extensions initialized: restored m, dis, crash, and elim; showmethemoney uses RTS_CFG.h grant values");return 1;
+    default:return 0;
+    }
+}
+
 }  // namespace
 
 extern "C" __declspec(dllexport)
 bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
-    if (!api || api->struct_size < A2FO_MODULE_API_V4_BASE_SIZE ||
-        api->api_version != A2FO_MODULE_API_VERSION || !api->log ||
-        !api->armada_module || !api->fleetops_module ||
-        !api->install_inline_hook || !api->extension_root_count ||
-        !api->extension_root) {
-        return false;
-    }
-
-    g_api = api;
-    g_armada = static_cast<HMODULE>(api->armada_module());
-    g_fleet_ops = static_cast<HMODULE>(api->fleetops_module());
-    if (!g_armada || !g_fleet_ops) {
-        log_line("Armada or Fleet Operations image unavailable; "
-                 "cheat extension disabled");
-        g_api = nullptr;
-        g_armada = nullptr;
-        g_fleet_ops = nullptr;
-        return false;
-    }
-    load_grant_amounts();
-    const auto money_signature = show_me_the_money_signature();
-    const bool money_entry_repurposed = signature_matches(
-        g_fleet_ops, kShowMeTheMoneyRva, repurposed_money_signature());
-    const auto chat_init_signature = chat_hook_init_signature();
-    if (!signature_matches(g_fleet_ops, kChatRegisterCheatRva,
-                           kExpectedChatRegisterCheat) ||
-        !signature_matches(g_armada, kAddCrewCapacityRva,
-                           kExpectedAddCrewCapacity) ||
-        !signature_matches(g_armada, kDisableShieldGeneratorRva,
-                           kExpectedDisableShieldGenerator) ||
-        !signature_matches(g_armada, kEntityGetTransformRva,
-                           kExpectedEntityGetTransform) ||
-        !signature_matches(g_armada, kQueueCommandVectorRva,
-                           kExpectedQueueCommandVector) ||
-        !signature_matches(g_armada, kEliminateTeamRva,
-                           kExpectedEliminateTeam) ||
-        !resource_mutator_signatures_match() ||
-        (!money_entry_repurposed &&
-         !signature_matches(g_fleet_ops, kShowMeTheMoneyRva,
-                            money_signature)) ||
-        !signature_matches(g_fleet_ops, kChatHookInitRva,
-                           chat_init_signature)) {
-        log_line("Cheat dependency signature mismatch; extension disabled");
-        g_api = nullptr;
-        g_armada = nullptr;
-        g_fleet_ops = nullptr;
-        return false;
-    }
-
-    if (!money_entry_repurposed && !api->install_inline_hook(
-            at(g_fleet_ops, kShowMeTheMoneyRva),
-            reinterpret_cast<void*>(&show_me_the_money_hook),
-            money_signature.size(), money_signature.data(),
-            &g_show_me_the_money_hook)) {
-        log_line("showmethemoney handler installation failed; "
-                 "cheat extension disabled");
-        return false;
-    }
-    if (money_entry_repurposed) {
-        log_line("September Fleet Ops money entry is used by icon rendering; "
-                 "registering showmethemoney directly without detouring it");
-    }
-    if (!api->install_inline_hook(
-            at(g_fleet_ops, kChatHookInitRva),
-            reinterpret_cast<void*>(&chat_hook_init_hook),
-            chat_init_signature.size(), chat_init_signature.data(),
-            &g_chat_hook_init_hook)) {
-        if (money_entry_repurposed) {
-            log_line("Chat initialization hook installation failed; "
-                     "cheat extension disabled");
-            return false;
-        }
-        // The first hook is already process-lifetime state. Keep this DLL
-        // loaded so that handler never points into an unloaded image.
-        log_line("Chat initialization hook installation failed; restored "
-                 "debug cheats disabled, showmethemoney remains active");
-        return true;
-    }
-
-    std::uint32_t current_cheat_count = 0;
-    if (cheat_registry(current_cheat_count) &&
-        !register_debug_cheats()) {
-        log_line("Existing chat registry found, but one or more restored "
-                 "cheat commands could not be registered");
-    }
-
-    log_line("Cheat extensions initialized: restored m, dis, crash, and elim; "
-             "showmethemoney uses RTS_CFG.h grant values");
-    return true;
+    const bool valid=api && api->struct_size>=A2FO_MODULE_API_V4_BASE_SIZE &&
+        api->api_version==A2FO_MODULE_API_VERSION && api->log &&
+        api->armada_module && api->fleetops_module && api->install_inline_hook &&
+        api->extension_root_count && api->extension_root;
+    if(valid)g_api=api;
+    CheatContext context{};
+    const bool result=a2fo_rs_runtime_cheats_init(valid,cheat_step,&context)!=0;
+    if(context.error)std::rethrow_exception(context.error);
+    return result;
 }

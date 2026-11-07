@@ -40,3 +40,10 @@ use.
 The recursive lookup indexes loose `.odf` files in Data and the active
 ParentMod chain. Packed-only menu files continue to use the stock three-level
 behaviour unless a loose copy is supplied.
+
+## Built-in availability
+
+`A2FOExtensions.dll` provides this feature under the original `A2FOEditMenu`
+selection name, with its own menu policy. The standalone SDK target remains
+available; normal releases do not require its DLL, and stale standalone copies
+are ignored during discovery.

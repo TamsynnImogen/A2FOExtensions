@@ -4,6 +4,14 @@ This optional native module restores **Load Settings** in Fleet Operations'
 Instant Action setup screen. It keeps Armada's original host check, validation,
 and UI update behavior.
 
+The release core now provides this feature inside `A2FOExtensions.dll`, under
+the same `A2FOInstantActionSettings` module selection. Stale standalone DLLs
+are ignored; the standalone SDK compatibility target remains available.
+For the running mod, Save gates future repair callbacks without unloading or
+repatching hooks. An off/on cycle invalidates a profile load already in
+progress. Previously applied setup or label changes are not rolled back.
+See the [sixth built-in milestone](../../docs/builtin-modules-stage6.md).
+
 Fleet Operations replaces the setup form and its button wrappers. On affected
 installations, **Save Settings** still reaches Armada normally while the visible
 **Load Settings** control misses the native click route. The module lets the
@@ -44,5 +52,6 @@ mod's `[modules]` list. Initialization and repair failures are written to
 `A2FOExtensions.log` under the `A2FOInstantActionSettings` tag.
 
 The runtime patch is restricted to the supported ArmadaL.exe identity and
-known function signatures. Unsupported binaries leave the module resident but
-disable the repair.
+known function signatures. Unsupported binaries or incomplete hook setup make
+the built-in unavailable for the process. Any installed callbacks remain
+resident and pass through while unavailable or deselected.

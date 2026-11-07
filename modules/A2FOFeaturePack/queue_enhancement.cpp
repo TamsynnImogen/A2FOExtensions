@@ -9,12 +9,17 @@
 #include "hybrid_bridge_client.hpp"
 #include "refit_queue_bridge_api.hpp"
 #include "refit_queue_bridge_client.hpp"
+#include "../../rust/stage8_c_queue_ffi.h"
+#include "../A2FOCollectiveXP/queue_resolver.hpp"
+#include "../../sdk/include/a2fo_module_provider.hpp"
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <unordered_map>
 #include <vector>
 
@@ -154,6 +159,40 @@ bool g_logged_build_order_path = false;
 bool g_logged_synchronized_build_path = false;
 unsigned g_synchronized_push_log_count = 0;
 
+void* resolve_build_queue_class(void* producer, void* base_class) noexcept {
+    using collective_xp::ResolveBuildClassFn;
+    static std::atomic<ResolveBuildClassFn> cached{nullptr};
+    ResolveBuildClassFn resolver = cached.load(std::memory_order_acquire);
+    if (!resolver) {
+        // Module initialization may follow FeaturePack. Retry missing lookups,
+        // but retain a successful export lookup for subsequent admissions.
+        HMODULE module = a2fo::module_provider(
+            "A2FOCollectiveXP.dll",
+            {"A2FOCollectiveXP_ResolveBuildClass",
+             "A2FOCollectiveXP_IsEnabledForObject"});
+        if (module) {
+            resolver = reinterpret_cast<ResolveBuildClassFn>(
+                reinterpret_cast<void*>(GetProcAddress(
+                    module, "A2FOCollectiveXP_ResolveBuildClass")));
+            if (resolver) cached.store(resolver, std::memory_order_release);
+        }
+    }
+    return collective_xp::resolve_queue_class(producer, base_class, resolver);
+}
+
+bool collective_queue_may_change_class(void* producer) noexcept {
+    // A read-only hint only. Never load rank classes or resolve a command on
+    // the local sender: the synchronized receiver owns admission and pricing.
+    using Enabled = bool (__cdecl*)(void*);
+    HMODULE module = a2fo::module_provider(
+        "A2FOCollectiveXP.dll",
+        {"A2FOCollectiveXP_ResolveBuildClass",
+         "A2FOCollectiveXP_IsEnabledForObject"});
+    auto enabled = module ? reinterpret_cast<Enabled>(reinterpret_cast<void*>(
+        GetProcAddress(module, "A2FOCollectiveXP_IsEnabledForObject"))) : nullptr;
+    return enabled && enabled(producer);
+}
+
 A2FO_InlineHook g_game_object_queue_class_command_hook{};
 A2FO_InlineHook g_game_object_dequeue_class_command_hook{};
 A2FO_InlineHook g_producer_dtor_hook{};
@@ -187,11 +226,6 @@ struct QueueUiColour {
     float x;
     float y;
     float z;
-};
-
-struct PhysicalQueueEntry {
-    void* target_class = nullptr;
-    std::uint32_t queue_id = 0;
 };
 
 struct GroupedQueueEntry {
@@ -344,18 +378,26 @@ void* current_build_target_class(void* producer) {
 }
 
 void* queued_target_class(void* producer, std::uint32_t queue_id) {
-    if (!producer) return nullptr;
-    void* item = *reinterpret_cast<void**>(
-        bytes(producer) + kQueueHeadOffset);
-    while (item) {
-        if (*reinterpret_cast<std::uint32_t*>(
-                bytes(item) + kQueueItemIdOffset) == queue_id) {
-            return *reinterpret_cast<void**>(item);
+    struct Context {void* producer;void* item{};} context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(op){
+        case 0:c.item=*reinterpret_cast<void**>(
+            bytes(c.producer)+kQueueHeadOffset);
+            return reinterpret_cast<std::uintptr_t>(c.item);
+        case 1:return *reinterpret_cast<std::uint32_t*>(
+            bytes(c.item)+kQueueItemIdOffset);
+        case 2:return reinterpret_cast<std::uintptr_t>(
+            *reinterpret_cast<void**>(c.item));
+        case 3:c.item=*reinterpret_cast<void**>(
+            bytes(c.item)+kQueueItemNextOffset);
+            return reinterpret_cast<std::uintptr_t>(c.item);
+        default:return 0;
         }
-        item = *reinterpret_cast<void**>(
-            bytes(item) + kQueueItemNextOffset);
-    }
-    return nullptr;
+    };
+    return reinterpret_cast<void*>(a2fo_rs_c_queue_find_target(&context,
+        reinterpret_cast<std::uintptr_t>(producer),queue_id,step));
 }
 
 std::uint32_t current_queue_id(void* producer) {
@@ -370,56 +412,92 @@ struct PendingQueueSnapshot {
 };
 
 PendingQueueSnapshot pending_queue_snapshot(void* producer) noexcept {
-    PendingQueueSnapshot snapshot{};
-    if (!producer || !g_queue_lock_ready) return snapshot;
-    const std::uint32_t handle = object_handle(producer);
-    if (!handle) return snapshot;
-    EnterCriticalSection(&g_queue_lock);
-    const auto found = g_pending_queue.find(handle);
-    if (found != g_pending_queue.end()) {
-        snapshot.count = std::min<std::uint32_t>(
-            static_cast<std::uint32_t>(found->second.size()),
-            kMaxLogicalQueue);
-        for (std::uint32_t index = 0; index < snapshot.count; ++index) {
-            snapshot.entries[index] = found->second[index];
-        }
-    }
-    LeaveCriticalSection(&g_queue_lock);
-    return snapshot;
+    struct Context {
+        void* producer;
+        std::uint32_t handle{};
+        decltype(g_pending_queue)::iterator found{};
+        PendingQueueSnapshot snapshot{};
+        std::uint8_t failed{};
+    } context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t value) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:c.handle=object_handle(c.producer);return c.handle;
+        case 1:EnterCriticalSection(&g_queue_lock);
+            c.found=g_pending_queue.find(c.handle);
+            return c.found==g_pending_queue.end()?0:c.found->second.size();
+        case 2:c.snapshot.count=static_cast<std::uint32_t>(value);return 1;
+        case 3:c.snapshot.entries[value]=c.found->second[value];return 1;
+        case 4:LeaveCriticalSection(&g_queue_lock);return 1;
+        default:return 0;
+        }}catch(...){c.failed=1;return 0;}
+    };
+    a2fo_rs_c_queue_snapshot_pending(&context,
+        reinterpret_cast<std::uintptr_t>(producer),g_queue_lock_ready,
+        step,&context.failed);
+    if(context.failed)std::terminate();
+    return context.snapshot;
 }
 
 bool append_pending_queue(void* producer, void* target_class) noexcept {
-    if (!producer || !target_class || !g_queue_lock_ready) return false;
-    const std::uint32_t handle = object_handle(producer);
-    if (!handle) return false;
-    bool appended = false;
-    try {
-        EnterCriticalSection(&g_queue_lock);
-        auto& pending = g_pending_queue[handle];
-        if (pending.size() < kMaxLogicalQueue) {
-            pending.push_back(target_class);
-            appended = true;
+    struct Context {
+        void* producer;
+        void* target;
+        std::uint32_t handle{};
+        std::vector<void*>* pending{};
+    } context{producer,target_class};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(op){
+        case 0:c.handle=object_handle(c.producer);return c.handle;
+        case 1:try{
+            EnterCriticalSection(&g_queue_lock);
+            c.pending=&g_pending_queue[c.handle];
+            return c.pending->size();
+            }catch(...){LeaveCriticalSection(&g_queue_lock);
+                return UINTPTR_MAX;}
+        case 2:try{c.pending->push_back(c.target);
+            LeaveCriticalSection(&g_queue_lock);return 1;
+            }catch(...){LeaveCriticalSection(&g_queue_lock);return 0;}
+        case 3:LeaveCriticalSection(&g_queue_lock);return 1;
+        default:return 0;
         }
-        LeaveCriticalSection(&g_queue_lock);
-    } catch (...) {
-        LeaveCriticalSection(&g_queue_lock);
-    }
-    return appended;
+    };
+    return a2fo_rs_c_queue_append_pending(&context,
+        reinterpret_cast<std::uintptr_t>(producer),
+        reinterpret_cast<std::uintptr_t>(target_class),g_queue_lock_ready,
+        step);
 }
 
 bool erase_pending_queue_index(void* producer, std::uint32_t index) noexcept {
-    if (!producer || !g_queue_lock_ready) return false;
-    const std::uint32_t handle = object_handle(producer);
-    if (!handle) return false;
-    bool removed = false;
-    EnterCriticalSection(&g_queue_lock);
-    const auto found = g_pending_queue.find(handle);
-    if (found != g_pending_queue.end() && index < found->second.size()) {
-        found->second.erase(found->second.begin() + index);
-        if (found->second.empty()) g_pending_queue.erase(found);
-        removed = true;
-    }
-    LeaveCriticalSection(&g_queue_lock);
+    struct Context {
+        void* producer;
+        std::uint32_t handle{};
+        decltype(g_pending_queue)::iterator found{};
+        std::uint8_t failed{};
+    } context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t value) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:c.handle=object_handle(c.producer);return c.handle;
+        case 1:EnterCriticalSection(&g_queue_lock);
+            c.found=g_pending_queue.find(c.handle);
+            return c.found==g_pending_queue.end()?0:c.found->second.size();
+        case 2:c.found->second.erase(c.found->second.begin()+value);
+            return 1;
+        case 3:return c.found->second.empty();
+        case 4:g_pending_queue.erase(c.found);return 1;
+        case 5:LeaveCriticalSection(&g_queue_lock);return 1;
+        default:return 0;
+        }}catch(...){c.failed=1;return 0;}
+    };
+    const bool removed=a2fo_rs_c_queue_erase_pending(&context,
+        reinterpret_cast<std::uintptr_t>(producer),index,
+        g_queue_lock_ready,step,&context.failed);
+    if(context.failed)std::terminate();
     return removed;
 }
 
@@ -460,292 +538,290 @@ GroupedQueueView collect_grouped_queue(void* producer) noexcept {
         return result;
     }
 
-    std::array<PhysicalQueueEntry, kQueueCapacity> physical{};
-    std::uint32_t physical_count = 0;
-    const void* active_class = current_build_target_class(producer);
-    const std::uint32_t active_id = current_queue_id(producer);
-    bool active_in_fifo = false;
-
-    void* item = *reinterpret_cast<void**>(
-        bytes(producer) + kQueueHeadOffset);
-    while (item && physical_count < kQueueCapacity) {
-        if (!readable_range(item, kQueueItemIdOffset + sizeof(std::uint32_t))) {
-            break;
-        }
-        void* target_class = *reinterpret_cast<void**>(item);
-        const std::uint32_t id = *reinterpret_cast<const std::uint32_t*>(
-            bytes(item) + kQueueItemIdOffset);
-        if (target_class) {
-            physical[physical_count++] = PhysicalQueueEntry{target_class, id};
-            if (active_class && active_id != 0 && id == active_id) {
-                active_in_fifo = true;
-            }
-        }
-        item = *reinterpret_cast<void**>(bytes(item) + kQueueItemNextOffset);
-    }
-
-    // Generic Producer queues retain the active job at the FIFO head. Hybrid
-    // research can detach that active node while preserving currentBuildClass;
-    // prepend only in the latter case so the logical presentation remains in
-    // actual completion order.
-    if (active_class && !active_in_fifo &&
-        (active_id != 0 || physical_count == 0)) {
-        const std::uint32_t limit = std::min<std::uint32_t>(
-            physical_count, kQueueCapacity - 1);
-        for (std::uint32_t index = limit; index > 0; --index) {
-            physical[index] = physical[index - 1];
-        }
-        physical[0] = PhysicalQueueEntry{
-            const_cast<void*>(active_class), active_id};
-        physical_count = std::min<std::uint32_t>(
-            physical_count + 1, kQueueCapacity);
-    }
-
-    auto append_grouped = [&](void* target_class, std::uint32_t queue_id,
-                              bool pending, std::uint32_t pending_index) {
-        if (!target_class) return;
-        GroupedQueueEntry* group = nullptr;
-        if (result.count != 0) {
-            GroupedQueueEntry& previous = result.groups[result.count - 1];
-            if (previous.target_class == target_class &&
-                previous.count < kUnitsPerVisibleSlot && !previous.infinite) {
-                group = &previous;
-            }
-        }
-        if (!group) {
-            if (result.count >= kVisibleQueueSlots) return;
-            group = &result.groups[result.count++];
-            group->target_class = target_class;
-        }
-        ++group->count;
-        if (pending) {
-            ++group->pending_count;
-            if (group->first_pending_index == 0xffffffffu) {
-                group->first_pending_index = pending_index;
-            }
-            group->last_pending_index = pending_index;
-        } else {
-            ++group->physical_count;
-            if (queue_id != 0) {
-                if (group->first_queue_id == 0) group->first_queue_id = queue_id;
-                group->last_queue_id = queue_id;
-            }
+    struct Context {
+        void* producer;
+        void* item{};
+        PendingQueueSnapshot pending{};
+        void* repeat_target{};
+    } context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t arg) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(op){
+        case 0:return reinterpret_cast<std::uintptr_t>(
+            current_build_target_class(c.producer));
+        case 1:return current_queue_id(c.producer);
+        case 2:c.item=*reinterpret_cast<void**>(
+            bytes(c.producer)+kQueueHeadOffset);
+            return reinterpret_cast<std::uintptr_t>(c.item);
+        case 3:return readable_range(c.item,
+            kQueueItemIdOffset+sizeof(std::uint32_t));
+        case 4:return reinterpret_cast<std::uintptr_t>(
+            *reinterpret_cast<void**>(c.item));
+        case 5:return *reinterpret_cast<const std::uint32_t*>(
+            bytes(c.item)+kQueueItemIdOffset);
+        case 6:c.item=*reinterpret_cast<void**>(
+            bytes(c.item)+kQueueItemNextOffset);
+            return reinterpret_cast<std::uintptr_t>(c.item);
+        case 7:c.pending=pending_queue_snapshot(c.producer);
+            return c.pending.count;
+        case 8:return reinterpret_cast<std::uintptr_t>(c.pending.entries[arg]);
+        case 9:return continuous_state(c.producer,&c.repeat_target);
+        case 10:return reinterpret_cast<std::uintptr_t>(c.repeat_target);
+        default:return 0;
         }
     };
-
-    for (std::uint32_t index = 0; index < physical_count; ++index) {
-        append_grouped(
-            physical[index].target_class, physical[index].queue_id,
-            false, 0xffffffffu);
+    A2foStage8QueueView view{};
+    if(!a2fo_rs_c_queue_collect(&context,step,kQueueCapacity,
+            kVisibleQueueSlots,kUnitsPerVisibleSlot,&view)){
+        return result;
     }
-
-    const PendingQueueSnapshot pending = pending_queue_snapshot(producer);
-    for (std::uint32_t index = 0; index < pending.count; ++index) {
-        append_grouped(pending.entries[index], 0, true, index);
-    }
-
-    void* repeat_target = nullptr;
-    if (continuous_state(producer, &repeat_target) && repeat_target) {
-        if (result.count != 0 &&
-            result.groups[result.count - 1].target_class == repeat_target) {
-            result.groups[result.count - 1].infinite = true;
-        } else if (result.count < kVisibleQueueSlots) {
-            GroupedQueueEntry& group = result.groups[result.count++];
-            group.target_class = repeat_target;
-            group.count = 1;
-            group.infinite = true;
-        }
+    result.count=view.count;
+    for(std::uint32_t index=0;index<view.count;++index){
+        const auto& source=view.groups[index];
+        auto& group=result.groups[index];
+        group.target_class=reinterpret_cast<void*>(source.target);
+        group.count=source.count;
+        group.physical_count=source.physical_count;
+        group.pending_count=source.pending_count;
+        group.first_queue_id=source.first_queue_id;
+        group.last_queue_id=source.last_queue_id;
+        group.first_pending_index=source.first_pending_index;
+        group.last_pending_index=source.last_pending_index;
+        group.infinite=source.infinite;
     }
     return result;
 }
 
-std::uint32_t logical_queue_units(const GroupedQueueView& view) noexcept {
-    std::uint32_t result = 0;
-    for (std::uint32_t index = 0; index < view.count; ++index) {
-        result += view.groups[index].count;
+struct QueueViewReadContext { const GroupedQueueView& view; };
+std::uintptr_t queue_view_step(void* opaque,std::uint32_t op,
+                               std::size_t index) noexcept {
+    const auto& view=static_cast<QueueViewReadContext*>(opaque)->view;
+    switch(op){
+    case 0:return view.count;
+    case 1:return view.groups[index].count;
+    case 2:return view.groups[view.count-1].infinite;
+    case 3:return reinterpret_cast<std::uintptr_t>(
+        view.groups[view.count-1].target_class);
+    case 4:return view.groups[view.count-1].count;
+    default:return 0;
     }
-    return result;
+}
+
+std::uint32_t logical_queue_units(const GroupedQueueView& view) noexcept {
+    QueueViewReadContext context{view};
+    return a2fo_rs_c_queue_units(&context,queue_view_step);
 }
 
 bool logical_queue_has_room_for(
     const GroupedQueueView& view, void* target_class) noexcept {
-    if (!target_class || logical_queue_units(view) >= kMaxLogicalQueue) {
-        return false;
-    }
-    if (view.count == 0) return true;
-    const GroupedQueueEntry& tail = view.groups[view.count - 1];
-    if (tail.infinite) return false;
-    if (tail.target_class == target_class &&
-        tail.count < kUnitsPerVisibleSlot) {
-        return true;
-    }
-    return view.count < kVisibleQueueSlots;
+    QueueViewReadContext context{view};
+    return a2fo_rs_c_queue_room(&context,
+        reinterpret_cast<std::uintptr_t>(target_class),queue_view_step);
 }
 
-// Continuous mode does not always need another finite queue unit. If the
-// requested class already occupies the logical tail, Ctrl+Alt may promote that
-// existing slot to xINF even when the slot is already x10. Otherwise it needs
-// the same room as one ordinary queued unit to create its backing job.
 bool logical_queue_can_enable_continuous(
     const GroupedQueueView& view, void* target_class) noexcept {
-    if (!target_class) return false;
-    if (view.count != 0) {
-        const GroupedQueueEntry& tail = view.groups[view.count - 1];
-        if (tail.target_class == target_class) return true;
-    }
-    return logical_queue_has_room_for(view, target_class);
+    QueueViewReadContext context{view};
+    return a2fo_rs_c_queue_continuous_room(&context,
+        reinterpret_cast<std::uintptr_t>(target_class),queue_view_step);
 }
 
 bool grouped_queue_icon_context(
     void* icon, void** ship_display, void** producer,
     std::uint32_t* visual_slot) noexcept {
-    if (!icon || !ship_display || !producer || !visual_slot ||
-        !readable_range(
-            bytes(icon) + kDisplayComponentParentOffset, sizeof(void*))) {
-        return false;
-    }
-    void* parent = read_ui_value<void*>(
-        icon, kDisplayComponentParentOffset, nullptr);
-    if (!parent || !readable_range(
-            bytes(parent) + kShipDisplayBuildQueueOffset,
-            kQueueCapacity * sizeof(void*)) ||
-        !readable_range(
-            bytes(parent) + kShipDisplaySelectedObjectOffset,
-            sizeof(void*))) {
-        return false;
-    }
-    std::uint32_t slot = kQueueCapacity;
-    for (std::uint32_t index = 0; index < kQueueCapacity; ++index) {
-        if (read_ui_value<void*>(
-                parent, kShipDisplayBuildQueueOffset + index * sizeof(void*),
-                nullptr) == icon) {
-            slot = index;
-            break;
+    struct Context {
+        void* icon;
+        void** ship_display;
+        void** producer;
+        std::uint32_t* visual_slot;
+        void* parent{};
+        void* selected{};
+    } context{icon,ship_display,producer,visual_slot};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t index) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(op){
+        case 0:return readable_range(
+            bytes(c.icon)+kDisplayComponentParentOffset,sizeof(void*));
+        case 1:c.parent=read_ui_value<void*>(
+            c.icon,kDisplayComponentParentOffset,nullptr);
+            return reinterpret_cast<std::uintptr_t>(c.parent);
+        case 2:return readable_range(
+            bytes(c.parent)+kShipDisplayBuildQueueOffset,
+            kQueueCapacity*sizeof(void*));
+        case 3:return readable_range(
+            bytes(c.parent)+kShipDisplaySelectedObjectOffset,sizeof(void*));
+        case 4:return reinterpret_cast<std::uintptr_t>(
+            read_ui_value<void*>(c.parent,
+                kShipDisplayBuildQueueOffset+index*sizeof(void*),nullptr));
+        case 5:c.selected=read_ui_value<void*>(c.parent,
+            kShipDisplaySelectedObjectOffset,nullptr);
+            return reinterpret_cast<std::uintptr_t>(c.selected);
+        case 6:*c.ship_display=c.parent;
+            *c.producer=c.selected;
+            *c.visual_slot=static_cast<std::uint32_t>(index);
+            return 1;
+        default:return 0;
         }
-    }
-    if (slot >= kQueueCapacity) return false;
-    void* selected = read_ui_value<void*>(
-        parent, kShipDisplaySelectedObjectOffset, nullptr);
-    if (!selected) return false;
-    *ship_display = parent;
-    *producer = selected;
-    *visual_slot = slot;
-    return true;
+    };
+    return a2fo_rs_c_queue_icon_context(&context,
+        reinterpret_cast<std::uintptr_t>(icon),
+        reinterpret_cast<std::uintptr_t>(ship_display),
+        reinterpret_cast<std::uintptr_t>(producer),
+        reinterpret_cast<std::uintptr_t>(visual_slot),step);
 }
 
 void* queue_count_text_component(void* ship_display) noexcept {
-    if (!ship_display) return nullptr;
-    for (const std::size_t offset : {
-             kShipDisplayBuildNameOffset,
-             kShipDisplayBuildClassOffset,
-             kShipDisplayNormalNameOffset}) {
-        void* component = read_ui_value<void*>(ship_display, offset, nullptr);
-        if (component && readable_range(
-                bytes(component) + kTextComponentFontStateOffset, 12)) {
-            return component;
+    struct Context {void* display;void* component{};}
+        context{ship_display};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t index) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(op){
+        case 0: {
+            constexpr std::size_t offsets[]={
+                kShipDisplayBuildNameOffset,kShipDisplayBuildClassOffset,
+                kShipDisplayNormalNameOffset};
+            c.component=read_ui_value<void*>(
+                c.display,offsets[index],nullptr);
+            return reinterpret_cast<std::uintptr_t>(c.component);
         }
-    }
-    return nullptr;
+        case 1:return readable_range(
+            bytes(c.component)+kTextComponentFontStateOffset,12);
+        default:return 0;
+        }
+    };
+    return reinterpret_cast<void*>(a2fo_rs_c_queue_text_component(
+        &context,reinterpret_cast<std::uintptr_t>(ship_display),step));
 }
 
 bool draw_group_count(void* icon, void* ship_display,
                       std::uint32_t count, bool infinite) noexcept {
-    if ((!infinite && count <= 1) || !g_armada || !icon || !ship_display ||
-        !signature_matches(
-            g_armada, kDisplayInterfaceDrawTextInRectangleRva,
-            kExpectedDisplayInterfaceDrawTextInRectangle)) {
-        return false;
-    }
-    void* text_component = queue_count_text_component(ship_display);
-    if (!text_component) return false;
-    QueueUiRectangle rectangle = read_ui_value<QueueUiRectangle>(
-        icon, kDisplayComponentRectangleOffset, QueueUiRectangle{});
-    if (rectangle.right <= rectangle.left ||
-        rectangle.bottom <= rectangle.top) {
-        return false;
-    }
-    const std::int32_t width = rectangle.right - rectangle.left;
-    const std::int32_t height = rectangle.bottom - rectangle.top;
-    rectangle.left = rectangle.left + std::max<std::int32_t>(0, width / 2);
-    rectangle.bottom = rectangle.top + std::max<std::int32_t>(12, height / 2);
-
-    void* display_interface = read_ui_value<void*>(
-        text_component, kDisplayComponentParentOffset, nullptr);
-    if (!display_interface) return false;
-    void* display_override = nullptr;
-    void* display_slot = read_ui_value<void*>(
-        text_component, kTextComponentDisplayOverrideSlotOffset, nullptr);
-    if (display_slot) {
-        display_override = read_ui_value<void*>(display_slot, 0, nullptr);
-    }
-    const std::int32_t text_flags = read_ui_value<std::int32_t>(
-        text_component, kTextComponentFlagsOffset, 9);
-    const std::uint8_t constrain = read_ui_value<std::uint8_t>(
-        text_component, kTextComponentConstrainOffset, 0);
-    QueueUiColour colour = read_ui_value<QueueUiColour>(
-        text_component, kTextComponentColourOffset,
-        QueueUiColour{1.0f, 1.0f, 1.0f});
-    void* font_state = bytes(text_component) + kTextComponentFontStateOffset;
-    if (!readable_range(font_state, 12)) return false;
-
-    char label[16]{};
-    if (infinite) {
-        // Keep continuous-build presentation ASCII-only so mods do not need
-        // a custom bitmap-font glyph. This also survives every stock/localized
-        // Fleet Ops font atlas unchanged.
-        std::snprintf(label, sizeof(label), "xINF");
-    } else {
-        std::snprintf(label, sizeof(label), "x%lu",
-                      static_cast<unsigned long>(count));
-    }
-    a2fo_call_thiscall_7(
-        at(g_armada, kDisplayInterfaceDrawTextInRectangleRva),
-        display_interface,
-        reinterpret_cast<std::uintptr_t>(label),
-        reinterpret_cast<std::uintptr_t>(&rectangle),
-        static_cast<std::uintptr_t>(text_flags),
-        reinterpret_cast<std::uintptr_t>(&colour),
-        reinterpret_cast<std::uintptr_t>(display_override),
-        static_cast<std::uintptr_t>(constrain),
-        reinterpret_cast<std::uintptr_t>(font_state));
-    return true;
+    struct Context {
+        void* icon;
+        void* ship_display;
+        std::uint32_t count;
+        bool infinite;
+        A2foStage8QueueRect rect{};
+        void* text_component{};
+        void* display_interface{};
+        void* display_slot{};
+        void* display_override{};
+        std::int32_t text_flags{};
+        std::uint8_t constrain{};
+        QueueUiColour colour{};
+        void* font_state{};
+    } context{icon,ship_display,count,infinite};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(op){
+        case 0:return g_armada&&c.icon&&c.ship_display&&
+            signature_matches(g_armada,
+                kDisplayInterfaceDrawTextInRectangleRva,
+                kExpectedDisplayInterfaceDrawTextInRectangle);
+        case 1:c.text_component=queue_count_text_component(c.ship_display);
+            return reinterpret_cast<std::uintptr_t>(c.text_component);
+        case 2: {
+            const QueueUiRectangle rectangle=read_ui_value<QueueUiRectangle>(
+                c.icon,kDisplayComponentRectangleOffset,QueueUiRectangle{});
+            c.rect={rectangle.left,rectangle.top,rectangle.right,
+                rectangle.bottom};return 1;
+        }
+        case 3:c.display_interface=read_ui_value<void*>(
+            c.text_component,kDisplayComponentParentOffset,nullptr);
+            return reinterpret_cast<std::uintptr_t>(c.display_interface);
+        case 4:c.display_slot=read_ui_value<void*>(c.text_component,
+            kTextComponentDisplayOverrideSlotOffset,nullptr);
+            return reinterpret_cast<std::uintptr_t>(c.display_slot);
+        case 5:c.display_override=read_ui_value<void*>(
+            c.display_slot,0,nullptr);return 1;
+        case 6:c.text_flags=read_ui_value<std::int32_t>(c.text_component,
+            kTextComponentFlagsOffset,9);return 1;
+        case 7:c.constrain=read_ui_value<std::uint8_t>(c.text_component,
+            kTextComponentConstrainOffset,0);return 1;
+        case 8:c.colour=read_ui_value<QueueUiColour>(c.text_component,
+            kTextComponentColourOffset,QueueUiColour{1.0f,1.0f,1.0f});
+            return 1;
+        case 9:c.font_state=bytes(c.text_component)+kTextComponentFontStateOffset;
+            return readable_range(c.font_state,12);
+        case 10: {
+            QueueUiRectangle rectangle{c.rect.left,c.rect.top,c.rect.right,
+                c.rect.bottom};
+            char label[16]{};
+            if(c.infinite){
+                std::snprintf(label,sizeof(label),"xINF");
+            }else{
+                std::snprintf(label,sizeof(label),"x%lu",
+                    static_cast<unsigned long>(c.count));
+            }
+            a2fo_call_thiscall_7(
+                at(g_armada,kDisplayInterfaceDrawTextInRectangleRva),
+                c.display_interface,
+                reinterpret_cast<std::uintptr_t>(label),
+                reinterpret_cast<std::uintptr_t>(&rectangle),
+                static_cast<std::uintptr_t>(c.text_flags),
+                reinterpret_cast<std::uintptr_t>(&c.colour),
+                reinterpret_cast<std::uintptr_t>(c.display_override),
+                static_cast<std::uintptr_t>(c.constrain),
+                reinterpret_cast<std::uintptr_t>(c.font_state));
+            return 1;
+        }
+        default:return 0;
+        }
+    };
+    return a2fo_rs_c_queue_draw_count(&context,count,infinite,
+        &context.rect,step);
 }
 
 void __attribute__((fastcall)) grouped_build_queue_icon_render_hook(
     void* icon, void*) noexcept {
-    if (!g_build_queue_icon_render_original) return;
-    if (!g_grouped_queue_ui_ready) {
-        a2fo_call_thiscall_0(g_build_queue_icon_render_original, icon);
-        return;
-    }
-    void* ship_display = nullptr;
-    void* producer = nullptr;
-    std::uint32_t slot = 0;
-    if (!grouped_queue_icon_context(
-            icon, &ship_display, &producer, &slot) ||
-        !writable_range(
-            bytes(icon) + kBuildQueueIconTargetClassOffset,
-            sizeof(void*))) {
-        a2fo_call_thiscall_0(g_build_queue_icon_render_original, icon);
-        return;
-    }
-    const GroupedQueueView view = collect_grouped_queue(producer);
-    void** target_slot = reinterpret_cast<void**>(
-        bytes(icon) + kBuildQueueIconTargetClassOffset);
-    void* saved_target = *target_slot;
-    *target_slot = slot < view.count ? view.groups[slot].target_class : nullptr;
-    if (writable_range(
-            bytes(icon) + kBuildQueueIconOwnerOffset, sizeof(void*))) {
-        *reinterpret_cast<void**>(
-            bytes(icon) + kBuildQueueIconOwnerOffset) = producer;
-    }
-    a2fo_call_thiscall_0(g_build_queue_icon_render_original, icon);
-    if (slot < view.count &&
-        (view.groups[slot].count > 1 || view.groups[slot].infinite)) {
-        draw_group_count(icon, ship_display, view.groups[slot].count,
-                         view.groups[slot].infinite);
-    }
-    *target_slot = saved_target;
+    struct Context {
+        void* icon;
+        void* ship_display{};
+        void* producer{};
+        std::uint32_t slot{};
+        GroupedQueueView view{};
+        void** target_slot{};
+        void* saved_target{};
+        std::exception_ptr error{};
+    } context{icon};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:return g_build_queue_icon_render_original!=nullptr;
+        case 1:return g_grouped_queue_ui_ready;
+        case 2:a2fo_call_thiscall_0(g_build_queue_icon_render_original,c.icon);
+            return 1;
+        case 3:return grouped_queue_icon_context(c.icon,&c.ship_display,
+            &c.producer,&c.slot);
+        case 4:return writable_range(
+            bytes(c.icon)+kBuildQueueIconTargetClassOffset,sizeof(void*));
+        case 5:c.view=collect_grouped_queue(c.producer);return 1;
+        case 6:c.target_slot=reinterpret_cast<void**>(
+            bytes(c.icon)+kBuildQueueIconTargetClassOffset);
+            c.saved_target=*c.target_slot;
+            *c.target_slot=c.slot<c.view.count
+                ?c.view.groups[c.slot].target_class:nullptr;return 1;
+        case 7:if(writable_range(
+            bytes(c.icon)+kBuildQueueIconOwnerOffset,sizeof(void*))){
+                *reinterpret_cast<void**>(
+                    bytes(c.icon)+kBuildQueueIconOwnerOffset)=c.producer;
+            }return 1;
+        case 8:return c.slot<c.view.count;
+        case 9:return c.view.groups[c.slot].count;
+        case 10:return c.view.groups[c.slot].infinite;
+        case 11:draw_group_count(c.icon,c.ship_display,
+            c.view.groups[c.slot].count,c.view.groups[c.slot].infinite);
+            return 1;
+        case 12:*c.target_slot=c.saved_target;return 1;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINTPTR_MAX;}
+    };
+    a2fo_rs_c_queue_icon_render(&context,step);
+    if(context.error)std::terminate();
 }
 
 std::uint32_t native_queue_count(void* producer) noexcept;
@@ -759,178 +835,186 @@ std::uint32_t native_queue_count(void* producer) noexcept;
 // never changed.
 void refresh_build_buttons_for_extended_queue(
     void* producer, const GroupedQueueView& view) noexcept {
-    if (!producer || g_extended_queue_button_refresh ||
-        native_queue_count(producer) < kQueueCapacity ||
-        logical_queue_units(view) >= kMaxLogicalQueue ||
-        // Once all ten logical slots exist, HybridBuild's popup post-pass
-        // applies the target-specific tail mask. Do not run this broad native
-        // refresh afterward or it would re-enable classes that would require
-        // an eleventh visible slot.
-        view.count >= kVisibleQueueSlots ||
-        !writable_range(bytes(producer) + kQueueCountOffset,
-                        sizeof(std::uint32_t)) ||
-        !readable_range(producer, sizeof(void*))) {
-        return;
-    }
-
-    void** vtable = *reinterpret_cast<void***>(producer);
-    void** update_slot = vtable
-        ? reinterpret_cast<void**>(bytes(vtable) +
-                                   kUpdateBuildButtonsVtableOffset)
-        : nullptr;
-    if (!readable_range(update_slot, sizeof(void*)) || !*update_slot) return;
-
-    auto* queue_count = reinterpret_cast<std::uint32_t*>(
-        bytes(producer) + kQueueCountOffset);
-    const std::uint32_t saved_count = *queue_count;
-    if (saved_count < kQueueCapacity) return;
-
-    g_extended_queue_button_refresh = true;
-    *queue_count = kQueueCapacity - 1;
-    a2fo_call_thiscall_0(*update_slot, producer);
-    *queue_count = saved_count;
-    g_extended_queue_button_refresh = false;
-
-    if (!g_logged_extended_queue_buttons) {
-        g_logged_extended_queue_buttons = true;
-        log_message(
-            "Extended queue kept Producer build buttons enabled past 10 "
-            "native jobs");
-    }
+    struct Context {
+        void* producer;
+        const GroupedQueueView& view;
+        void** update_slot{};
+        std::uint32_t* queue_count{};
+        std::uint32_t saved_count{};
+        std::exception_ptr error{};
+    } context{producer,view};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:return !g_extended_queue_button_refresh;
+        case 1:return native_queue_count(c.producer);
+        case 2:return logical_queue_units(c.view);
+        case 3:return c.view.count;
+        case 4:return writable_range(bytes(c.producer)+kQueueCountOffset,
+            sizeof(std::uint32_t));
+        case 5:return readable_range(c.producer,sizeof(void*));
+        case 6: {
+            void** vtable=*reinterpret_cast<void***>(c.producer);
+            c.update_slot=vtable?reinterpret_cast<void**>(
+                bytes(vtable)+kUpdateBuildButtonsVtableOffset):nullptr;
+            return 1;
+        }
+        case 7:return readable_range(c.update_slot,sizeof(void*))&&
+            *c.update_slot;
+        case 8:c.queue_count=reinterpret_cast<std::uint32_t*>(
+            bytes(c.producer)+kQueueCountOffset);
+            c.saved_count=*c.queue_count;return c.saved_count;
+        case 9:g_extended_queue_button_refresh=true;
+            *c.queue_count=kQueueCapacity-1;return 1;
+        case 10:a2fo_call_thiscall_0(*c.update_slot,c.producer);return 1;
+        case 11:*c.queue_count=c.saved_count;return 1;
+        case 12:g_extended_queue_button_refresh=false;return 1;
+        case 13:if(!g_logged_extended_queue_buttons){
+            g_logged_extended_queue_buttons=true;
+            log_message("Extended queue kept Producer build buttons enabled past 10 "
+                "native jobs");
+            }return 1;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINTPTR_MAX;}
+    };
+    a2fo_rs_c_queue_refresh_buttons(&context,
+        reinterpret_cast<std::uintptr_t>(producer),step);
+    if(context.error)std::terminate();
 }
 
 void __attribute__((fastcall)) grouped_build_queue_icon_simulate_hook(
     void* icon, void*) noexcept {
-    if (!g_build_queue_icon_simulate_original) return;
-    if (!g_grouped_queue_ui_ready) {
-        a2fo_call_thiscall_0(g_build_queue_icon_simulate_original, icon);
-        return;
-    }
-    void* ship_display = nullptr;
-    void* producer = nullptr;
-    std::uint32_t slot = 0;
-    if (!grouped_queue_icon_context(
-            icon, &ship_display, &producer, &slot) ||
-        !writable_range(
-            bytes(icon) + kBuildQueueIconTargetClassOffset,
-            sizeof(void*))) {
-        a2fo_call_thiscall_0(g_build_queue_icon_simulate_original, icon);
-        return;
-    }
-    const GroupedQueueView view = collect_grouped_queue(producer);
-    if (slot == 0) {
-        refresh_build_buttons_for_extended_queue(producer, view);
-    }
-    void** target_slot = reinterpret_cast<void**>(
-        bytes(icon) + kBuildQueueIconTargetClassOffset);
-    void* saved_target = *target_slot;
-    *target_slot = slot < view.count ? view.groups[slot].target_class : nullptr;
-
-    const GroupedQueueUiContext saved_context = g_grouped_queue_ui_context;
-    g_grouped_queue_ui_context.active = slot < view.count;
-    g_grouped_queue_ui_context.producer = producer;
-    g_grouped_queue_ui_context.visual_slot = slot;
-    a2fo_call_thiscall_0(g_build_queue_icon_simulate_original, icon);
-    g_grouped_queue_ui_context = saved_context;
-    *target_slot = saved_target;
+    struct Context {
+        void* icon;
+        void* ship_display{};
+        void* producer{};
+        std::uint32_t slot{};
+        GroupedQueueView view{};
+        void** target_slot{};
+        void* saved_target{};
+        GroupedQueueUiContext saved_context{};
+        std::exception_ptr error{};
+    } context{icon};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:return g_build_queue_icon_simulate_original!=nullptr;
+        case 1:return g_grouped_queue_ui_ready;
+        case 2:a2fo_call_thiscall_0(g_build_queue_icon_simulate_original,c.icon);
+            return 1;
+        case 3:return grouped_queue_icon_context(c.icon,&c.ship_display,
+            &c.producer,&c.slot);
+        case 4:return writable_range(
+            bytes(c.icon)+kBuildQueueIconTargetClassOffset,sizeof(void*));
+        case 5:c.view=collect_grouped_queue(c.producer);return 1;
+        case 6:return c.slot;
+        case 7:refresh_build_buttons_for_extended_queue(c.producer,c.view);
+            return 1;
+        case 8:c.target_slot=reinterpret_cast<void**>(
+            bytes(c.icon)+kBuildQueueIconTargetClassOffset);
+            c.saved_target=*c.target_slot;
+            *c.target_slot=c.slot<c.view.count
+                ?c.view.groups[c.slot].target_class:nullptr;return 1;
+        case 9:c.saved_context=g_grouped_queue_ui_context;
+            g_grouped_queue_ui_context.active=c.slot<c.view.count;
+            g_grouped_queue_ui_context.producer=c.producer;
+            g_grouped_queue_ui_context.visual_slot=c.slot;return 1;
+        case 10:g_grouped_queue_ui_context=c.saved_context;return 1;
+        case 11:*c.target_slot=c.saved_target;return 1;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINTPTR_MAX;}
+    };
+    a2fo_rs_c_queue_icon_simulate(&context,step);
+    if(context.error)std::terminate();
 }
 
 bool install_grouped_queue_ui() noexcept {
-    if (!g_armada || !g_repeat_ready ||
-        !signature_matches(
-            g_armada, kDisplayInterfaceDrawTextInRectangleRva,
-            kExpectedDisplayInterfaceDrawTextInRectangle)) {
-        return false;
-    }
-    void** vtable = at<void*>(g_armada, kBuildQueueIconVtableRva);
-    if (!vtable || !readable_range(
-            vtable, (kBuildQueueIconRenderVtableIndex + 1) * sizeof(void*))) {
-        return false;
-    }
-    void** simulate_slot = vtable + kBuildQueueIconSimulateVtableIndex;
-    void** render_slot = vtable + kBuildQueueIconRenderVtableIndex;
-    void* simulate = *simulate_slot;
-    void* render = *render_slot;
-    if (!simulate || !render || !readable_range(simulate, 1) ||
-        !readable_range(render, 1)) {
-        return false;
-    }
-
-    DWORD old_protection = 0;
-    if (!VirtualProtect(
-            simulate_slot, 2 * sizeof(void*), PAGE_EXECUTE_READWRITE,
-            &old_protection)) {
-        return false;
-    }
-    g_build_queue_icon_simulate_original = simulate;
-    g_build_queue_icon_render_original = render;
-    *simulate_slot = reinterpret_cast<void*>(
-        &grouped_build_queue_icon_simulate_hook);
-    *render_slot = reinterpret_cast<void*>(
-        &grouped_build_queue_icon_render_hook);
-    DWORD ignored = 0;
-    VirtualProtect(simulate_slot, 2 * sizeof(void*), old_protection, &ignored);
-    FlushInstructionCache(GetCurrentProcess(), simulate_slot, 2 * sizeof(void*));
-    return true;
-}
-
-std::uint32_t pushed_queue_id(
-    void* producer,
-    const std::array<std::uint32_t, kQueueCapacity>& previous_ids,
-    std::uint32_t previous_count) {
-    if (!producer) return 0;
-    void* item = *reinterpret_cast<void**>(
-        bytes(producer) + kQueueHeadOffset);
-    for (std::uint32_t visited = 0;
-         item && visited < kQueueCapacity; ++visited) {
-        const std::uint32_t id = *reinterpret_cast<const std::uint32_t*>(
-            bytes(item) + kQueueItemIdOffset);
-        bool existed = false;
-        for (std::uint32_t index = 0; index < previous_count; ++index) {
-            if (previous_ids[index] == id) {
-                existed = true;
-                break;
-            }
+    struct Context {
+        void** vtable{};
+        void** simulate_slot{};
+        void** render_slot{};
+        void* simulate{};
+        void* render{};
+        DWORD old_protection{};
+        std::exception_ptr error{};
+    } context;
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:return g_armada&&g_repeat_ready&&signature_matches(
+            g_armada,kDisplayInterfaceDrawTextInRectangleRva,
+            kExpectedDisplayInterfaceDrawTextInRectangle);
+        case 1:c.vtable=at<void*>(g_armada,kBuildQueueIconVtableRva);
+            return c.vtable&&readable_range(c.vtable,
+                (kBuildQueueIconRenderVtableIndex+1)*sizeof(void*));
+        case 2:c.simulate_slot=c.vtable+kBuildQueueIconSimulateVtableIndex;
+            c.render_slot=c.vtable+kBuildQueueIconRenderVtableIndex;
+            c.simulate=*c.simulate_slot;c.render=*c.render_slot;
+            return c.simulate&&c.render&&readable_range(c.simulate,1)&&
+                readable_range(c.render,1);
+        case 3:return VirtualProtect(c.simulate_slot,2*sizeof(void*),
+            PAGE_EXECUTE_READWRITE,&c.old_protection)!=0;
+        case 4:g_build_queue_icon_simulate_original=c.simulate;
+            g_build_queue_icon_render_original=c.render;
+            *c.simulate_slot=reinterpret_cast<void*>(
+                &grouped_build_queue_icon_simulate_hook);
+            *c.render_slot=reinterpret_cast<void*>(
+                &grouped_build_queue_icon_render_hook);return 1;
+        case 5: {
+            DWORD ignored=0;
+            VirtualProtect(c.simulate_slot,2*sizeof(void*),
+                c.old_protection,&ignored);return 1;
         }
-        if (!existed) return id;
-        item = *reinterpret_cast<void**>(
-            bytes(item) + kQueueItemNextOffset);
-    }
-    return 0;
+        case 6:FlushInstructionCache(GetCurrentProcess(),c.simulate_slot,
+            2*sizeof(void*));return 1;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINTPTR_MAX;}
+    };
+    const bool result=a2fo_rs_c_queue_install_ui(&context,step);
+    if(context.error)std::terminate();
+    return result;
 }
 
 std::uint32_t push_refit_checked(
     void* producer, void* target_class) noexcept {
-    if (!g_repeat_ready || !producer || !target_class ||
-        *reinterpret_cast<const std::uint32_t*>(
-            bytes(producer) + kQueueCountOffset) >= kQueueCapacity ||
-        hybrid_production_has_evolution_barrier(producer) ||
-        !dispatch_producer_event(
-            A2FO_PRODUCER_EVENT_ADMIT, producer, target_class)) {
-        return 0;
-    }
-
-    std::array<std::uint32_t, kQueueCapacity> previous_ids{};
-    std::uint32_t previous_count = 0;
-    void* item = *reinterpret_cast<void**>(
-        bytes(producer) + kQueueHeadOffset);
-    while (item && previous_count < kQueueCapacity) {
-        previous_ids[previous_count++] =
-            *reinterpret_cast<const std::uint32_t*>(
-                bytes(item) + kQueueItemIdOffset);
-        item = *reinterpret_cast<void**>(
-            bytes(item) + kQueueItemNextOffset);
-    }
-
-    const std::uint32_t before = *reinterpret_cast<const std::uint32_t*>(
-        bytes(producer) + kQueueCountOffset);
-    a2fo_call_thiscall_1(
-        at(g_fleet_ops, kFoProducerPushCheckedRva), producer,
-        reinterpret_cast<std::uintptr_t>(target_class));
-    const std::uint32_t after = *reinterpret_cast<const std::uint32_t*>(
-        bytes(producer) + kQueueCountOffset);
-    return after > before
-        ? pushed_queue_id(producer, previous_ids, previous_count) : 0;
+    struct Context {
+        void* producer;
+        void* target_class;
+        void* item{};
+        std::uint8_t failed{};
+    } context{producer,target_class};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:return *reinterpret_cast<const std::uint32_t*>(
+            bytes(c.producer)+kQueueCountOffset);
+        case 1:return hybrid_production_has_evolution_barrier(c.producer);
+        case 2:return dispatch_producer_event(A2FO_PRODUCER_EVENT_ADMIT,
+            c.producer,c.target_class);
+        case 3:c.item=*reinterpret_cast<void**>(
+            bytes(c.producer)+kQueueHeadOffset);
+            return reinterpret_cast<std::uintptr_t>(c.item);
+        case 4:return *reinterpret_cast<const std::uint32_t*>(
+            bytes(c.item)+kQueueItemIdOffset);
+        case 5:c.item=*reinterpret_cast<void**>(
+            bytes(c.item)+kQueueItemNextOffset);
+            return reinterpret_cast<std::uintptr_t>(c.item);
+        case 6:a2fo_call_thiscall_1(at(g_fleet_ops,kFoProducerPushCheckedRva),
+            c.producer,reinterpret_cast<std::uintptr_t>(c.target_class));
+            return 1;
+        default:return 0;
+        }}catch(...){c.failed=1;return 0;}
+    };
+    const auto result=a2fo_rs_c_queue_push_refit(&context,
+        reinterpret_cast<std::uintptr_t>(producer),
+        reinterpret_cast<std::uintptr_t>(target_class),g_repeat_ready,
+        step,&context.failed);
+    if(context.failed)std::terminate();
+    return result;
 }
 
 bool charges_resources_when_queued(void* producer) {
@@ -958,485 +1042,524 @@ std::uint32_t native_queue_count(void* producer) noexcept {
 }
 
 bool push_native_checked_once(
-    void* producer, void* target_class, bool dispatch_admit) noexcept {
-    if (!producer || !target_class ||
-        native_queue_count(producer) >= kQueueCapacity ||
-        hybrid_production_has_evolution_barrier(producer)) {
-        return false;
-    }
-    if (dispatch_admit && !dispatch_producer_event(
-            A2FO_PRODUCER_EVENT_ADMIT, producer, target_class)) {
-        return false;
-    }
-    const std::uint32_t before = native_queue_count(producer);
-    a2fo_call_thiscall_1(
-        at(g_fleet_ops, kFoProducerPushCheckedRva), producer,
-        reinterpret_cast<std::uintptr_t>(target_class));
-    return native_queue_count(producer) > before;
+    void* producer, void* target_class, bool dispatch_admit,
+    bool target_resolved = false) noexcept {
+    struct Context {void* producer;void* target_class;}
+        context{producer,target_class};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(op){
+        case 0:c.target_class=resolve_build_queue_class(
+            c.producer,c.target_class);
+            return reinterpret_cast<std::uintptr_t>(c.target_class);
+        case 1:return c.target_class!=nullptr;
+        case 2:return native_queue_count(c.producer);
+        case 3:return hybrid_production_has_evolution_barrier(c.producer);
+        case 4:return dispatch_producer_event(
+            A2FO_PRODUCER_EVENT_ADMIT,c.producer,c.target_class);
+        case 5:return native_queue_count(c.producer);
+        case 6:a2fo_call_thiscall_1(
+            at(g_fleet_ops,kFoProducerPushCheckedRva),c.producer,
+            reinterpret_cast<std::uintptr_t>(c.target_class));return 1;
+        case 7:return native_queue_count(c.producer);
+        default:return 0;
+        }
+    };
+    return a2fo_rs_c_queue_push_once(&context,
+        reinterpret_cast<std::uintptr_t>(producer),
+        reinterpret_cast<std::uintptr_t>(target_class),dispatch_admit,
+        target_resolved,step);
 }
 
-bool queue_logical_one_checked(void* producer, void* target_class) noexcept {
-    if (!producer || !target_class ||
-        hybrid_production_has_evolution_barrier(producer) ||
-        hybrid_production_has_queued_research_conflict(
-            producer, target_class)) {
-        return false;
-    }
-    const GroupedQueueView view = collect_grouped_queue(producer);
-    if (!logical_queue_has_room_for(view, target_class)) return false;
-
-    const PendingQueueSnapshot pending = pending_queue_snapshot(producer);
-    if (pending.count == 0 && native_queue_count(producer) < kQueueCapacity) {
-        return push_native_checked_once(producer, target_class, true);
-    }
-    if (!dispatch_producer_event(
-            A2FO_PRODUCER_EVENT_ADMIT, producer, target_class)) {
-        return false;
-    }
-    return append_pending_queue(producer, target_class);
+bool queue_logical_one_checked(void* producer, void* target_class,
+                               bool target_resolved = false) noexcept {
+    struct Context {
+        void* producer;void* target_class;
+        GroupedQueueView view{};
+        PendingQueueSnapshot pending{};
+    } context{producer,target_class};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(op){
+        case 0:c.target_class=resolve_build_queue_class(
+            c.producer,c.target_class);
+            return reinterpret_cast<std::uintptr_t>(c.target_class);
+        case 1:return c.target_class!=nullptr;
+        case 2:return hybrid_production_has_evolution_barrier(c.producer);
+        case 3:return hybrid_production_has_queued_research_conflict(
+            c.producer,c.target_class);
+        case 4:c.view=collect_grouped_queue(c.producer);return 1;
+        case 5:return logical_queue_has_room_for(c.view,c.target_class);
+        case 6:c.pending=pending_queue_snapshot(c.producer);
+            return c.pending.count;
+        case 7:return native_queue_count(c.producer);
+        case 8:return push_native_checked_once(c.producer,c.target_class,
+            true,true);
+        case 9:return dispatch_producer_event(A2FO_PRODUCER_EVENT_ADMIT,
+            c.producer,c.target_class);
+        case 10:return append_pending_queue(c.producer,c.target_class);
+        default:return 0;
+        }
+    };
+    return a2fo_rs_c_queue_logical_one(&context,
+        reinterpret_cast<std::uintptr_t>(producer),
+        reinterpret_cast<std::uintptr_t>(target_class),target_resolved,step);
 }
 
 void materialize_pending_queue(void* producer) noexcept {
-    if (!producer || refit_has_waiting_job(producer) ||
-        hybrid_production_has_evolution_barrier(producer)) {
-        return;
-    }
-    for (std::uint32_t attempt = 0;
-         attempt < kQueueCapacity && native_queue_count(producer) < kQueueCapacity;
-         ++attempt) {
-        const PendingQueueSnapshot pending = pending_queue_snapshot(producer);
-        if (pending.count == 0 || !pending.entries[0]) break;
-        void* target_class = pending.entries[0];
-        if (hybrid_production_has_queued_research_conflict(
-                producer, target_class)) {
-            break;
+    struct Context {
+        void* producer;
+        PendingQueueSnapshot pending{};
+        void* target_class{};
+    } context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(op){
+        case 0:return refit_has_waiting_job(c.producer);
+        case 1:return hybrid_production_has_evolution_barrier(c.producer);
+        case 2:return native_queue_count(c.producer);
+        case 3:c.pending=pending_queue_snapshot(c.producer);
+            return c.pending.count;
+        case 4:c.target_class=c.pending.entries[0];
+            return reinterpret_cast<std::uintptr_t>(c.target_class);
+        case 5:return hybrid_production_has_queued_research_conflict(
+            c.producer,c.target_class);
+        case 6:return push_native_checked_once(c.producer,c.target_class,
+            false);
+        case 7:return erase_pending_queue_index(c.producer,0);
+        default:return 0;
         }
-        // The logical order already passed A2FO_PRODUCER_EVENT_ADMIT when it
-        // was accepted. Fleet Ops performs its normal resource/tech checks as
-        // the deferred order is moved into the native ten-job FIFO.
-        if (!push_native_checked_once(producer, target_class, false)) break;
-        if (!erase_pending_queue_index(producer, 0)) break;
-    }
+    };
+    a2fo_rs_c_queue_materialize(&context,
+        reinterpret_cast<std::uintptr_t>(producer),step);
 }
 
 std::uint32_t fill_queue_checked(void* producer, void* target_class) {
-    if (!producer || !target_class) return 0;
-    if (hybrid_production_has_evolution_barrier(producer)) return 0;
-    if (hybrid_production_has_queued_research_conflict(
-            producer, target_class)) {
-        return 0;
-    }
-
-    GroupedQueueView view = collect_grouped_queue(producer);
-    std::uint32_t room_in_slot = kUnitsPerVisibleSlot;
-    if (view.count != 0) {
-        const GroupedQueueEntry& tail = view.groups[view.count - 1];
-        if (tail.infinite) return 0;
-        if (tail.target_class == target_class) {
-            if (tail.count < kUnitsPerVisibleSlot) {
-                room_in_slot = kUnitsPerVisibleSlot - tail.count;
-            } else if (view.count >= kVisibleQueueSlots) {
-                return 0;
-            } else {
-                // A full x10 batch starts a new visible slot on the next
-                // Ctrl-fill, even when it is the same ship class.
-                room_in_slot = kUnitsPerVisibleSlot;
-            }
-        } else if (view.count >= kVisibleQueueSlots) {
-            return 0;
+    struct Context {
+        void* producer;
+        void* target_class;
+        GroupedQueueView view{};
+    } context{producer,target_class};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(op){
+        case 0:c.target_class=resolve_build_queue_class(
+            c.producer,c.target_class);
+            return reinterpret_cast<std::uintptr_t>(c.target_class);
+        case 1:return hybrid_production_has_evolution_barrier(c.producer);
+        case 2:return hybrid_production_has_queued_research_conflict(
+            c.producer,c.target_class);
+        case 3:c.view=collect_grouped_queue(c.producer);return 1;
+        case 4:return c.view.count;
+        case 5:return c.view.groups[c.view.count-1].infinite;
+        case 6:return reinterpret_cast<std::uintptr_t>(
+            c.view.groups[c.view.count-1].target_class);
+        case 7:return c.view.groups[c.view.count-1].count;
+        case 8:return hybrid_production_is_evolve_target(
+            c.producer,c.target_class);
+        case 9:return queue_logical_one_checked(
+            c.producer,c.target_class,true);
+        default:return 0;
         }
-    }
-
-    const bool evolve = hybrid_production_is_evolve_target(
-        producer, target_class);
-    const std::uint32_t attempt_limit = evolve ? 1 : room_in_slot;
-    std::uint32_t added = 0;
-    for (std::uint32_t attempt = 0; attempt < attempt_limit; ++attempt) {
-        if (!queue_logical_one_checked(producer, target_class)) break;
-        ++added;
-    }
-    return added;
+    };
+    return a2fo_rs_c_queue_fill(&context,
+        reinterpret_cast<std::uintptr_t>(producer),
+        reinterpret_cast<std::uintptr_t>(target_class),step);
 }
 
 void __attribute__((fastcall)) game_object_dequeue_class_command_hook(
     void* game_object, void*, std::uint32_t command,
     void* target_class) {
-    if (command == A2FO_REFIT_CLASS_COMMAND) {
-        if (!consume_refit_synchronized_command(
-                game_object, target_class)) {
-            log_message("Synchronized refit request rejected");
-        }
-        return;
-    }
-    if (command == A2FO_REFIT_CANCEL_CLASS_COMMAND) {
-        if (!cancel_refit_synchronized_command(game_object)) {
-            log_message("Synchronized refit cancellation rejected");
-        }
-        return;
-    }
-    const bool fill = command == kQueueFillMarkerCommand;
-    const bool continuous = command == kContinuousMarkerCommand;
-    const bool extended_single = command == kExtendedQueueMarkerCommand;
-    if (!fill && !continuous && !extended_single) {
-        a2fo_call_thiscall_2(
-            g_game_object_dequeue_class_command_hook.gateway, game_object,
-            command, reinterpret_cast<std::uintptr_t>(target_class));
-        return;
-    }
-
-    if (!g_repeat_ready || !game_object || !target_class) {
-        log_message("Queue-enhancement marker rejected");
-        return;
-    }
-
-    if (extended_single) {
-        void* repeat_target = nullptr;
-        if (continuous_state(game_object, &repeat_target)) {
-            stop_continuous(game_object);
-            if (repeat_target == target_class) {
-                log_message(
-                    "Continuous production disabled by repeated build order");
-                return;
+    struct Context {
+        void* object;
+        std::uint32_t command;
+        void* target;
+        void* repeat_target{};
+        void* effective{};
+        GroupedQueueView view{};
+        std::uint8_t failed{};
+        std::exception_ptr error{};
+    } context{game_object,command,target_class};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t value) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:return consume_refit_synchronized_command(
+            c.object,c.target);
+        case 1:log_message("Synchronized refit request rejected");return 1;
+        case 2:return cancel_refit_synchronized_command(c.object);
+        case 3:log_message("Synchronized refit cancellation rejected");
+            return 1;
+        case 4:return a2fo_call_thiscall_2(
+            g_game_object_dequeue_class_command_hook.gateway,c.object,
+            c.command,reinterpret_cast<std::uintptr_t>(c.target));
+        case 5:log_message("Queue-enhancement marker rejected");return 1;
+        case 6:return continuous_state(c.object,&c.repeat_target);
+        case 7:return reinterpret_cast<std::uintptr_t>(c.repeat_target);
+        case 8:stop_continuous(c.object);return 1;
+        case 9:log_message(
+            "Continuous production disabled by repeated build order");
+            return 1;
+        case 10:return queue_logical_one_checked(c.object,c.target);
+        case 11:log_message("Extended synchronized build order accepted");
+            return 1;
+        case 12:log_message("Extended synchronized build order rejected");
+            return 1;
+        case 13:return hybrid_production_is_evolve_target(c.object,c.target);
+        case 14:return fill_queue_checked(c.object,c.target);
+        case 15:{char message[96];
+            std::snprintf(message,sizeof(message),
+                "Ctrl synchronized logical slot fill received: %lu added",
+                static_cast<unsigned long>(value));
+            log_message(message);return 1;}
+        case 16:c.effective=resolve_build_queue_class(c.object,c.target);
+            return reinterpret_cast<std::uintptr_t>(c.effective);
+        case 17:log_message(
+            "Continuous production marker rejected: class resolution");
+            return 1;
+        case 18:c.view=collect_grouped_queue(c.object);return c.view.count;
+        case 19:return reinterpret_cast<std::uintptr_t>(
+            c.view.groups[c.view.count-1].target_class);
+        case 20:return queue_logical_one_checked(c.object,c.effective,true);
+        case 21:log_message(
+            "Continuous production marker rejected: no logical slot");
+            return 1;
+        case 22:try {
+            const auto handle=object_handle(c.object);
+            EnterCriticalSection(&g_queue_lock);
+            auto& state=g_continuous[handle];
+            state.active=true;
+            state.target_class=c.target;
+            state.target_project_id=project_id(c.target);
+            state.paused_retry_ticks=0;
+            LeaveCriticalSection(&g_queue_lock);
+            log_message("Continuous production enabled as one logical xINF slot");
+            return 1;
+            }catch(...){
+                LeaveCriticalSection(&g_queue_lock);
+                log_message("Continuous production marker could not be recorded");
+                return 0;
             }
-        }
-        const bool added = queue_logical_one_checked(
-            game_object, target_class);
-        log_message(added
-            ? "Extended synchronized build order accepted"
-            : "Extended synchronized build order rejected");
-        return;
-    }
-
-    if (!continuous || hybrid_production_is_evolve_target(
-            game_object, target_class)) {
-        const std::uint32_t added =
-            fill_queue_checked(game_object, target_class);
-        char fill_message[96];
-        std::snprintf(fill_message, sizeof(fill_message),
-                      "Ctrl synchronized logical slot fill received: %lu added",
-                      static_cast<unsigned long>(added));
-        log_message(fill_message);
-        stop_continuous(game_object);
-        return;
-    }
-
-    // Continuous production is represented by one logical xINF slot,
-    // not by pre-filling ten physical jobs. If the requested class is already
-    // at the logical tail, promote that slot to continuous; otherwise append
-    // one backing job first.
-    stop_continuous(game_object);
-    GroupedQueueView view = collect_grouped_queue(game_object);
-    bool has_backing_job = view.count != 0 &&
-        view.groups[view.count - 1].target_class == target_class;
-    if (!has_backing_job) {
-        has_backing_job = queue_logical_one_checked(
-            game_object, target_class);
-    }
-    if (!has_backing_job) {
-        log_message("Continuous production marker rejected: no logical slot");
-        return;
-    }
-
-    try {
-        const std::uint32_t handle = object_handle(game_object);
-        EnterCriticalSection(&g_queue_lock);
-        ContinuousState& state = g_continuous[handle];
-        state.active = true;
-        state.target_class = target_class;
-        state.target_project_id = project_id(target_class);
-        state.paused_retry_ticks = 0;
-        LeaveCriticalSection(&g_queue_lock);
-        log_message(
-            "Continuous production enabled as one logical xINF slot");
-    } catch (...) {
-        LeaveCriticalSection(&g_queue_lock);
-        log_message("Continuous production marker could not be recorded");
-    }
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();c.failed=1;return 0;}
+    };
+    a2fo_rs_c_queue_dequeue_command(&context,
+        reinterpret_cast<std::uintptr_t>(game_object),command,
+        reinterpret_cast<std::uintptr_t>(target_class),g_repeat_ready,
+        step,&context.failed);
+    if(context.error)std::rethrow_exception(context.error);
 }
 
 void try_refill(void* producer) {
-    if (!g_repeat_ready || !producer) return;
-
-    // First keep the native ten-job FIFO fed from the extended sidecar. This
-    // preserves the exact logical order while allowing up to 100 queued units.
-    materialize_pending_queue(producer);
-
-    const std::uint32_t handle = object_handle(producer);
-    void* target_class = nullptr;
-    {
-        EnterCriticalSection(&g_queue_lock);
-        const auto found = g_continuous.find(handle);
-        if (found != g_continuous.end() && found->second.active) {
-            target_class = found->second.target_class;
+    struct Context {
+        void* producer;
+        std::uint32_t handle{};
+        void* target_class{};
+        PendingQueueSnapshot pending{};
+    } context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(op){
+        case 0:materialize_pending_queue(c.producer);return 1;
+        case 1: {
+            c.handle=object_handle(c.producer);
+            EnterCriticalSection(&g_queue_lock);
+            const auto found=g_continuous.find(c.handle);
+            if(found!=g_continuous.end()&&found->second.active){
+                c.target_class=found->second.target_class;
+            }
+            LeaveCriticalSection(&g_queue_lock);
+            return reinterpret_cast<std::uintptr_t>(c.target_class);
         }
-        LeaveCriticalSection(&g_queue_lock);
-    }
-    if (!target_class || refit_has_waiting_job(producer)) return;
-
-    if (hybrid_production_has_evolution_barrier(producer)) {
-        stop_continuous(producer);
-        return;
-    }
-    if (hybrid_production_has_queued_research_conflict(
-            producer, target_class)) {
-        return;
-    }
-
-    // xINF keeps only one real backing job. Do not pre-fill the native
-    // FIFO: when the queue becomes empty the next copy is admitted.
-    const PendingQueueSnapshot pending = pending_queue_snapshot(producer);
-    if (native_queue_count(producer) != 0 || pending.count != 0) return;
-
-    if (push_native_checked_once(producer, target_class, true)) {
-        EnterCriticalSection(&g_queue_lock);
-        const auto found = g_continuous.find(handle);
-        if (found != g_continuous.end()) {
-            found->second.paused_retry_ticks = 0;
+        case 2:return refit_has_waiting_job(c.producer);
+        case 3:return hybrid_production_has_evolution_barrier(c.producer);
+        case 4:stop_continuous(c.producer);return 1;
+        case 5:return hybrid_production_has_queued_research_conflict(
+            c.producer,c.target_class);
+        case 6:c.pending=pending_queue_snapshot(c.producer);
+            return c.pending.count;
+        case 7:return native_queue_count(c.producer);
+        case 8:return push_native_checked_once(c.producer,c.target_class,true);
+        case 9: {
+            EnterCriticalSection(&g_queue_lock);
+            const auto found=g_continuous.find(c.handle);
+            if(found!=g_continuous.end()){
+                found->second.paused_retry_ticks=0;
+            }
+            LeaveCriticalSection(&g_queue_lock);
+            return 1;
         }
-        LeaveCriticalSection(&g_queue_lock);
-    }
+        default:return 0;
+        }
+    };
+    a2fo_rs_c_queue_refill(&context,
+        reinterpret_cast<std::uintptr_t>(producer),g_repeat_ready,step);
 }
 
 void __attribute__((fastcall)) game_object_queue_class_command_hook(
     void* game_object, void*, std::uint32_t command,
     void* target_class) {
-    if (command == kBuildCommand && target_class &&
-        hybrid_production_should_defer_construct_order(
-            game_object, target_class)) {
-        return;
-    }
-    if (command == kBuildCommand && target_class) {
-        retain_hybrid_research_menu_after_order(
-            game_object, target_class);
-    }
-    if (command != kBuildCommand || !target_class || !g_repeat_ready) {
-        a2fo_call_thiscall_2(
-            g_game_object_queue_class_command_hook.gateway, game_object,
-            command, reinterpret_cast<std::uintptr_t>(target_class));
-        return;
-    }
-
-    if (!g_logged_build_order_path) {
-        g_logged_build_order_path = true;
-        log_message("First Producer build order reached");
-    }
-
-    if (modifier_key_down(kCommandControlPointerRva, VK_CONTROL)) {
-        const bool continuous =
-            modifier_key_down(kCommandAltPointerRva, VK_MENU);
-        a2fo_call_thiscall_2(
-            g_game_object_queue_class_command_hook.gateway, game_object,
-            continuous ? kContinuousMarkerCommand : kQueueFillMarkerCommand,
-            reinterpret_cast<std::uintptr_t>(target_class));
-        log_message(continuous
-                        ? "Ctrl+Alt synchronized continuous marker queued"
-                        : "Ctrl synchronized logical-slot fill marker queued");
-        return;
-    }
-
-    const PendingQueueSnapshot pending = pending_queue_snapshot(game_object);
-    if (pending.count != 0 ||
-        native_queue_count(game_object) >= kQueueCapacity) {
-        const GroupedQueueView view = collect_grouped_queue(game_object);
-        void* repeat_target = nullptr;
-        const bool repeat_active = continuous_state(
-            game_object, &repeat_target);
-        const bool repeat_toggle = repeat_active &&
-            repeat_target == target_class;
-        if (!repeat_toggle &&
-            !logical_queue_has_room_for(view, target_class)) {
-            log_message("Logical build queue full (10 slots x 10 units)");
-            return;
-        }
-        // The native QueueClassCommand path stops admitting build orders at
-        // ten physical jobs. Route overflow through A2FO's synchronized typed
-        // marker so every peer appends the same sidecar entry deterministically.
-        a2fo_call_thiscall_2(
-            g_game_object_queue_class_command_hook.gateway, game_object,
-            kExtendedQueueMarkerCommand,
-            reinterpret_cast<std::uintptr_t>(target_class));
-        return;
-    }
-
-    a2fo_call_thiscall_2(
-        g_game_object_queue_class_command_hook.gateway, game_object,
-        command, reinterpret_cast<std::uintptr_t>(target_class));
+    struct Context {
+        void* object;
+        std::uint32_t command;
+        void* target;
+        PendingQueueSnapshot pending{};
+        GroupedQueueView view{};
+        void* repeat_target{};
+        std::uint8_t failed{};
+        std::exception_ptr error{};
+    } context{game_object,command,target_class};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t value) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:return hybrid_production_should_defer_construct_order(
+            c.object,c.target);
+        case 1:retain_hybrid_research_menu_after_order(c.object,c.target);
+            return 1;
+        case 2:return a2fo_call_thiscall_2(
+            g_game_object_queue_class_command_hook.gateway,c.object,
+            value,reinterpret_cast<std::uintptr_t>(c.target));
+        case 3:if(!g_logged_build_order_path){
+            g_logged_build_order_path=true;
+            log_message("First Producer build order reached");}
+            return 1;
+        case 4:return modifier_key_down(kCommandControlPointerRva,VK_CONTROL);
+        case 5:return modifier_key_down(kCommandAltPointerRva,VK_MENU);
+        case 6:return a2fo_call_thiscall_2(
+            g_game_object_queue_class_command_hook.gateway,c.object,
+            value,reinterpret_cast<std::uintptr_t>(c.target));
+        case 7:log_message(value
+            ?"Ctrl+Alt synchronized continuous marker queued"
+            :"Ctrl synchronized logical-slot fill marker queued");
+            return 1;
+        case 8:c.pending=pending_queue_snapshot(c.object);
+            return c.pending.count;
+        case 9:return native_queue_count(c.object);
+        case 10:c.view=collect_grouped_queue(c.object);return 1;
+        case 11:return continuous_state(c.object,&c.repeat_target);
+        case 12:return reinterpret_cast<std::uintptr_t>(c.repeat_target);
+        case 13:return logical_queue_has_room_for(c.view,c.target);
+        case 14:return collective_queue_may_change_class(c.object);
+        case 15:log_message("Logical build queue full (10 slots x 10 units)");
+            return 1;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();c.failed=1;return 0;}
+    };
+    a2fo_rs_c_queue_queue_command(&context,command,
+        reinterpret_cast<std::uintptr_t>(target_class),g_repeat_ready,
+        step,&context.failed);
+    if(context.error)std::rethrow_exception(context.error);
 }
 
 void __attribute__((fastcall)) producer_command_push_hook(
     void* producer, void*, void* target_class) {
-    if (producer && target_class &&
-        hybrid_production_should_defer_construct_order(
-            producer, target_class)) {
-        return;
-    }
-    if (!g_repeat_ready || !producer || !target_class) {
-        if (producer && target_class && !dispatch_producer_event(
-                A2FO_PRODUCER_EVENT_ADMIT, producer, target_class)) {
-            return;
+    struct Context {
+        void* producer;
+        void* base;
+        void* target;
+        std::uint32_t handle{};
+        decltype(g_continuous)::iterator found{};
+        GroupedQueueView view{};
+        PendingQueueSnapshot pending{};
+        std::uint32_t before{};
+        std::uint32_t after{};
+        std::uint8_t failed{};
+        std::exception_ptr error{};
+    } context{producer,target_class,target_class};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t value) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        if(op>=11&&op<=14){
+            try {switch(op){
+            case 11:
+                EnterCriticalSection(&g_queue_lock);
+                c.found=g_continuous.find(c.handle);
+                if(!g_logged_synchronized_build_path){
+                    g_logged_synchronized_build_path=true;
+                    log_message("First synchronized Producer build command reached");
+                }
+                return 1;
+            case 12:return c.found!=g_continuous.end()&&
+                c.found->second.active;
+            case 13:return reinterpret_cast<std::uintptr_t>(
+                c.found->second.target_class);
+            case 14:if(value!=0)g_continuous.erase(c.found);
+                LeaveCriticalSection(&g_queue_lock);return 1;
+            default:break;
+            }}catch(...){LeaveCriticalSection(&g_queue_lock);
+                return UINTPTR_MAX;}
         }
-        const std::uint32_t before = producer
-            ? native_queue_count(producer) : 0;
-        a2fo_call_thiscall_1(g_fo_command_push_hook.gateway, producer,
-                            reinterpret_cast<std::uintptr_t>(target_class));
-        if (producer && target_class) {
-            finalize_hybrid_construct_order(
-                producer, target_class,
-                native_queue_count(producer) > before);
-        }
-        return;
-    }
-
-    // This synchronized receiver is the common path for ordinary, hotkey,
-    // Ctrl-fill, local, and remote orders. Arm the local palette adapter here
-    // as well as at GameObject::QueueClassCommand so every accepted pod click
-    // can survive Fleet Ops resetting menu 3 to root during its next refresh.
-    retain_hybrid_research_menu_after_order(producer, target_class);
-    const bool research_conflict =
-        hybrid_production_has_queued_research_conflict(
-            producer, target_class);
-    const bool evolution_barrier =
-        hybrid_production_has_evolution_barrier(producer);
-    const bool evolve_target = hybrid_production_is_evolve_target(
-        producer, target_class);
-    bool suppress = research_conflict || evolution_barrier;
-    bool repeat_toggle_off = false;
-    const std::uint32_t handle = object_handle(producer);
-    try {
-        EnterCriticalSection(&g_queue_lock);
-        const auto found = g_continuous.find(handle);
-        if (!g_logged_synchronized_build_path) {
-            g_logged_synchronized_build_path = true;
-            log_message("First synchronized Producer build command reached");
-        }
-        if (found != g_continuous.end() && found->second.active) {
-            if (found->second.target_class == target_class && !evolve_target) {
-                repeat_toggle_off = true;
-                suppress = true;
-            }
-            g_continuous.erase(found);
-        }
-        LeaveCriticalSection(&g_queue_lock);
-    } catch (...) {
-        LeaveCriticalSection(&g_queue_lock);
-        suppress = research_conflict || evolution_barrier;
-    }
-
-    const std::uint32_t before = native_queue_count(producer);
-    bool queued_native = false;
-    bool queued_extended = false;
-    bool logical_full = false;
-    if (!suppress) {
-        const GroupedQueueView view = collect_grouped_queue(producer);
-        if (!logical_queue_has_room_for(view, target_class)) {
-            logical_full = true;
-            suppress = true;
-        } else if (!dispatch_producer_event(
-                A2FO_PRODUCER_EVENT_ADMIT, producer, target_class)) {
-            suppress = true;
-        } else {
-            const PendingQueueSnapshot pending =
-                pending_queue_snapshot(producer);
-            if (pending.count == 0 && before < kQueueCapacity) {
-                a2fo_call_thiscall_1(
-                    g_fo_command_push_hook.gateway, producer,
-                    reinterpret_cast<std::uintptr_t>(target_class));
-                queued_native = native_queue_count(producer) > before;
-            } else {
-                queued_extended = append_pending_queue(
-                    producer, target_class);
-                suppress = !queued_extended;
-            }
-        }
-    }
-
-    const std::uint32_t after = native_queue_count(producer);
-    finalize_hybrid_construct_order(
-        producer, target_class, queued_native);
-    if (g_synchronized_push_log_count < kSynchronizedPushLogLimit) {
-        ++g_synchronized_push_log_count;
-        char message[192];
-        const char* outcome =
-            research_conflict ? "research conflict rejected" :
-            evolution_barrier ? "evolution barrier rejected" :
-            repeat_toggle_off ? "continuous mode toggled off" :
-            logical_full ? "logical 10x10 queue full" :
-            queued_extended ? "accepted into extended queue" :
-            queued_native ? "forwarded to native queue" :
-            suppress ? "rejected" : "no native change";
-        std::snprintf(
-            message, sizeof(message),
-            "Synchronized Producer queue result: target %lu, "
-            "native %lu -> %lu (%s)",
-            static_cast<unsigned long>(project_id(target_class)),
-            static_cast<unsigned long>(before),
-            static_cast<unsigned long>(after), outcome);
-        log_message(message);
-    }
+        try {switch(op){
+        case 0:return hybrid_production_should_defer_construct_order(
+            c.producer,c.target);
+        case 1:c.target=resolve_build_queue_class(c.producer,c.base);
+            return reinterpret_cast<std::uintptr_t>(c.target);
+        case 2:return dispatch_producer_event(A2FO_PRODUCER_EVENT_ADMIT,
+            c.producer,c.target);
+        case 3:return native_queue_count(c.producer);
+        case 4:a2fo_call_thiscall_1(g_fo_command_push_hook.gateway,c.producer,
+            reinterpret_cast<std::uintptr_t>(c.target));return 1;
+        case 5:finalize_hybrid_construct_order(c.producer,c.target,
+            value!=0);return 1;
+        case 6:retain_hybrid_research_menu_after_order(c.producer,c.target);
+            return 1;
+        case 7:return hybrid_production_has_queued_research_conflict(
+            c.producer,c.target);
+        case 8:return hybrid_production_has_evolution_barrier(c.producer);
+        case 9:return hybrid_production_is_evolve_target(c.producer,c.target);
+        case 10:c.handle=object_handle(c.producer);return c.handle;
+        case 15:c.before=native_queue_count(c.producer);return c.before;
+        case 16:c.view=collect_grouped_queue(c.producer);return 1;
+        case 17:return logical_queue_has_room_for(c.view,c.target);
+        case 18:return dispatch_producer_event(A2FO_PRODUCER_EVENT_ADMIT,
+            c.producer,c.target);
+        case 19:c.pending=pending_queue_snapshot(c.producer);
+            return c.pending.count;
+        case 20:a2fo_call_thiscall_1(g_fo_command_push_hook.gateway,
+            c.producer,reinterpret_cast<std::uintptr_t>(c.target));return 1;
+        case 21:return native_queue_count(c.producer);
+        case 22:return append_pending_queue(c.producer,c.target);
+        case 23:c.after=native_queue_count(c.producer);return c.after;
+        case 24:finalize_hybrid_construct_order(c.producer,c.target,
+            value!=0);return 1;
+        case 25:if(g_synchronized_push_log_count<kSynchronizedPushLogLimit){
+            ++g_synchronized_push_log_count;return 1;}return 0;
+        case 26:{
+            static const char* const outcome[]={
+                "research conflict rejected",
+                "evolution barrier rejected",
+                "continuous mode toggled off",
+                "logical 10x10 queue full",
+                "accepted into extended queue",
+                "forwarded to native queue",
+                "rejected","no native change"};
+            char message[192];
+            std::snprintf(message,sizeof(message),
+                "Synchronized Producer queue result: target %lu, "
+                "native %lu -> %lu (%s)",
+                static_cast<unsigned long>(project_id(c.target)),
+                static_cast<unsigned long>(c.before),
+                static_cast<unsigned long>(c.after),outcome[value]);
+            log_message(message);return 1;}
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();c.failed=1;return 0;}
+    };
+    a2fo_rs_c_queue_producer_push(&context,
+        reinterpret_cast<std::uintptr_t>(producer),
+        reinterpret_cast<std::uintptr_t>(target_class),g_repeat_ready,
+        step,&context.failed);
+    if(context.error)std::rethrow_exception(context.error);
 }
 
 std::uintptr_t __attribute__((fastcall)) producer_finish_hook(
     void* producer, void*) {
-    void* target_class = current_build_target_class(producer);
-    if (!target_class) target_class = queue_head_target_class(producer);
-    const std::uint32_t queue_id = current_queue_id(producer);
-    const bool use_native_completion = !producer || !target_class ||
-        dispatch_producer_event(
-            A2FO_PRODUCER_EVENT_FINISHING, producer, target_class);
-    const std::uintptr_t result = use_native_completion
-        ? a2fo_call_thiscall_0(g_fo_finish_hook.gateway, producer)
-        : 0;
-    if (producer && target_class) {
-        dispatch_producer_event(
-            A2FO_PRODUCER_EVENT_FINISHED, producer, target_class);
-        notify_refit_job_finished(
-            producer, queue_id, target_class,
-            reinterpret_cast<void*>(result));
-    }
-    try_refill(producer);
+    struct Context {
+        void* producer;
+        void* target_class{};
+        std::uint32_t queue_id{};
+        std::uint8_t failed{};
+        std::exception_ptr error{};
+    } context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t value) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:c.target_class=current_build_target_class(c.producer);
+            return reinterpret_cast<std::uintptr_t>(c.target_class);
+        case 1:c.target_class=queue_head_target_class(c.producer);
+            return reinterpret_cast<std::uintptr_t>(c.target_class);
+        case 2:c.queue_id=current_queue_id(c.producer);return c.queue_id;
+        case 3:return dispatch_producer_event(A2FO_PRODUCER_EVENT_FINISHING,
+            c.producer,c.target_class);
+        case 4:return a2fo_call_thiscall_0(g_fo_finish_hook.gateway,
+            c.producer);
+        case 5:dispatch_producer_event(A2FO_PRODUCER_EVENT_FINISHED,
+            c.producer,c.target_class);return 1;
+        case 6:notify_refit_job_finished(c.producer,c.queue_id,
+            c.target_class,reinterpret_cast<void*>(value));return 1;
+        case 7:try_refill(c.producer);return 1;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();c.failed=1;return 0;}
+    };
+    const auto result=a2fo_rs_c_queue_finish(&context,
+        reinterpret_cast<std::uintptr_t>(producer),step,&context.failed);
+    if(context.error)std::rethrow_exception(context.error);
     return result;
 }
 
 std::uintptr_t __attribute__((fastcall)) producer_cancel_hook(
     void* producer, void*) {
-    stop_continuous(producer);
-    const std::uint32_t queue_id = current_queue_id(producer);
-    void* target_class = current_build_target_class(producer);
-    if (target_class) {
-        dispatch_producer_event(
-            A2FO_PRODUCER_EVENT_CANCELLED, producer, target_class);
-    }
-    if (producer && queue_id != 0) {
-        notify_refit_job_removed(
-            producer, queue_id, target_class,
-            A2FO_REFIT_QUEUE_CANCELLED);
-    }
-    const std::uintptr_t result =
-        a2fo_call_thiscall_0(g_fo_cancel_hook.gateway, producer);
-    materialize_pending_queue(producer);
+    struct Context {
+        void* producer;
+        void* target_class{};
+        std::uint32_t queue_id{};
+        std::uint8_t failed{};
+        std::exception_ptr error{};
+    } context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:stop_continuous(c.producer);return 1;
+        case 1:c.queue_id=current_queue_id(c.producer);return c.queue_id;
+        case 2:c.target_class=current_build_target_class(c.producer);
+            return reinterpret_cast<std::uintptr_t>(c.target_class);
+        case 3:dispatch_producer_event(A2FO_PRODUCER_EVENT_CANCELLED,
+            c.producer,c.target_class);return 1;
+        case 4:notify_refit_job_removed(c.producer,c.queue_id,c.target_class,
+            A2FO_REFIT_QUEUE_CANCELLED);return 1;
+        case 5:return a2fo_call_thiscall_0(g_fo_cancel_hook.gateway,
+            c.producer);
+        case 6:materialize_pending_queue(c.producer);return 1;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();c.failed=1;return 0;}
+    };
+    const auto result=a2fo_rs_c_queue_cancel(&context,
+        reinterpret_cast<std::uintptr_t>(producer),step,&context.failed);
+    if(context.error)std::rethrow_exception(context.error);
     return result;
 }
 
 void delete_native_queue_item(
     void* producer, std::uint32_t queue_id) noexcept {
-    if (!producer || queue_id == 0) return;
-    const std::uint32_t current_id = *reinterpret_cast<std::uint32_t*>(
-        bytes(producer) + kCurrentQueueIdOffset);
-    void* removed_class = queued_target_class(producer, queue_id);
-    if (!removed_class && queue_id == current_id) {
-        removed_class = current_build_target_class(producer);
-    }
-    if (queue_id != current_id && charges_resources_when_queued(producer)) {
-        if (removed_class) {
-            dispatch_producer_event(
-                A2FO_PRODUCER_EVENT_DELETED, producer, removed_class);
-        }
-    }
-    notify_refit_job_removed(
-        producer, queue_id, removed_class, A2FO_REFIT_QUEUE_DELETED);
-    a2fo_call_thiscall_1(
-        g_fo_act_delete_hook.gateway, producer, queue_id);
-    discard_hybrid_construct_placement(producer, queue_id);
+    struct Context {
+        void* producer;
+        std::uint32_t queue_id;
+        void* removed_class{};
+        std::uint8_t failed{};
+    } context{producer,queue_id};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:return *reinterpret_cast<std::uint32_t*>(
+            bytes(c.producer)+kCurrentQueueIdOffset);
+        case 1:c.removed_class=queued_target_class(c.producer,c.queue_id);
+            return reinterpret_cast<std::uintptr_t>(c.removed_class);
+        case 2:c.removed_class=current_build_target_class(c.producer);
+            return reinterpret_cast<std::uintptr_t>(c.removed_class);
+        case 3:return charges_resources_when_queued(c.producer);
+        case 4:dispatch_producer_event(A2FO_PRODUCER_EVENT_DELETED,
+            c.producer,c.removed_class);return 1;
+        case 5:notify_refit_job_removed(c.producer,c.queue_id,
+            c.removed_class,A2FO_REFIT_QUEUE_DELETED);return 1;
+        case 6:a2fo_call_thiscall_1(g_fo_act_delete_hook.gateway,
+            c.producer,c.queue_id);return 1;
+        case 7:discard_hybrid_construct_placement(c.producer,c.queue_id);
+            return 1;
+        default:return 0;
+        }}catch(...){c.failed=1;return 0;}
+    };
+    a2fo_rs_c_queue_delete_native(&context,
+        reinterpret_cast<std::uintptr_t>(producer),queue_id,step,
+        &context.failed);
+    if(context.failed)std::terminate();
 }
 
 bool visual_slot_from_native_queue_id(
@@ -1451,352 +1574,377 @@ bool visual_slot_from_native_queue_id(
         return false;
     }
 
-    std::array<PhysicalQueueEntry, kQueueCapacity> physical{};
-    std::uint32_t physical_count = 0;
-    const void* active_class = current_build_target_class(producer);
-    const std::uint32_t active_id = current_queue_id(producer);
-    bool active_in_fifo = false;
-
-    void* item = *reinterpret_cast<void**>(
-        bytes(producer) + kQueueHeadOffset);
-    while (item && physical_count < kQueueCapacity) {
-        if (!readable_range(item,
-                kQueueItemIdOffset + sizeof(std::uint32_t))) {
-            break;
+    struct Context {void* producer;void* item{};} context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(op){
+        case 0:return reinterpret_cast<std::uintptr_t>(
+            current_build_target_class(c.producer));
+        case 1:return current_queue_id(c.producer);
+        case 2:c.item=*reinterpret_cast<void**>(
+            bytes(c.producer)+kQueueHeadOffset);
+            return reinterpret_cast<std::uintptr_t>(c.item);
+        case 3:return readable_range(c.item,
+            kQueueItemIdOffset+sizeof(std::uint32_t));
+        case 4:return reinterpret_cast<std::uintptr_t>(
+            *reinterpret_cast<void**>(c.item));
+        case 5:return *reinterpret_cast<const std::uint32_t*>(
+            bytes(c.item)+kQueueItemIdOffset);
+        case 6:c.item=*reinterpret_cast<void**>(
+            bytes(c.item)+kQueueItemNextOffset);
+            return reinterpret_cast<std::uintptr_t>(c.item);
+        default:return 0;
         }
-        void* target_class = *reinterpret_cast<void**>(item);
-        const std::uint32_t id = *reinterpret_cast<const std::uint32_t*>(
-            bytes(item) + kQueueItemIdOffset);
-        if (target_class) {
-            physical[physical_count++] = PhysicalQueueEntry{target_class, id};
-            if (active_class && active_id != 0 && id == active_id) {
-                active_in_fifo = true;
-            }
-        }
-        item = *reinterpret_cast<void**>(
-            bytes(item) + kQueueItemNextOffset);
-    }
-
-    if (active_class && !active_in_fifo &&
-        (active_id != 0 || physical_count == 0)) {
-        const std::uint32_t limit = std::min<std::uint32_t>(
-            physical_count, kQueueCapacity - 1);
-        for (std::uint32_t index = limit; index > 0; --index) {
-            physical[index] = physical[index - 1];
-        }
-        physical[0] = PhysicalQueueEntry{
-            const_cast<void*>(active_class), active_id};
-        physical_count = std::min<std::uint32_t>(
-            physical_count + 1, kQueueCapacity);
-    }
-
-    for (std::uint32_t index = 0; index < physical_count; ++index) {
-        if (physical[index].queue_id == queue_id) {
-            *visual_slot = index;
-            return true;
-        }
-    }
-    return false;
+    };
+    return a2fo_rs_c_queue_visual_slot(&context,step,queue_id,
+        kQueueCapacity,visual_slot);
 }
 
 void trim_group_to_single(
     void* producer, std::uint32_t visual_slot) noexcept {
-    if (!producer) return;
-    for (std::uint32_t guard = 0; guard < kUnitsPerVisibleSlot; ++guard) {
-        const GroupedQueueView view = collect_grouped_queue(producer);
-        if (visual_slot >= view.count) return;
-        const GroupedQueueEntry group = view.groups[visual_slot];
-        if (group.count <= 1) return;
-        if (group.pending_count != 0 &&
-            group.last_pending_index != 0xffffffffu) {
-            if (!erase_pending_queue_index(
-                    producer, group.last_pending_index)) {
-                return;
-            }
-            continue;
+    struct Context {
+        void* producer;
+        GroupedQueueView view{};
+        GroupedQueueEntry group{};
+    } context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t arg) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(op){
+        case 0:c.view=collect_grouped_queue(c.producer);return c.view.count;
+        case 1:c.group=c.view.groups[arg];return c.group.count;
+        case 2:return c.group.pending_count;
+        case 3:return c.group.last_pending_index;
+        case 4:return erase_pending_queue_index(c.producer,
+            static_cast<std::uint32_t>(arg));
+        case 5:return current_queue_id(c.producer);
+        case 6:return c.group.last_queue_id;
+        case 7:delete_native_queue_item(c.producer,
+            static_cast<std::uint32_t>(arg));return 1;
+        default:return 0;
         }
-        const std::uint32_t current_id = current_queue_id(producer);
-        if (group.last_queue_id != 0 &&
-            group.last_queue_id != current_id) {
-            delete_native_queue_item(producer, group.last_queue_id);
-            continue;
-        }
-        return;
-    }
+    };
+    a2fo_rs_c_queue_trim_group(&context,
+        reinterpret_cast<std::uintptr_t>(producer),visual_slot,step);
 }
 
 void __attribute__((fastcall)) producer_act_delete_hook(
     void* producer, void*, std::uint32_t queue_id) {
-    std::uint32_t requested_slot = 0xffffffffu;
-    bool have_requested_slot = false;
-    if (g_grouped_queue_ui_ready &&
-        g_grouped_queue_ui_context.active &&
-        g_grouped_queue_ui_context.producer == producer) {
-        requested_slot = g_grouped_queue_ui_context.visual_slot;
-        have_requested_slot = true;
-    } else if (g_grouped_queue_ui_ready) {
-        // Some Fleet Ops queue-icon paths defer the delete callback until
-        // after BuildQueueIcon::Simulate returns. In that case the temporary
-        // visual-slot context is gone, but the stock queue_id still belongs
-        // to the native icon index that was clicked. Recover that index and
-        // treat it as the grouped visual slot before remapping the deletion.
-        have_requested_slot = visual_slot_from_native_queue_id(
-            producer, queue_id, &requested_slot);
-        if (have_requested_slot &&
-            !g_logged_grouped_delete_slot_fallback) {
-            g_logged_grouped_delete_slot_fallback = true;
+    struct Context {
+        void* producer;
+        std::uint32_t queue_id;
+        std::uint32_t requested_slot=0xffffffffu;
+        GroupedQueueView view{};
+        GroupedQueueEntry group{};
+    } context{producer,queue_id};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t arg) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(op){
+        case 0:return g_grouped_queue_ui_ready;
+        case 1:return g_grouped_queue_ui_context.active&&
+            g_grouped_queue_ui_context.producer==c.producer;
+        case 2:c.requested_slot=g_grouped_queue_ui_context.visual_slot;
+            return 1;
+        case 3:return visual_slot_from_native_queue_id(
+            c.producer,c.queue_id,&c.requested_slot);
+        case 4:if(!g_logged_grouped_delete_slot_fallback){
+            g_logged_grouped_delete_slot_fallback=true;
             log_message("Grouped queue cancellation recovered the clicked "
-                        "visual slot from the native icon index");
+                "visual slot from the native icon index");
+            }return 1;
+        case 5:c.view=collect_grouped_queue(c.producer);return c.view.count;
+        case 6:return c.requested_slot;
+        case 7:c.group=c.view.groups[c.requested_slot];
+            return c.group.infinite;
+        case 8:trim_group_to_single(c.producer,c.requested_slot);
+            stop_continuous(c.producer);
+            log_message("Continuous queue slot removed: xINF reverted "
+                        "to one normal build");return 1;
+        case 9:return c.group.pending_count;
+        case 10:return c.group.last_pending_index;
+        case 11:erase_pending_queue_index(c.producer,
+            c.group.last_pending_index);
+            if(!g_logged_grouped_delete_remap){
+                g_logged_grouped_delete_remap=true;
+                log_message("Grouped queue cancellation removed the last "
+                    "extended item in the visible run");
+            }return 1;
+        case 12:return c.group.last_queue_id;
+        case 13:return c.queue_id;
+        case 14:c.queue_id=static_cast<std::uint32_t>(arg);
+            if(!g_logged_grouped_delete_remap){
+                g_logged_grouped_delete_remap=true;
+                log_message("Grouped queue cancellation remapped to the last "
+                    "native item in the visible run");
+            }return 1;
+        case 15:delete_native_queue_item(c.producer,c.queue_id);return 1;
+        case 16:materialize_pending_queue(c.producer);return 1;
+        default:return 0;
         }
-    }
-
-    if (have_requested_slot) {
-        const GroupedQueueView view = collect_grouped_queue(producer);
-        const std::uint32_t slot = requested_slot;
-        if (slot < view.count) {
-            const GroupedQueueEntry group = view.groups[slot];
-            if (group.infinite) {
-                // Selecting xINF for removal disables repeat but keeps
-                // exactly one ordinary build of that class in the queue.
-                trim_group_to_single(producer, slot);
-                stop_continuous(producer);
-                log_message(
-                    "Continuous queue slot removed: xINF reverted "
-                    "to one normal build");
-                return;
-            }
-            if (group.pending_count != 0 &&
-                group.last_pending_index != 0xffffffffu) {
-                erase_pending_queue_index(
-                    producer, group.last_pending_index);
-                if (!g_logged_grouped_delete_remap) {
-                    g_logged_grouped_delete_remap = true;
-                    log_message(
-                        "Grouped queue cancellation removed the last "
-                        "extended item in the visible run");
-                }
-                return;
-            }
-            if (group.last_queue_id != 0 &&
-                group.last_queue_id != queue_id) {
-                queue_id = group.last_queue_id;
-                if (!g_logged_grouped_delete_remap) {
-                    g_logged_grouped_delete_remap = true;
-                    log_message(
-                        "Grouped queue cancellation remapped to the last "
-                        "native item in the visible run");
-                }
-            }
-        }
-    }
-    // Do not stop continuous production just because an earlier finite slot
-    // was cancelled. The xINF slot is an independent logical tail and is only
-    // disabled by explicitly selecting that infinite slot above.
-    delete_native_queue_item(producer, queue_id);
-    materialize_pending_queue(producer);
+    };
+    a2fo_rs_c_queue_act_delete(&context,step);
 }
 
 void __attribute__((fastcall)) producer_clear_hook(void* producer, void*) {
-    stop_continuous(producer);
-    clear_pending_queue(producer);
-    const bool charge_at_queue = charges_resources_when_queued(producer);
-    const std::uint32_t active_id = current_queue_id(producer);
-    bool active_notified = false;
-    void* item = producer ? *reinterpret_cast<void**>(
-        bytes(producer) + kQueueHeadOffset) : nullptr;
-    while (item) {
-        void* target_class = *reinterpret_cast<void**>(item);
-        const std::uint32_t queue_id =
-            *reinterpret_cast<const std::uint32_t*>(
-                bytes(item) + kQueueItemIdOffset);
-        if (target_class) {
-            if (charge_at_queue) {
-                dispatch_producer_event(
-                    A2FO_PRODUCER_EVENT_CLEARED,
-                    producer, target_class);
-            }
-            notify_refit_job_removed(
-                producer, queue_id, target_class,
-                A2FO_REFIT_QUEUE_CLEARED);
-            if (queue_id == active_id) active_notified = true;
-        }
-        item = *reinterpret_cast<void**>(
-            bytes(item) + kQueueItemNextOffset);
-    }
-    if (!charge_at_queue) {
-        // Fleet Operations' non-queue-charge branch refunds only the active
-        // class directly; it does not route through its Cancel callback.
-        if (void* target_class = current_build_target_class(producer)) {
-            dispatch_producer_event(
-                A2FO_PRODUCER_EVENT_CLEARED, producer, target_class);
-            if (!active_notified) {
-                notify_refit_job_removed(
-                    producer, active_id, target_class,
-                    A2FO_REFIT_QUEUE_CLEARED);
-                active_notified = true;
-            }
-        }
-    }
-    if (producer && active_id != 0 && !active_notified) {
-        // The active target pointer can be cleared before Clear reaches this
-        // hook. Preserve the queue-ID removal notification so optional refit
-        // state (including its collision restore) cannot be orphaned.
-        notify_refit_job_removed(
-            producer, active_id,
-            current_build_target_class(producer),
-            A2FO_REFIT_QUEUE_CLEARED);
-    }
-    a2fo_call_thiscall_0(g_fo_clear_hook.gateway, producer);
-    clear_hybrid_construct_placements(producer);
+    struct Context {
+        void* producer;
+        bool charge_at_queue{};
+        std::uint32_t active_id{};
+        void* item{};
+        void* target_class{};
+        std::uint32_t queue_id{};
+        std::exception_ptr error{};
+    } context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:stop_continuous(c.producer);return 1;
+        case 1:clear_pending_queue(c.producer);return 1;
+        case 2:c.charge_at_queue=charges_resources_when_queued(c.producer);
+            return c.charge_at_queue;
+        case 3:c.active_id=current_queue_id(c.producer);return c.active_id;
+        case 4:c.item=c.producer?*reinterpret_cast<void**>(
+            bytes(c.producer)+kQueueHeadOffset):nullptr;
+            return reinterpret_cast<std::uintptr_t>(c.item);
+        case 5:c.target_class=*reinterpret_cast<void**>(c.item);
+            return reinterpret_cast<std::uintptr_t>(c.target_class);
+        case 6:c.queue_id=*reinterpret_cast<const std::uint32_t*>(
+            bytes(c.item)+kQueueItemIdOffset);return c.queue_id;
+        case 7:dispatch_producer_event(A2FO_PRODUCER_EVENT_CLEARED,
+            c.producer,c.target_class);return 1;
+        case 8:notify_refit_job_removed(c.producer,c.queue_id,
+            c.target_class,A2FO_REFIT_QUEUE_CLEARED);return 1;
+        case 9:c.item=*reinterpret_cast<void**>(
+            bytes(c.item)+kQueueItemNextOffset);
+            return reinterpret_cast<std::uintptr_t>(c.item);
+        case 10:c.target_class=current_build_target_class(c.producer);
+            return reinterpret_cast<std::uintptr_t>(c.target_class);
+        case 11:dispatch_producer_event(A2FO_PRODUCER_EVENT_CLEARED,
+            c.producer,c.target_class);return 1;
+        case 12:notify_refit_job_removed(c.producer,c.active_id,
+            c.target_class,A2FO_REFIT_QUEUE_CLEARED);return 1;
+        case 13:notify_refit_job_removed(c.producer,c.active_id,
+            current_build_target_class(c.producer),
+            A2FO_REFIT_QUEUE_CLEARED);return 1;
+        case 14:a2fo_call_thiscall_0(g_fo_clear_hook.gateway,c.producer);
+            return 1;
+        case 15:clear_hybrid_construct_placements(c.producer);return 1;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINTPTR_MAX;}
+    };
+    a2fo_rs_c_queue_clear(&context,
+        reinterpret_cast<std::uintptr_t>(producer),step);
+    if(context.error)std::rethrow_exception(context.error);
 }
 
 void __attribute__((fastcall)) producer_simulate_hook(
     void* producer, void*, std::uint32_t delta_bits) {
-    a2fo_call_thiscall_1(g_producer_simulate_hook.gateway, producer,
-                        delta_bits);
-    if (!g_repeat_ready || !producer) return;
-
-    if (native_queue_count(producer) < kQueueCapacity) {
-        const PendingQueueSnapshot pending = pending_queue_snapshot(producer);
-        if (pending.count != 0) materialize_pending_queue(producer);
-    }
-
-    bool retry = false;
-    const std::uint32_t handle = object_handle(producer);
-    EnterCriticalSection(&g_queue_lock);
-    const auto found = g_continuous.find(handle);
-    if (found != g_continuous.end()) {
-        ContinuousState& state = found->second;
-        if (state.active) {
-            const std::uint32_t count = *reinterpret_cast<std::uint32_t*>(
-                bytes(producer) + kQueueCountOffset);
-            if (count < kQueueCapacity &&
-                ++state.paused_retry_ticks >= kPausedRetryTicks) {
-                state.paused_retry_ticks = 0;
-                retry = true;
-            }
-        }
-    }
-    LeaveCriticalSection(&g_queue_lock);
-    if (retry) try_refill(producer);
+    struct Context {
+        void* producer;
+        std::uint32_t delta_bits;
+        std::uint32_t handle{};
+        ContinuousState* state{};
+        std::uint8_t failed{};
+        std::exception_ptr error{};
+    } context{producer,delta_bits};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:a2fo_call_thiscall_1(g_producer_simulate_hook.gateway,
+            c.producer,c.delta_bits);return 1;
+        case 1:return native_queue_count(c.producer);
+        case 2:return pending_queue_snapshot(c.producer).count;
+        case 3:materialize_pending_queue(c.producer);return 1;
+        case 4:c.handle=object_handle(c.producer);
+            EnterCriticalSection(&g_queue_lock);
+            {const auto found=g_continuous.find(c.handle);
+            c.state=found==g_continuous.end()?nullptr:&found->second;}
+            return c.state&&c.state->active;
+        case 5:return *reinterpret_cast<std::uint32_t*>(
+            bytes(c.producer)+kQueueCountOffset);
+        case 6:return ++c.state->paused_retry_ticks;
+        case 7:c.state->paused_retry_ticks=0;return 1;
+        case 8:LeaveCriticalSection(&g_queue_lock);return 1;
+        case 9:try_refill(c.producer);return 1;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();c.failed=1;return 0;}
+    };
+    a2fo_rs_c_queue_simulate(&context,
+        reinterpret_cast<std::uintptr_t>(producer),g_repeat_ready,step,
+        &context.failed);
+    if(context.error)std::rethrow_exception(context.error);
 }
 
 std::uintptr_t __attribute__((fastcall)) producer_dtor_hook(
     void* producer, void*) {
-    if (producer) {
-        dispatch_producer_event(
-            A2FO_PRODUCER_EVENT_DESTROYING, producer, nullptr);
-        notify_refit_job_removed(
-            producer, 0, nullptr,
-            A2FO_REFIT_QUEUE_PRODUCER_DESTROYED);
-    }
-    stop_continuous(producer);
-    clear_pending_queue(producer);
-    return a2fo_call_thiscall_0(g_producer_dtor_hook.gateway, producer);
+    struct Context {
+        void* producer;
+        std::uint8_t failed{};
+        std::exception_ptr error{};
+    } context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:dispatch_producer_event(A2FO_PRODUCER_EVENT_DESTROYING,
+            c.producer,nullptr);return 1;
+        case 1:notify_refit_job_removed(c.producer,0,nullptr,
+            A2FO_REFIT_QUEUE_PRODUCER_DESTROYED);return 1;
+        case 2:stop_continuous(c.producer);return 1;
+        case 3:clear_pending_queue(c.producer);return 1;
+        case 4:return a2fo_call_thiscall_0(g_producer_dtor_hook.gateway,
+            c.producer);
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();c.failed=1;return 0;}
+    };
+    const auto result=a2fo_rs_c_queue_dtor(&context,
+        reinterpret_cast<std::uintptr_t>(producer),step,&context.failed);
+    if(context.error)std::rethrow_exception(context.error);
+    return result;
 }
 
 void reconstruct_queue_ids(void* producer) {
-    auto* producer_bytes = bytes(producer);
-    void* item = *reinterpret_cast<void**>(
-        producer_bytes + kQueueHeadOffset);
-    std::uint32_t current_id = 0;
-    std::uint32_t maximum_id = 0;
-    if (item) {
-        current_id = *reinterpret_cast<std::uint32_t*>(
-            bytes(item) + kQueueItemIdOffset);
-    }
-    unsigned visited = 0;
-    while (item && visited++ < kQueueCapacity) {
-        maximum_id = std::max(
-            maximum_id,
-            *reinterpret_cast<std::uint32_t*>(
-                bytes(item) + kQueueItemIdOffset));
-        item = *reinterpret_cast<void**>(bytes(item) + kQueueItemNextOffset);
-    }
-    *reinterpret_cast<std::uint32_t*>(
-        producer_bytes + kCurrentQueueIdOffset) = current_id;
-    *reinterpret_cast<std::uint32_t*>(
-        producer_bytes + kNextQueueIdOffset) =
-        maximum_id == 0xffffffffu ? 1u : std::max(1u, maximum_id + 1u);
+    struct Context {void* producer;void* item{};} context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t value) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(op){
+        case 0:c.item=*reinterpret_cast<void**>(
+            bytes(c.producer)+kQueueHeadOffset);
+            return reinterpret_cast<std::uintptr_t>(c.item);
+        case 1:return *reinterpret_cast<std::uint32_t*>(
+            bytes(c.item)+kQueueItemIdOffset);
+        case 2:return *reinterpret_cast<std::uint32_t*>(
+            bytes(c.item)+kQueueItemIdOffset);
+        case 3:c.item=*reinterpret_cast<void**>(
+            bytes(c.item)+kQueueItemNextOffset);
+            return reinterpret_cast<std::uintptr_t>(c.item);
+        case 4:*reinterpret_cast<std::uint32_t*>(
+            bytes(c.producer)+kCurrentQueueIdOffset)=
+            static_cast<std::uint32_t>(value);return 1;
+        case 5:*reinterpret_cast<std::uint32_t*>(
+            bytes(c.producer)+kNextQueueIdOffset)=
+            static_cast<std::uint32_t>(value);return 1;
+        default:return 0;
+        }
+    };
+    a2fo_rs_c_queue_reconstruct_ids(&context,step);
 }
 
 std::uintptr_t __attribute__((fastcall)) producer_save_hook(
     void* producer, void*, void* writer) {
-    if (!g_repeat_ready || !producer) {
-        return a2fo_call_thiscall_1(
-            g_producer_save_hook.gateway, producer,
-            reinterpret_cast<std::uintptr_t>(writer));
-    }
-
-    bool active = false;
-    std::uint32_t target_project_id = 0;
-    const std::uint32_t handle = object_handle(producer);
-    EnterCriticalSection(&g_queue_lock);
-    const auto found = g_continuous.find(handle);
-    if (found != g_continuous.end() && found->second.active) {
-        active = true;
-        target_project_id = found->second.target_project_id;
-    }
-    LeaveCriticalSection(&g_queue_lock);
-
-    auto* producer_bytes = bytes(producer);
-    auto* current_id = reinterpret_cast<std::uint32_t*>(
-        producer_bytes + kCurrentQueueIdOffset);
-    auto* next_id = reinterpret_cast<std::uint32_t*>(
-        producer_bytes + kNextQueueIdOffset);
-    const std::uint32_t saved_current_id = *current_id;
-    const std::uint32_t saved_next_id = *next_id;
-    if (active) {
-        *current_id = kRepeatSaveMarker;
-        *next_id = target_project_id;
-    }
-    const std::uintptr_t result = a2fo_call_thiscall_1(
-        g_producer_save_hook.gateway, producer,
-        reinterpret_cast<std::uintptr_t>(writer));
-    *current_id = saved_current_id;
-    *next_id = saved_next_id;
+    struct Context {
+        void* producer;
+        void* writer;
+        bool active{};
+        std::uint32_t target_project_id{};
+        std::uint32_t* current_id{};
+        std::uint32_t* next_id{};
+        std::uint32_t saved_current_id{};
+        std::uint32_t saved_next_id{};
+        std::uint8_t failed{};
+        std::exception_ptr error{};
+    } context{producer,writer};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:return a2fo_call_thiscall_1(
+            g_producer_save_hook.gateway,c.producer,
+            reinterpret_cast<std::uintptr_t>(c.writer));
+        case 1: {
+            const std::uint32_t handle=object_handle(c.producer);
+            EnterCriticalSection(&g_queue_lock);
+            const auto found=g_continuous.find(handle);
+            if(found!=g_continuous.end()&&found->second.active){
+                c.active=true;
+                c.target_project_id=found->second.target_project_id;
+            }
+            LeaveCriticalSection(&g_queue_lock);
+            return c.active;
+        }
+        case 2:c.current_id=reinterpret_cast<std::uint32_t*>(
+            bytes(c.producer)+kCurrentQueueIdOffset);
+            c.saved_current_id=*c.current_id;return c.saved_current_id;
+        case 3:c.next_id=reinterpret_cast<std::uint32_t*>(
+            bytes(c.producer)+kNextQueueIdOffset);
+            c.saved_next_id=*c.next_id;return c.saved_next_id;
+        case 4:*c.current_id=kRepeatSaveMarker;
+            *c.next_id=c.target_project_id;return 1;
+        case 5:return a2fo_call_thiscall_1(
+            g_producer_save_hook.gateway,c.producer,
+            reinterpret_cast<std::uintptr_t>(c.writer));
+        case 6:*c.current_id=c.saved_current_id;return 1;
+        case 7:*c.next_id=c.saved_next_id;return 1;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();c.failed=1;
+            return 0;}
+    };
+    const auto result=a2fo_rs_c_queue_save(&context,
+        reinterpret_cast<std::uintptr_t>(producer),g_repeat_ready,step,
+        &context.failed);
+    if(context.error)std::rethrow_exception(context.error);
     return result;
 }
 
 std::uintptr_t __attribute__((fastcall)) producer_load_hook(
     void* producer, void*, void* reader) {
-    const std::uintptr_t result = a2fo_call_thiscall_1(
-        g_producer_load_hook.gateway, producer,
-        reinterpret_cast<std::uintptr_t>(reader));
-    if (producer) clear_pending_queue(producer);
-    if (!g_repeat_ready || !producer || result == 0) return result;
-
-    auto* producer_bytes = bytes(producer);
-    const std::uint32_t marker = *reinterpret_cast<std::uint32_t*>(
-        producer_bytes + kCurrentQueueIdOffset);
-    if (marker != kRepeatSaveMarker) return result;
-    const std::uint32_t target_project_id =
-        *reinterpret_cast<std::uint32_t*>(
-            producer_bytes + kNextQueueIdOffset);
-    reconstruct_queue_ids(producer);
-
-    using FindByProjectIdFunction = void* (A2FO_CALL*)(std::uint32_t);
-    const auto find_by_project_id =
-        reinterpret_cast<FindByProjectIdFunction>(
-            at(g_armada, kGameObjectClassFindByProjectIdRva));
-    void* target_class = find_by_project_id(target_project_id);
-    if (!target_class) {
-        stop_continuous(producer);
-        return result;
-    }
-
-    try {
-        const std::uint32_t handle = object_handle(producer);
-        EnterCriticalSection(&g_queue_lock);
-        ContinuousState& state = g_continuous[handle];
-        state.active = true;
-        state.target_class = target_class;
-        state.target_project_id = target_project_id;
-        state.paused_retry_ticks = 0;
-        LeaveCriticalSection(&g_queue_lock);
-    } catch (...) {
-        LeaveCriticalSection(&g_queue_lock);
-    }
+    struct Context {
+        void* producer;
+        void* reader;
+        std::uint32_t target_project_id{};
+        void* target_class{};
+        std::uint8_t failed{};
+        std::exception_ptr error{};
+    } context{producer,reader};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:return a2fo_call_thiscall_1(
+            g_producer_load_hook.gateway,c.producer,
+            reinterpret_cast<std::uintptr_t>(c.reader));
+        case 1:clear_pending_queue(c.producer);return 1;
+        case 2:return *reinterpret_cast<std::uint32_t*>(
+            bytes(c.producer)+kCurrentQueueIdOffset);
+        case 3:c.target_project_id=*reinterpret_cast<std::uint32_t*>(
+            bytes(c.producer)+kNextQueueIdOffset);
+            return c.target_project_id;
+        case 4:reconstruct_queue_ids(c.producer);return 1;
+        case 5: {
+            using FindByProjectIdFunction=void* (A2FO_CALL*)(std::uint32_t);
+            const auto find_by_project_id=
+                reinterpret_cast<FindByProjectIdFunction>(
+                    at(g_armada,kGameObjectClassFindByProjectIdRva));
+            c.target_class=find_by_project_id(c.target_project_id);
+            return reinterpret_cast<std::uintptr_t>(c.target_class);
+        }
+        case 6:stop_continuous(c.producer);return 1;
+        case 7: {
+            try {
+                const std::uint32_t handle=object_handle(c.producer);
+                EnterCriticalSection(&g_queue_lock);
+                ContinuousState& state=g_continuous[handle];
+                state.active=true;
+                state.target_class=c.target_class;
+                state.target_project_id=c.target_project_id;
+                state.paused_retry_ticks=0;
+                LeaveCriticalSection(&g_queue_lock);
+            }catch(...){LeaveCriticalSection(&g_queue_lock);}
+            return 1;
+        }
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();c.failed=1;
+            return 0;}
+    };
+    const auto result=a2fo_rs_c_queue_load(&context,
+        reinterpret_cast<std::uintptr_t>(producer),g_repeat_ready,step,
+        &context.failed);
+    if(context.error)std::rethrow_exception(context.error);
     return result;
 }
 
@@ -1808,16 +1956,6 @@ bool signature_matches(HMODULE module, std::uintptr_t rva,
 }
 
 template <std::size_t Size>
-bool require_signature(HMODULE module, std::uintptr_t rva,
-                       const std::uint8_t (&expected)[Size],
-                       const char* name) {
-    if (signature_matches(module, rva, expected)) return true;
-    log_message("Continuous production signature mismatch at:");
-    log_message(name);
-    return false;
-}
-
-template <std::size_t Size>
 bool install_hook(HMODULE module, std::uintptr_t rva, void* replacement,
                   const std::uint8_t (&expected)[Size],
                   A2FO_InlineHook& hook) {
@@ -1826,140 +1964,136 @@ bool install_hook(HMODULE module, std::uintptr_t rva, void* replacement,
 }
 
 bool install_repeat_hooks() {
-    bool signatures_ok = true;
-    signatures_ok &= require_signature(
-        g_armada, kGameObjectDequeueClassCommandRva,
-        kExpectedGameObjectDequeueClassCommand,
-        "Armada synchronized typed-class order receive");
-    signatures_ok &= require_signature(
-        g_armada, kProducerDtorRva, kExpectedProducerDtor,
-        "Armada Producer destructor");
-    signatures_ok &= require_signature(
-        g_armada, kProducerSimulateRva, kExpectedProducerSimulate,
-        "Armada Producer simulate");
-    signatures_ok &= require_signature(
-        g_armada, kProducerLoadRva, kExpectedProducerLoad,
-        "Armada Producer load");
-    signatures_ok &= require_signature(
-        g_armada, kProducerSaveRva, kExpectedProducerSave,
-        "Armada Producer save");
-    signatures_ok &= require_signature(
-        g_armada, kGameObjectClassFindByProjectIdRva,
-        kExpectedFindByProjectId, "Armada class lookup by project ID");
-    signatures_ok &= require_signature(
-        g_fleet_ops, kFoProducerFinishRva, kExpectedFoFinish,
-        "Fleet Ops Producer finish callback");
-    signatures_ok &= require_signature(
-        g_fleet_ops, kFoProducerCancelRva, kExpectedFoCancel,
-        "Fleet Ops Producer cancel callback");
-    signatures_ok &= require_signature(
-        g_fleet_ops, kFoProducerPushCheckedRva, kExpectedFoPushChecked,
-        "Fleet Ops checked queue push");
-    signatures_ok &= require_signature(
-        g_fleet_ops, kFoProducerCommandPushRva, kExpectedFoCommandPush,
-        "Fleet Ops build-command push");
-    signatures_ok &= require_signature(
-        g_fleet_ops, kFoProducerActDeleteRva, kExpectedFoActDelete,
-        "Fleet Ops queue-item delete callback");
-    signatures_ok &= require_signature(
-        g_fleet_ops, kFoProducerClearRva, kExpectedFoClear,
-        "Fleet Ops queue clear callback");
-    if (!signatures_ok) {
-        log_message("Continuous production signatures mismatch; disabled");
-        return false;
-    }
-
-    const bool installed =
-        install_hook(g_armada, kGameObjectDequeueClassCommandRva,
-                     reinterpret_cast<void*>(
-                         &game_object_dequeue_class_command_hook),
-                     kExpectedGameObjectDequeueClassCommand,
-                     g_game_object_dequeue_class_command_hook) &&
-        install_hook(g_armada, kProducerDtorRva,
-                     reinterpret_cast<void*>(&producer_dtor_hook),
-                     kExpectedProducerDtor, g_producer_dtor_hook) &&
-        install_hook(g_armada, kProducerSimulateRva,
-                     reinterpret_cast<void*>(&producer_simulate_hook),
-                     kExpectedProducerSimulate, g_producer_simulate_hook) &&
-        install_hook(g_armada, kProducerLoadRva,
-                     reinterpret_cast<void*>(&producer_load_hook),
-                     kExpectedProducerLoad, g_producer_load_hook) &&
-        install_hook(g_armada, kProducerSaveRva,
-                     reinterpret_cast<void*>(&producer_save_hook),
-                     kExpectedProducerSave, g_producer_save_hook) &&
-        install_hook(g_fleet_ops, kFoProducerFinishRva,
-                     reinterpret_cast<void*>(&producer_finish_hook),
-                     kExpectedFoFinish, g_fo_finish_hook) &&
-        install_hook(g_fleet_ops, kFoProducerCancelRva,
-                     reinterpret_cast<void*>(&producer_cancel_hook),
-                     kExpectedFoCancel, g_fo_cancel_hook) &&
-        install_hook(g_fleet_ops, kFoProducerCommandPushRva,
-                     reinterpret_cast<void*>(&producer_command_push_hook),
-                     kExpectedFoCommandPush, g_fo_command_push_hook) &&
-        install_hook(g_fleet_ops, kFoProducerActDeleteRva,
-                     reinterpret_cast<void*>(&producer_act_delete_hook),
-                     kExpectedFoActDelete, g_fo_act_delete_hook) &&
-        install_hook(g_fleet_ops, kFoProducerClearRva,
-                     reinterpret_cast<void*>(&producer_clear_hook),
-                     kExpectedFoClear, g_fo_clear_hook);
-    if (!installed) {
-        log_message("Continuous production hook installation incomplete; "
-                    "feature disabled safely");
-        return false;
-    }
-    return true;
+    struct SignatureSpec {
+        bool fleet;
+        std::uintptr_t rva;
+        const std::uint8_t* expected;
+        std::size_t length;
+        const char* name;
+    };
+    const std::array<SignatureSpec,12> signatures{{
+        {false,kGameObjectDequeueClassCommandRva,kExpectedGameObjectDequeueClassCommand,sizeof(kExpectedGameObjectDequeueClassCommand),"Armada synchronized typed-class order receive"},
+        {false,kProducerDtorRva,kExpectedProducerDtor,sizeof(kExpectedProducerDtor),"Armada Producer destructor"},
+        {false,kProducerSimulateRva,kExpectedProducerSimulate,sizeof(kExpectedProducerSimulate),"Armada Producer simulate"},
+        {false,kProducerLoadRva,kExpectedProducerLoad,sizeof(kExpectedProducerLoad),"Armada Producer load"},
+        {false,kProducerSaveRva,kExpectedProducerSave,sizeof(kExpectedProducerSave),"Armada Producer save"},
+        {false,kGameObjectClassFindByProjectIdRva,kExpectedFindByProjectId,sizeof(kExpectedFindByProjectId),"Armada class lookup by project ID"},
+        {true,kFoProducerFinishRva,kExpectedFoFinish,sizeof(kExpectedFoFinish),"Fleet Ops Producer finish callback"},
+        {true,kFoProducerCancelRva,kExpectedFoCancel,sizeof(kExpectedFoCancel),"Fleet Ops Producer cancel callback"},
+        {true,kFoProducerPushCheckedRva,kExpectedFoPushChecked,sizeof(kExpectedFoPushChecked),"Fleet Ops checked queue push"},
+        {true,kFoProducerCommandPushRva,kExpectedFoCommandPush,sizeof(kExpectedFoCommandPush),"Fleet Ops build-command push"},
+        {true,kFoProducerActDeleteRva,kExpectedFoActDelete,sizeof(kExpectedFoActDelete),"Fleet Ops queue-item delete callback"},
+        {true,kFoProducerClearRva,kExpectedFoClear,sizeof(kExpectedFoClear),"Fleet Ops queue clear callback"},
+    }};
+    struct HookSpec {
+        bool fleet;
+        std::uintptr_t rva;
+        void* replacement;
+        const std::uint8_t* expected;
+        std::size_t length;
+        A2FO_InlineHook* hook;
+    };
+    const std::array<HookSpec,10> hooks{{
+        {false,kGameObjectDequeueClassCommandRva,reinterpret_cast<void*>(&game_object_dequeue_class_command_hook),kExpectedGameObjectDequeueClassCommand,sizeof(kExpectedGameObjectDequeueClassCommand),&g_game_object_dequeue_class_command_hook},
+        {false,kProducerDtorRva,reinterpret_cast<void*>(&producer_dtor_hook),kExpectedProducerDtor,sizeof(kExpectedProducerDtor),&g_producer_dtor_hook},
+        {false,kProducerSimulateRva,reinterpret_cast<void*>(&producer_simulate_hook),kExpectedProducerSimulate,sizeof(kExpectedProducerSimulate),&g_producer_simulate_hook},
+        {false,kProducerLoadRva,reinterpret_cast<void*>(&producer_load_hook),kExpectedProducerLoad,sizeof(kExpectedProducerLoad),&g_producer_load_hook},
+        {false,kProducerSaveRva,reinterpret_cast<void*>(&producer_save_hook),kExpectedProducerSave,sizeof(kExpectedProducerSave),&g_producer_save_hook},
+        {true,kFoProducerFinishRva,reinterpret_cast<void*>(&producer_finish_hook),kExpectedFoFinish,sizeof(kExpectedFoFinish),&g_fo_finish_hook},
+        {true,kFoProducerCancelRva,reinterpret_cast<void*>(&producer_cancel_hook),kExpectedFoCancel,sizeof(kExpectedFoCancel),&g_fo_cancel_hook},
+        {true,kFoProducerCommandPushRva,reinterpret_cast<void*>(&producer_command_push_hook),kExpectedFoCommandPush,sizeof(kExpectedFoCommandPush),&g_fo_command_push_hook},
+        {true,kFoProducerActDeleteRva,reinterpret_cast<void*>(&producer_act_delete_hook),kExpectedFoActDelete,sizeof(kExpectedFoActDelete),&g_fo_act_delete_hook},
+        {true,kFoProducerClearRva,reinterpret_cast<void*>(&producer_clear_hook),kExpectedFoClear,sizeof(kExpectedFoClear),&g_fo_clear_hook},
+    }};
+    struct Context {
+        const std::array<SignatureSpec,12>& signatures;
+        const std::array<HookSpec,10>& hooks;
+        std::exception_ptr error{};
+    } context{signatures,hooks};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t index) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0: {
+            const auto& spec=c.signatures[index];
+            HMODULE module=spec.fleet?g_fleet_ops:g_armada;
+            const bool matches=module&&std::memcmp(
+                at(module,spec.rva),spec.expected,spec.length)==0;
+            if(!matches){
+                log_message("Continuous production signature mismatch at:");
+                log_message(spec.name);
+            }
+            return matches;
+        }
+        case 1:log_message("Continuous production signatures mismatch; disabled");return 1;
+        case 2: {
+            const auto& spec=c.hooks[index];
+            HMODULE module=spec.fleet?g_fleet_ops:g_armada;
+            return g_api->install_inline_hook(at(module,spec.rva),
+                spec.replacement,spec.length,spec.expected,spec.hook);
+        }
+        case 3:log_message("Continuous production hook installation incomplete; feature disabled safely");return 1;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINTPTR_MAX;}
+    };
+    const bool result=a2fo_rs_c_queue_install_hooks(&context,step);
+    if(context.error)std::rethrow_exception(context.error);
+    return result;
 }
 
 }  // namespace
 
+// Startup capability query for core-provided Producer event consumers. A
+// loaded FeaturePack alone does not prove its checked queue hooks succeeded.
+extern "C" __declspec(dllexport) bool A2FO_CALL A2FO_ProducerEventsReady() noexcept {
+    return g_repeat_ready;
+}
+
 bool initialize_queue_enhancements(const A2FO_ModuleApi* api,
                                    HMODULE armada,
                                    HMODULE fleet_ops) noexcept {
-    g_api = api;
-    g_armada = armada;
-    g_fleet_ops = fleet_ops;
-    if (!g_api || !g_api->install_inline_hook || !g_armada || !g_fleet_ops) {
-        return false;
-    }
-
-    InitializeCriticalSection(&g_queue_lock);
-    g_queue_lock_ready = true;
-    try {
-        g_continuous.reserve(256);
-        g_pending_queue.reserve(256);
-    } catch (...) {
-        log_message("Queue state allocation failed; enhancements disabled");
-        return false;
-    }
-
-    if (!signature_matches(g_armada, kGameObjectQueueClassCommandRva,
-                           kExpectedGameObjectQueueClassCommand) ||
-        !install_hook(g_armada, kGameObjectQueueClassCommandRva,
-                      reinterpret_cast<void*>(
-                          &game_object_queue_class_command_hook),
-                      kExpectedGameObjectQueueClassCommand,
-                      g_game_object_queue_class_command_hook)) {
-        log_message("Ctrl-fill queue hook signature mismatch; disabled");
-        return false;
-    }
-    log_message("Ctrl-click queue fill enabled (10 units per logical slot)");
-
-    g_repeat_ready = install_repeat_hooks();
-    if (g_repeat_ready) {
-        log_message("Ctrl+Alt continuous production enabled as xINF "
-                    "with synchronized orders and save markers");
-        g_grouped_queue_ui_ready = install_grouped_queue_ui();
-        if (g_grouped_queue_ui_ready) {
-            log_message(
-                "Grouped build queue enabled: 10 visible slots x 10 units "
-                "(100 logical jobs), with xN/xINF counters");
-        } else {
-            log_message(
-                "Grouped build queue presentation unavailable; native "
-                "ten-slot display retained");
-        }
-    }
-    return true;
+    g_api=api;
+    g_armada=armada;
+    g_fleet_ops=fleet_ops;
+    struct Context {std::exception_ptr error{};} context;
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:return g_api&&g_api->install_inline_hook&&g_armada&&g_fleet_ops;
+        case 1:InitializeCriticalSection(&g_queue_lock);
+            g_queue_lock_ready=true;return 1;
+        case 2:try {g_continuous.reserve(256);
+                    g_pending_queue.reserve(256);return 1;}
+            catch(...){return 0;}
+        case 3:log_message("Queue state allocation failed; enhancements disabled");return 1;
+        case 4:return signature_matches(g_armada,
+            kGameObjectQueueClassCommandRva,
+            kExpectedGameObjectQueueClassCommand);
+        case 5:return install_hook(g_armada,
+            kGameObjectQueueClassCommandRva,
+            reinterpret_cast<void*>(&game_object_queue_class_command_hook),
+            kExpectedGameObjectQueueClassCommand,
+            g_game_object_queue_class_command_hook);
+        case 6:log_message("Ctrl-fill queue hook signature mismatch; disabled");return 1;
+        case 7:log_message("Ctrl-click queue fill enabled (10 units per logical slot)");return 1;
+        case 8:g_repeat_ready=install_repeat_hooks();return g_repeat_ready;
+        case 9:log_message("Ctrl+Alt continuous production enabled as xINF "
+            "with synchronized orders and save markers");return 1;
+        case 10:g_grouped_queue_ui_ready=install_grouped_queue_ui();
+            return g_grouped_queue_ui_ready;
+        case 11:log_message(
+            "Grouped build queue enabled: 10 visible slots x 10 units "
+            "(100 logical jobs), with xN/xINF counters");return 1;
+        case 12:log_message(
+            "Grouped build queue presentation unavailable; native "
+            "ten-slot display retained");return 1;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINTPTR_MAX;}
+    };
+    const bool result=a2fo_rs_c_queue_initialize(&context,step);
+    if(context.error)std::terminate();
+    return result;
 }
 
 extern "C" __declspec(dllexport)
@@ -1969,102 +2103,121 @@ std::uint32_t __cdecl A2FO_ProducerPushRefit(
 }
 
 extern "C" __declspec(dllexport)
-bool __cdecl A2FO_ProducerCancelQueuedJob(void* producer, std::uint32_t queue_id) {
-    if (!g_repeat_ready || !producer || !queue_id ||
-        !g_fo_act_delete_hook.gateway || !queued_target_class(producer, queue_id))
-        return false;
-    // Calling producer_act_delete_hook here would interpret the ID as a GUI
-    // slot and could cancel a different ship in a grouped queue.
-    delete_native_queue_item(producer, queue_id);
-    materialize_pending_queue(producer);
-    return true;
+bool __cdecl A2FO_ProducerCancelQueuedJob(void* producer,
+                                          std::uint32_t queue_id) {
+    struct Context {void* producer;std::uint32_t queue_id;}
+        context{producer,queue_id};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(op){
+        case 0:return g_fo_act_delete_hook.gateway!=nullptr;
+        case 1:return queued_target_class(c.producer,c.queue_id)!=nullptr;
+        case 2:delete_native_queue_item(c.producer,c.queue_id);return 1;
+        case 3:materialize_pending_queue(c.producer);return 1;
+        default:return 0;
+        }
+    };
+    return a2fo_rs_c_queue_export_cancel(&context,
+        reinterpret_cast<std::uintptr_t>(producer),queue_id,g_repeat_ready,
+        step);
 }
 
-// HybridBuild owns the checked Producer::IsBusy / replacement-pop gates used
-// by CraftProcess before a build order reaches QueueClassCommand. Expose only
-// a read-only admission hint so HybridBuild can let an 11th+ synchronized
-// order reach FeaturePack's sidecar without ever increasing Armada's native
-// ten-node FIFO. The target-specific decision still happens later in
-// logical_queue_has_room_for().
 bool producer_logical_queue_has_room(void* producer) noexcept {
-    if (!g_repeat_ready || !producer) return false;
-    const GroupedQueueView view = collect_grouped_queue(producer);
-    if (logical_queue_units(view) >= kMaxLogicalQueue) return false;
-    if (view.count < kVisibleQueueSlots) return true;
-    if (view.count == 0) return true;
-    const GroupedQueueEntry& tail = view.groups[view.count - 1];
-    return !tail.infinite && tail.count < kUnitsPerVisibleSlot;
+    struct Context {void* producer;GroupedQueueView view{};}
+        context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(op){
+        case 0:c.view=collect_grouped_queue(c.producer);return 1;
+        case 1:return logical_queue_units(c.view);
+        case 2:return c.view.count;
+        case 3:return c.view.groups[c.view.count-1].infinite;
+        case 4:return c.view.groups[c.view.count-1].count;
+        default:return 0;
+        }
+    };
+    return a2fo_rs_c_queue_export_room(&context,
+        reinterpret_cast<std::uintptr_t>(producer),g_repeat_ready,step);
 }
 
-// Keep the export for compatibility with intermediate V3/V4 HybridBuild
-// binaries. V5 passes this same function pointer directly through the existing
-// HybridBridge and no longer depends on GetProcAddress succeeding.
 extern "C" __declspec(dllexport)
 bool __cdecl A2FO_ProducerLogicalQueueHasRoom(void* producer) {
     return producer_logical_queue_has_room(producer);
 }
 
-// Target-specific admission query for the Build palette. Once all ten visual
-// slots exist, only the class already occupying slot ten may grow that slot,
-// and only until its count reaches ten. HybridBuild uses this read-only query
-// to gray out build choices that cannot be represented without creating an
-// eleventh visible slot.
+extern "C" __declspec(dllexport)
+std::uint32_t __cdecl A2FO_ProducerLogicalQueueSize(void* producer) {
+    struct Context {void* producer;} context{producer};
+    const auto step=+[](void* opaque,std::uint32_t,
+        std::size_t) noexcept ->std::uintptr_t {
+        const auto& c=*static_cast<Context*>(opaque);
+        return logical_queue_units(collect_grouped_queue(c.producer));
+    };
+    return a2fo_rs_c_queue_export_size(&context,
+        reinterpret_cast<std::uintptr_t>(producer),g_repeat_ready,step);
+}
+
 extern "C" __declspec(dllexport)
 bool __cdecl A2FO_ProducerCanQueueExtendedBuild(
     void* producer, void* target_class) {
-    if (!g_repeat_ready || !producer || !target_class) return false;
-    const GroupedQueueView view = collect_grouped_queue(producer);
-    return logical_queue_has_room_for(view, target_class);
+    struct Context {void* producer;void* target_class;GroupedQueueView view{};}
+        context{producer,target_class};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        switch(op){
+        case 0:c.view=collect_grouped_queue(c.producer);return 1;
+        case 1:return logical_queue_has_room_for(c.view,c.target_class);
+        default:return 0;
+        }
+    };
+    return a2fo_rs_c_queue_export_can(&context,
+        reinterpret_cast<std::uintptr_t>(producer),
+        reinterpret_cast<std::uintptr_t>(target_class),g_repeat_ready,step);
 }
 
-// UI-side overflow admission. Fleet Ops can reject a normal build-button press
-// before QueueClassCommand reaches FeaturePack once the physical FIFO is 10/10.
-// HybridBuild calls this export only for that full-native-queue case. Reuse the
-// same synchronized typed-class marker as FeaturePack's local hook so multiplayer
-// order remains deterministic and the actual native FIFO never exceeds ten.
 extern "C" __declspec(dllexport)
 bool __cdecl A2FO_ProducerQueueExtendedBuild(
     void* producer, void* target_class) {
-    if (!g_repeat_ready || !producer || !target_class ||
-        native_queue_count(producer) < kQueueCapacity) {
-        return false;
-    }
-
-    const GroupedQueueView view = collect_grouped_queue(producer);
-    const bool control = modifier_key_down(
-        kCommandControlPointerRva, VK_CONTROL);
-    const bool continuous = control && modifier_key_down(
-        kCommandAltPointerRva, VK_MENU);
-
-    std::uint32_t marker = kExtendedQueueMarkerCommand;
-    const char* marker_name = "single";
-    if (continuous) {
-        if (!logical_queue_can_enable_continuous(view, target_class)) {
-            return false;
-        }
-        marker = kContinuousMarkerCommand;
-        marker_name = "continuous";
-    } else if (control) {
-        if (!logical_queue_has_room_for(view, target_class)) return false;
-        marker = kQueueFillMarkerCommand;
-        marker_name = "fill-to-10";
-    } else if (!logical_queue_has_room_for(view, target_class)) {
-        return false;
-    }
-
-    a2fo_call_thiscall_2(
-        g_game_object_queue_class_command_hook.gateway, producer, marker,
-        reinterpret_cast<std::uintptr_t>(target_class));
-    if (!g_logged_direct_extended_button_order) {
-        g_logged_direct_extended_button_order = true;
-        char message[160];
-        std::snprintf(message, sizeof(message),
-                      "Direct overflow-button order preserved %s modifier "
-                      "semantics and emitted synchronized queue marker",
-                      marker_name);
-        log_message(message);
-    }
-    return true;
+    struct Context {void* producer;void* target_class;GroupedQueueView view{};
+        std::exception_ptr error{};}
+        context{producer,target_class};
+    const auto step=+[](void* opaque,std::uint32_t op,
+        std::size_t arg) noexcept ->std::uintptr_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try {switch(op){
+        case 0:return native_queue_count(c.producer);
+        case 1:c.view=collect_grouped_queue(c.producer);return 1;
+        case 2:return modifier_key_down(kCommandControlPointerRva,VK_CONTROL);
+        case 3:return modifier_key_down(kCommandAltPointerRva,VK_MENU);
+        case 4:return logical_queue_can_enable_continuous(
+            c.view,c.target_class);
+        case 5:return logical_queue_has_room_for(c.view,c.target_class);
+        case 6:a2fo_call_thiscall_2(
+            g_game_object_queue_class_command_hook.gateway,c.producer,arg,
+            reinterpret_cast<std::uintptr_t>(c.target_class));return 1;
+        case 7:if(!g_logged_direct_extended_button_order){
+            g_logged_direct_extended_button_order=true;
+            const char* marker_name=arg==kContinuousMarkerCommand
+                ?"continuous":arg==kQueueFillMarkerCommand
+                ?"fill-to-10":"single";
+            char message[160];
+            std::snprintf(message,sizeof(message),
+                "Direct overflow-button order preserved %s modifier "
+                "semantics and emitted synchronized queue marker",
+                marker_name);
+            log_message(message);
+            }return 1;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINTPTR_MAX;}
+    };
+    const bool result=a2fo_rs_c_queue_export_overflow(&context,
+        reinterpret_cast<std::uintptr_t>(producer),
+        reinterpret_cast<std::uintptr_t>(target_class),g_repeat_ready,step);
+    if(context.error)std::rethrow_exception(context.error);
+    return result;
 }
 
 }  // namespace a2fo

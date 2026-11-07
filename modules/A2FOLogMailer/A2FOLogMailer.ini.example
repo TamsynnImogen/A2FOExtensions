@@ -1,0 +1,9 @@
+[Reporting]
+; Optional player consent. Default is OFF even if the DLL is loaded or required.
+Enabled=0
+; crash_only sends after a crash; all_sessions also sends after a normal exit.
+Mode=crash_only
+; Delivery is already configured in the distributed binaries.
+; No relay settings or mailbox credentials are needed by players.
+; Distributors may override RelayUrl and SubmissionToken together if hosting
+; a different receiver. Leaving both absent/blank uses the bundled receiver.

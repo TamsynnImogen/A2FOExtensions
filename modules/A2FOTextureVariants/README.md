@@ -211,3 +211,66 @@ behaviour.
 10. Destroy, repair, and destroy it again; verify a valid numbered part is
     selected each time. Save/load while destroyed and confirm there is no
     false load-time explosion.
+
+
+## Checkpoint — 2026-10-28: six render/UI families complete behind native adapters
+
+This batch completes the remaining portable controllers and source/headless
+validation for A2FOCraftIdentity (module and object editor),
+A2FODirectionalShields, A2FOFeaturePack (recursive ODF, buildyard pseudo-technology,
+queue enhancements and upgrade pods), A2FOShellDisplay (Bink and canvas),
+A2FORGBTextures and A2FOTextureVariants: eleven inventory units in total.
+
+Rust now controls CraftIdentity first-match fields/atlas lookup, full-byte string
+trim, display-mode suffix admission, drawn predicates and visible hover setup;
+RGB DDS/TGA publication traversal and precedence; FeaturePack ODF hash-chain
+membership; directional effect-tree traversal; canvas ancestry, point-map pass
+order and reverse lease selection; and texture scorch admission, publication
+comparison and hardpoint selection. Native failure/reset paths and lazy reads
+are preserved. Canvas ancestry releases each borrowed record before the next
+lookup. Full u32 scorch bands and raw effect pointers remain data, separate
+from callback error metadata. Display-mode suffix whitespace is classified
+before the parsed-range decision, as in the original CRT path.
+
+This is portable-controller completion, not a pure-Rust binary. Native code
+retains Win32/COM/GDI/CRT and engine calls, hooks/signatures/addresses, checked
+fields, native strings/maps/iterators/locks, exception scopes, exact GNU x87
+projection/geometry/rounding primitives, and FeaturePack's existing STL sort.
+The sort retains casefold-equivalent filename ordering and comparator/allocation
+exception behavior. Object-editor and Bink controllers were already in Rust;
+this batch supplies their current build and headless validation. Existing native
+kernel files and ABI boundaries are pinned rather than rewritten speculatively.
+
+Validation passed: 249 Rust tests; formatting, host/i686 Windows Clippy, both
+release archives, integrated DLL and all six standalone DLLs. Twenty native
+suites produced 267 matching before/current trace pairs (534 executions,
+6,832 stdout lines), with inherited mutation and allocation-failure cases.
+A direct production Bink fixture compares 276 numeric rows across 12 x87 modes;
+canvas fixtures cover ancestry depth bounds, reverse/scoped leases and point
+mapping. Seven additional directional tree cases cover signed branches, missing
+and unreadable nodes, the head sentinel and cycle bound in both module forms.
+A separate production scorch comparison passes 228 rows across all 12 x87
+precision/rounding modes, including guards, boundary bands, modulo hardpoint
+selection, publication state, raw sticky/C1 status, CW and stack balance.
+Built-in batch9 admission also passes. Runtime fixture assets are isolated per
+execution and retained; both sides see the same logical working-directory path.
+
+The source boundary check preserves 56 complete native files and all text
+outside 16 approved controller bodies plus new adapter helpers in six files.
+All 417 source-referenced Rust implementations link (the verifier checks 420
+including three defaults). Core 197 exports/ordinals and each standalone export
+set remain identical, with no new system imports. The build pins 791 product
+inputs including owned .inl files. Six objects depending on changed sources
+were rebuilt; remaining cache entries and 7,851 third-party source pins were
+verified against the passed Squadrons predecessor. Original/current fixtures
+use independently pinned pre-batch and candidate Rust archives. Established
+fixture-only GNU ABI/custom allocator diagnostic flags remain recorded in the
+compile commands. Failed link/probe attempts are preserved.
+
+Evidence: build/rust-migration-stage10/render-ui-batch/checkpoint/validation.json.
+The eleven units are completed_pending_census. Official totals remain 116/151
+with 35 uncredited units: seventeen completed units await the shared strict
+census refresh, and eighteen units remain unfinished. Frozen membership,
+baseline provenance and strict archive/common-DLL bindings are unchanged.
+Canonical artifacts and earlier checkpoints are preserved. No deployment or
+real game launch occurred; GPU and in-game acceptance remain pending.

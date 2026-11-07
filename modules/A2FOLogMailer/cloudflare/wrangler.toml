@@ -1,0 +1,22 @@
+name = "a2fo-log-relay"
+main = "worker.mjs"
+compatibility_date = "2025-09-01"
+workers_dev = true
+preview_urls = false
+
+# A separate Worker: no routes, assets, custom domains or Webdex configuration.
+[vars]
+GMAIL_USER = "aclaydon1@googlemail.com"
+MAX_REPORTS_PER_DAY = "100"
+
+[[durable_objects.bindings]]
+name = "MAIL_BUDGET"
+class_name = "MailBudget"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MailBudget"]
+
+# Set A2FO_RELAY_TOKEN and GMAIL_APP_PASSWORD using Worker secrets, never here.
+[observability]
+enabled = false

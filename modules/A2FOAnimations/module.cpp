@@ -1,8 +1,13 @@
 // Event-driven SOD matrix clips. Native gameplay callbacks always continue.
+#ifdef A2FO_BUILTIN_FEATURE
+#include "../../core/builtin_modules.hpp"
+#endif
 #include "../../sdk/include/a2fo_module_api.h"
 #include "../../sdk/include/a2fo_supported_armada.hpp"
 #include "playback.hpp"
+#include "native_observation.hpp"
 #include "api.hpp"
+#include "../../rust/module_runtime_b3_ffi.h"
 #include <windows.h>
 #include <cstring>
 #include <cstdio>
@@ -15,6 +20,7 @@ using namespace a2fo::animations;
 const A2FO_ModuleApi* g_api=nullptr;
 std::uint8_t* g_armada=nullptr;
 bool g_ready=false;
+NativePlaybackCoverage g_native_coverage;
 constexpr char name[]="A2FOAnimations";
 A2FO_InlineHook h_read{},h_clone{},h_destroy{},h_evaluate{},h_animate{},h_dock{},h_add{},h_output{};
 void* g_explicit_instance=nullptr;
@@ -22,7 +28,7 @@ using Unary=void (__fastcall*)(void*,void*,void*);
 using Nullary=void (__fastcall*)(void*,void*);
 using Clone=void* (__fastcall*)(void*,void*,void*);
 
-void log(const char* text) {if(g_api && g_api->log) g_api->log(name,text);}
+void log(const char* text) noexcept {try{if(g_api && g_api->log)g_api->log(name,text);}catch(...){}}
 void* at(std::uintptr_t rva){return g_armada+rva;}
 bool accessible(const void* p,std::size_t size,bool write=false) {
     auto cursor=reinterpret_cast<std::uintptr_t>(p);
@@ -79,6 +85,39 @@ struct Launch {void* yard=nullptr;std::uint32_t yard_handle=0;};
 std::unordered_map<void*,Launch> g_launches;
 std::unordered_map<void*,void*> g_docks;
 std::unordered_map<void*,std::uint32_t> g_jobs;
+
+std::uint64_t runtime_activation() noexcept {
+#ifdef A2FO_BUILTIN_FEATURE
+    return g_ready ? a2fo::builtin_module_activation(A2FO_BUILTIN_FEATURE) : 0;
+#else
+    return g_ready ? 1 : 0;
+#endif
+}
+bool runtime_enabled() noexcept {
+    const auto activation = runtime_activation();
+#ifdef A2FO_BUILTIN_FEATURE
+    static std::uint64_t previous = 0;
+    const auto reset=[](void*,std::uint32_t,std::uint32_t) noexcept ->std::uint64_t {
+        g_states.clear(); g_instances.clear(); g_launches.clear();
+        g_docks.clear(); g_jobs.clear();
+        return 1;
+    };
+    return a2fo_rs_animations_live(activation,&previous,nullptr,reset)!=0;
+#else
+    const auto noop=[](void*,std::uint32_t,std::uint32_t) noexcept ->std::uint64_t {return 1;};
+    return a2fo_rs_animations_live(activation,nullptr,nullptr,noop)!=0;
+#endif
+}
+void discard_craft(void* craft) {
+    g_launches.erase(craft);
+    for (auto i=g_launches.begin(); i!=g_launches.end();)
+        if (i->second.yard==craft) i=g_launches.erase(i); else ++i;
+    for (auto i=g_docks.begin(); i!=g_docks.end();)
+        if (i->first==craft || i->second==craft) i=g_docks.erase(i); else ++i;
+    g_jobs.erase(craft);
+    auto state=g_states.find(craft);
+    if (state!=g_states.end()) {g_instances.erase(state->second.instance);g_states.erase(state);}
+}
 
 void bootstrap(State& s);
 void erase_state(void* craft) {
@@ -179,19 +218,21 @@ void set_condition(State& s,const char* event,bool active) {
     if(changed==s.conditions) return;
     s.conditions=changed;reconcile(s,true);
 }
+struct EmitContext {State* s;const char* event;bool failed=false;};
+std::uint64_t emit_operation(void* opaque,std::uint32_t op,std::uint32_t arg) noexcept {
+    auto& c=*static_cast<EmitContext*>(opaque);
+    try {switch(op) {
+    case 0:set_condition(*c.s,arg>=4?"repair":"production",(arg&1u)!=0);return 1;
+    case 1:return definition(*c.s,arg==2?"repair":"production")!=nullptr;
+    case 2:if(auto clip=definition(*c.s,c.event))select_clip(*c.s,*clip);return 1;
+    case 3:return c.failed;
+    default:return 0;
+    }}catch(...){c.failed=true;return 0;}
+}
 void emit(void* craft,const char* event) {
-    State* s=state(craft);if(!s) return;
-    const char* pair=nullptr;bool active=false;
-    if(std::strcmp(event,"production_begin")==0) {pair="production";active=true;}
-    if(std::strcmp(event,"production_complete")==0 || std::strcmp(event,"production_cancel")==0) pair="production";
-    if(std::strcmp(event,"repair_begin")==0) {pair="repair";active=true;}
-    if(std::strcmp(event,"repair_end")==0) pair="repair";
-    if(pair) {
-        set_condition(*s,pair,active);
-        // A combined binding owns both edges, overriding the separate clips.
-        if(definition(*s,pair)) return;
-    }
-    if(auto clip=definition(*s,event)) select_clip(*s,*clip);
+    State* s=state(craft);if(!s)return;
+    EmitContext context{s,event};
+    a2fo_rs_animations_emit(reinterpret_cast<const std::uint8_t*>(event),std::strlen(event),&context,emit_operation);
 }
 bool construction_rig(void* craft,const State& s) {
     // Hybrid research producers temporarily borrow the instance vtable/tail;
@@ -259,7 +300,8 @@ void observe_activity(void* craft,State& s) {
     reconcile(s,changed);
 }
 bool evaluate(void* instance,void* channel,void* fallback) {
-    if(!g_ready || !matrix_channel(channel)) return false;
+    NativeEvaluationScope observation(g_native_coverage);
+    if(!runtime_enabled() || !matrix_channel(channel)) return false;
     State* s=instance_state(instance);
     if(!s || !s->playback.active || read<void*>(instance,0x80)!=s->database) return false;
     auto found=g_samples.find(channel);if(found==g_samples.end()) return false;
@@ -274,42 +316,92 @@ bool evaluate(void* instance,void* channel,void* fallback) {
     std::memcpy(output,frames[index].data(),48);
     return true;
 }
-void __fastcall read_hook(void* channel,void*,void* stream) {
-    reinterpret_cast<Unary>(h_read.gateway)(channel,nullptr,stream);
-    if(!g_ready) return;
-    try {
+struct ReadContext {void* channel;void* stream;};
+std::uint64_t read_operation(void* opaque,std::uint32_t op,std::uint32_t) noexcept {
+    auto& c=*static_cast<ReadContext*>(opaque);auto* channel=c.channel;
+    try {switch(op) {
+    case 0:reinterpret_cast<Unary>(h_read.gateway)(channel,nullptr,c.stream);return 1;
+    case 1: {
         g_samples.erase(channel);
         const auto count=read<std::uint32_t>(channel,0x34);
         const auto duration=read<float>(channel,0x2c);
         auto data=read<void*>(channel,0x4c);
-        if(!count || count>65535 || !std::isfinite(duration) || duration<=0 || !accessible(data,count*48u)) return;
+        if(!count || count>65535 || !accessible(data,count*48u)) return 1;
+        if(count>1 && !plausible_duration(duration,count)) {
+            static bool warned=false;
+            if(!warned) {log("SOD matrix channel has an invalid stored duration (often its byte length); using 30 samples/second");warned=true;}
+        }
         auto samples=std::make_shared<Samples>();
-        samples->matrices.resize(count);samples->spacing=double(duration)/count;
+        samples->matrices.resize(count);samples->spacing=seconds_per_sample(duration,count);
         std::memcpy(samples->matrices.data(),data,count*48u);
         g_samples[channel]=std::move(samples);
-    } catch(...) {log("Cannot retain SOD source frames; affected clips disabled");}
+        return 1;
+    }
+    default:return 0;
+    }}catch(...) {log("Cannot retain SOD source frames; affected clips disabled");return 0;}
+}
+void __fastcall read_hook(void* channel,void*,void* stream) {
+    ReadContext context{channel,stream};
+    a2fo_rs_animations_read(g_ready,&context,read_operation);
+}
+struct CloneContext {void* channel;void* db;void* result=nullptr;std::shared_ptr<const Samples> source;};
+std::uint64_t clone_operation(void* opaque,std::uint32_t op,std::uint32_t) noexcept {
+    auto& c=*static_cast<CloneContext*>(opaque);
+    try {switch(op) {
+    case 0: {auto it=g_samples.find(c.channel);if(it!=g_samples.end())c.source=it->second;return 1;}
+    case 1:c.result=reinterpret_cast<Clone>(h_clone.gateway)(c.channel,nullptr,c.db);
+        return reinterpret_cast<std::uintptr_t>(c.result);
+    case 2:g_samples.erase(c.result);if(c.source)g_samples[c.result]=std::move(c.source);return 1;
+    default:return 0;
+    }}catch(...) {if(op==2)log("Cannot retain cloned SOD frames");return 0;}
 }
 void* __fastcall clone_hook(void* channel,void*,void* db) {
     // Keep the source alive even if the native clone path manipulates channels.
-    std::shared_ptr<const Samples> source;
-    if(g_ready) {auto it=g_samples.find(channel);if(it!=g_samples.end()) source=it->second;}
-    void* result=reinterpret_cast<Clone>(h_clone.gateway)(channel,nullptr,db);
-    if(g_ready && result) try {g_samples.erase(result);if(source)g_samples[result]=std::move(source);} catch(...) {log("Cannot retain cloned SOD frames");}
-    return result;
+    CloneContext context{};context.channel=channel;context.db=db;
+    return reinterpret_cast<void*>(a2fo_rs_animations_clone(g_ready,&context,clone_operation));
+}
+std::uint64_t destroy_operation(void* opaque,std::uint32_t op,std::uint32_t) noexcept {
+    auto* channel=opaque;
+    try {switch(op) {
+    case 0:g_samples.erase(channel);return 1;
+    case 1:reinterpret_cast<Nullary>(h_destroy.gateway)(channel,nullptr);return 1;
+    default:return 0;
+    }}catch(...){return 0;}
 }
 void __fastcall destroy_hook(void* channel,void*) {
-    g_samples.erase(channel);
-    reinterpret_cast<Nullary>(h_destroy.gateway)(channel,nullptr);
+    a2fo_rs_animations_destroy(channel,destroy_operation);
+}
+struct EvaluateContext {void* channel;void* fallback;};
+std::uint64_t evaluate_operation(void* opaque,std::uint32_t op,std::uint32_t) noexcept {
+    auto& c=*static_cast<EvaluateContext*>(opaque);
+    try {switch(op) {
+    case 0:return runtime_enabled();
+    case 1: {
+        void* engine=read<void*>(at(0x3ad508),0);
+        void* instance=g_explicit_instance?g_explicit_instance:read<void*>(engine,0x100);
+        return evaluate(instance,c.channel,c.fallback);
+    }
+    case 2:reinterpret_cast<Unary>(h_evaluate.gateway)(c.channel,nullptr,c.fallback);return 1;
+    default:return 0;
+    }}catch(...){return 0;}
 }
 void __fastcall evaluate_hook(void* channel,void*,void* fallback) {
-    void* engine=read<void*>(at(0x3ad508),0);
-    void* instance=g_explicit_instance?g_explicit_instance:read<void*>(engine,0x100);
-    if(!evaluate(instance,channel,fallback)) reinterpret_cast<Unary>(h_evaluate.gateway)(channel,nullptr,fallback);
+    EvaluateContext context{channel,fallback};
+    a2fo_rs_animations_evaluate_hook(&context,evaluate_operation);
+}
+struct AnimateContext {void* instance;void* saved=nullptr;};
+std::uint64_t animate_operation(void* opaque,std::uint32_t op,std::uint32_t) noexcept {
+    auto& c=*static_cast<AnimateContext*>(opaque);
+    try {switch(op) {
+    case 0:c.saved=g_explicit_instance;g_explicit_instance=c.instance;return 1;
+    case 1:reinterpret_cast<Nullary>(h_animate.gateway)(c.instance,nullptr);return 1;
+    case 2:g_explicit_instance=c.saved;return 1;
+    default:return 0;
+    }}catch(...){return 0;}
 }
 void __fastcall animate_hook(void* instance,void*) {
-    void* saved=g_explicit_instance;g_explicit_instance=instance;
-    reinterpret_cast<Nullary>(h_animate.gateway)(instance,nullptr);
-    g_explicit_instance=saved;
+    AnimateContext context{instance};
+    a2fo_rs_animations_animate(&context,animate_operation);
 }
 void end_launch(void* craft,const char* event) {
     auto it=g_launches.find(craft);if(it==g_launches.end()) return;
@@ -320,37 +412,52 @@ void end_launch(void* craft,const char* event) {
     for(const auto& entry:g_launches) if(entry.second.yard==launch.yard) return;
     emit(launch.yard,event);
 }
+struct ObserverContext {unsigned kind;void* owner;void* craft;};
+std::uint64_t observer_operation(void* opaque,std::uint32_t op,std::uint32_t) noexcept {
+    auto& c=*static_cast<ObserverContext*>(opaque);
+    try {switch(op) {
+    case 0:case 3:return runtime_activation();
+    case 1:reinterpret_cast<Unary>((c.kind==0?h_add:c.kind==1?h_output:h_dock).gateway)(c.owner,nullptr,c.craft);return 1;
+    case 2:return runtime_enabled();
+    case 4:return g_ready;
+    case 5:
+        if(c.kind==1){end_launch(c.craft,"launch_clear");return 1;}
+        if(c.kind==2){
+            auto it=g_docks.find(c.owner);void* previous=it==g_docks.end()?nullptr:it->second;
+            if(previous==c.craft)return 1;
+            if(previous){g_docks.erase(c.owner);emit(previous,"repair_end");emit(c.owner,"repair_end");}
+            if(c.craft){g_docks[c.owner]=c.craft;emit(c.craft,"repair_begin");emit(c.owner,"repair_begin");}
+            return 1;
+        }
+        {auto yard=read<void*>(c.owner,0x1c);
+        if(read<void*>(c.owner,0)!=at(0x2b3714) || read<void*>(yard,0x2b4)!=c.owner ||
+            !read<std::uint32_t>(c.craft,0x194) ||
+            read<std::uint32_t>(c.craft,0x198)!=read<std::uint32_t>(yard,0x28))return 1;
+        if(g_launches.find(c.craft)!=g_launches.end())return 1;
+        bool first=true;for(const auto& e:g_launches)if(e.second.yard==yard)first=false;
+        g_launches[c.craft]={yard,read<std::uint32_t>(yard,0x28)};
+        emit(c.craft,"launch_begin");if(first)emit(yard,"launch_begin");
+        return 1;}
+    default:return 0;
+    }}catch(...){log(c.kind==0?"Launch animation event failed":c.kind==1?
+        "Launch-clear animation event failed":"Repair animation event failed");return 0;}
+}
 void __fastcall add_hook(void* queue,void*,void* craft) {
-    reinterpret_cast<Unary>(h_add.gateway)(queue,nullptr,craft);
-    if(!g_ready) return;
-    try {
-        auto yard=read<void*>(queue,0x1c);
-        if(read<void*>(queue,0)!=at(0x2b3714) || read<void*>(yard,0x2b4)!=queue ||
-            !read<std::uint32_t>(craft,0x194) ||
-            read<std::uint32_t>(craft,0x198)!=read<std::uint32_t>(yard,0x28)) return;
-        if(g_launches.find(craft)!=g_launches.end()) return;
-        bool first=true;for(const auto& e:g_launches) if(e.second.yard==yard) first=false;
-        g_launches[craft]={yard,read<std::uint32_t>(yard,0x28)};
-        emit(craft,"launch_begin");if(first) emit(yard,"launch_begin");
-    } catch(...) {log("Launch animation event failed");}
+    ObserverContext context{0,queue,craft};a2fo_rs_animations_observer(&context,observer_operation);
 }
 void __fastcall output_hook(void* queue,void*,void* craft) {
-    reinterpret_cast<Unary>(h_output.gateway)(queue,nullptr,craft);
-    if(g_ready) try {end_launch(craft,"launch_clear");} catch(...) {log("Launch-clear animation event failed");}
+    ObserverContext context{1,queue,craft};a2fo_rs_animations_observer(&context,observer_operation);
 }
 void __fastcall dock_hook(void* yard,void*,void* craft) {
-    reinterpret_cast<Unary>(h_dock.gateway)(yard,nullptr,craft);
-    if(!g_ready) return;
-    try {
-        auto it=g_docks.find(yard);void* previous=it==g_docks.end()?nullptr:it->second;
-        if(previous==craft) return;
-        if(previous) {g_docks.erase(yard);emit(previous,"repair_end");emit(yard,"repair_end");}
-        if(craft) {g_docks[yard]=craft;emit(craft,"repair_begin");emit(yard,"repair_begin");}
-    } catch(...) {log("Repair animation event failed");}
+    ObserverContext context{2,yard,craft};a2fo_rs_animations_observer(&context,observer_operation);
 }
 std::string string_view(A2FO_StringView s){return s.data?std::string(s.data,s.size):std::string{};}
 void A2FO_CALL class_loaded(const A2FO_GameObjectClassLoadedEvent* e,void*) {
     if(!g_ready || !e || e->struct_size<sizeof(*e)) return;
+    struct Update {
+        bool entered=g_native_coverage.begin_class_update();
+        ~Update(){if(entered)g_native_coverage.end_class_update(!g_classes.empty());}
+    } observation;
     try {
         for(auto i=g_states.begin();i!=g_states.end();) {
             if(i->second.klass==e->object_class) {g_instances.erase(i->second.instance);i=g_states.erase(i);}
@@ -382,51 +489,61 @@ void cleanup(void* craft) {
     }
     g_jobs.erase(craft);erase_state(craft);
 }
-void A2FO_CALL craft_event(const A2FO_CraftEvent* e,void*) {
-    if(!g_ready || !e || e->struct_size<sizeof(*e)) return;
-    try {
-        if(e->kind==A2FO_CRAFT_EVENT_CLEANUP) {cleanup(e->craft);return;}
-        if(e->kind==A2FO_CRAFT_EVENT_POST_LOAD) {
-            cleanup(e->craft);emit(e->craft,"load");
-            if(auto s=state(e->craft)) s->seen_simulation=true;
-            return;
-        }
-        if(e->kind!=A2FO_CRAFT_EVENT_SIMULATE_PRE && e->kind!=A2FO_CRAFT_EVENT_SIMULATE_POST) return;
+struct CraftContext {const A2FO_CraftEvent* e;State* s=nullptr;bool fresh=false;};
+std::uint64_t craft_operation(void* opaque,std::uint32_t op,std::uint32_t) noexcept {
+    auto& c=*static_cast<CraftContext*>(opaque);const auto* e=c.e;
+    try {switch(op) {
+    case 0:discard_craft(e->craft);return 1;
+    case 1:cleanup(e->craft);return 1;
+    case 2:cleanup(e->craft);emit(e->craft,"load");
+        if(auto s=state(e->craft))s->seen_simulation=true;
+        return 1;
+    case 3:
         if(e->kind==A2FO_CRAFT_EVENT_SIMULATE_POST && g_launches.count(e->craft) &&
-            !read<std::uint32_t>(e->craft,0x194)) end_launch(e->craft,"launch_abort");
-        State* s=state(e->craft);if(!s) return;
-        const bool fresh=!s->seen_simulation;
-        s->seen_simulation=true;
-        if(fresh && !s->event_selected) emit(e->craft,"spawn");
-        if(s->playback.active && s->database!=read<void*>(s->instance,0x80)) {
-            s->pending=s->playback.clip.event;s->playback.active=false;
+            !read<std::uint32_t>(e->craft,0x194))end_launch(e->craft,"launch_abort");
+        c.s=state(e->craft);if(!c.s)return 0;
+        c.fresh=!c.s->seen_simulation;c.s->seen_simulation=true;
+        if(c.fresh && !c.s->event_selected)emit(e->craft,"spawn");
+        if(c.s->playback.active && c.s->database!=read<void*>(c.s->instance,0x80)) {
+            c.s->pending=c.s->playback.clip.event;c.s->playback.active=false;
         }
-        retry(*s);
-        if(e->kind==A2FO_CRAFT_EVENT_SIMULATE_PRE && !fresh) {
-            s->playback.advance(e->elapsed_seconds);
+        retry(*c.s);return 1;
+    case 4:
+        if(!c.fresh){c.s->playback.advance(e->elapsed_seconds);
             if(std::isfinite(e->elapsed_seconds) && e->elapsed_seconds>0)
-                s->recent_attack=std::max(0.0,s->recent_attack-e->elapsed_seconds);
-        }
-        if(e->kind==A2FO_CRAFT_EVENT_SIMULATE_POST) {
-            finish_returned_bees(e->craft,*s);
-            observe_activity(e->craft,*s);
-        }
-    } catch(...) {log("Animation simulation event failed");}
+                c.s->recent_attack=std::max(0.0,c.s->recent_attack-e->elapsed_seconds);}
+        return 1;
+    case 5:finish_returned_bees(e->craft,*c.s);observe_activity(e->craft,*c.s);return 1;
+    default:return 0;
+    }}catch(...){log("Animation simulation event failed");return 0;}
+}
+void A2FO_CALL craft_event(const A2FO_CraftEvent* e,void*) {
+    const bool active=runtime_enabled();
+    const bool valid=g_ready && e && e->struct_size>=sizeof(*e);
+    CraftContext context{e};
+    a2fo_rs_animations_craft_event(valid?e->kind:0,valid,active,&context,craft_operation);
+}
+struct ProducerContext {const A2FO_ProducerEvent* e;};
+std::uint64_t producer_operation(void* opaque,std::uint32_t op,std::uint32_t) noexcept {
+    const auto* e=static_cast<ProducerContext*>(opaque)->e;
+    try {switch(op) {
+    case 0: {
+        if(auto s=state(e->producer))s->production_end=nullptr;
+        auto id=read<std::uint32_t>(e->producer,0x2a0);auto it=g_jobs.find(e->producer);
+        if(it==g_jobs.end() || it->second!=id){g_jobs[e->producer]=id;emit(e->producer,"production_begin");}
+        return 1;
+    }
+    case 1:production_ended(e->producer,"production_complete");return 1;
+    case 2:production_ended(e->producer,"production_cancel");return 1;
+    case 3:cleanup(e->producer);return 1;
+    default:return 0;
+    }}catch(...){log("Production animation event failed");return 0;}
 }
 bool A2FO_CALL producer_event(const A2FO_ProducerEvent* e,void*) {
-    if(!g_ready || !e || e->struct_size<sizeof(*e)) return true;
-    try {
-        if(e->kind==A2FO_PRODUCER_EVENT_STARTING_EFFECT) {
-            if(auto s=state(e->producer)) s->production_end=nullptr;
-            auto id=read<std::uint32_t>(e->producer,0x2a0);
-            auto it=g_jobs.find(e->producer);
-            if(it==g_jobs.end() || it->second!=id) {g_jobs[e->producer]=id;emit(e->producer,"production_begin");}
-        } else if(e->kind==A2FO_PRODUCER_EVENT_FINISHED) {
-            production_ended(e->producer,"production_complete");
-        } else if(e->kind==A2FO_PRODUCER_EVENT_CANCELLED) {
-            production_ended(e->producer,"production_cancel");
-        } else if(e->kind==A2FO_PRODUCER_EVENT_DESTROYING) cleanup(e->producer);
-    } catch(...) {log("Production animation event failed");}
+    const bool active=runtime_enabled();
+    const bool valid=active && e && e->struct_size>=sizeof(*e);
+    ProducerContext context{e};
+    a2fo_rs_animations_producer_event(valid?e->kind:0,valid,active,&context,producer_operation);
     return true;
 }
 std::string bounded_string(const char* value) {
@@ -469,7 +586,7 @@ void weapon_used(void* weapon) {
     if(policy!=g_weapon_events.end()) emit(owner,policy->second.c_str());
 }
 bool A2FO_CALL weapon_trigger(const A2FO_WeaponTriggerEvent* e,void*) {
-    if(g_ready && e && e->struct_size>=sizeof(*e) && e->kind==A2FO_WEAPON_TRIGGER_COMMITTED)
+    if(runtime_enabled() && e && e->struct_size>=sizeof(*e) && e->kind==A2FO_WEAPON_TRIGGER_COMMITTED)
         try {weapon_used(e->weapon);} catch(...) {log("Weapon-use animation event failed");}
     return true; // Never claim or prevent a native weapon use.
 }
@@ -522,19 +639,62 @@ std::vector<HookSpec> hook_specs() {
         {0x13a500,reinterpret_cast<void*>(output_hook),&h_output,{0x55,0x8b,0xec,0x8b,0x41,0x1c}}
     };
 }
-bool install() {
-    if(a2fo::supported_armada::identify(reinterpret_cast<HMODULE>(g_armada))==a2fo::supported_armada::Identity::unsupported) return false;
-    for(const auto& s:helper_specs()) if(!supported_helper(s)) {
+struct InitContext {const A2FO_ModuleApi* api;std::vector<HelperSpec> helpers;
+    std::vector<HookSpec> hooks;std::vector<std::string> storage;
+    std::vector<const char*> fields;bool exception=false;};
+std::uint64_t init_operation(void* opaque,std::uint32_t op,std::uint32_t index) noexcept {
+    auto& c=*static_cast<InitContext*>(opaque);
+    try {switch(op) {
+    case 0:g_api=c.api;g_armada=static_cast<std::uint8_t*>(c.api->armada_module());return g_armada!=nullptr;
+    case 1:c.helpers=helper_specs();return c.helpers.size();
+    case 2: {
+        const auto& s=c.helpers.at(index);if(supported_helper(s))return 1;
         char text[160];std::snprintf(text,sizeof(text),
             "Unsupported animation helper signature at RVA %08lx; runtime disabled",
-            static_cast<unsigned long>(s.rva));log(text);return false;
+            static_cast<unsigned long>(s.rva));log(text);return 0;
     }
-    auto specs=hook_specs();
-    for(const auto& s:specs) if(!accessible(at(s.rva),s.bytes.size()) || std::memcmp(at(s.rva),s.bytes.data(),s.bytes.size())) {
-        char text[100];std::snprintf(text,sizeof(text),"Unsupported animation hook signature at RVA %08lx",static_cast<unsigned long>(s.rva));log(text);return false;
+    case 3:c.hooks=hook_specs();return c.hooks.size();
+    case 4: {
+        const auto& s=c.hooks.at(index);
+        if(accessible(at(s.rva),s.bytes.size()) && !std::memcmp(at(s.rva),s.bytes.data(),s.bytes.size()))return 1;
+        char text[100];std::snprintf(text,sizeof(text),"Unsupported animation hook signature at RVA %08lx",
+            static_cast<unsigned long>(s.rva));log(text);return 0;
     }
-    for(const auto& s:specs) if(!g_api->install_inline_hook(at(s.rva),s.function,s.bytes.size(),s.bytes.data(),s.hook)) return false;
-    return true;
+    case 5: {
+        const auto& s=c.hooks.at(index);
+        return g_api->install_inline_hook(at(s.rva),s.function,s.bytes.size(),s.bytes.data(),s.hook);
+    }
+    case 6:
+        for(std::size_t i=0;i<=max_clips;++i)for(auto suffix:{"event","start","end","direction","repeat","resetonend","speed"})
+            c.storage.push_back("animation"+std::to_string(i)+suffix);
+        for(const auto& s:c.storage)c.fields.push_back(s.c_str());
+        return 1;
+    case 7:return (c.fields.size()+63)/64;
+    case 8: {
+        const auto offset=std::size_t(index)*64;
+        const auto count=std::min<std::size_t>(64,c.fields.size()-offset);
+        A2FO_GameObjectClassLoadedHandler callback=offset+count==c.fields.size()
+            ? class_loaded:+[](const A2FO_GameObjectClassLoadedEvent*,void*){};
+        return c.api->register_game_object_class_loaded_handler(name,c.fields.data()+offset,count,callback,nullptr);
+    }
+    case 9:return c.api->register_producer_event_handler(name,producer_event,nullptr);
+    case 10:g_ready=false;g_native_coverage.configure(false,{});log(c.exception?"Animation initialization failed; native playback retained":
+        "Animation runtime disabled; native playback retained");return 1;
+    case 11:g_ready=false;g_native_coverage.configure(false,{});log("Animation initialization failed; native playback retained");return 1;
+    case 12:g_ready=index!=0 && !c.exception;
+        g_native_coverage.configure(g_ready,{reinterpret_cast<HMODULE>(g_armada),
+            h_evaluate.target,reinterpret_cast<void*>(evaluate_hook),h_evaluate.gateway,h_evaluate.length,0});
+        log(c.exception?"Animation initialization failed; native playback retained":
+            g_ready?"SOD animation clips initialized (32 clips, 16 built-in events plus weapon names)":
+            "Animation callbacks unavailable; native playback retained");return 1;
+    case 13:return c.api->register_craft_event_handler(name,craft_event,nullptr);
+    case 14: {const char* weapon_fields[]={"animation"};return c.api->register_weapon_class_loaded_handler(
+        name,weapon_fields,1,weapon_class_loaded,nullptr);}
+    case 15:return c.api->register_weapon_trigger_handler(name,weapon_trigger,nullptr);
+    case 16:return a2fo::supported_armada::identify(reinterpret_cast<HMODULE>(g_armada))!=
+        a2fo::supported_armada::Identity::unsupported;
+    default:return 0;
+    }}catch(...){c.exception=true;return UINT64_MAX;}
 }
 } // namespace
 
@@ -542,44 +702,21 @@ extern "C" __declspec(dllexport) bool __cdecl A2FO_AnimationsEvaluate(void* inst
     return evaluate(instance,channel,fallback);
 }
 extern "C" __declspec(dllexport) bool __cdecl A2FO_AnimationsControlled(void* instance) {
-    auto s=g_ready?instance_state(instance):nullptr;
+    auto s=runtime_enabled()?instance_state(instance):nullptr;
     return s && s->playback.active && read<void*>(instance,0x80)==s->database;
 }
 extern "C" __declspec(dllexport) void __cdecl A2FO_AnimationsWeaponFired(void* weapon) {
-    if(g_ready && weapon) try {weapon_used(weapon);} catch(...) {log("Weapon-fire animation event failed");}
+    if(runtime_enabled() && weapon) try {weapon_used(weapon);} catch(...) {log("Weapon-fire animation event failed");}
 }
 extern "C" __declspec(dllexport) bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
-    if(!api || api->api_version!=A2FO_MODULE_API_VERSION ||
-        !A2FO_MODULE_API_HAS(api,register_craft_event_handler) || !api->register_craft_event_handler ||
-        !api->register_game_object_class_loaded_handler || !api->register_producer_event_handler ||
-        !api->register_weapon_class_loaded_handler || !api->register_weapon_trigger_handler ||
-        !api->log || !api->armada_module || !api->install_inline_hook) return false;
-    g_api=api;g_armada=static_cast<std::uint8_t*>(api->armada_module());
-    if(!g_armada) return false;
-    try {
-        if(!install()) {log("Animation runtime disabled; native playback retained");return true;}
-        std::vector<std::string> storage;std::vector<const char*> fields;
-        for(std::size_t i=0;i<=max_clips;++i) for(auto suffix:{"event","start","end","direction","repeat","resetonend","speed"})
-            storage.push_back("animation"+std::to_string(i)+suffix);
-        for(const auto& s:storage) fields.push_back(s.c_str());
-        // The core collects the union before dispatching the full inherited
-        // snapshot, but allows at most 64 requested fields per registration.
-        bool registered=true;
-        for(std::size_t offset=0;offset<fields.size();offset+=64) {
-            auto count=std::min<std::size_t>(64,fields.size()-offset);
-            A2FO_GameObjectClassLoadedHandler callback = offset+count==fields.size()
-                ? class_loaded : +[](const A2FO_GameObjectClassLoadedEvent*,void*){};
-            registered=api->register_game_object_class_loaded_handler(
-                name,fields.data()+offset,count,callback,nullptr) && registered;
-        }
-        const char* weapon_fields[]={"animation"};
-        g_ready=registered && api->register_producer_event_handler(name,producer_event,nullptr) &&
-            api->register_craft_event_handler(name,craft_event,nullptr) &&
-            api->register_weapon_class_loaded_handler(name,weapon_fields,1,weapon_class_loaded,nullptr) &&
-            api->register_weapon_trigger_handler(name,weapon_trigger,nullptr);
-        log(g_ready?"SOD animation clips initialized (32 clips, 16 built-in events plus weapon names)":"Animation callbacks unavailable; native playback retained");
-    } catch(...) {g_ready=false;log("Animation initialization failed; native playback retained");}
-    // Never unload after installing process-lifetime trampolines.
-    return true;
+    g_native_coverage.configure(false,{});
+    g_ready=false;
+    const bool valid=api && api->api_version==A2FO_MODULE_API_VERSION &&
+        A2FO_MODULE_API_HAS(api,register_craft_event_handler) && api->register_craft_event_handler &&
+        api->register_game_object_class_loaded_handler && api->register_producer_event_handler &&
+        api->register_weapon_class_loaded_handler && api->register_weapon_trigger_handler &&
+        api->log && api->armada_module && api->install_inline_hook;
+    InitContext context{};context.api=api;
+    return a2fo_rs_animations_init(valid,&context,init_operation)!=0;
 }
 extern "C" __declspec(dllexport) void A2FO_CALL A2FO_ModuleShutdown() {}

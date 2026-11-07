@@ -1,0 +1,8 @@
+#include "nox_breeder_base.odf"
+
+unitName = "Unseeded Breeder"
+tooltip = "Unseeded Breeder"
+verboseTooltip = "Choose Scout or Destroyer genes. A friendly Mother within 800 sends a physical seed. The choice becomes permanent when it arrives."
+hotkeyLabel = "HOTKEY_F7"
+buildItem0 = "nox_scout"
+buildItem1 = "nox_destroy"

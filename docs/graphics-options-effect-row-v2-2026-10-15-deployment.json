@@ -1,0 +1,29 @@
+{
+  "build_id": "20261015-graphics-options-effect-row-2",
+  "status": "installed; live v2 visual acceptance pending",
+  "source": "/home/tamsynn/A2FOHookExtensions",
+  "data_root": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data",
+  "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/graphics-effect-row-v2-20261015-110943",
+  "prior_deployment": "/home/tamsynn/A2FOHookExtensions/docs/graphics-options-roots-2026-10-15-deployment.json",
+  "changed_artifacts": [
+    {
+      "file": "A2FOExtensions.dll",
+      "build": "/home/tamsynn/A2FOHookExtensions/build/A2FOExtensions.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.dll",
+      "sha256": "45be55e79afe53365dc26f1e4238bfcd9d74120299215b52bca6458f072d4b05",
+      "previous_sha256": "0ae18bd3d75850dae53d6cdc5e6b4e7d18aa42307997da68e853f588b245fd37"
+    }
+  ],
+  "package_files": {
+    "A2FOExtensions.dll": "45be55e79afe53365dc26f1e4238bfcd9d74120299215b52bca6458f072d4b05",
+    "A2FOArmadaProfiles.txt": "08ffa42a487354a7959fa5d4b184eb8120b331d2bca62284ac59f0da1cb52dac",
+    "modules/A2FOCollectiveXP.dll": "5021089cf2574265f58af48cbdac7dc2fe064ac5cd746091c4e30e38c746ed35"
+  },
+  "checks": {
+    "build": "PASS; existing unrelated warnings",
+    "graphics": "1200x900 and 800x600 fixtures PASS; simulated setup reset and reopen bounds change; at least 8px vertical gap and no gamma/effect overlap",
+    "signatures": "checked SetBounds signature and ABI verified in original, clean and October12 DLLs",
+    "live_v1": "supplied screenshot confirms controls visible but overlapping; local log confirms engine profile accepted and extension initialization complete",
+    "live_v2": "not run; manual restart/visual check required"
+  }
+}

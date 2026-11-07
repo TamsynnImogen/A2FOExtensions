@@ -1,0 +1,273 @@
+interface,method,status,evidence,limitations
+Direct3D8,create_native,implemented at source level,d3d8to11_base.cpp:26,Non-stub body exists; completeness and compatibility are unverified.
+Direct3D8,QueryInterface,implemented at source level,d3d8to11_base.cpp:89,Non-stub body exists; completeness and compatibility are unverified.
+Direct3D8,AddRef,implemented at source level,d3d8to11_base.cpp:109,Non-stub body exists; completeness and compatibility are unverified.
+Direct3D8,Release,implemented at source level,d3d8to11_base.cpp:114,Non-stub body exists; completeness and compatibility are unverified.
+Direct3D8,RegisterSoftwareDevice,unsupported/stub,d3d8to11_base.cpp:126,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3D8,GetAdapterCount,implemented at source level,d3d8to11_base.cpp:133,Non-stub body exists; completeness and compatibility are unverified.
+Direct3D8,GetAdapterIdentifier,partial/unsupported,d3d8to11_base.cpp:138,Explicit invalid-call or TODO path; see cited implementation.
+Direct3D8,GetAdapterModeCount,implemented at source level,d3d8to11_base.cpp:179,Non-stub body exists; completeness and compatibility are unverified.
+Direct3D8,EnumAdapterModes,implemented at source level,d3d8to11_base.cpp:184,Non-stub body exists; completeness and compatibility are unverified.
+Direct3D8,GetAdapterDisplayMode,implemented at source level,d3d8to11_base.cpp:201,Non-stub body exists; completeness and compatibility are unverified.
+Direct3D8,CheckDeviceType,implemented at source level,d3d8to11_base.cpp:219,Non-stub body exists; completeness and compatibility are unverified.
+Direct3D8,CheckDeviceFormat,partial,d3d8to11_base.cpp:236,Body contains TODO/HACK or ignored input; semantics require separate contract review.
+Direct3D8,CheckDeviceMultiSampleType,unsupported/stub,d3d8to11_base.cpp:260,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3D8,CheckDepthStencilMatch,partial,d3d8to11_base.cpp:267,Body contains TODO/HACK or ignored input; semantics require separate contract review.
+Direct3D8,GetDeviceCaps,partial/unsupported,d3d8to11_base.cpp:274,Explicit invalid-call or TODO path; see cited implementation.
+Direct3D8,GetAdapterMonitor,unsupported/stub,d3d8to11_base.cpp:448,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3D8,CreateDevice,partial/unsupported,d3d8to11_base.cpp:456,Explicit invalid-call or TODO path; see cited implementation.
+Direct3DDevice8,shader_preprocess,implemented at source level,d3d8to11_device.cpp:151,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,draw_call_increment,implemented at source level,d3d8to11_device.cpp:298,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,store_permutation_flags,implemented at source level,d3d8to11_device.cpp:412,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,create_depth_stencil,implemented at source level,d3d8to11_device.cpp:562,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,create_composite_texture,implemented at source level,d3d8to11_device.cpp:571,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,create_render_target,implemented at source level,d3d8to11_device.cpp:620,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,get_back_buffer,implemented at source level,d3d8to11_device.cpp:669,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,create_native,partial,d3d8to11_device.cpp:707,Body contains TODO/HACK or ignored input; semantics require separate contract review.
+Direct3DDevice8,QueryInterface,implemented at source level,d3d8to11_device.cpp:1131,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,AddRef,implemented at source level,d3d8to11_device.cpp:1151,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,Release,implemented at source level,d3d8to11_device.cpp:1156,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,TestCooperativeLevel,unsupported/stub,d3d8to11_device.cpp:1168,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,GetAvailableTextureMem,unsupported/stub,d3d8to11_device.cpp:1174,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,ResourceManagerDiscardBytes,unsupported/stub,d3d8to11_device.cpp:1184,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,GetDirect3D,implemented at source level,d3d8to11_device.cpp:1195,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,GetDeviceCaps,implemented at source level,d3d8to11_device.cpp:1209,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,GetDisplayMode,implemented at source level,d3d8to11_device.cpp:1214,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,GetCreationParameters,implemented at source level,d3d8to11_device.cpp:1219,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,SetCursorProperties,unsupported/stub,d3d8to11_device.cpp:1234,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,SetCursorPosition,unsupported/stub,d3d8to11_device.cpp:1239,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,ShowCursor,unsupported/stub,d3d8to11_device.cpp:1244,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,CreateAdditionalSwapChain,unsupported/stub,d3d8to11_device.cpp:1250,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,Reset,partial/unsupported,d3d8to11_device.cpp:1299,Explicit invalid-call or TODO path; see cited implementation.
+Direct3DDevice8,oit_composite,implemented at source level,d3d8to11_device.cpp:1370,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,oit_start,implemented at source level,d3d8to11_device.cpp:1432,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,Present,partial,d3d8to11_device.cpp:1449,Body contains TODO/HACK or ignored input; semantics require separate contract review.
+Direct3DDevice8,GetBackBuffer,partial/unsupported,d3d8to11_device.cpp:1531,Explicit invalid-call or TODO path; see cited implementation.
+Direct3DDevice8,GetRasterStatus,unsupported/stub,d3d8to11_device.cpp:1554,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,SetGammaRamp,unsupported/stub,d3d8to11_device.cpp:1559,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,GetGammaRamp,unsupported/stub,d3d8to11_device.cpp:1564,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,CreateTexture,implemented at source level,d3d8to11_device.cpp:1569,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,CreateVolumeTexture,unsupported/stub,d3d8to11_device.cpp:1618,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,CreateCubeTexture,unsupported/stub,d3d8to11_device.cpp:1646,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,CreateVertexBuffer,implemented at source level,d3d8to11_device.cpp:1674,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,CreateIndexBuffer,implemented at source level,d3d8to11_device.cpp:1717,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,CreateRenderTarget,unsupported/stub,d3d8to11_device.cpp:1760,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,CreateDepthStencilSurface,unsupported/stub,d3d8to11_device.cpp:1766,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,CreateImageSurface,unsupported/stub,d3d8to11_device.cpp:1772,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,CopyRects,partial/unsupported,d3d8to11_device.cpp:1777,Explicit invalid-call or TODO path; see cited implementation.
+Direct3DDevice8,UpdateTexture,unsupported/stub,d3d8to11_device.cpp:1843,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,GetFrontBuffer,unsupported/stub,d3d8to11_device.cpp:1848,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,SetRenderTarget,implemented at source level,d3d8to11_device.cpp:1853,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,GetRenderTarget,implemented at source level,d3d8to11_device.cpp:1897,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,GetDepthStencilSurface,implemented at source level,d3d8to11_device.cpp:1909,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,BeginScene,implemented at source level,d3d8to11_device.cpp:1921,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,EndScene,implemented at source level,d3d8to11_device.cpp:1926,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,Clear,implemented at source level,d3d8to11_device.cpp:1931,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,update_wv_inv_t,implemented at source level,d3d8to11_device.cpp:1971,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,SetTransform,implemented at source level,d3d8to11_device.cpp:1979,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,GetTransform,implemented at source level,d3d8to11_device.cpp:2026,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,MultiplyTransform,implemented at source level,d3d8to11_device.cpp:2065,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,SetViewport,implemented at source level,d3d8to11_device.cpp:2107,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,GetViewport,implemented at source level,d3d8to11_device.cpp:2125,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,SetMaterial,implemented at source level,d3d8to11_device.cpp:2142,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,GetMaterial,implemented at source level,d3d8to11_device.cpp:2154,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,SetLight,implemented at source level,d3d8to11_device.cpp:2165,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,GetLight,implemented at source level,d3d8to11_device.cpp:2183,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,LightEnable,implemented at source level,d3d8to11_device.cpp:2214,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,GetLightEnable,implemented at source level,d3d8to11_device.cpp:2228,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,SetClipPlane,implemented at source level,d3d8to11_device.cpp:2244,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,GetClipPlane,implemented at source level,d3d8to11_device.cpp:2255,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,SetRenderState,implemented at source level,d3d8to11_device.cpp:2266,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,GetRenderState,implemented at source level,d3d8to11_device.cpp:2648,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,BeginStateBlock,unsupported/stub,d3d8to11_device.cpp:2682,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,EndStateBlock,unsupported/stub,d3d8to11_device.cpp:2687,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,ApplyStateBlock,unsupported/stub,d3d8to11_device.cpp:2692,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,CaptureStateBlock,unsupported/stub,d3d8to11_device.cpp:2697,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,DeleteStateBlock,unsupported/stub,d3d8to11_device.cpp:2702,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,CreateStateBlock,unsupported/stub,d3d8to11_device.cpp:2707,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,SetClipStatus,unsupported/stub,d3d8to11_device.cpp:2712,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,GetClipStatus,unsupported/stub,d3d8to11_device.cpp:2717,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,GetTexture,implemented at source level,d3d8to11_device.cpp:2722,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,SetTexture,implemented at source level,d3d8to11_device.cpp:2744,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,GetTextureStageState,partial/unsupported,d3d8to11_device.cpp:2792,Explicit invalid-call or TODO path; see cited implementation.
+Direct3DDevice8,SetTextureStageState,implemented at source level,d3d8to11_device.cpp:2889,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,ValidateDevice,unsupported/stub,d3d8to11_device.cpp:3035,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,GetInfo,partial,d3d8to11_device.cpp:3040,Body contains TODO/HACK or ignored input; semantics require separate contract review.
+Direct3DDevice8,SetPaletteEntries,unsupported/stub,d3d8to11_device.cpp:3049,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,GetPaletteEntries,unsupported/stub,d3d8to11_device.cpp:3054,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,SetCurrentTexturePalette,unsupported/stub,d3d8to11_device.cpp:3059,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,GetCurrentTexturePalette,unsupported/stub,d3d8to11_device.cpp:3064,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,run_draw_prologues,implemented at source level,d3d8to11_device.cpp:3069,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,run_draw_epilogues,implemented at source level,d3d8to11_device.cpp:3081,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,oit_zwrite_force,implemented at source level,d3d8to11_device.cpp:3131,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,oit_zwrite_restore,implemented at source level,d3d8to11_device.cpp:3147,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,DrawPrimitive,implemented at source level,d3d8to11_device.cpp:3156,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,DrawIndexedPrimitive,unsupported/stub,d3d8to11_device.cpp:3243,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,DrawPrimitiveUP,implemented at source level,d3d8to11_device.cpp:3298,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,DrawIndexedPrimitiveUP,implemented at source level,d3d8to11_device.cpp:3388,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,ProcessVertices,unsupported/stub,d3d8to11_device.cpp:3534,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,CreateVertexShader,unsupported/stub,d3d8to11_device.cpp:3539,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,SetVertexShader,unsupported/stub,d3d8to11_device.cpp:3544,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,GetVertexShader,unsupported/stub,d3d8to11_device.cpp:3572,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,DeleteVertexShader,unsupported/stub,d3d8to11_device.cpp:3588,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,SetVertexShaderConstant,unsupported/stub,d3d8to11_device.cpp:3621,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,GetVertexShaderConstant,unsupported/stub,d3d8to11_device.cpp:3626,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,GetVertexShaderDeclaration,partial/unsupported,d3d8to11_device.cpp:3631,Explicit invalid-call or TODO path; see cited implementation.
+Direct3DDevice8,GetVertexShaderFunction,unsupported/stub,d3d8to11_device.cpp:3640,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,SetStreamSource,partial,d3d8to11_device.cpp:3662,Body contains TODO/HACK or ignored input; semantics require separate contract review.
+Direct3DDevice8,GetStreamSource,implemented at source level,d3d8to11_device.cpp:3701,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,SetIndices,implemented at source level,d3d8to11_device.cpp:3731,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,GetIndices,implemented at source level,d3d8to11_device.cpp:3756,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,CreatePixelShader,partial/unsupported,d3d8to11_device.cpp:3781,Explicit invalid-call or TODO path; see cited implementation.
+Direct3DDevice8,SetPixelShader,unsupported/stub,d3d8to11_device.cpp:3786,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,GetPixelShader,unsupported/stub,d3d8to11_device.cpp:3791,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,DeletePixelShader,unsupported/stub,d3d8to11_device.cpp:3796,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,SetPixelShaderConstant,unsupported/stub,d3d8to11_device.cpp:3801,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,GetPixelShaderConstant,unsupported/stub,d3d8to11_device.cpp:3806,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,GetPixelShaderFunction,partial/unsupported,d3d8to11_device.cpp:3811,Explicit invalid-call or TODO path; see cited implementation.
+Direct3DDevice8,DrawRectPatch,unsupported/stub,d3d8to11_device.cpp:3816,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,DrawTriPatch,unsupported/stub,d3d8to11_device.cpp:3821,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,DeletePatch,unsupported/stub,d3d8to11_device.cpp:3826,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DDevice8,print_info_queue,implemented at source level,d3d8to11_device.cpp:3831,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,commit_uber_shader_flags,implemented at source level,d3d8to11_device.cpp:4101,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,commit_per_pixel,implemented at source level,d3d8to11_device.cpp:4117,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,commit_per_model,implemented at source level,d3d8to11_device.cpp:4133,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,commit_per_scene,implemented at source level,d3d8to11_device.cpp:4151,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,commit_per_texture,implemented at source level,d3d8to11_device.cpp:4169,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,update_sampler,partial,d3d8to11_device.cpp:4185,Body contains TODO/HACK or ignored input; semantics require separate contract review.
+Direct3DDevice8,get_shaders,implemented at source level,d3d8to11_device.cpp:4235,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,update_shaders,implemented at source level,d3d8to11_device.cpp:4255,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,update_blend,implemented at source level,d3d8to11_device.cpp:4303,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,update_depth,implemented at source level,d3d8to11_device.cpp:4348,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,update_rasterizers,implemented at source level,d3d8to11_device.cpp:4422,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,free_shaders,implemented at source level,d3d8to11_device.cpp:4479,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,oit_load_shaders,implemented at source level,d3d8to11_device.cpp:4533,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,oit_release,implemented at source level,d3d8to11_device.cpp:4605,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,oit_write,implemented at source level,d3d8to11_device.cpp:4623,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,oit_read,implemented at source level,d3d8to11_device.cpp:4655,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,oit_init,implemented at source level,d3d8to11_device.cpp:4674,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,oit_frag_list_head_init,implemented at source level,d3d8to11_device.cpp:4683,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,oit_frag_list_count_init,implemented at source level,d3d8to11_device.cpp:4728,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,oit_frag_list_nodes_init,implemented at source level,d3d8to11_device.cpp:4773,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DTexture8,create_native,implemented at source level,d3d8to11_texture.cpp:34,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DTexture8,QueryInterface,implemented at source level,d3d8to11_texture.cpp:193,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DTexture8,AddRef,implemented at source level,d3d8to11_texture.cpp:215,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DTexture8,Release,implemented at source level,d3d8to11_texture.cpp:220,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DTexture8,GetDevice,implemented at source level,d3d8to11_texture.cpp:232,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DTexture8,SetPrivateData,unsupported/stub,d3d8to11_texture.cpp:244,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DTexture8,GetPrivateData,unsupported/stub,d3d8to11_texture.cpp:249,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DTexture8,FreePrivateData,unsupported/stub,d3d8to11_texture.cpp:254,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DTexture8,SetPriority,unsupported/stub,d3d8to11_texture.cpp:259,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DTexture8,GetPriority,unsupported/stub,d3d8to11_texture.cpp:264,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DTexture8,PreLoad,unsupported/stub,d3d8to11_texture.cpp:270,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DTexture8,GetType,implemented at source level,d3d8to11_texture.cpp:275,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DTexture8,SetLOD,unsupported/stub,d3d8to11_texture.cpp:280,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DTexture8,GetLOD,unsupported/stub,d3d8to11_texture.cpp:285,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DTexture8,GetLevelCount,implemented at source level,d3d8to11_texture.cpp:291,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DTexture8,GetLevelDesc,implemented at source level,d3d8to11_texture.cpp:296,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DTexture8,GetSurfaceLevel,implemented at source level,d3d8to11_texture.cpp:320,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DTexture8,LockRect,implemented at source level,d3d8to11_texture.cpp:340,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DTexture8,UnlockRect,partial/unsupported,d3d8to11_texture.cpp:373,Explicit invalid-call or TODO path; see cited implementation.
+Direct3DTexture8,AddDirtyRect,unsupported/stub,d3d8to11_texture.cpp:429,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DTexture8,get_level_offset,implemented at source level,d3d8to11_texture.cpp:449,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DCubeTexture8,QueryInterface,implemented at source level,d3d8to11_texture.cpp:614,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DCubeTexture8,AddRef,implemented at source level,d3d8to11_texture.cpp:636,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DCubeTexture8,Release,implemented at source level,d3d8to11_texture.cpp:641,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DCubeTexture8,GetDevice,implemented at source level,d3d8to11_texture.cpp:646,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DCubeTexture8,SetPrivateData,implemented at source level,d3d8to11_texture.cpp:660,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DCubeTexture8,GetPrivateData,implemented at source level,d3d8to11_texture.cpp:665,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DCubeTexture8,FreePrivateData,implemented at source level,d3d8to11_texture.cpp:670,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DCubeTexture8,SetPriority,implemented at source level,d3d8to11_texture.cpp:675,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DCubeTexture8,GetPriority,implemented at source level,d3d8to11_texture.cpp:680,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DCubeTexture8,PreLoad,implemented at source level,d3d8to11_texture.cpp:685,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DCubeTexture8,GetType,implemented at source level,d3d8to11_texture.cpp:690,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DCubeTexture8,SetLOD,implemented at source level,d3d8to11_texture.cpp:695,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DCubeTexture8,GetLOD,implemented at source level,d3d8to11_texture.cpp:700,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DCubeTexture8,GetLevelCount,implemented at source level,d3d8to11_texture.cpp:705,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DCubeTexture8,GetLevelDesc,implemented at source level,d3d8to11_texture.cpp:710,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DCubeTexture8,GetCubeMapSurface,implemented at source level,d3d8to11_texture.cpp:731,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DCubeTexture8,LockRect,implemented at source level,d3d8to11_texture.cpp:754,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DCubeTexture8,UnlockRect,implemented at source level,d3d8to11_texture.cpp:759,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DCubeTexture8,AddDirtyRect,implemented at source level,d3d8to11_texture.cpp:764,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolumeTexture8,QueryInterface,implemented at source level,d3d8to11_texture.cpp:786,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolumeTexture8,AddRef,implemented at source level,d3d8to11_texture.cpp:808,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolumeTexture8,Release,implemented at source level,d3d8to11_texture.cpp:813,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolumeTexture8,GetDevice,implemented at source level,d3d8to11_texture.cpp:818,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolumeTexture8,SetPrivateData,implemented at source level,d3d8to11_texture.cpp:832,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolumeTexture8,GetPrivateData,implemented at source level,d3d8to11_texture.cpp:837,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolumeTexture8,FreePrivateData,implemented at source level,d3d8to11_texture.cpp:842,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolumeTexture8,SetPriority,implemented at source level,d3d8to11_texture.cpp:847,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolumeTexture8,GetPriority,implemented at source level,d3d8to11_texture.cpp:852,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolumeTexture8,PreLoad,implemented at source level,d3d8to11_texture.cpp:857,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolumeTexture8,GetType,implemented at source level,d3d8to11_texture.cpp:862,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolumeTexture8,SetLOD,implemented at source level,d3d8to11_texture.cpp:867,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolumeTexture8,GetLOD,implemented at source level,d3d8to11_texture.cpp:872,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolumeTexture8,GetLevelCount,implemented at source level,d3d8to11_texture.cpp:877,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolumeTexture8,GetLevelDesc,implemented at source level,d3d8to11_texture.cpp:882,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolumeTexture8,GetVolumeLevel,implemented at source level,d3d8to11_texture.cpp:903,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolumeTexture8,LockBox,implemented at source level,d3d8to11_texture.cpp:926,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolumeTexture8,UnlockBox,implemented at source level,d3d8to11_texture.cpp:931,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolumeTexture8,AddDirtyBox,implemented at source level,d3d8to11_texture.cpp:936,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DSurface8,QueryInterface,implemented at source level,d3d8to11_surface.cpp:50,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DSurface8,AddRef,implemented at source level,d3d8to11_surface.cpp:70,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DSurface8,Release,implemented at source level,d3d8to11_surface.cpp:75,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DSurface8,GetDevice,implemented at source level,d3d8to11_surface.cpp:87,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DSurface8,SetPrivateData,unsupported/stub,d3d8to11_surface.cpp:101,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DSurface8,GetPrivateData,unsupported/stub,d3d8to11_surface.cpp:106,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DSurface8,FreePrivateData,unsupported/stub,d3d8to11_surface.cpp:111,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DSurface8,GetContainer,unsupported/stub,d3d8to11_surface.cpp:116,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DSurface8,GetDesc,implemented at source level,d3d8to11_surface.cpp:121,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DSurface8,LockRect,implemented at source level,d3d8to11_surface.cpp:132,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DSurface8,UnlockRect,implemented at source level,d3d8to11_surface.cpp:137,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DSurface8,create_native,implemented at source level,d3d8to11_surface.cpp:142,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVertexBuffer8,create_native,implemented at source level,d3d8to11_vertex_buffer.cpp:10,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVertexBuffer8,QueryInterface,implemented at source level,d3d8to11_vertex_buffer.cpp:38,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVertexBuffer8,AddRef,implemented at source level,d3d8to11_vertex_buffer.cpp:59,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVertexBuffer8,Release,implemented at source level,d3d8to11_vertex_buffer.cpp:64,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVertexBuffer8,GetDevice,implemented at source level,d3d8to11_vertex_buffer.cpp:76,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVertexBuffer8,SetPrivateData,unsupported/stub,d3d8to11_vertex_buffer.cpp:90,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DVertexBuffer8,GetPrivateData,unsupported/stub,d3d8to11_vertex_buffer.cpp:95,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DVertexBuffer8,FreePrivateData,unsupported/stub,d3d8to11_vertex_buffer.cpp:100,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DVertexBuffer8,SetPriority,unsupported/stub,d3d8to11_vertex_buffer.cpp:105,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DVertexBuffer8,GetPriority,unsupported/stub,d3d8to11_vertex_buffer.cpp:110,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DVertexBuffer8,PreLoad,unsupported/stub,d3d8to11_vertex_buffer.cpp:115,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DVertexBuffer8,GetType,implemented at source level,d3d8to11_vertex_buffer.cpp:120,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVertexBuffer8,Lock,implemented at source level,d3d8to11_vertex_buffer.cpp:125,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVertexBuffer8,Unlock,implemented at source level,d3d8to11_vertex_buffer.cpp:166,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVertexBuffer8,GetDesc,implemented at source level,d3d8to11_vertex_buffer.cpp:180,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DIndexBuffer8,create_native,implemented at source level,d3d8to11_index_buffer.cpp:10,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DIndexBuffer8,QueryInterface,implemented at source level,d3d8to11_index_buffer.cpp:38,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DIndexBuffer8,AddRef,implemented at source level,d3d8to11_index_buffer.cpp:59,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DIndexBuffer8,Release,implemented at source level,d3d8to11_index_buffer.cpp:64,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DIndexBuffer8,GetDevice,implemented at source level,d3d8to11_index_buffer.cpp:76,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DIndexBuffer8,SetPrivateData,unsupported/stub,d3d8to11_index_buffer.cpp:90,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DIndexBuffer8,GetPrivateData,unsupported/stub,d3d8to11_index_buffer.cpp:95,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DIndexBuffer8,FreePrivateData,unsupported/stub,d3d8to11_index_buffer.cpp:100,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DIndexBuffer8,SetPriority,unsupported/stub,d3d8to11_index_buffer.cpp:105,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DIndexBuffer8,GetPriority,unsupported/stub,d3d8to11_index_buffer.cpp:110,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DIndexBuffer8,PreLoad,unsupported/stub,d3d8to11_index_buffer.cpp:115,Logs unsupported; macro returns D3DERR_INVALIDCALL unless void/explicit fallback.
+Direct3DIndexBuffer8,GetType,implemented at source level,d3d8to11_index_buffer.cpp:120,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DIndexBuffer8,Lock,implemented at source level,d3d8to11_index_buffer.cpp:125,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DIndexBuffer8,Unlock,implemented at source level,d3d8to11_index_buffer.cpp:166,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DIndexBuffer8,GetDesc,implemented at source level,d3d8to11_index_buffer.cpp:180,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolume8,QueryInterface,implemented at source level,d3d8to11_volume.cpp:21,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolume8,AddRef,implemented at source level,d3d8to11_volume.cpp:41,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolume8,Release,implemented at source level,d3d8to11_volume.cpp:46,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolume8,GetDevice,implemented at source level,d3d8to11_volume.cpp:51,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolume8,SetPrivateData,implemented at source level,d3d8to11_volume.cpp:65,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolume8,GetPrivateData,implemented at source level,d3d8to11_volume.cpp:70,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolume8,FreePrivateData,implemented at source level,d3d8to11_volume.cpp:75,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolume8,GetContainer,implemented at source level,d3d8to11_volume.cpp:80,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolume8,GetDesc,implemented at source level,d3d8to11_volume.cpp:85,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolume8,LockBox,implemented at source level,d3d8to11_volume.cpp:106,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DVolume8,UnlockBox,implemented at source level,d3d8to11_volume.cpp:111,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DSwapChain8,QueryInterface,implemented at source level,d3d8to11_swap_chain.cpp:22,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DSwapChain8,AddRef,implemented at source level,d3d8to11_swap_chain.cpp:42,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DSwapChain8,Release,implemented at source level,d3d8to11_swap_chain.cpp:47,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DSwapChain8,Present,partial,d3d8to11_swap_chain.cpp:52,Body contains TODO/HACK or ignored input; semantics require separate contract review.
+Direct3DSwapChain8,GetBackBuffer,implemented at source level,d3d8to11_swap_chain.cpp:59,Non-stub body exists; completeness and compatibility are unverified.
+Direct3DDevice8,SetRenderState enum dispatch,partial,d3d8to11/d3d8to11_device.cpp:2266-2290,Explicitly ignores selected states and rejects default/invalid values; full mapping is state-case-specific.
+Direct3DDevice8,GetRenderState enum dispatch,partial,d3d8to11/d3d8to11_device.cpp:2648-2679,Selected states return invalid-call; remaining values come from tracked state array.
+Direct3DDevice8,GetTextureStageState enum dispatch,partial,d3d8to11/d3d8to11_device.cpp:2792-2887,BORDERCOLOR is TODO; other unhandled enum values fail.
+Direct3DDevice8,SetTextureStageState enum dispatch,partial,d3d8to11/d3d8to11_device.cpp:2889-3033,Selective explicit cases; unsupported/default handling is not equivalent to complete enum support.
+D3D8 format/primitive converters,to_d3d11 / format conversion switches,partial,d3d8to11/d3d8to11.cpp:214-231; d3d8to11/d3d8types.cpp,Default/unknown formats or topologies are unsupported; audit converter switch cases for target formats before reuse.

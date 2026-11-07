@@ -1,0 +1,53 @@
+{
+  "status": "deployed for next full restart; real GPU worker passed; in-game acceptance pending",
+  "timestamp": "20261019-011939",
+  "target": "/home/tamsynn/NVMeData/Fleet Ops Roots",
+  "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/refit-fast-dds-20261019-011939",
+  "installed": {
+    "Data/modules/refit/A2FORefitScene.dll": "f817596a3e7205cf7d2acb2b36055015b5cc58a52ed5fba04218051dd1261562"
+  },
+  "previous_files": {
+    "Data/modules/refit/A2FORefitScene.dll": "21de74ba7f72b80ce9409f78f5ff6596f863425f15b0a4494c9e8871c49757dc"
+  },
+  "protected_unchanged": {
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FORefitMenus.ini": "e7a2c34c0b10be36fddd15baa78458cca6638a02ab0d09584d7e77b6cc275fae",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOShellDisplay.dll": "c364fa31788d6c1a08769d93ed9db56c93c6a218e4bb626eb3ff25711dc5bd19",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/RefitScene/Render3D.ini": "66ac89a0f313f8b0f8a85e25fcab25929cba7d4f454146bc30e3a81d1f98ef2f",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/licenses/libm-0.2.16.txt": "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.dll": "45be55e79afe53365dc26f1e4238bfcd9d74120299215b52bca6458f072d4b05",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll": "3fd18eeee4201a9a1297ac26b3eb88f78c5f72e8c55a62c25179f1d4932e4c11",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/settings_saves_logs/Settings.xml": "71b25b86c867398e4aa12b5676e58faed6809e67d8aacf380f4b329e027add77",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOArmadaProfiles.txt": "08ffa42a487354a7959fa5d4b184eb8120b331d2bca62284ac59f0da1cb52dac",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/licenses/noto-sans-condensed-OFL.txt": "cee9892f9f0cc8fe882c9e9537ee6a89621d86ee7ceaf70b02e2b2b1c25c061a",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/licenses/armada2-refit.txt": "35a427baddf84b00c8925cb5604fb20a93d667dabd952a105ceefe62a23465b7",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/RefitScene/Menu/map.ini": "cc370d017744facc01eecb91dca2b9d1f02461de9794fab60149c46b1dde7b2d",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/licenses/noto-sans-condensed-SOURCE.txt": "2449c7043de655fe9faaa36ef115d9a1c85dd5d07768440bfa6c772d60da8ac9",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe": "817b1ddb9876cfb9c5d781b42d2513de48fef9cbdbc408aa43c878c573581a18",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/info.ini": "d40efd9f80bc8e07d95186ede2ddd2a44277c758f45ac58171712f8eaa9a7192",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.ini": "8830d04dbcd3d5c45671748cc8a3999cbb5e52f5ff19636d3f01a42c8bb9abdd",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/info.ini": "68cef7963cf436691dc775dae6efc07d9ed4a9545d1b71f596b1d3b8a76061ac",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FORefitMenus.dll": "edd08ae51fe73d066192248311048f8bf8bf40df3d1d12454203d6c0001eeded",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/STA2 Classic Mod/info.ini": "9f599f3f5217d0219d80ef0dd8a01990a72e9995b51a0b5cc372ff709cf77976"
+  },
+  "preserved_logs_config": {
+    "Data/A2FOExtensions.log": "167c0193a15683bb07d917211e035e2f85c1ff7a8973820f1daa92a9e129c2fa",
+    "Data/RefitScene/A2FORefitScene.log": "eae172dbde582c635bfd4bd0785a6c939ebce7977a47551302f0f1adce308c41",
+    "Data/A2FORefitMenus.ini": "e7a2c34c0b10be36fddd15baa78458cca6638a02ab0d09584d7e77b6cc275fae"
+  },
+  "evidence": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/refit-fast-dds-20261019-011939/evidence",
+  "source_sha256": {
+    "third_party/armada2-refit/menu-renderer/a2fmt/src/dds.rs": "16bfa9085808d77507601f7f3438863a00d1d474b51d3e263707450f4d4a143d",
+    "third_party/armada2-refit/menu-renderer/src/assets/mod.rs": "533982ac64af285de8eb01db1b055775fa0af1d9a636244ff83d7614c68027a1"
+  },
+  "tests": {
+    "parser": "22 unit tests passed; DDS arithmetic equivalence and header metadata. Eight stock tests have optional asset guards and were not validated against a configured stock install.",
+    "build": "i686 MSVC release build passed",
+    "abi": "provider init, null device, owner/foreign thread and repeat-init guards passed",
+    "gpu": "1920x1080 main/Klingon/Borg frames, retained backend and worker cleanup passed",
+    "review": "arithmetic reviewed; candidate validation retained to avoid invalid _1 hiding valid bare 1 mip"
+  },
+  "scope": "Menu-only helper DLL. Config choice, render resolution/profile, host DLL, ShellDisplay, game binaries, module lists and attribution unchanged.",
+  "limits": "Actual game presentation pending full restart. Faction visuals and complete Instant Action UI remain unfinished.",
+  "input_automation": false,
+  "rollback": "With game closed, copy previous helper from backup to identical live relative path. Retain attribution."
+}

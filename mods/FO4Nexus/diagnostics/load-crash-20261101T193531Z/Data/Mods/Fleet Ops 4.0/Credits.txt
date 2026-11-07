@@ -1,0 +1,795 @@
+@colour=(0.4,0.5,1.0)
+@font=2
+@loc=(800.0,600.0)
+@hold=3.0
+Fleet Operations
+
+http://www.fleetops.net
+
+
+@cls
+@font=1
+@hold=6.0
+Fleet Operations Team
+
+
+DOCa Cola
+
+Optec
+
+Detektor
+
+Remoter
+
+Overlord/Zeich
+
+@cls
+@colour=(1.0,1.0,1.0)
+@font=2
+@loc=(800.0,600.0)
+@hold=3.0
+Star Trek Armada II
+
+A Mad Doc Software Game
+
+An Activision Production
+
+@cls
+@font=1
+@hold=8.0
+MAD DOC SOFTWARE
+
+CORE ARMADA II Team
+
+
+Elizabeth Budington
+
+Peter J. Calabria Jr.
+
+Dr. Ian Lane Davis
+
+Ken Davis
+
+Tim Farrar
+
+James Fleming
+
+Mark C. Graham
+
+Shaun McDermott
+
+Gordon Moyes
+
+Brian Mysliwy
+
+Steven W. Nadeau
+
+Matthew Nordhaus
+
+Michael Thomas Ryan
+
+Michael Swiderek
+
+Tara Teich
+
+Kevin Wasserman
+
+Karen Wolff
+
+@cls
+@hold=8.0
+INTERNS
+
+Jason Craig Dunlop
+
+Sarah Hastings
+
+
+ADDITIONAL ART
+
+Franz Boehm
+
+Nicholas Greco
+
+Rick "pneumonic81" Knox
+
+
+TESTERS
+
+Nathaniel Blumberg
+
+Daniel Krikorian
+
+Doug Linder
+
+Nathan G. Raymond
+
+Chris Wyman
+
+
+PRODUCTION COORDINATION
+
+Jennifer Mysliwy
+
+@cls
+@hold=8.0
+VOICE TALENTS
+
+
+CAPTAIN JEAN-LUC PICARD
+
+Patrick Stewart
+
+
+CHANCELLOR MARTOK
+
+J.G. Hertzler
+
+
+BORG QUEEN
+
+Alice Krige
+
+
+FEDERATION COMPUTER
+
+Judi Durand
+
+@cls
+@hold=8.0
+ADDITIONAL VOICE TALENTS
+
+
+Vaughn Armstrong, Iris Bahr,
+
+Terrance Beasor, Michael Bell, 
+
+Earl Boen, Charles Bartlett, 
+
+Charles Chun, Jonathan Cook, 
+
+John Cragen, Jonathan Del Arco, 
+
+Barry Dennen, Gregg Eagles, 
+
+Paul Eiding, Dan Gilvezan,
+
+Max Grodenchik, Nicholas Guest,
+
+Martha Hackett, James Horan,
+
+
+@cls
+@hold=8.0
+ADDITIONAL VOICE TALENTS
+
+
+Sherman Howard, Tony Jay,
+
+Denise Kumagai, Lex Lang, 
+
+Lisa Locicero, Brian Mysliwy, 
+
+Tony Pasqualini, David Randolph, 
+
+Peter Renaday, Michael Reisz,
+
+Neil Ross, Joel Swetow,
+
+Jim Ward, Patti Yasutake
+
+@cls
+@hold=8.0
+SOUND
+
+
+SOUND DESIGNER
+
+Kemal Amarasingham
+
+
+CASTING
+
+Ron Surma Casting
+
+Barbara Harris Casting
+
+
+VOICE OVER DIRECTION
+
+Kris Zimmerman
+
+
+SALAMI STUDIOS
+
+Devon Bowman
+
+Mark Mercado
+
+Gregory Cathcart
+
+@cls
+@hold=8.0
+MUSIC
+
+
+THEME AND ORIGINAL SCORE
+
+Danny Pelfrey
+
+
+INTRO MOVIE
+
+
+CG ANIMATION
+
+Creat Studios, LLC
+
+
+PRODUCER
+
+Daniel Prousline
+
+
+CG SUPERVISOR
+
+Avenir Sniatkov
+
+@cls
+@hold=8.0
+ACTIVISION, INC.
+
+
+PRODUCER
+
+Doug Pearson
+
+
+ASSOCIATE PRODUCER
+
+Jim Hudson
+
+Glenn Ige
+
+
+EXECUTIVE PRODUCER
+
+Marc Struhl
+
+
+PRODUCTION TESTERS
+
+Eric Lee
+
+Doug Mirabello
+
+Tim Ogle
+
+@cls
+@hold=8.0
+V.P. OF PRODUCTION, NORTH AMERICA
+
+Mark Lamia
+
+
+E.V.P. WORLDWIDE STUDIOS
+
+Larry Goldberg
+
+
+GLOBAL BRAND MANAGER
+
+Jennifer Stornetta
+
+
+ASSOCIATE BRAND MANAGER
+
+Elizabeth Dunn
+
+
+V.P., GLOBAL BRAND MANAGEMENT
+
+Tricia Betero
+
+
+E.V.P., GLOBAL BRAND MANAGEMENT
+
+Kathy Vrabeck
+
+@cls
+@hold=8.0
+PUBLIC RELATIONS
+
+
+V.P., CORPORATE COMMUNICATIONS
+
+Maryanne Lataif
+
+
+SENIOR PUBLICIST
+
+CORPORATE COMMUNICATIONS
+
+Michael J. Larson
+
+
+LEGAL
+
+George Rose
+
+Mike Walker
+
+@cls
+@hold=8.0
+INTERNATIONAL
+
+
+SENIOR V.P., EUROPEAN PUBLISHING
+
+Scott Dodkins
+
+
+HEAD OF PUBLISHING SERVICES
+
+Nathalie Dove
+
+
+SENIOR LOCALISATIONS
+
+PROJECT MANAGER
+
+Tamsin Lucas
+
+
+LOCALISATIONS
+
+PROJECT MANAGER
+
+Simon Dawes
+
+@cls
+@hold=8.0
+DIRECTOR OF STRATEGIC
+
+MARKETING EUROPE
+
+Roger Walkden
+
+
+MARKETING MANAGER, UK & ROE
+
+Carolyn London
+
+
+PR MANANGER, UK
+
+Guy Cunis
+
+
+PR MANAGER, ROE
+
+Suzanne Panter
+
+
+MARKETING DIRECTOR, GERMANY
+
+Andreas Stock
+
+@cls
+@hold=8.0
+MARKETING MANAGER, GERMANY
+
+Achim Kaspers
+
+
+JR. BRAND MANAGER, GERMANY
+
+Stephan Ricken
+
+
+MARKETING DIRECTOR, ASIA PACIFIC
+
+Paul Butcher
+
+
+BRAND MANAGER, ASIA PACIFIC
+
+Leigh Glover White
+
+@cls
+@hold=8.0
+CENTRAL TECHNOLOGY
+
+
+SENIOR MANAGER
+
+Ed Clune
+
+
+INSTALLER
+
+John Fritts
+
+Andrew Petterson
+
+@cls
+@hold=8.0
+QUALITY ASSURANCE
+
+
+PROJECT LEAD
+
+Matt McClure
+
+
+FLOOR LEAD
+
+Doug Rothman
+
+
+DATABASE MANAGER
+
+Dan Carreker
+
+
+MULTIPLAYER LEAD
+
+Nick Falzon
+
+
+SINGLE PLAYER LEAD
+
+Michael Wade
+
+@cls
+@hold=8.0
+QUALITY ASSURANCE
+
+
+TESTERS
+
+Brad Arnold, Mike Beck,
+
+Matthew Burns, Bruce Campbell,  
+
+Aaron Cantu, Paul Colbert,
+
+Jason Cook, Alex Epstein,
+
+Behrang Fassihi-Rad, 
+
+Brian Fisher, Eddies Flores,
+
+Glen Gregory, Paul Goldilla,
+
+Doug Hartley, Lip Ho, 
+
+John Hong, Mark Horner,
+
+James Jacob, Francis Jimenez, 
+
+Jeremiah Jones, Frankie Kang, 
+
+Patrick Keenan, Anthony Korotko,
+
+Dan Ko, Doug Koupal,
+
+Corey Levin, Jason Levine,  
+
+Doug Linder, Halo Mauch, 
+
+Victor Meng, Dave Miao,
+
+@cls
+@hold=8.0
+QUALITY ASSURANCE
+
+
+TESTERS
+
+Michael McConn, Ayal Moreno, 
+
+Andy Pan, Joe Pena, 
+
+Ray Ploesser, Arvind Ramamoorthy, 
+
+J. Richards, John Rickers,
+
+Eric Rodriguez, Mike Ryan, 
+
+Frank So, Jay Sosnicki, 
+
+Dustin Thomas, Nick Weaver, 
+
+Paul Williams, Walter Williams, 
+
+Brian Zigich
+
+
+SENIOR LEAD
+
+Marilena Rixford
+
+
+MANAGER PC TESTING
+
+Sam Nouriani
+
+@cls
+@hold=8.0
+QUALITY ASSURANCE
+
+
+LEAD, COMPATIBILITY LAB
+
+Neil Barizo
+
+
+QA COMPATIBILITY TECHNICIAN
+
+Jason Kim
+
+
+QA COMPATIBILITY TESTERS
+
+John Santry
+
+Jane Lee
+
+
+SR. LEAD, NETWORK LAB LEAD
+
+Christopher Keim
+
+
+LEAD, CODE RELEASE GROUP
+
+Brad Saavedra
+
+@cls
+@hold=8.0
+CUSTOMER SUPPORT
+
+
+CUSTOMER SUPPORT MANAGER
+
+Bob McPherson
+
+
+CUSTOMER SUPPORT LEADS
+
+Rob Lim
+
+Gary Bolduc
+
+Mike Hill
+
+@cls
+@hold=8.0
+EXTERNAL TEST COORDINATOR
+
+Chad Siedhoff
+
+
+VISIONEER TESTING GROUP
+
+
+Eric Lo, Travis Prebble,
+
+John Silva, David C. Seale,
+
+Baldwin Yen, Henry Wang,
+
+Rich Reed, Maxwell DeChant, 
+
+Theresa Spielbauer, Aaron Cox, 
+
+Graham Nardone, Paul Castillo,
+
+Calvin Oliveria, Dan Carter, 
+
+Scott Cook, CJ Biro, 
+
+Mickael Gross, Scott Kasai,
+
+Mark Spadavecchia, Michael Dwiel, 
+
+@cls
+@hold=8.0
+VISIONEER TESTING GROUP
+
+
+Ken Rumsey, Jamie K. Badgerow, 
+
+Kevin Hoekman, Alan Wexelblat, 
+
+Joseph Bott, Trevor Cook, 
+
+Phillip Hansen, David Teague, 
+
+Dominick Ziccarelli, Tom Hepner,
+
+Timothy Wilson, John Vernon, 
+
+James Dillinger, Myron McMullen, 
+
+Don R. Swanner Jr., Dave Barron,
+
+Dee Anderson, Carolann Quinn, 
+
+Lee Thium, William Carl Slayton Jr.,
+
+Chris Penney, Daniel Smith,
+
+Mark Zaritsky, Derek Lung, 
+
+Wayne Chang, Clay Culver, 
+
+Iain Hill, Andy Serwatuk,
+
+Peter Lolley
+
+@cls
+@hold=8.0
+QA SPECIAL THANKS
+
+
+Jim Summers, Jason Wong,
+
+Indra Gunawan, Juan Valdes,
+
+Todd Komesu, The Brothers Chap,
+
+Nadine Theuzillot, Glenn Vistante, 
+
+Jessica Burnett, Homestar Runner, 
+
+Tim Vanlaw
+
+@cls
+@hold=8.0
+VIACOM CONSUMER PRODUCTS/
+
+PARAMOUNT PICTURES LIASONS
+
+
+DIRECTOR, PRODUCT DEVELOPMENT
+
+INTERACTIVE & TECHNOLOGY
+
+Harry Lang
+
+
+SUPERVISOR, PRODUCT DEVELOPMENT
+
+INTERACTIVE & TECHNOLOGY
+
+Daniel Felts
+
+
+VIACOM CONSUMER PRODUCTS/
+
+PARAMOUNT PICTURES
+
+
+Andrea Hein, Terri Helton,
+
+Pam Newton, Rick Berman,
+
+Dave Rossi, Peter Lauritson,
+
+Mike Okuda, Sandi Isaacs
+
+@cls
+@hold=8.0
+GAMESPY
+
+Joost Schuur
+
+Travis Hogue
+
+
+RAD GAME TOOLS, INC.
+
+Mitch Soule
+
+Jeff Roberts
+
+@cls
+@hold=8.0
+CREATIVE SERVICES
+
+
+V.P., CREATIVE SERVICES
+
+Denise Walsh
+
+
+MANAGER, CREATIVE SERVICES
+
+Jill Barry
+
+
+PACKAGING AND MANUAL PRODUCED
+
+BY IGNITED MINDS, LLC.
+
+
+SPECIAL THANKS
+
+Magnus Morgan, Ron Gould,
+
+Mike Rivera, Josh Lieber
+
+@cls
+@hold=8.0
+ACTIVISION MANAGEMENT
+
+
+Ron Doornink
+
+Brian Kelly
+
+Bobby Kotick
+
+@cls
+@hold=8.0
+SPECIAL THANKS
+
+
+The Original Armada Team
+
+
+Mike Webster, Sandy O'Toole, Leah,
+
+James Matthew Ryan, Adviye Tolunay,
+
+Steve Crane, Gene Mauro,
+
+Wicked, Max, Maya, Rachel,
+
+Owen, Amberly, Emelia, Addie,
+
+Emma 'Schnootch' Graham,
+
+Schnootch 2, Dr. Audrey Graham,
+
+Jim Martin, Bob Deluca,
+
+Jim Thorp, Bert Paley,
+
+Doc Davis, Sr., Attorney Davis.,
+
+Alfred Angelo Tomaselli III,
+
+Rick Glenn, David Dalzell, 
+
+Alfalfa, Bailey, Buckwheat,
+
+Chessmess, Wombit, Trickster
+
+@cls
+@hold=8.0
+VERY SPECIAL THANKS
+
+
+Gene Roddenberry
+
+@cls
+@hold=8.0
+LICENSES
+
+
+USES BINK VIDEO
+
+Copyright (c) 1997-2001 by
+
+Rad Game Tools, Inc.
+
+
+GAMESPY AND GAMESPY ARCADE
+
+Copyright (c) 2001 by
+
+GameSpy Industries, Inc.
+

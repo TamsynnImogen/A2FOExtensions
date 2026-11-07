@@ -1,0 +1,1730 @@
+{
+  "schema_version": 1,
+  "description": "Frozen 152-unit census. Stages 1-6 have verified Rust implementations for 77 units (50.66% by unit count); native C++ adapters remain.",
+  "sources": {
+    "census": {
+      "path": "/tmp/a2fo-rust-25-inventory.json",
+      "sha256": "592155225147d50dbb0ab517cddc494720d788c04694aecad2826572b3bc2a10"
+    },
+    "stage3_scope": {
+      "path": "build/rust-migration-stage3/scope.json",
+      "sha256": "5a6908527d5b88776a3cced5cf4e9917bf287e6a039d2cc91c6303be8cc18dbe"
+    },
+    "prior_stage_record": "docs/rust-migration.md",
+    "stage1_parity": "tools/check_rust_migration_parity.py",
+    "stage2_parity": "tools/check_rust_stage2_parity.py",
+    "stage3_parity": "tools/check_rust_stage3_parity.py",
+    "stage4_scope": {
+      "path": "build/rust-migration-stage4/scope.json",
+      "sha256": "870106d985e04a6de024707ea36b6eb25b244c53457dcc66c6decd79388c8ae7"
+    },
+    "stage4_parity": "tools/check_rust_stage4_parity.py",
+    "stage5_scope": {
+      "path": "build/rust-migration-stage5/scope.json",
+      "sha256": "2ad397e8389c54475242a108fd63b6666fe1ae57a0fe1adac63d652876a711dc"
+    },
+    "stage5_parity": "tools/check_rust_stage5_worker_parity.py",
+    "stage5_validation": "build/rust-migration-stage5/validation.json",
+    "stage6_scope": {
+      "path": "build/rust-migration-stage6/scope.json",
+      "sha256": "58f65ff17b49e60c6c0020695411b2945a528779935d5c427c93be6364c7b820"
+    },
+    "stage6_parity": "tools/check_rust_stage6_parity.py",
+    "stage6_validation": "build/rust-migration-stage6/validation.json"
+  },
+  "counting_rules": {
+    "denominator": "152 frozen direct C++ implementation units; baseline_cpp_lines are from the frozen census, not current source sizes.",
+    "migrated": "Count only verified portable implementation ports. A C++ adapter remains at each boundary; builtin aggregation wrappers, assembly, headers, and third-party code are not counted as migrated.",
+    "pending": "A selected unit is counted only after differential, linked-DLL, and integration checks pass. Unit coverage is not a measure of effort or full DLL completion."
+  },
+  "totals": {
+    "denominator_cpp_units": 152,
+    "baseline_cpp_lines": 41621,
+    "verified_before_stage4_units": 38,
+    "verified_stage1_units": 3,
+    "verified_stage2_units": 6,
+    "stage3_verified_units": 29,
+    "stage4_verified_units": 6,
+    "selected_pending_units": 0,
+    "not_migrated_units": 75,
+    "verified_migrated_units_now": 77,
+    "verified_migrated_percent": 50.657895,
+    "stage3_verification_status": "verified",
+    "stage4_verification_status": "verified",
+    "verified_before_stage5_units": 44,
+    "stage5_verified_units": 32,
+    "stage5_verification_status": "verified",
+    "verified_before_stage6_units": 76,
+    "stage6_verified_units": 1,
+    "stage6_verification_status": "verified"
+  },
+  "stage3_group_counts": {
+    "config": 8,
+    "gameplay": 8,
+    "ui": 7,
+    "lead": 6
+  },
+  "units": [
+    {
+      "path": "core/builtin_a1_compat.cpp",
+      "baseline_cpp_lines": 5,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_a1_fallbacks.cpp",
+      "baseline_cpp_lines": 8,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_always_shields.cpp",
+      "baseline_cpp_lines": 8,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_animated_hardpoints.cpp",
+      "baseline_cpp_lines": 8,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_animations.cpp",
+      "baseline_cpp_lines": 8,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_breeders.cpp",
+      "baseline_cpp_lines": 8,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_build_tooltips.cpp",
+      "baseline_cpp_lines": 8,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_camera_controls.cpp",
+      "baseline_cpp_lines": 12,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_cheats.cpp",
+      "baseline_cpp_lines": 7,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_collective_xp.cpp",
+      "baseline_cpp_lines": 4,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_craft_identity.cpp",
+      "baseline_cpp_lines": 5,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_directional_shields.cpp",
+      "baseline_cpp_lines": 4,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_edit_menu.cpp",
+      "baseline_cpp_lines": 8,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_energy_systems.cpp",
+      "baseline_cpp_lines": 5,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_feature_pack.cpp",
+      "baseline_cpp_lines": 8,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_feature_pack_buildyard.cpp",
+      "baseline_cpp_lines": 5,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_feature_pack_hybrid_client.cpp",
+      "baseline_cpp_lines": 2,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_feature_pack_queue.cpp",
+      "baseline_cpp_lines": 5,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_feature_pack_upgrade_pods.cpp",
+      "baseline_cpp_lines": 5,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_fire_arcs.cpp",
+      "baseline_cpp_lines": 8,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_hybrid_build.cpp",
+      "baseline_cpp_lines": 7,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_hybrid_runtime.cpp",
+      "baseline_cpp_lines": 8,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_infestation.cpp",
+      "baseline_cpp_lines": 8,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_info_ini.cpp",
+      "baseline_cpp_lines": 4,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_instant_action_settings.cpp",
+      "baseline_cpp_lines": 9,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_log_mailer.cpp",
+      "baseline_cpp_lines": 5,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_m3d.cpp",
+      "baseline_cpp_lines": 8,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_mission_selector.cpp",
+      "baseline_cpp_lines": 5,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_modules.cpp",
+      "baseline_cpp_lines": 313,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/builtin_runtime.rs",
+      "parity_group": "core",
+      "parity_fixture": "tests/rust_stage5_core_lifecycle_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_runtime_state"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "core/builtin_multi_yard_build.cpp",
+      "baseline_cpp_lines": 4,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_muzzle_flashes.cpp",
+      "baseline_cpp_lines": 8,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_nebula_renderer.cpp",
+      "baseline_cpp_lines": 4,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_normal_weapon_tech.cpp",
+      "baseline_cpp_lines": 8,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_odf_variants.cpp",
+      "baseline_cpp_lines": 8,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_point_defense_cycles.cpp",
+      "baseline_cpp_lines": 4,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_radar_diagnostics.cpp",
+      "baseline_cpp_lines": 8,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_recovery_tests.cpp",
+      "baseline_cpp_lines": 8,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_refit_menus.cpp",
+      "baseline_cpp_lines": 5,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_refit_yards.cpp",
+      "baseline_cpp_lines": 4,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_resources.cpp",
+      "baseline_cpp_lines": 5,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_rgb_textures.cpp",
+      "baseline_cpp_lines": 4,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_shell_display.cpp",
+      "baseline_cpp_lines": 5,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_sol_maps.cpp",
+      "baseline_cpp_lines": 6,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_squadrons.cpp",
+      "baseline_cpp_lines": 5,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_startup_modules.cpp",
+      "baseline_cpp_lines": 115,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/builtin_runtime.rs",
+      "parity_group": "core",
+      "parity_fixture": "tests/rust_stage5_core_lifecycle_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_startup_initialize"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "core/builtin_startup_policy.cpp",
+      "baseline_cpp_lines": 23,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/builtin_runtime.rs",
+      "parity_group": "core",
+      "parity_fixture": "tests/rust_stage5_core_lifecycle_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_startup_selected"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "core/builtin_state.cpp",
+      "baseline_cpp_lines": 55,
+      "status": "verified_prior",
+      "stage": "stage1",
+      "rust_source": "rust/a2fo_core/src/builtin_state.rs",
+      "parity_group": "stage1",
+      "parity_fixture": "tests/rust_migration_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_builtin_activation",
+        "a2fo_rs_builtin_find",
+        "a2fo_rs_builtin_flags",
+        "a2fo_rs_builtin_name",
+        "a2fo_rs_builtin_prepare",
+        "a2fo_rs_builtin_request",
+        "a2fo_rs_builtin_requires_restart",
+        "a2fo_rs_builtin_same_root"
+      ],
+      "ported_in_frozen_census": true
+    },
+    {
+      "path": "core/builtin_station_rotation.cpp",
+      "baseline_cpp_lines": 8,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_swarm_system.cpp",
+      "baseline_cpp_lines": 8,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_team_change_weapons.cpp",
+      "baseline_cpp_lines": 8,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_texture_variants.cpp",
+      "baseline_cpp_lines": 4,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_turrets.cpp",
+      "baseline_cpp_lines": 4,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_video.cpp",
+      "baseline_cpp_lines": 5,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_view_distance.cpp",
+      "baseline_cpp_lines": 12,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_weapon_damage_controls.cpp",
+      "baseline_cpp_lines": 8,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/builtin_wreckage.cpp",
+      "baseline_cpp_lines": 5,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/decal_math.cpp",
+      "baseline_cpp_lines": 24,
+      "status": "verified_stage4",
+      "ported_in_frozen_census": false,
+      "stage": "stage4",
+      "rust_source": "rust/a2fo_core/src/text_geometry.rs",
+      "parity_group": "numeric",
+      "parity_fixture": "tests/rust_stage4_numeric_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_geometry_rotate_xyz"
+      ],
+      "verification_receipt": "build/rust-migration-stage4/validation.json"
+    },
+    {
+      "path": "core/dllmain.cpp",
+      "baseline_cpp_lines": 4379,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/extension_roots.cpp",
+      "baseline_cpp_lines": 355,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/roots.rs",
+      "parity_group": "core",
+      "parity_fixture": "tests/rust_stage5_core_lifecycle_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_roots_active"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "core/fpq_paths.cpp",
+      "baseline_cpp_lines": 192,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/config.rs",
+      "parity_group": "config",
+      "parity_fixture": "tests/rust_config_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_config_fpq"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "core/game_monitor.cpp",
+      "baseline_cpp_lines": 236,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/monitor.rs",
+      "parity_group": "monitor",
+      "parity_fixture": "tests/rust_stage5_monitor_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_monitor_list"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "core/game_monitor_policy.cpp",
+      "baseline_cpp_lines": 85,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/ui.rs",
+      "parity_group": "ui",
+      "parity_fixture": "tests/rust_ui_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_ui_legacy_width",
+        "a2fo_rs_ui_monitor"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "core/hook.cpp",
+      "baseline_cpp_lines": 123,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/native_hooks.rs",
+      "parity_group": "core",
+      "parity_fixture": "tests/rust_stage5_core_lifecycle_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_hook_patch"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "core/module_loader.cpp",
+      "baseline_cpp_lines": 201,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/loader.rs",
+      "parity_group": "core",
+      "parity_fixture": "tests/rust_stage5_core_lifecycle_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_loader_producer"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "core/module_menu.cpp",
+      "baseline_cpp_lines": 2212,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/module_policy.cpp",
+      "baseline_cpp_lines": 275,
+      "status": "verified_prior",
+      "stage": "stage1",
+      "rust_source": "rust/a2fo_core/src/module_policy.rs",
+      "parity_group": "stage1",
+      "parity_fixture": "tests/rust_migration_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_policy_evaluate",
+        "a2fo_rs_policy_key",
+        "a2fo_rs_policy_normalize",
+        "a2fo_rs_policy_parse",
+        "a2fo_rs_policy_rewrite"
+      ],
+      "ported_in_frozen_census": true
+    },
+    {
+      "path": "core/nebula_emissive.cpp",
+      "baseline_cpp_lines": 287,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/emissive.rs",
+      "parity_group": "emissive",
+      "parity_fixture": "tests/rust_stage5_emissive_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_emissive_subsystem"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "core/nebula_renderer.cpp",
+      "baseline_cpp_lines": 6490,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "core/odf_paths.cpp",
+      "baseline_cpp_lines": 78,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/config.rs",
+      "parity_group": "config",
+      "parity_fixture": "tests/rust_config_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_config_odf_alias_equivalent",
+        "a2fo_rs_config_odf_basename"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "core/renderer_options.cpp",
+      "baseline_cpp_lines": 1595,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "modules/A1Compat/a1_bzn_policy.cpp",
+      "baseline_cpp_lines": 532,
+      "status": "verified_stage4",
+      "ported_in_frozen_census": false,
+      "stage": "stage4",
+      "rust_source": "rust/a2fo_core/src/a1_maps.rs",
+      "parity_group": "a1",
+      "parity_fixture": "tests/rust_stage4_a1_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_a1_parse_header"
+      ],
+      "verification_receipt": "build/rust-migration-stage4/validation.json"
+    },
+    {
+      "path": "modules/A1Compat/race_menu_policy.cpp",
+      "baseline_cpp_lines": 48,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/config.rs",
+      "parity_group": "config",
+      "parity_fixture": "tests/rust_config_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_config_race"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A1Compat/team_color_policy.cpp",
+      "baseline_cpp_lines": 212,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/config.rs",
+      "parity_group": "config",
+      "parity_fixture": "tests/rust_config_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_config_team"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A1Fallbacks/fallback_policy.cpp",
+      "baseline_cpp_lines": 32,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/lead.rs",
+      "parity_group": "lead",
+      "parity_fixture": "tests/rust_lead_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_lead_fallback"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A2FOAlwaysShowShields/shield_visibility.cpp",
+      "baseline_cpp_lines": 30,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/lead.rs",
+      "parity_group": "lead",
+      "parity_fixture": "tests/rust_lead_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_lead_scan_due",
+        "a2fo_rs_lead_shield_action"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A2FOBuildTooltips/build_time_text.cpp",
+      "baseline_cpp_lines": 86,
+      "status": "verified_stage4",
+      "ported_in_frozen_census": false,
+      "stage": "stage4",
+      "rust_source": "rust/a2fo_core/src/text_geometry.rs",
+      "parity_group": "numeric",
+      "parity_fixture": "tests/rust_stage4_numeric_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_text_reconcile"
+      ],
+      "verification_receipt": "build/rust-migration-stage4/validation.json"
+    },
+    {
+      "path": "modules/A2FOCollectiveXP/collective_xp.cpp",
+      "baseline_cpp_lines": 311,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/domain_state.rs",
+      "parity_group": "domain_state",
+      "parity_fixture": "tests/rust_stage5_domain_state_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_xp_process"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "modules/A2FOCraftIdentity/directional_shield_display_config.cpp",
+      "baseline_cpp_lines": 288,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/gameplay.rs",
+      "parity_group": "gameplay",
+      "parity_fixture": "tests/rust_gameplay_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_gameplay_parse_shield_config",
+        "a2fo_rs_gameplay_remap_shield",
+        "a2fo_rs_gameplay_scale_shield",
+        "a2fo_rs_gameplay_shield_value",
+        "a2fo_rs_gameplay_valid_shield_mapping"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A2FOCraftIdentity/directional_shield_fill.cpp",
+      "baseline_cpp_lines": 58,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/gameplay.rs",
+      "parity_group": "gameplay",
+      "parity_fixture": "tests/rust_gameplay_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_gameplay_centered_fill",
+        "a2fo_rs_gameplay_segment_at"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A2FOCraftIdentity/extended_weapon_icons.cpp",
+      "baseline_cpp_lines": 525,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "modules/A2FOCraftIdentity/fleetops_object_editor.cpp",
+      "baseline_cpp_lines": 390,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "modules/A2FOCraftIdentity/identity_selection.cpp",
+      "baseline_cpp_lines": 23,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/gameplay.rs",
+      "parity_group": "gameplay",
+      "parity_fixture": "tests/rust_gameplay_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_gameplay_identity_index"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A2FOCraftIdentity/object_editor.cpp",
+      "baseline_cpp_lines": 824,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "modules/A2FOCraftIdentity/object_editor_state.cpp",
+      "baseline_cpp_lines": 99,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/lead.rs",
+      "parity_group": "lead",
+      "parity_fixture": "tests/rust_lead_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_lead_editor_decode",
+        "a2fo_rs_lead_editor_number",
+        "a2fo_rs_lead_editor_valid"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A2FOCraftIdentity/system_icon_state.cpp",
+      "baseline_cpp_lines": 118,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/gameplay.rs",
+      "parity_group": "gameplay",
+      "parity_fixture": "tests/rust_gameplay_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_gameplay_icon_state",
+        "a2fo_rs_gameplay_passive_weapon_class",
+        "a2fo_rs_gameplay_tint_colour",
+        "a2fo_rs_gameplay_weapon_colour_source",
+        "a2fo_rs_gameplay_weapon_presentation"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A2FODirectionalShields/directional_shields.cpp",
+      "baseline_cpp_lines": 378,
+      "status": "verified_stage6",
+      "ported_in_frozen_census": false,
+      "stage": "stage6",
+      "rust_source": "rust/a2fo_core/src/shields.rs",
+      "parity_group": "shields",
+      "parity_fixture": "tests/rust_stage6_shields_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_shields_index",
+        "a2fo_rs_shields_active",
+        "a2fo_rs_shields_normalize",
+        "a2fo_rs_shields_valid",
+        "a2fo_rs_shields_total",
+        "a2fo_rs_shields_aggregate",
+        "a2fo_rs_shields_clear",
+        "a2fo_rs_shields_suppress",
+        "a2fo_rs_shields_select",
+        "a2fo_rs_shields_select_local",
+        "a2fo_rs_shields_initialize",
+        "a2fo_rs_shields_reconcile"
+      ],
+      "verification_receipt": "build/rust-migration-stage6/validation.json"
+    },
+    {
+      "path": "modules/A2FOEditMenu/edit_menu_odf.cpp",
+      "baseline_cpp_lines": 280,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/config.rs",
+      "parity_group": "config",
+      "parity_fixture": "tests/rust_config_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_config_edit_normalize",
+        "a2fo_rs_config_edit_parse",
+        "a2fo_rs_config_edit_submenu"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A2FOEnergySystems/energy_systems.cpp",
+      "baseline_cpp_lines": 34,
+      "status": "verified_prior",
+      "stage": "stage2",
+      "rust_source": "rust/a2fo_core/src/energy.rs",
+      "parity_group": "stores",
+      "parity_fixture": "tests/rust_stores_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_energy_can_consume",
+        "a2fo_rs_energy_clamp",
+        "a2fo_rs_energy_consume",
+        "a2fo_rs_energy_enabled",
+        "a2fo_rs_energy_normalize",
+        "a2fo_rs_energy_recharge",
+        "a2fo_rs_energy_reload",
+        "a2fo_rs_energy_requires_resupply"
+      ],
+      "ported_in_frozen_census": true
+    },
+    {
+      "path": "modules/A2FOEnergySystems/resupply_policy.cpp",
+      "baseline_cpp_lines": 102,
+      "status": "verified_prior",
+      "stage": "stage1",
+      "rust_source": "rust/a2fo_core/src/resupply.rs",
+      "parity_group": "stage1",
+      "parity_fixture": "tests/rust_migration_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_resupply_allowed",
+        "a2fo_rs_resupply_normalize_odf",
+        "a2fo_rs_resupply_normalize_type",
+        "a2fo_rs_resupply_parse"
+      ],
+      "ported_in_frozen_census": true
+    },
+    {
+      "path": "modules/A2FOFeaturePack/refit_queue_bridge_client.cpp",
+      "baseline_cpp_lines": 86,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "modules/A2FOFeaturePack/upgrade_pod_config.cpp",
+      "baseline_cpp_lines": 133,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/config.rs",
+      "parity_group": "config",
+      "parity_fixture": "tests/rust_config_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_config_upgrade"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A2FOFireArcs/fire_arc.cpp",
+      "baseline_cpp_lines": 400,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/motion.rs",
+      "parity_group": "motion",
+      "parity_fixture": "tests/rust_stage5_motion_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_arc_defer"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "modules/A2FOFireArcs/runtime_config.cpp",
+      "baseline_cpp_lines": 123,
+      "status": "verified_stage4",
+      "ported_in_frozen_census": false,
+      "stage": "stage4",
+      "rust_source": "rust/a2fo_core/src/combat_config.rs",
+      "parity_group": "combat",
+      "parity_fixture": "tests/rust_stage4_combat_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_combat_parse_firearc"
+      ],
+      "verification_receipt": "build/rust-migration-stage4/validation.json"
+    },
+    {
+      "path": "modules/A2FOHybridBuild/build_submenu_config.cpp",
+      "baseline_cpp_lines": 59,
+      "status": "verified_prior",
+      "stage": "stage2",
+      "rust_source": "rust/a2fo_core/src/hybrid.rs",
+      "parity_group": "hybrid",
+      "parity_fixture": "tests/rust_hybrid_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_hybrid_normalize",
+        "a2fo_rs_hybrid_parse_submenu"
+      ],
+      "ported_in_frozen_census": true
+    },
+    {
+      "path": "modules/A2FOHybridBuild/hybrid_production.cpp",
+      "baseline_cpp_lines": 130,
+      "status": "verified_prior",
+      "stage": "stage2",
+      "rust_source": "rust/a2fo_core/src/hybrid.rs",
+      "parity_group": "hybrid",
+      "parity_fixture": "tests/rust_hybrid_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_hybrid_command_prefix",
+        "a2fo_rs_hybrid_list",
+        "a2fo_rs_hybrid_method_name",
+        "a2fo_rs_hybrid_parse_command",
+        "a2fo_rs_hybrid_queue"
+      ],
+      "ported_in_frozen_census": true
+    },
+    {
+      "path": "modules/A2FOInstantActionSettings/load_button_bounds.cpp",
+      "baseline_cpp_lines": 113,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/ui.rs",
+      "parity_group": "ui",
+      "parity_fixture": "tests/rust_ui_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_ui_caption",
+        "a2fo_rs_ui_contains",
+        "a2fo_rs_ui_load_bounds"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A2FOInstantActionSettings/setup_details_line.cpp",
+      "baseline_cpp_lines": 70,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/ui.rs",
+      "parity_group": "ui",
+      "parity_fixture": "tests/rust_ui_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_ui_decode_details"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A2FOM3D/m3d_conversion.cpp",
+      "baseline_cpp_lines": 1609,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/m3d.rs",
+      "parity_group": "m3d",
+      "parity_fixture": "tests/rust_stage5_m3d_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_m3d_convert"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "modules/A2FONebulaRenderer/art_texture_suffix_config.cpp",
+      "baseline_cpp_lines": 351,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/config.rs",
+      "parity_group": "config",
+      "parity_fixture": "tests/rust_config_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_config_art",
+        "a2fo_rs_config_disable_bump",
+        "a2fo_rs_config_texture_suffix"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A2FOPointDefenseCycles/firing_cycle.cpp",
+      "baseline_cpp_lines": 148,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/gameplay.rs",
+      "parity_group": "gameplay",
+      "parity_fixture": "tests/rust_gameplay_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_gameplay_build_cycle",
+        "a2fo_rs_gameplay_consume_cycle",
+        "a2fo_rs_gameplay_normalize_cycle",
+        "a2fo_rs_gameplay_update_cycle"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A2FORefitMenus/loading_content.cpp",
+      "baseline_cpp_lines": 296,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/refit_present.rs",
+      "parity_group": "refit_present",
+      "parity_fixture": "tests/rust_stage5_refit_present_parity.cpp",
+      "rust_symbols": [
+        "a2fo_refit_decode_bmp"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "modules/A2FORefitMenus/loading_gpu.cpp",
+      "baseline_cpp_lines": 202,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/refit_native.rs",
+      "parity_group": "refit_native",
+      "parity_fixture": "tests/rust_stage5_refit_native_parity.cpp",
+      "rust_symbols": [
+        "a2fo_refit_gpu_draw"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "modules/A2FORefitMenus/loading_native.cpp",
+      "baseline_cpp_lines": 733,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "modules/A2FORefitMenus/loading_presentation.cpp",
+      "baseline_cpp_lines": 583,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/refit_present.rs",
+      "parity_group": "refit_present",
+      "parity_fixture": "tests/rust_stage5_refit_present_parity.cpp",
+      "rust_symbols": [
+        "a2fo_refit_loading_layout"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "modules/A2FORefitMenus/loading_theme.cpp",
+      "baseline_cpp_lines": 143,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/ui.rs",
+      "parity_group": "ui",
+      "parity_fixture": "tests/rust_ui_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_ui_theme"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A2FORefitMenus/menu_scene.cpp",
+      "baseline_cpp_lines": 830,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "modules/A2FORefitMenus/mission_backdrop.cpp",
+      "baseline_cpp_lines": 196,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/backdrop.rs",
+      "parity_group": "backdrop",
+      "parity_fixture": "tests/rust_stage5_backdrop_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_backdrop_observe"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "modules/A2FORefitMenus/presentation.cpp",
+      "baseline_cpp_lines": 544,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/refit_present.rs",
+      "parity_group": "refit_present",
+      "parity_fixture": "tests/rust_stage5_refit_present_parity.cpp",
+      "rust_symbols": [
+        "a2fo_refit_menu_layout"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "modules/A2FORefitMenus/scene_catalogue.cpp",
+      "baseline_cpp_lines": 103,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/ui.rs",
+      "parity_group": "ui",
+      "parity_fixture": "tests/rust_ui_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_ui_catalogue"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A2FORefitMenus/scene_composition.cpp",
+      "baseline_cpp_lines": 220,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/ui.rs",
+      "parity_group": "ui",
+      "parity_fixture": "tests/rust_ui_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_ui_compose",
+        "a2fo_rs_ui_match",
+        "a2fo_rs_ui_valid_art"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A2FORefitMenus/setup_native.cpp",
+      "baseline_cpp_lines": 629,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "modules/A2FORefitMenus/setup_presentation.cpp",
+      "baseline_cpp_lines": 517,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/refit_present.rs",
+      "parity_group": "refit_present",
+      "parity_fixture": "tests/rust_stage5_refit_present_parity.cpp",
+      "rust_symbols": [
+        "a2fo_refit_setup_launch_at"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "modules/A2FORefitMenus/setup_skin.cpp",
+      "baseline_cpp_lines": 262,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/refit_native.rs",
+      "parity_group": "refit_native",
+      "parity_fixture": "tests/rust_stage5_refit_native_parity.cpp",
+      "rust_symbols": [
+        "a2fo_refit_skin_atlas_size_valid"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "modules/A2FORefitMenus/skin.cpp",
+      "baseline_cpp_lines": 200,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/ui.rs",
+      "parity_group": "ui",
+      "parity_fixture": "tests/rust_ui_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_ui_apply",
+        "a2fo_rs_ui_style"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A2FORefitMenus/skin_native.cpp",
+      "baseline_cpp_lines": 438,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "modules/A2FORefitYards/refit_policy.cpp",
+      "baseline_cpp_lines": 79,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/config.rs",
+      "parity_group": "config",
+      "parity_fixture": "tests/rust_config_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_config_refit_normalize",
+        "a2fo_rs_config_refit_parse",
+        "a2fo_rs_config_refit_supported"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A2FOResources/additional_resources.cpp",
+      "baseline_cpp_lines": 63,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/gameplay.rs",
+      "parity_group": "gameplay",
+      "parity_fixture": "tests/rust_gameplay_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_gameplay_can_afford",
+        "a2fo_rs_gameplay_credit",
+        "a2fo_rs_gameplay_debit",
+        "a2fo_rs_gameplay_parse_nonnegative",
+        "a2fo_rs_gameplay_saturating_add"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A2FOSOLMaps/sol_format.cpp",
+      "baseline_cpp_lines": 332,
+      "status": "verified_stage4",
+      "ported_in_frozen_census": false,
+      "stage": "stage4",
+      "rust_source": "rust/a2fo_core/src/sol.rs",
+      "parity_group": "sol",
+      "parity_fixture": "tests/rust_stage4_sol_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_sol_parse"
+      ],
+      "verification_receipt": "build/rust-migration-stage4/validation.json"
+    },
+    {
+      "path": "modules/A2FOShellDisplay/bink_video.cpp",
+      "baseline_cpp_lines": 802,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "modules/A2FOShellDisplay/canvas.cpp",
+      "baseline_cpp_lines": 1092,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "modules/A2FOShellDisplay/native_intro.cpp",
+      "baseline_cpp_lines": 246,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "modules/A2FOSquadrons/squadron_config.cpp",
+      "baseline_cpp_lines": 171,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/gameplay.rs",
+      "parity_group": "gameplay",
+      "parity_fixture": "tests/rust_gameplay_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_gameplay_definition_size_add",
+        "a2fo_rs_gameplay_economics_squadron",
+        "a2fo_rs_gameplay_odf_key",
+        "a2fo_rs_gameplay_parse_squadron",
+        "a2fo_rs_gameplay_validate_squadron"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A2FOSquadrons/squadron_state.cpp",
+      "baseline_cpp_lines": 303,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/domain_state.rs",
+      "parity_group": "domain_state",
+      "parity_fixture": "tests/rust_stage5_domain_state_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_sq_expand"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "modules/A2FOSwarmSystem/swarm_motion.cpp",
+      "baseline_cpp_lines": 354,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/motion.rs",
+      "parity_group": "motion",
+      "parity_fixture": "tests/rust_stage5_motion_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_motion_random_seed"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "modules/A2FOTextureVariants/texture_variants.cpp",
+      "baseline_cpp_lines": 205,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/gameplay.rs",
+      "parity_group": "gameplay",
+      "parity_fixture": "tests/rust_gameplay_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_gameplay_damage_policy_active",
+        "a2fo_rs_gameplay_faction_suffix",
+        "a2fo_rs_gameplay_mesh_choice",
+        "a2fo_rs_gameplay_node_flags",
+        "a2fo_rs_gameplay_node_name",
+        "a2fo_rs_gameplay_rebuild_scale",
+        "a2fo_rs_gameplay_repair_sample",
+        "a2fo_rs_gameplay_subsystem_condition",
+        "a2fo_rs_gameplay_texture_name",
+        "a2fo_rs_gameplay_texture_path"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "modules/A2FOTurrets/turret_combat.cpp",
+      "baseline_cpp_lines": 39,
+      "status": "verified_stage4",
+      "ported_in_frozen_census": false,
+      "stage": "stage4",
+      "rust_source": "rust/a2fo_core/src/combat_config.rs",
+      "parity_group": "combat",
+      "parity_fixture": "tests/rust_stage4_combat_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_combat_attack_target"
+      ],
+      "verification_receipt": "build/rust-migration-stage4/validation.json"
+    },
+    {
+      "path": "modules/A2FOTurrets/turret_math.cpp",
+      "baseline_cpp_lines": 148,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/motion.rs",
+      "parity_group": "motion",
+      "parity_fixture": "tests/rust_stage5_motion_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_turret_clamp"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "modules/A2FOWreckage/wreckage_policy.cpp",
+      "baseline_cpp_lines": 15,
+      "status": "verified_prior",
+      "stage": "stage2",
+      "rust_source": "rust/a2fo_core/src/wreckage.rs",
+      "parity_group": "stores",
+      "parity_fixture": "tests/rust_stores_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_wreckage_decide"
+      ],
+      "ported_in_frozen_census": true
+    },
+    {
+      "path": "renderer/cloak/refraction.cpp",
+      "baseline_cpp_lines": 244,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/refraction.rs",
+      "parity_group": "refraction",
+      "parity_fixture": "tests/rust_stage5_refraction_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_refraction_release"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "renderer/d3d11/compressed_texture.cpp",
+      "baseline_cpp_lines": 80,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/d3d_resources.rs",
+      "parity_group": "d3d_resources",
+      "parity_fixture": "tests/rust_stage5_d3d_resources_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_d3d_compressed_upload"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "renderer/d3d11/game/backend.cpp",
+      "baseline_cpp_lines": 628,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "renderer/d3d11/game/draw_pipeline.cpp",
+      "baseline_cpp_lines": 507,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "renderer/d3d11/probe_bridge.cpp",
+      "baseline_cpp_lines": 26,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/d3d_resources.rs",
+      "parity_group": "d3d_resources",
+      "parity_fixture": "tests/rust_stage5_d3d_resources_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_d3d_probe_bridge"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "renderer/d3d11/probe_device.cpp",
+      "baseline_cpp_lines": 246,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/d3d_resources.rs",
+      "parity_group": "d3d_resources",
+      "parity_fixture": "tests/rust_stage5_d3d_resources_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_d3d_probe_initialize"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "renderer/d3d11/texture_handle.cpp",
+      "baseline_cpp_lines": 27,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/d3d_resources.rs",
+      "parity_group": "d3d_resources",
+      "parity_fixture": "tests/rust_stage5_d3d_resources_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_d3d_handle_drop"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "renderer/d3d11/ui_renderer.cpp",
+      "baseline_cpp_lines": 756,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "renderer/d3d8_compat/game/bc_catalog.cpp",
+      "baseline_cpp_lines": 318,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/render_cache_state.rs",
+      "parity_group": "render_cache_state",
+      "parity_fixture": "tests/rust_stage5_render_cache_state_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_bc_load"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "renderer/d3d8_compat/game/d3dx_bridge.cpp",
+      "baseline_cpp_lines": 188,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/d3dx.rs",
+      "parity_group": "d3dx",
+      "parity_fixture": "tests/rust_stage5_d3dx_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_d3dx_info"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "renderer/d3d8_compat/game/device.cpp",
+      "baseline_cpp_lines": 718,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "renderer/d3d8_compat/game/draw.cpp",
+      "baseline_cpp_lines": 471,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/render_draw.rs",
+      "parity_group": "render_draw",
+      "parity_fixture": "tests/rust_stage5_render_draw_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_shader_words"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "renderer/d3d8_compat/game/factory.cpp",
+      "baseline_cpp_lines": 352,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "renderer/d3d8_compat/game/resources.cpp",
+      "baseline_cpp_lines": 491,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "renderer/d3d8_compat/game/state_blocks.cpp",
+      "baseline_cpp_lines": 258,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/render_cache_state.rs",
+      "parity_group": "render_cache_state",
+      "parity_fixture": "tests/rust_stage5_render_cache_state_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_state_run"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "renderer/d3d8_compat/game/unsupported.cpp",
+      "baseline_cpp_lines": 77,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "renderer/d3d8_compat/observer.cpp",
+      "baseline_cpp_lines": 532,
+      "status": "not_migrated",
+      "ported_in_frozen_census": false
+    },
+    {
+      "path": "renderer/d3d8_compat/resources/compressed_texture8.cpp",
+      "baseline_cpp_lines": 240,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/render_draw.rs",
+      "parity_group": "render_draw",
+      "parity_fixture": "tests/rust_stage5_render_draw_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_texture_private_set"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "renderer/shaders/bytecode_cache.cpp",
+      "baseline_cpp_lines": 248,
+      "status": "verified_stage5",
+      "ported_in_frozen_census": false,
+      "rust_source": "rust/a2fo_core/src/render_cache_state.rs",
+      "parity_group": "render_cache_state",
+      "parity_fixture": "tests/rust_stage5_render_cache_state_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_shader_compile"
+      ],
+      "native_boundary": "Native ABI calls, owned STL/COM/GDI storage and platform primitives remain in temporary C++ adapters; Rust owns the migrated validation, algorithms and workflow.",
+      "stage": "stage5",
+      "verification_receipt": "build/rust-migration-stage5/validation.json"
+    },
+    {
+      "path": "renderer/shaders/d3d8_tokens.cpp",
+      "baseline_cpp_lines": 104,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/lead.rs",
+      "parity_group": "lead",
+      "parity_fixture": "tests/rust_lead_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_lead_tokens"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "renderer/shaders/vs11.cpp",
+      "baseline_cpp_lines": 158,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/lead.rs",
+      "parity_group": "lead",
+      "parity_fixture": "tests/rust_lead_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_lead_vs11",
+        "a2fo_rs_lead_vs_interface"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "renderer/state/fvf.cpp",
+      "baseline_cpp_lines": 135,
+      "status": "verified_stage3",
+      "stage": "stage3",
+      "rust_source": "rust/a2fo_core/src/lead.rs",
+      "parity_group": "lead",
+      "parity_fixture": "tests/rust_lead_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_lead_fan",
+        "a2fo_rs_lead_fvf",
+        "a2fo_rs_lead_primitive"
+      ],
+      "ported_in_frozen_census": false,
+      "verification_receipt": "build/rust-migration-stage3/validation.json"
+    },
+    {
+      "path": "renderer/textures/dds.cpp",
+      "baseline_cpp_lines": 77,
+      "status": "verified_prior",
+      "stage": "stage2",
+      "rust_source": "rust/a2fo_core/src/textures.rs",
+      "parity_group": "textures",
+      "parity_fixture": "tests/rust_textures_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_textures_layout",
+        "a2fo_rs_textures_parse",
+        "a2fo_rs_textures_validate"
+      ],
+      "ported_in_frozen_census": true
+    },
+    {
+      "path": "renderer/textures/upload.cpp",
+      "baseline_cpp_lines": 32,
+      "status": "verified_prior",
+      "stage": "stage2",
+      "rust_source": "rust/a2fo_core/src/textures.rs",
+      "parity_group": "textures",
+      "parity_fixture": "tests/rust_textures_parity.cpp",
+      "rust_symbols": [
+        "a2fo_rs_textures_upload_copy",
+        "a2fo_rs_textures_upload_plan"
+      ],
+      "ported_in_frozen_census": true
+    }
+  ],
+  "stage4_group_counts": {
+    "a1": 1,
+    "sol": 1,
+    "combat": 2,
+    "numeric": 2
+  },
+  "stage5_group_counts": {
+    "backdrop": 1,
+    "core": 6,
+    "d3d_resources": 4,
+    "d3dx": 1,
+    "domain_state": 2,
+    "emissive": 1,
+    "m3d": 1,
+    "monitor": 1,
+    "motion": 3,
+    "refit_native": 2,
+    "refit_present": 4,
+    "refraction": 1,
+    "render_cache_state": 3,
+    "render_draw": 2
+  }
+}

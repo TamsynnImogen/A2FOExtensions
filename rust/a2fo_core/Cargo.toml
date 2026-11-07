@@ -1,0 +1,29 @@
+[package]
+name = "a2fo-core"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[features]
+default = []
+# The optional combined media runtime supplies std's allocator/panic runtime.
+std-host = []
+
+[lib]
+name = "a2fo_core"
+crate-type = ["rlib", "staticlib"]
+doctest = false
+
+[dependencies]
+a2fo_native11_model = { path = "../a2fo_native11_model" }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+

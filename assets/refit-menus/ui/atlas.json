@@ -1,0 +1,170 @@
+{
+  "format": "RGBA PNG; binary resource is top-down premultiplied BGRA",
+  "atlas": "atlas.png",
+  "atlas_width": 128,
+  "atlas_height": 256,
+  "cell_width": 64,
+  "cell_height": 64,
+  "tiles": [
+    {
+      "name": "panel",
+      "file": "panel.png",
+      "index": 0,
+      "source": {
+        "x": 0,
+        "y": 0,
+        "width": 64,
+        "height": 64
+      },
+      "nine_slice": {
+        "left": 8,
+        "top": 8,
+        "right": 8,
+        "bottom": 8
+      },
+      "interior_opacity": 180,
+      "frame_border_opacity": 255,
+      "bottom_edge_opacity": 255
+    },
+    {
+      "name": "header",
+      "file": "header.png",
+      "index": 1,
+      "source": {
+        "x": 64,
+        "y": 0,
+        "width": 64,
+        "height": 64
+      },
+      "nine_slice": {
+        "left": 8,
+        "top": 8,
+        "right": 8,
+        "bottom": 8
+      },
+      "interior_opacity": 210,
+      "frame_border_opacity": 0,
+      "bottom_edge_opacity": 255
+    },
+    {
+      "name": "button_normal",
+      "file": "button_normal.png",
+      "index": 2,
+      "source": {
+        "x": 0,
+        "y": 64,
+        "width": 64,
+        "height": 64
+      },
+      "nine_slice": {
+        "left": 8,
+        "top": 8,
+        "right": 8,
+        "bottom": 8
+      },
+      "interior_opacity": 220,
+      "frame_border_opacity": 255,
+      "bottom_edge_opacity": 255
+    },
+    {
+      "name": "button_hot",
+      "file": "button_hot.png",
+      "index": 3,
+      "source": {
+        "x": 64,
+        "y": 64,
+        "width": 64,
+        "height": 64
+      },
+      "nine_slice": {
+        "left": 8,
+        "top": 8,
+        "right": 8,
+        "bottom": 8
+      },
+      "interior_opacity": 220,
+      "frame_border_opacity": 255,
+      "bottom_edge_opacity": 255
+    },
+    {
+      "name": "button_pressed",
+      "file": "button_pressed.png",
+      "index": 4,
+      "source": {
+        "x": 0,
+        "y": 128,
+        "width": 64,
+        "height": 64
+      },
+      "nine_slice": {
+        "left": 8,
+        "top": 8,
+        "right": 8,
+        "bottom": 8
+      },
+      "interior_opacity": 220,
+      "frame_border_opacity": 255,
+      "bottom_edge_opacity": 255
+    },
+    {
+      "name": "button_disabled",
+      "file": "button_disabled.png",
+      "index": 5,
+      "source": {
+        "x": 64,
+        "y": 128,
+        "width": 64,
+        "height": 64
+      },
+      "nine_slice": {
+        "left": 8,
+        "top": 8,
+        "right": 8,
+        "bottom": 8
+      },
+      "interior_opacity": 180,
+      "frame_border_opacity": 255,
+      "bottom_edge_opacity": 255
+    },
+    {
+      "name": "popup",
+      "file": "popup.png",
+      "index": 6,
+      "source": {
+        "x": 0,
+        "y": 192,
+        "width": 64,
+        "height": 64
+      },
+      "nine_slice": {
+        "left": 8,
+        "top": 8,
+        "right": 8,
+        "bottom": 8
+      },
+      "interior_opacity": 255,
+      "frame_border_opacity": 255,
+      "bottom_edge_opacity": 255
+    },
+    {
+      "name": "popup_selected",
+      "file": "popup_selected.png",
+      "index": 7,
+      "source": {
+        "x": 64,
+        "y": 192,
+        "width": 64,
+        "height": 64
+      },
+      "nine_slice": {
+        "left": 8,
+        "top": 8,
+        "right": 8,
+        "bottom": 8
+      },
+      "interior_opacity": 255,
+      "frame_border_opacity": 255,
+      "bottom_edge_opacity": 255
+    }
+  ]
+}

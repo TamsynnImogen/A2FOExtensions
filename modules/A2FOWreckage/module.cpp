@@ -1,15 +1,17 @@
 /* Native ODF-driven wreckage replacement module. */
 
 #include "../../sdk/include/a2fo_module_api.h"
-#include "wreckage_policy.hpp"
+#include "../../rust/module_runtime_a_ffi.h"
+#ifdef A2FO_BUILTIN_FEATURE
+#include "../../core/builtin_modules.hpp"
+#endif
 
 #include <windows.h>
 
 #include <array>
-#include <cctype>
 #include <cstdint>
 #include <cstring>
-#include <string_view>
+#include <exception>
 
 namespace {
 
@@ -19,73 +21,61 @@ constexpr std::array<const char*, 2> kRequiredFields{{
 
 const A2FO_ModuleApi* g_api = nullptr;
 thread_local std::array<char, 256> g_replacement_odf{};
+std::exception_ptr g_register_error;
 
 void log_line(const char* message) noexcept {
     if (g_api && g_api->log) g_api->log(kModuleName, message);
 }
 
-bool equal_ascii_case_insensitive(
-    A2FO_StringView value, const char* expected) noexcept {
-    if (!expected) return false;
-    const std::size_t expected_size = std::strlen(expected);
-    if (!value.data || value.size != expected_size) return false;
-    for (std::size_t index = 0; index < expected_size; ++index) {
-        if (std::tolower(static_cast<unsigned char>(value.data[index])) !=
-            std::tolower(static_cast<unsigned char>(expected[index]))) {
-            return false;
-        }
-    }
-    return true;
+uint8_t field_at(void* context, std::uint32_t index,
+                 A2foRsRuntimeField* out) noexcept {
+    const auto* event = static_cast<const A2FO_ObjectDestroyedEvent*>(context);
+    if (!out || index >= event->odf_field_count) return 0;
+    const A2FO_OdfFieldView& field = event->odf_fields[index];
+    out->name = {reinterpret_cast<const std::uint8_t*>(field.name.data),
+                 field.name.size};
+    out->value = {reinterpret_cast<const std::uint8_t*>(field.value.data),
+                  field.value.size};
+    out->value_valid = field.value.data || field.value.size == 0;
+    return 1;
 }
 
-bool find_field(
-    const A2FO_ObjectDestroyedEvent* event, const char* name,
-    std::string_view* value) noexcept {
-    if (value) *value = {};
-    if (!event || !name || !value ||
-        (!event->odf_fields && event->odf_field_count != 0)) {
-        return false;
-    }
-    for (std::uint32_t index = 0; index < event->odf_field_count; ++index) {
-        const A2FO_OdfFieldView& field = event->odf_fields[index];
-        if (!equal_ascii_case_insensitive(field.name, name)) continue;
-        if (!field.value.data && field.value.size != 0) return false;
-        *value = std::string_view(
-            field.value.data ? field.value.data : "", field.value.size);
-        return true;
-    }
-    return false;
+uint8_t register_handler(void*) noexcept;
+void log_init(void*, std::uint32_t code) noexcept {
+    if (g_register_error) return;
+    log_line(code == 0 ? "Object-destroyed dispatch is unavailable" :
+               "Native ODF wreckage replacement initialized");
 }
 
 bool A2FO_CALL object_destroyed_handler(
     const A2FO_ObjectDestroyedEvent* event,
     A2FO_ObjectReplacement* replacement, void*) {
-    if (!event || event->struct_size < sizeof(*event) || !replacement ||
-        replacement->struct_size < sizeof(*replacement)) {
+    const bool enabled =
+#ifdef A2FO_BUILTIN_FEATURE
+        a2fo::builtin_module_enabled(A2FO_BUILTIN_FEATURE);
+#else
+        true;
+#endif
+    // Preserve admission order before borrowing any native event fields.
+    if (!enabled || !event || event->struct_size < sizeof(*event) ||
+        !replacement || replacement->struct_size < sizeof(*replacement)) {
         return false;
     }
-    std::string_view wreckage;
-    if (!find_field(event, "wreckage", &wreckage)) return false;
-    std::string_view chance;
-    const bool chance_present = find_field(
-        event, "wreckageChance", &chance);
-    const a2fo::wreckage::Decision decision =
-        a2fo::wreckage::decide_replacement(
-            wreckage, chance_present, chance, event->random_seed);
-    if (decision.status ==
-        a2fo::wreckage::DecisionStatus::invalid_chance) {
+    A2foRsRuntimeBytes selected{};
+    const std::uint32_t status = a2fo_rs_runtime_wreckage_handler(
+        enabled, event && event->struct_size >= sizeof(*event),
+        replacement && replacement->struct_size >= sizeof(*replacement),
+        event && (event->odf_fields || event->odf_field_count == 0),
+        event ? event->odf_field_count : 0, event ? event->random_seed : 0,
+        g_replacement_odf.size(), &field_at,
+        const_cast<A2FO_ObjectDestroyedEvent*>(event), &selected);
+    if (status == 2) {
         log_line("Ignored invalid wreckageChance; use a value from 0 to 100");
         return false;
     }
-    if (decision.status != a2fo::wreckage::DecisionStatus::replace ||
-        decision.replacement_odf.empty() ||
-        decision.replacement_odf.size() >= g_replacement_odf.size()) {
-        return false;
-    }
-    std::memcpy(g_replacement_odf.data(),
-                decision.replacement_odf.data(),
-                decision.replacement_odf.size());
-    g_replacement_odf[decision.replacement_odf.size()] = '\0';
+    if (status != 1) return false;
+    std::memcpy(g_replacement_odf.data(), selected.data, selected.size);
+    g_replacement_odf[selected.size] = '\0';
     replacement->odf = g_replacement_odf.data();
     replacement->flags = A2FO_REPLACEMENT_INHERIT_POSITION |
         A2FO_REPLACEMENT_INHERIT_ROTATION;
@@ -93,27 +83,34 @@ bool A2FO_CALL object_destroyed_handler(
     return true;
 }
 
+uint8_t register_handler(void*) noexcept {
+    try {
+        return g_api->register_object_destroyed_handler(
+            kModuleName, kRequiredFields.data(),
+            static_cast<std::uint32_t>(kRequiredFields.size()),
+            &object_destroyed_handler, nullptr);
+    } catch (...) {
+        g_register_error = std::current_exception();
+        return 0;
+    }
+}
+
 }  // namespace
 
 extern "C" __declspec(dllexport)
 bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
-    if (!api || api->struct_size < A2FO_MODULE_API_V4_BASE_SIZE ||
-        api->api_version != A2FO_MODULE_API_VERSION || !api->log) {
-        return false;
-    }
+    const bool valid = api && api->struct_size >= A2FO_MODULE_API_V4_BASE_SIZE &&
+        api->api_version == A2FO_MODULE_API_VERSION && api->log;
+    if (!valid) return false;
     g_api = api;
-    if (!A2FO_MODULE_API_HAS(api, register_object_destroyed_handler) ||
-        !api->register_object_destroyed_handler ||
-        (api->capabilities & A2FO_CAP_OBJECT_DESTROYED_DISPATCH) == 0 ||
-        !api->register_object_destroyed_handler(
-            kModuleName, kRequiredFields.data(),
-            static_cast<std::uint32_t>(kRequiredFields.size()),
-            &object_destroyed_handler, nullptr)) {
-        log_line("Object-destroyed dispatch is unavailable");
-        return false;
-    }
-    log_line("Native ODF wreckage replacement initialized");
-    return true;
+    const bool available = A2FO_MODULE_API_HAS(api, register_object_destroyed_handler) &&
+        api->register_object_destroyed_handler &&
+        (api->capabilities & A2FO_CAP_OBJECT_DESTROYED_DISPATCH) != 0;
+    g_register_error = nullptr;
+    const bool result = a2fo_rs_runtime_wreckage_init(
+        valid, available, &register_handler, &log_init, nullptr) != 0;
+    if (g_register_error) std::rethrow_exception(g_register_error);
+    return result;
 }
 
 extern "C" __declspec(dllexport)

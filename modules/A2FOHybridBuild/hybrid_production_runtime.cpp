@@ -6,6 +6,14 @@
 
 #include "hybrid_production_runtime.hpp"
 #include "refit_ui_bridge_api.hpp"
+#include "../../rust/stage8_hybrid_runtime_ffi.h"
+#include "../../rust/stage8_hybrid_lists_ffi.h"
+#include "../../rust/stage8_hybrid_state_ffi.h"
+#include "../../rust/stage9_hybrid_runtime_ffi.h"
+#include "../../rust/stage10_hybrid_completion_ffi.h"
+#include <optional>
+#include <exception>
+#include "../../sdk/include/a2fo_module_provider.hpp"
 
 #include <algorithm>
 #include <array>
@@ -668,41 +676,40 @@ void log_message(const std::string& message) noexcept {
 }
 
 void resolve_shield_craft_observer() noexcept {
-    HMODULE shields = GetModuleHandleA(kAlwaysShowShieldsModuleName);
-    FARPROC exported = shields
-        ? GetProcAddress(shields, kShieldCraftObserverExport)
-        : nullptr;
-    static_assert(sizeof(exported) == sizeof(g_shield_craft_observer),
-                  "unexpected function-pointer size");
-    std::memcpy(&g_shield_craft_observer, &exported,
-                sizeof(g_shield_craft_observer));
-    if (g_shield_craft_observer) {
-        log_message(
-            "Shield visibility observer linked through the Fleet Ops "
-            "Craft render boundary");
-    }
+    struct Context {HMODULE provider=nullptr;FARPROC exported=nullptr;std::exception_ptr error{};} context;
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:c.provider=GetModuleHandleA(kCoreModuleName);return c.provider!=nullptr;
+        case 1:c.exported=GetProcAddress(c.provider,kShieldCraftObserverExport);return 0;
+        case 2:return c.exported!=nullptr;
+        case 3:c.provider=GetModuleHandleA(kAlwaysShowShieldsModuleName);return c.provider!=nullptr;
+        case 4:c.exported=GetProcAddress(c.provider,kShieldCraftObserverExport);return 0;
+        case 5:static_assert(sizeof(c.exported)==sizeof(g_shield_craft_observer));std::memcpy(&g_shield_craft_observer,&c.exported,sizeof(g_shield_craft_observer));return 0;
+        case 6:return g_shield_craft_observer!=nullptr;
+        case 7:log_message("Shield visibility observer linked through the Fleet Ops Craft render boundary");return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    a2fo_rs_stage8_hybrid_resolve(0,step,&context);if(context.error)std::rethrow_exception(context.error);
 }
-
 void resolve_nebula_craft_render_observers() noexcept {
-    HMODULE core = GetModuleHandleA(kCoreModuleName);
-    FARPROC begin = core
-        ? GetProcAddress(core, kNebulaBeginCraftRenderExport) : nullptr;
-    FARPROC end = core
-        ? GetProcAddress(core, kNebulaEndCraftRenderExport) : nullptr;
-    static_assert(sizeof(begin) == sizeof(g_nebula_begin_craft_render),
-                  "unexpected function-pointer size");
-    std::memcpy(&g_nebula_begin_craft_render, &begin,
-                sizeof(g_nebula_begin_craft_render));
-    std::memcpy(&g_nebula_end_craft_render, &end,
-                sizeof(g_nebula_end_craft_render));
-    if (g_nebula_begin_craft_render && g_nebula_end_craft_render) {
-        log_message(
-            "Nebula emissive context linked to Fleet Ops' base Craft render "
-            "call; later effect passes remain isolated");
-    } else {
-        g_nebula_begin_craft_render = nullptr;
-        g_nebula_end_craft_render = nullptr;
-    }
+    struct Context {HMODULE core=nullptr;FARPROC begin=nullptr,end=nullptr;std::exception_ptr error{};} context;
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        try{switch(op){
+        case 0:c.core=GetModuleHandleA(kCoreModuleName);return c.core!=nullptr;
+        case 1:c.begin=GetProcAddress(c.core,kNebulaBeginCraftRenderExport);return 0;
+        case 2:c.end=GetProcAddress(c.core,kNebulaEndCraftRenderExport);return 0;
+        case 3:static_assert(sizeof(c.begin)==sizeof(g_nebula_begin_craft_render));std::memcpy(&g_nebula_begin_craft_render,&c.begin,sizeof(g_nebula_begin_craft_render));std::memcpy(&g_nebula_end_craft_render,&c.end,sizeof(g_nebula_end_craft_render));return 0;
+        case 4:return g_nebula_begin_craft_render!=nullptr;
+        case 5:return g_nebula_end_craft_render!=nullptr;
+        case 6:log_message("Nebula emissive context linked to Fleet Ops' base Craft render call; later effect passes remain isolated");return 0;
+        case 7:g_nebula_begin_craft_render=nullptr;g_nebula_end_craft_render=nullptr;return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    a2fo_rs_stage8_hybrid_resolve(1,step,&context);if(context.error)std::rethrow_exception(context.error);
 }
 
 std::uint8_t* bytes(void* value) noexcept;
@@ -710,159 +717,127 @@ bool readable_range(const void* pointer, std::size_t size) noexcept;
 bool writable_range(void* pointer, std::size_t size) noexcept;
 
 void resolve_feature_pack_extended_queue() noexcept {
-    // Prefer the read-only FeaturePack admission export when the linker has
-    // published it.  The bridge itself intentionally remains the original V1
-    // ABI so HybridBuild cannot be rejected merely because queue polish was
-    // updated independently.
-    HMODULE feature_pack = GetModuleHandleA("A2FOFeaturePack.dll");
-    FARPROC exported = feature_pack
-        ? GetProcAddress(feature_pack, "A2FO_ProducerLogicalQueueHasRoom")
-        : nullptr;
-    FARPROC queue_export = feature_pack
-        ? GetProcAddress(feature_pack, "A2FO_ProducerQueueExtendedBuild")
-        : nullptr;
-    FARPROC target_export = feature_pack
-        ? GetProcAddress(feature_pack,
-                         "A2FO_ProducerCanQueueExtendedBuild")
-        : nullptr;
-    static_assert(sizeof(exported) ==
-                      sizeof(g_feature_pack_logical_queue_has_room),
-                  "unexpected FeaturePack function-pointer size");
-    static_assert(sizeof(queue_export) ==
-                      sizeof(g_feature_pack_queue_extended_build),
-                  "unexpected FeaturePack queue function-pointer size");
-    static_assert(sizeof(target_export) ==
-                      sizeof(g_feature_pack_can_queue_extended_build),
-                  "unexpected FeaturePack target-admission pointer size");
-    std::memcpy(&g_feature_pack_logical_queue_has_room, &exported,
-                sizeof(g_feature_pack_logical_queue_has_room));
-    std::memcpy(&g_feature_pack_queue_extended_build, &queue_export,
-                sizeof(g_feature_pack_queue_extended_build));
-    std::memcpy(&g_feature_pack_can_queue_extended_build, &target_export,
-                sizeof(g_feature_pack_can_queue_extended_build));
-    if (g_feature_pack_logical_queue_has_room &&
-        g_feature_pack_queue_extended_build &&
-        g_feature_pack_can_queue_extended_build) {
-        log_message("FeaturePack extended-queue admission linked to "
-                    "Producer gates, direct overflow routing, and "
-                    "target-specific tail-slot masking");
-    } else if (g_feature_pack_logical_queue_has_room) {
-        log_message("FeaturePack logical queue gate linked; direct overflow "
-                    "button routing unavailable");
-    } else {
-        // The native gate runs before FeaturePack's synchronized queue hook.
-        // When the PE export is unavailable, fail open only at the physical
-        // ten-job boundary and preserve the FIFO. FeaturePack remains the
-        // authoritative final admission check (10 slots x 10 units), so a
-        // logically-full order is simply rejected later without losing a
-        // native queue item.
-        log_message("FeaturePack queue-capacity export unavailable; "
-                    "native-full orders handed to FeaturePack final "
-                    "admission");
-    }
+    using Ready=bool(A2FO_CALL*)() noexcept;
+    struct Context {HMODULE provider=nullptr;std::array<FARPROC,4> exported{};Ready ready=nullptr;std::exception_ptr error{};} context;
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);
+        constexpr const char* names[]={"A2FO_ProducerLogicalQueueHasRoom","A2FO_ProducerQueueExtendedBuild","A2FO_ProducerCanQueueExtendedBuild","A2FO_ProducerEventsReady"};
+        try{switch(op){
+        case 0:c.provider=a2fo::startup_module_provider("A2FOFeaturePack.dll",{names[0],names[1],names[2],names[3]});return c.provider!=nullptr;
+        case 1:c.exported[a]=GetProcAddress(c.provider,names[a]);return 0;
+        case 2:static_assert(sizeof(c.exported[3])==sizeof(c.ready));std::memcpy(&c.ready,&c.exported[3],sizeof(c.ready));return c.ready!=nullptr;
+        case 3:return c.ready();
+        case 4:c.exported[0]=c.exported[1]=c.exported[2]=nullptr;return 0;
+        case 5:
+            static_assert(sizeof(c.exported[0])==sizeof(g_feature_pack_logical_queue_has_room));
+            static_assert(sizeof(c.exported[1])==sizeof(g_feature_pack_queue_extended_build));
+            static_assert(sizeof(c.exported[2])==sizeof(g_feature_pack_can_queue_extended_build));
+            std::memcpy(&g_feature_pack_logical_queue_has_room,&c.exported[0],sizeof(g_feature_pack_logical_queue_has_room));
+            std::memcpy(&g_feature_pack_queue_extended_build,&c.exported[1],sizeof(g_feature_pack_queue_extended_build));
+            std::memcpy(&g_feature_pack_can_queue_extended_build,&c.exported[2],sizeof(g_feature_pack_can_queue_extended_build));return 0;
+        case 6:return g_feature_pack_logical_queue_has_room!=nullptr;
+        case 7:return g_feature_pack_queue_extended_build!=nullptr;
+        case 8:return g_feature_pack_can_queue_extended_build!=nullptr;
+        case 9:log_message("FeaturePack extended-queue admission linked to Producer gates, direct overflow routing, and target-specific tail-slot masking");return 0;
+        case 10:log_message("FeaturePack logical queue gate linked; direct overflow button routing unavailable");return 0;
+        case 11:log_message("FeaturePack queue-capacity export unavailable; native-full orders handed to FeaturePack final admission");return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    a2fo_rs_stage8_hybrid_resolve(2,step,&context);if(context.error)std::rethrow_exception(context.error);
 }
 
 bool feature_pack_extended_queue_has_room(void* producer) noexcept {
-    if (!producer) return false;
-    if (g_feature_pack_logical_queue_has_room) {
-        return g_feature_pack_logical_queue_has_room(producer);
-    }
-    if (!readable_range(bytes(producer) + kQueueCountOffset,
-                        sizeof(std::uint32_t))) {
-        return false;
-    }
-    const std::uint32_t count =
-        *reinterpret_cast<const std::uint32_t*>(
-            bytes(producer) + kQueueCountOffset);
-    return count >= kNativeQueueCapacity;
+    struct Context {void* producer;std::exception_ptr error{};} context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);(void)a;
+        try{switch(op){
+        case 0:return c.producer!=nullptr;
+        case 1:return g_feature_pack_logical_queue_has_room!=nullptr;
+        case 2:return g_feature_pack_logical_queue_has_room(c.producer);
+        case 3:return readable_range(bytes(c.producer)+kQueueCountOffset,sizeof(std::uint32_t));
+        case 4:return *reinterpret_cast<const std::uint32_t*>(bytes(c.producer)+kQueueCountOffset);
+        case 5:return kNativeQueueCapacity;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_hybrid_resolve(3,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
 }
 
-
-bool feature_pack_can_queue_extended_build(
-    void* producer, void* target_class) noexcept {
-    if (!producer || !target_class) return false;
-    if (g_feature_pack_can_queue_extended_build) {
-        return g_feature_pack_can_queue_extended_build(
-            producer, target_class);
-    }
-    // Older FeaturePack builds expose only the producer-wide capacity hint.
-    // Preserve their behavior rather than disabling valid build choices.
-    return feature_pack_extended_queue_has_room(producer);
+bool feature_pack_can_queue_extended_build(void* producer,void* target_class) noexcept {
+    struct Context {void* producer;void* target_class;std::exception_ptr error{};} context{producer,target_class};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);(void)a;
+        try{switch(op){
+        case 0:return c.producer!=nullptr;
+        case 1:return c.target_class!=nullptr;
+        case 2:return g_feature_pack_can_queue_extended_build!=nullptr;
+        case 3:return g_feature_pack_can_queue_extended_build(c.producer,c.target_class);
+        case 4:return feature_pack_extended_queue_has_room(c.producer);
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_hybrid_resolve(4,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
 }
 
 void apply_extended_queue_tail_mask(void* producer) noexcept {
-    if (!producer || !g_fleet_ops ||
-        !g_feature_pack_can_queue_extended_build ||
-        !readable_range(bytes(producer) + kQueueCountOffset,
-                        sizeof(std::uint32_t)) ||
-        *reinterpret_cast<const std::uint32_t*>(
-            bytes(producer) + kQueueCountOffset) < kNativeQueueCapacity) {
-        return;
-    }
-
-    void** popup_buttons = at<void*>(
-        g_fleet_ops, kFoPopupButtonPointerArrayRva);
-    if (!readable_range(
-            popup_buttons, kFoPopupButtonCount * sizeof(void*))) {
-        return;
-    }
-
-    bool masked_any = false;
-    for (std::size_t index = 0; index < kFoPopupButtonCount; ++index) {
-        void* button = popup_buttons[index];
-        if (!button || !readable_range(
-                bytes(button) + kControlButtonModeInfoOffset,
-                sizeof(void*)) || !writable_range(
-                bytes(button) + kControlButtonStateOffset,
-                sizeof(std::uint32_t))) {
-            continue;
-        }
-        void* mode_info = *reinterpret_cast<void**>(
-            bytes(button) + kControlButtonModeInfoOffset);
-        if (!mode_info || !readable_range(
-                bytes(mode_info) + kModeInfoTypeOffset,
-                sizeof(std::uint32_t)) || !readable_range(
-                bytes(mode_info) + kModeInfoTargetClassOffset,
-                sizeof(void*))) {
-            continue;
-        }
-        const std::uint32_t type =
-            *reinterpret_cast<const std::uint32_t*>(
-                bytes(mode_info) + kModeInfoTypeOffset);
-        void* target_class = *reinterpret_cast<void**>(
-            bytes(mode_info) + kModeInfoTargetClassOffset);
-        if (type != 1u || !target_class) continue;
-
-        if (!feature_pack_can_queue_extended_build(
-                producer, target_class)) {
-            *reinterpret_cast<std::uint32_t*>(
-                bytes(button) + kControlButtonStateOffset) = 0u;
-            masked_any = true;
-        }
-    }
-
-    if (masked_any && !g_logged_extended_queue_tail_mask) {
-        g_logged_extended_queue_tail_mask = true;
-        log_message("Extended queue full-slot palette mask active: only "
-                    "the class already occupying slot ten remains "
-                    "available until that slot reaches x10");
-    }
+    struct Context {void* producer;void** popup_buttons=nullptr;void* button=nullptr;void* mode_info=nullptr;std::uint32_t type=0;void* target_class=nullptr;std::exception_ptr error{};} context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);(void)a;
+        try{switch(op){
+        case 0:return c.producer!=nullptr;
+        case 1:return g_fleet_ops!=nullptr;
+        case 2:return g_feature_pack_can_queue_extended_build!=nullptr;
+        case 3:return readable_range(bytes(c.producer)+kQueueCountOffset,sizeof(std::uint32_t));
+        case 4:return *reinterpret_cast<const std::uint32_t*>(bytes(c.producer)+kQueueCountOffset);
+        case 5:c.popup_buttons=at<void*>(g_fleet_ops,kFoPopupButtonPointerArrayRva);return 0;
+        case 6:return readable_range(c.popup_buttons,kFoPopupButtonCount*sizeof(void*));
+        case 7:return kFoPopupButtonCount;
+        case 8:c.button=c.popup_buttons[a];return 0;
+        case 9:return c.button!=nullptr;
+        case 10:return readable_range(bytes(c.button)+kControlButtonModeInfoOffset,sizeof(void*));
+        case 11:return writable_range(bytes(c.button)+kControlButtonStateOffset,sizeof(std::uint32_t));
+        case 12:c.mode_info=*reinterpret_cast<void**>(bytes(c.button)+kControlButtonModeInfoOffset);return 0;
+        case 13:return c.mode_info!=nullptr;
+        case 14:return readable_range(bytes(c.mode_info)+kModeInfoTypeOffset,sizeof(std::uint32_t));
+        case 15:return readable_range(bytes(c.mode_info)+kModeInfoTargetClassOffset,sizeof(void*));
+        case 16:c.type=*reinterpret_cast<const std::uint32_t*>(bytes(c.mode_info)+kModeInfoTypeOffset);return 0;
+        case 17:c.target_class=*reinterpret_cast<void**>(bytes(c.mode_info)+kModeInfoTargetClassOffset);return 0;
+        case 18:return c.type==1u;
+        case 19:return c.target_class!=nullptr;
+        case 20:return feature_pack_can_queue_extended_build(c.producer,c.target_class);
+        case 21:*reinterpret_cast<std::uint32_t*>(bytes(c.button)+kControlButtonStateOffset)=0u;return 0;
+        case 22:return g_logged_extended_queue_tail_mask;
+        case 23:g_logged_extended_queue_tail_mask=true;return 0;
+        case 24:log_message("Extended queue full-slot palette mask active: only the class already occupying slot ten remains available until that slot reaches x10");return 0;
+        case 25:return kNativeQueueCapacity;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    a2fo_rs_stage8_hybrid_resolve(5,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
 }
 
-bool dispatch_producer_event(std::uint32_t kind, void* producer,
-                             void* target_class) noexcept {
-    if (!g_api ||
-        !A2FO_MODULE_API_HAS(g_api, dispatch_producer_event) ||
-        (g_api->capabilities & A2FO_CAP_PRODUCER_EVENTS) == 0 ||
-        !g_api->dispatch_producer_event) {
-        return true;
-    }
-    A2FO_ProducerEvent event{};
-    event.struct_size = sizeof(event);
-    event.kind = kind;
-    event.producer = producer;
-    event.target_class = target_class;
-    return g_api->dispatch_producer_event(&event);
+bool dispatch_producer_event(std::uint32_t kind,void* producer,void* target_class) noexcept {
+    struct Context {std::uint32_t kind;void* producer;void* target_class;std::exception_ptr error{};} context{kind,producer,target_class};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);(void)a;
+        try{switch(op){
+        case 0:return g_api!=nullptr;
+        case 1:return A2FO_MODULE_API_HAS(g_api,dispatch_producer_event);
+        case 2:return (g_api->capabilities&A2FO_CAP_PRODUCER_EVENTS)!=0;
+        case 3:return g_api->dispatch_producer_event!=nullptr;
+        case 4:{A2FO_ProducerEvent event{};event.struct_size=sizeof(event);event.kind=c.kind;event.producer=c.producer;event.target_class=c.target_class;return g_api->dispatch_producer_event(&event);}
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_hybrid_resolve(6,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
 }
 
 std::uint8_t* bytes(void* value) noexcept {
@@ -924,12 +899,18 @@ LiveBuildSubmenuClass* live_submenus_for_class(
 LiveBuildSubmenuPage* submenu_page_for_parent(
     LiveBuildSubmenuClass* menus, void* parent_class) noexcept {
     if (!menus || !parent_class) return nullptr;
-    const auto found = std::find_if(
-        menus->pages.begin(), menus->pages.end(),
-        [parent_class](const LiveBuildSubmenuPage& page) {
-            return page.parent_class == parent_class;
-        });
-    return found == menus->pages.end() ? nullptr : &*found;
+    struct Context { LiveBuildSubmenuClass* menus; void* parent_class; };
+    Context context{menus, parent_class};
+    const auto probe = +[](void* opaque, std::size_t index,
+                           std::uint32_t) noexcept -> std::uint32_t {
+        const auto& context = *static_cast<Context*>(opaque);
+        return context.menus->pages[index].parent_class ==
+               context.parent_class ? 1u : 0u;
+    };
+    const auto result = a2fo_rs_stage10_hybrid_visit(
+        0, menus->pages.size(), &context, probe);
+    return result.status || result.index == menus->pages.size()
+        ? nullptr : &menus->pages[result.index];
 }
 
 template <std::size_t Size>
@@ -973,172 +954,148 @@ bool read_parameter_project_id(void* parameter_db, const std::string& key,
 }
 
 bool is_hybridbuild_parameter_db(void* parameter_db) noexcept {
-    if (!parameter_db || !g_api ||
-        !A2FO_MODULE_API_HAS(g_api, get_original_classlabel) ||
-        (g_api->capabilities & A2FO_CAP_ORIGINAL_CLASSLABEL) == 0 ||
-        !g_api->get_original_classlabel) {
-        if (!g_logged_missing_classlabel_identity_api) {
-            g_logged_missing_classlabel_identity_api = true;
-            log_message("HybridBuild identity API unavailable; explicit "
-                        "hybrid menus remain disabled on this core");
-        }
-        return false;
-    }
-
-    std::array<char, 64> classlabel{};
-    if (!g_api->get_original_classlabel(
-            parameter_db, classlabel.data(),
-            static_cast<std::uint32_t>(classlabel.size()))) {
-        return false;
-    }
-    const bool hybridbuild = _stricmp(
-        classlabel.data(), "hybridbuild") == 0;
-    if (hybridbuild && !g_logged_hybridbuild_identity) {
-        g_logged_hybridbuild_identity = true;
-        log_message("HybridBuild source identity preserved through the "
-                    "research classlabel alias");
-    }
-    return hybridbuild;
+    struct Context {void* db;std::array<char,64> classlabel{};std::exception_ptr error{};} context{parameter_db};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t b) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);(void)a;(void)b;
+        try{switch(op){
+        case 0:return c.db!=nullptr;
+        case 1:return g_api!=nullptr;
+        case 2:return A2FO_MODULE_API_HAS(g_api,get_original_classlabel);
+        case 3:return (g_api->capabilities&A2FO_CAP_ORIGINAL_CLASSLABEL)!=0;
+        case 4:return g_api->get_original_classlabel!=nullptr;
+        case 5:return g_logged_missing_classlabel_identity_api;
+        case 6:g_logged_missing_classlabel_identity_api=true;return 0;
+        case 7:log_message("HybridBuild identity API unavailable; explicit hybrid menus remain disabled on this core");return 0;
+        case 8:return g_api->get_original_classlabel(c.db,c.classlabel.data(),static_cast<std::uint32_t>(c.classlabel.size()));
+        case 9:return _stricmp(c.classlabel.data(),"hybridbuild")==0;
+        case 10:return g_logged_hybridbuild_identity;
+        case 11:g_logged_hybridbuild_identity=true;return 0;
+        case 12:log_message("HybridBuild source identity preserved through the research classlabel alias");return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_hybrid_lists(0,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
 }
 
 bool has_explicit_list_marker(void* parameter_db) {
-    // ODF build lists conventionally begin at zero. This four-lookup gate
-    // avoids another 228 ParameterDB searches on every ordinary Producer
-    // class while retaining sparse entries after the first item.
-    constexpr ProductionMethod methods[] = {
-        ProductionMethod::construct,
-        ProductionMethod::yard,
-        ProductionMethod::research,
-        ProductionMethod::evolve,
+    struct Context {void* db;std::optional<std::string> ignored{};std::exception_ptr error{};} context{parameter_db};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t b) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);(void)a;(void)b;
+        try{switch(op){
+        case 0:{constexpr ProductionMethod methods[]={ProductionMethod::construct,ProductionMethod::yard,ProductionMethod::research,ProductionMethod::evolve};c.ignored.emplace();return read_parameter_string(c.db,production_command(methods[a],0),*c.ignored);}
+        case 1:c.ignored.reset();return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
     };
-    for (const ProductionMethod method : methods) {
-        std::string ignored;
-        if (read_parameter_string(parameter_db,
-                                  production_command(method, 0), ignored)) {
-            return true;
-        }
-    }
-    return false;
+    const auto result=a2fo_rs_stage8_hybrid_lists(1,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
 }
 
-void load_explicit_lists(void* producer_class, void* parameter_db) {
-    if (!producer_class || !parameter_db || !has_explicit_list_marker(
-            parameter_db)) {
-        return;
-    }
-
-    constexpr ProductionMethod methods[] = {
-        ProductionMethod::construct,
-        ProductionMethod::yard,
-        ProductionMethod::research,
-        ProductionMethod::evolve,
+void load_explicit_lists(void* producer_class,void* parameter_db) {
+    struct Context {void* producer_class;void* db;std::unique_ptr<HybridBuildLists> lists{};struct Row{std::string key;std::string target;};std::optional<Row> row{};ProductionMethod method{};std::size_t index=0;std::uint32_t project_id=0;AddListEntryResult added{};std::array<std::size_t,4> counts{};std::size_t total=0;std::exception_ptr error{};} context{producer_class,parameter_db};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a,std::uintptr_t b) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);(void)a;(void)b;
+        try{switch(op){
+        case 0:return c.producer_class!=nullptr;
+        case 1:return c.db!=nullptr;
+        case 2:return has_explicit_list_marker(c.db);
+        case 3:c.lists=std::make_unique<HybridBuildLists>();return 0;
+        case 4:return kHybridBuildListCapacity;
+        case 5:{constexpr ProductionMethod methods[]={ProductionMethod::construct,ProductionMethod::yard,ProductionMethod::research,ProductionMethod::evolve};c.method=methods[a];c.index=b;c.row.emplace(Context::Row{production_command(c.method,b),{}});return 0;}
+        case 6:return read_parameter_string(c.db,c.row->key,c.row->target);
+        case 7:return c.row->target.empty();
+        case 8:log_message(c.row->key+" ignored: target ODF is empty");return 0;
+        case 9:c.project_id=0;return read_parameter_project_id(c.db,c.row->key,c.project_id);
+        case 10:return c.project_id!=0;
+        case 11:log_message(c.row->key+" ignored: "+c.row->target+" could not be assigned a project ID");return 0;
+        case 12:c.added=c.lists->add(c.method,c.index,c.project_id);return 0;
+        case 13:return c.added==AddListEntryResult::added;
+        case 14:return c.added==AddListEntryResult::ambiguous_project;
+        case 15:log_message(c.row->key+" ignored: "+c.row->target+" already belongs to another explicit method");return 0;
+        case 16:log_message(c.row->key+" ignored: explicit list entry is invalid");return 0;
+        case 17:c.row.reset();return 0;
+        case 18:return c.lists->empty();
+        case 19:log_message("Hybrid production commands were present but no valid targets were registered");return 0;
+        case 20:c.total=c.lists->entries().size();EnterCriticalSection(&g_registry_lock);try{g_class_lists[c.producer_class]=std::move(c.lists);LeaveCriticalSection(&g_registry_lock);}catch(...){LeaveCriticalSection(&g_registry_lock);throw;}return 0;
+        case 21:c.counts[a]=b;return 0;
+        case 22:{char message[256];std::snprintf(message,sizeof(message),"Hybrid production ODF lists registered: %lu total (construct %lu, yard %lu, research %lu, evolve %lu); runtime HybridBuild ResearchStation four-method adapter available",static_cast<unsigned long>(c.total),static_cast<unsigned long>(c.counts[0]),static_cast<unsigned long>(c.counts[1]),static_cast<unsigned long>(c.counts[2]),static_cast<unsigned long>(c.counts[3]));log_message(message);return 0;}
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
     };
-    auto lists = std::make_unique<HybridBuildLists>();
-    std::array<std::size_t, 4> counts{};
-    for (std::size_t method_index = 0; method_index < counts.size();
-         ++method_index) {
-        const ProductionMethod method = methods[method_index];
-        for (std::size_t index = 0; index < kHybridBuildListCapacity;
-             ++index) {
-            const std::string key = production_command(method, index);
-            std::string declared_target;
-            if (!read_parameter_string(parameter_db, key, declared_target)) {
-                continue;
-            }
-            if (declared_target.empty()) {
-                log_message(key + " ignored: target ODF is empty");
-                continue;
-            }
-            std::uint32_t project_id = 0;
-            if (!read_parameter_project_id(parameter_db, key, project_id) ||
-                project_id == 0) {
-                log_message(key + " ignored: " + declared_target +
-                            " could not be assigned a project ID");
-                continue;
-            }
-            const AddListEntryResult added = lists->add(
-                method, index, project_id);
-            if (added == AddListEntryResult::added) {
-                ++counts[method_index];
-            } else if (added == AddListEntryResult::ambiguous_project) {
-                log_message(key + " ignored: " + declared_target +
-                            " already belongs to another explicit method");
-            } else {
-                log_message(key + " ignored: explicit list entry is invalid");
-            }
-        }
-    }
-    if (lists->empty()) {
-        log_message("Hybrid production commands were present but no valid "
-                    "targets were registered");
-        return;
-    }
-
-    const std::size_t total = lists->entries().size();
-    EnterCriticalSection(&g_registry_lock);
-    try {
-        g_class_lists[producer_class] = std::move(lists);
-        LeaveCriticalSection(&g_registry_lock);
-    } catch (...) {
-        LeaveCriticalSection(&g_registry_lock);
-        throw;
-    }
-
-    char message[256];
-    std::snprintf(
-        message, sizeof(message),
-        "Hybrid production ODF lists registered: %lu total "
-        "(construct %lu, yard %lu, research %lu, evolve %lu); runtime "
-        "HybridBuild ResearchStation four-method adapter available",
-        static_cast<unsigned long>(total),
-        static_cast<unsigned long>(counts[0]),
-        static_cast<unsigned long>(counts[1]),
-        static_cast<unsigned long>(counts[2]),
-        static_cast<unsigned long>(counts[3]));
-    log_message(message);
+    a2fo_rs_stage8_hybrid_lists(2,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
 }
 
-bool active_explicit_method(void* producer,
-                            ProductionMethod& method) noexcept {
-    if (!producer || !readable_range(
-            bytes(producer) + kQueueHeadOffset, sizeof(void*))) {
-        return false;
-    }
-    void* producer_class = *reinterpret_cast<void**>(
-        bytes(producer) + kObjectClassOffset);
-    if (!producer_class) return false;
-
-    void* target_class = *reinterpret_cast<void**>(
-        bytes(producer) + kCurrentBuildClassOffset);
-    if (!target_class) {
-        void* queue_head = *reinterpret_cast<void**>(
-            bytes(producer) + kQueueHeadOffset);
-        if (readable_range(queue_head, sizeof(void*))) {
-            target_class = *reinterpret_cast<void**>(queue_head);
-        }
-    }
-    std::uint32_t target_project_id = 0;
-    return class_project_id(target_class, target_project_id) &&
-        resolve_explicit_production_method(
-            producer_class, target_project_id, method);
+bool active_explicit_method(void* producer,ProductionMethod& method) noexcept {
+    struct Context {void* producer;ProductionMethod& method;void* producer_class=nullptr;void* target_class=nullptr;void* queue_head=nullptr;std::uint32_t project_id=0;std::exception_ptr error{};} context{producer,method};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);(void)a;
+        try{switch(op){
+        case 0:return c.producer!=nullptr;
+        case 1:return readable_range(bytes(c.producer)+kQueueHeadOffset,sizeof(void*));
+        case 2:c.producer_class=*reinterpret_cast<void**>(bytes(c.producer)+kObjectClassOffset);return 0;
+        case 3:return c.producer_class!=nullptr;
+        case 4:c.target_class=*reinterpret_cast<void**>(bytes(c.producer)+kCurrentBuildClassOffset);return 0;
+        case 5:return c.target_class!=nullptr;
+        case 6:c.queue_head=*reinterpret_cast<void**>(bytes(c.producer)+kQueueHeadOffset);return 0;
+        case 7:return readable_range(c.queue_head,sizeof(void*));
+        case 8:c.target_class=*reinterpret_cast<void**>(c.queue_head);return 0;
+        case 9:return class_project_id(c.target_class,c.project_id);
+        case 10:return resolve_explicit_production_method(c.producer_class,c.project_id,c.method);
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_hybrid_state(0,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
 }
 
 bool active_yard_job(void* producer) noexcept {
-    ProductionMethod method = ProductionMethod::legacy;
-    return active_explicit_method(producer, method) &&
-        method == ProductionMethod::yard;
+    struct Context {void* producer;ProductionMethod method=ProductionMethod::legacy;std::exception_ptr error{};} context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);(void)a;
+        try{switch(op){
+        case 0:return active_explicit_method(c.producer,c.method);
+        case 1:return c.method==ProductionMethod::yard;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_hybrid_state(1,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
 }
 
 bool active_construct_job(void* producer) noexcept {
-    ProductionMethod method = ProductionMethod::legacy;
-    return active_explicit_method(producer, method) &&
-        method == ProductionMethod::construct;
+    struct Context {void* producer;ProductionMethod method=ProductionMethod::legacy;std::exception_ptr error{};} context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);(void)a;
+        try{switch(op){
+        case 0:return active_explicit_method(c.producer,c.method);
+        case 1:return c.method==ProductionMethod::construct;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_hybrid_state(1,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
 }
 
 bool active_evolve_job(void* producer) noexcept {
-    ProductionMethod method = ProductionMethod::legacy;
-    return active_explicit_method(producer, method) &&
-        method == ProductionMethod::evolve;
+    struct Context {void* producer;ProductionMethod method=ProductionMethod::legacy;std::exception_ptr error{};} context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);(void)a;
+        try{switch(op){
+        case 0:return active_explicit_method(c.producer,c.method);
+        case 1:return c.method==ProductionMethod::evolve;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_hybrid_state(1,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
 }
 
 class HybridCocoonTailSwap {
@@ -1393,13 +1350,18 @@ std::uint32_t active_construction_queue_id(void* station) noexcept {
 void* placement_interface_for_queue_id_locked(
     HybridConstructionState& state, std::uint32_t queue_id) noexcept {
     if (!queue_id) return nullptr;
-    for (const HybridConstructionState::Placement& placement :
-         state.placements) {
-        if (placement.queue_id == queue_id) {
-            return placement.build_interface;
-        }
-    }
-    return nullptr;
+    struct Context { HybridConstructionState* state; std::uint32_t id; };
+    Context context{&state, queue_id};
+    const auto probe = +[](void* opaque, std::size_t index,
+                           std::uint32_t) noexcept -> std::uint32_t {
+        const auto& context = *static_cast<Context*>(opaque);
+        return context.state->placements[index].queue_id == context.id
+            ? 1u : 0u;
+    };
+    const auto result = a2fo_rs_stage10_hybrid_visit(
+        0, state.placements.size(), &context, probe);
+    return result.status || result.index == state.placements.size()
+        ? nullptr : state.placements[result.index].build_interface;
 }
 
 class HybridConstructionTailSwap {
@@ -1542,25 +1504,34 @@ void remove_hybrid_construction_state(void* station) noexcept {
 
     std::array<void*, kNativeQueueCapacity + 2> interfaces{};
     std::size_t interface_count = 0;
-    auto remember_interface = [&interfaces, &interface_count](
-                                  void* build_interface) noexcept {
-        if (!build_interface) return;
-        for (std::size_t index = 0; index < interface_count; ++index) {
-            if (interfaces[index] == build_interface) return;
-        }
-        if (interface_count < interfaces.size()) {
-            interfaces[interface_count++] = build_interface;
-        }
-    };
     EnterCriticalSection(&g_registry_lock);
     const auto found = g_hybrid_construction.find(station);
     if (found != g_hybrid_construction.end()) {
-        remember_interface(found->second.cursor_interface);
-        remember_interface(found->second.pending_interface);
-        for (const HybridConstructionState::Placement& placement :
-             found->second.placements) {
-            remember_interface(placement.build_interface);
-        }
+        struct Context {
+            HybridConstructionState* state;
+            std::array<void*, kNativeQueueCapacity + 2>* interfaces;
+        } context{&found->second, &interfaces};
+        const auto probe = +[](void* opaque, std::uint32_t phase,
+                               std::size_t candidate,
+                               std::size_t other) noexcept -> std::uint32_t {
+            const auto& context = *static_cast<Context*>(opaque);
+            const auto value = +[](const Context& c, std::size_t index)
+                noexcept -> void* {
+                if (index == 0) return c.state->cursor_interface;
+                if (index == 1) return c.state->pending_interface;
+                return c.state->placements[index - 2].build_interface;
+            };
+            void* build_interface = value(context, candidate);
+            if (phase == 0) return build_interface ? 1u : 0u;
+            if (phase == 1)
+                return build_interface == value(context, other) ? 1u : 0u;
+            (*context.interfaces)[other] = build_interface;
+            return 0;
+        };
+        const auto unique = a2fo_rs_stage10_hybrid_unique(
+            found->second.placements.size() + 2, interfaces.size(),
+            &context, probe);
+        interface_count = unique.index;
         g_hybrid_construction.erase(found);
         InterlockedDecrement(&g_hybrid_construction_state_count);
     }
@@ -1644,29 +1615,37 @@ std::uint32_t queued_id_for_target(
             bytes(producer) + kQueueHeadOffset, sizeof(void*))) {
         return 0;
     }
-    void* queue_item = *reinterpret_cast<void**>(
-        bytes(producer) + kQueueHeadOffset);
-    std::uint32_t fallback_id = 0;
-    for (std::uint32_t visited = 0;
-         queue_item && visited < kNativeQueueCapacity; ++visited) {
-        if (!readable_range(
-                queue_item, kQueueItemIdOffset + sizeof(std::uint32_t))) {
+    struct Context {
+        void* queue_item;
+        void* target_class;
+    } context{*reinterpret_cast<void**>(bytes(producer) + kQueueHeadOffset),
+              target_class};
+    const auto probe = +[](void* opaque, std::uint32_t phase,
+                           std::uint32_t* id) noexcept -> std::uint32_t {
+        auto& context = *static_cast<Context*>(opaque);
+        if (phase == 1) {
+            context.queue_item = *reinterpret_cast<void**>(
+                bytes(context.queue_item) + kQueueItemNextOffset);
             return 0;
         }
-        void* queued_class = *reinterpret_cast<void**>(queue_item);
+        if (!context.queue_item) return 2;
+        if (!readable_range(context.queue_item,
+                            kQueueItemIdOffset + sizeof(std::uint32_t))) {
+            return 3;
+        }
+        void* queued_class = *reinterpret_cast<void**>(context.queue_item);
         const std::uint32_t queued_id =
             *reinterpret_cast<const std::uint32_t*>(
-                bytes(queue_item) + kQueueItemIdOffset);
-        if (queued_class == target_class) {
-            if (preferred_queue_id && queued_id == preferred_queue_id) {
-                return queued_id;
-            }
-            fallback_id = queued_id;
+                bytes(context.queue_item) + kQueueItemIdOffset);
+        if (queued_class == context.target_class) {
+            *id = queued_id;
+            return 1;
         }
-        queue_item = *reinterpret_cast<void**>(
-            bytes(queue_item) + kQueueItemNextOffset);
-    }
-    return preferred_queue_id ? 0 : fallback_id;
+        return 0;
+    };
+    const auto result = a2fo_rs_stage10_hybrid_queue(
+        kNativeQueueCapacity, preferred_queue_id, &context, probe);
+    return result.status ? 0 : result.id;
 }
 
 void bind_pending_construct_placement(
@@ -1718,17 +1697,26 @@ void bind_pending_construct_placement(
                         kBuildPositionInterfaceMatrixOffset,
                     kBuildPositionInterfaceMatrixSize);
             }
-            HybridConstructionState::Placement* destination = nullptr;
-            for (HybridConstructionState::Placement& placement :
-                 found->second.placements) {
-                if (placement.queue_id == queue_id) {
-                    destination = &placement;
-                    break;
-                }
-                if (!destination && !placement.build_interface) {
-                    destination = &placement;
-                }
-            }
+            auto& placements = found->second.placements;
+            struct Context {
+                std::array<HybridConstructionState::Placement,
+                           kNativeQueueCapacity>* placements;
+                std::uint32_t queue_id;
+            } context{&placements, queue_id};
+            const auto probe = +[](void* opaque, std::size_t index,
+                                   std::uint32_t phase) noexcept
+                -> std::uint32_t {
+                const auto& context = *static_cast<Context*>(opaque);
+                const auto& placement = (*context.placements)[index];
+                return phase == 0
+                    ? (placement.queue_id == context.queue_id ? 1u : 0u)
+                    : (!placement.build_interface ? 1u : 0u);
+            };
+            const auto selected = a2fo_rs_stage10_hybrid_visit(
+                2, placements.size(), &context, probe);
+            HybridConstructionState::Placement* destination =
+                !selected.status && selected.index < placements.size()
+                    ? &placements[selected.index] : nullptr;
             if (destination) {
                 destroy_interface = destination->build_interface;
                 destination->queue_id = queue_id;
@@ -1758,13 +1746,24 @@ void release_construct_placement(
     EnterCriticalSection(&g_registry_lock);
     const auto found = g_hybrid_construction.find(producer);
     if (found != g_hybrid_construction.end()) {
-        for (HybridConstructionState::Placement& placement :
-             found->second.placements) {
-            if (placement.queue_id == queue_id) {
-                build_interface = placement.build_interface;
-                placement = {};
-                break;
-            }
+        auto& placements = found->second.placements;
+        struct Context {
+            std::array<HybridConstructionState::Placement,
+                       kNativeQueueCapacity>* placements;
+            std::uint32_t queue_id;
+        } context{&placements, queue_id};
+        const auto probe = +[](void* opaque, std::size_t index,
+                               std::uint32_t) noexcept -> std::uint32_t {
+            const auto& context = *static_cast<Context*>(opaque);
+            return (*context.placements)[index].queue_id == context.queue_id
+                ? 1u : 0u;
+        };
+        const auto selected = a2fo_rs_stage10_hybrid_visit(
+            0, placements.size(), &context, probe);
+        if (!selected.status && selected.index < placements.size()) {
+            auto& placement = placements[selected.index];
+            build_interface = placement.build_interface;
+            placement = {};
         }
     }
     LeaveCriticalSection(&g_registry_lock);
@@ -1785,14 +1784,25 @@ void clear_construct_placements(void* producer) noexcept {
             found->second.pending_target_class = nullptr;
             found->second.pending_queue_id = 0;
         }
-        for (HybridConstructionState::Placement& placement :
-             found->second.placements) {
+        struct Context {
+            HybridConstructionState* state;
+            decltype(interfaces)* interfaces;
+            std::size_t* count;
+        } context{&found->second, &interfaces, &interface_count};
+        const auto probe = +[](void* opaque, std::size_t index,
+                               std::uint32_t) noexcept -> std::uint32_t {
+            auto& context = *static_cast<Context*>(opaque);
+            auto& placement = context.state->placements[index];
             if (placement.build_interface &&
-                interface_count < interfaces.size()) {
-                interfaces[interface_count++] = placement.build_interface;
+                *context.count < context.interfaces->size()) {
+                (*context.interfaces)[(*context.count)++] =
+                    placement.build_interface;
             }
             placement = {};
-        }
+            return 0;
+        };
+        a2fo_rs_stage10_hybrid_visit(
+            1, found->second.placements.size(), &context, probe);
     }
     LeaveCriticalSection(&g_registry_lock);
     for (std::size_t index = 0; index < interface_count; ++index) {
@@ -1801,36 +1811,28 @@ void clear_construct_placements(void* producer) noexcept {
 }
 
 bool has_evolution_barrier(void* producer) noexcept {
-    if (!producer || !readable_range(
-            bytes(producer) + kCurrentBuildClassOffset, sizeof(void*)) ||
-        !readable_range(bytes(producer) + kQueueHeadOffset, sizeof(void*))) {
-        return false;
-    }
-
-    void* active_class = *reinterpret_cast<void**>(
-        bytes(producer) + kCurrentBuildClassOffset);
-    if (target_has_explicit_method(
-            producer, active_class, ProductionMethod::evolve)) {
-        return true;
-    }
-
-    void* queue_item = *reinterpret_cast<void**>(
-        bytes(producer) + kQueueHeadOffset);
-    for (std::uint32_t visited = 0;
-         queue_item && visited < kNativeQueueCapacity; ++visited) {
-        if (!readable_range(
-                queue_item, kQueueItemNextOffset + sizeof(void*))) {
-            break;
-        }
-        void* queued_class = *reinterpret_cast<void**>(queue_item);
-        if (target_has_explicit_method(
-                producer, queued_class, ProductionMethod::evolve)) {
-            return true;
-        }
-        queue_item = *reinterpret_cast<void**>(
-            bytes(queue_item) + kQueueItemNextOffset);
-    }
-    return false;
+    struct Context {void* producer;void* active_class=nullptr;void* queue_item=nullptr;void* queued_class=nullptr;std::exception_ptr error{};} context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);(void)a;
+        try{switch(op){
+        case 0:return c.producer!=nullptr;
+        case 1:return readable_range(bytes(c.producer)+kCurrentBuildClassOffset,sizeof(void*));
+        case 2:return readable_range(bytes(c.producer)+kQueueHeadOffset,sizeof(void*));
+        case 3:c.active_class=*reinterpret_cast<void**>(bytes(c.producer)+kCurrentBuildClassOffset);return 0;
+        case 4:return target_has_explicit_method(c.producer,c.active_class,ProductionMethod::evolve);
+        case 5:c.queue_item=*reinterpret_cast<void**>(bytes(c.producer)+kQueueHeadOffset);return 0;
+        case 6:return kNativeQueueCapacity;
+        case 7:return c.queue_item!=nullptr;
+        case 8:return readable_range(c.queue_item,kQueueItemNextOffset+sizeof(void*));
+        case 9:c.queued_class=*reinterpret_cast<void**>(c.queue_item);return 0;
+        case 10:return target_has_explicit_method(c.producer,c.queued_class,ProductionMethod::evolve);
+        case 11:c.queue_item=*reinterpret_cast<void**>(bytes(c.queue_item)+kQueueItemNextOffset);return 0;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_hybrid_state(2,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
 }
 
 RuntimeClassLists* runtime_lists_for_class(void* producer_class) noexcept {
@@ -1843,167 +1845,192 @@ RuntimeClassLists* runtime_lists_for_class(void* producer_class) noexcept {
     return result;
 }
 
-bool raw_list_contains(void** list, void* target_class) noexcept {
-    if (!list || !target_class || !readable_range(
-            list, kRuntimeBuildListCapacity * sizeof(void*))) {
-        return false;
-    }
-    for (std::size_t index = 0; index < kRuntimeBuildListCapacity; ++index) {
-        if (list[index] == target_class) return true;
-    }
-    return false;
+bool raw_list_contains(void** list,void* target_class) noexcept {
+    struct Context {void** list;void* target;std::exception_ptr error{};} context{list,target_class};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);(void)a;
+        try{switch(op){
+        case 0:return c.list!=nullptr;
+        case 1:return c.target!=nullptr;
+        case 2:return readable_range(c.list,kRuntimeBuildListCapacity*sizeof(void*));
+        case 3:return kRuntimeBuildListCapacity;
+        case 4:return c.list[a]==c.target;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_hybrid_state(3,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
 }
 
-bool hybrid_research_target(void* producer, void* target_class) noexcept {
-    if (!producer || !target_class || !readable_range(
-            bytes(producer) + kObjectClassOffset, sizeof(void*))) {
-        return false;
-    }
-    void* producer_class = *reinterpret_cast<void**>(
-        bytes(producer) + kObjectClassOffset);
-    RuntimeClassLists* lists = runtime_lists_for_class(producer_class);
-    if (!lists || !lists->has_yard) return false;
-
-    std::uint32_t target_project_id = 0;
-    ProductionMethod method = ProductionMethod::legacy;
-    if (class_project_id(target_class, target_project_id) &&
-        resolve_explicit_production_method(
-            producer_class, target_project_id, method)) {
-        return method == ProductionMethod::research;
-    }
-
-    if (std::find(lists->yard.begin(), lists->yard.end(), target_class) !=
-        lists->yard.end()) {
-        return false;
-    }
-    if (std::find(lists->research.begin(), lists->research.end(),
-                  target_class) != lists->research.end() ||
-        raw_list_contains(lists->legacy_research, target_class)) {
-        return true;
-    }
-
-    // Fleet Ops may substitute a tier-specific research table on the live
-    // station. Include that current table without ever reclassifying an item
-    // from the explicit yard array as a research pod.
-    void*** active_list_slot = reinterpret_cast<void***>(
-        bytes(producer) + kCurrentBuildClassOffset - sizeof(void*));
-    if (!readable_range(active_list_slot, sizeof(void*))) return false;
-    void** active_list = *active_list_slot;
-    return active_list != lists->yard.data() &&
-        raw_list_contains(active_list, target_class);
+bool hybrid_research_target(void* producer,void* target_class) noexcept {
+    struct Context {void* producer;void* target;void* producer_class=nullptr;RuntimeClassLists* lists=nullptr;std::uint32_t project_id=0;ProductionMethod method=ProductionMethod::legacy;void*** active_slot=nullptr;void** active_list=nullptr;std::exception_ptr error{};} context{producer,target_class};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);(void)a;
+        try{switch(op){
+        case 0:return c.producer!=nullptr;
+        case 1:return c.target!=nullptr;
+        case 2:return readable_range(bytes(c.producer)+kObjectClassOffset,sizeof(void*));
+        case 3:c.producer_class=*reinterpret_cast<void**>(bytes(c.producer)+kObjectClassOffset);return 0;
+        case 4:c.lists=runtime_lists_for_class(c.producer_class);return 0;
+        case 5:return c.lists!=nullptr;
+        case 6:return c.lists->has_yard;
+        case 7:return class_project_id(c.target,c.project_id);
+        case 8:return resolve_explicit_production_method(c.producer_class,c.project_id,c.method);
+        case 9:return c.method==ProductionMethod::research;
+        case 10:return kRuntimeBuildListCapacity;
+        case 11:return c.lists->yard[a]==c.target;
+        case 12:return c.lists->research[a]==c.target;
+        case 13:return raw_list_contains(c.lists->legacy_research,c.target);
+        case 14:c.active_slot=reinterpret_cast<void***>(bytes(c.producer)+kCurrentBuildClassOffset-sizeof(void*));return 0;
+        case 15:return readable_range(c.active_slot,sizeof(void*));
+        case 16:c.active_list=*c.active_slot;return 0;
+        case 17:return c.active_list!=c.lists->yard.data();
+        case 18:return raw_list_contains(c.active_list,c.target);
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_hybrid_state(4,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
 }
 
-bool research_classes_conflict(void* existing_class,
-                               void* target_class) noexcept {
-    if (!existing_class || !target_class) return false;
-    if (existing_class == target_class) return true;
-    const std::size_t class_bytes =
-        kResearchPodFamilyOffset + sizeof(std::int32_t);
-    if (!readable_range(existing_class, class_bytes) ||
-        !readable_range(target_class, class_bytes)) {
-        return false;
-    }
-    const std::uint8_t existing_is_pod = *reinterpret_cast<const std::uint8_t*>(
-        bytes(existing_class) + kResearchPodClassFlagOffset);
-    const std::uint8_t target_is_pod = *reinterpret_cast<const std::uint8_t*>(
-        bytes(target_class) + kResearchPodClassFlagOffset);
-    if (!existing_is_pod || !target_is_pod) return false;
-
-    const std::int32_t existing_family =
-        *reinterpret_cast<const std::int32_t*>(
-            bytes(existing_class) + kResearchPodFamilyOffset);
-    const std::int32_t target_family =
-        *reinterpret_cast<const std::int32_t*>(
-            bytes(target_class) + kResearchPodFamilyOffset);
-    if (existing_family != target_family) return false;
-
-    const std::int32_t existing_level =
-        *reinterpret_cast<const std::int32_t*>(
-            bytes(existing_class) + kResearchPodLevelOffset);
-    const std::int32_t target_level =
-        *reinterpret_cast<const std::int32_t*>(
-            bytes(target_class) + kResearchPodLevelOffset);
-    // Match ResearchStation's native attached-pod rule: exact classes always
-    // conflict, and a lower tier cannot be ordered behind a higher tier from
-    // the same research-pod family.
-    return target_level < existing_level;
+bool research_classes_conflict(void* existing_class,void* target_class) noexcept {
+    struct Context {void* existing;void* target;std::exception_ptr error{};} context{existing_class,target_class};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);(void)a;
+        try{switch(op){
+        case 0:return c.existing!=nullptr;
+        case 1:return c.target!=nullptr;
+        case 2:return c.existing==c.target;
+        case 3:return readable_range(c.existing,kResearchPodFamilyOffset+sizeof(std::int32_t));
+        case 4:return readable_range(c.target,kResearchPodFamilyOffset+sizeof(std::int32_t));
+        case 5:return *reinterpret_cast<const std::uint8_t*>(bytes(c.existing)+kResearchPodClassFlagOffset);
+        case 6:return *reinterpret_cast<const std::uint8_t*>(bytes(c.target)+kResearchPodClassFlagOffset);
+        case 7:return static_cast<std::uint32_t>(*reinterpret_cast<const std::int32_t*>(bytes(c.existing)+kResearchPodFamilyOffset));
+        case 8:return static_cast<std::uint32_t>(*reinterpret_cast<const std::int32_t*>(bytes(c.target)+kResearchPodFamilyOffset));
+        case 9:return static_cast<std::uint32_t>(*reinterpret_cast<const std::int32_t*>(bytes(c.existing)+kResearchPodLevelOffset));
+        case 10:return static_cast<std::uint32_t>(*reinterpret_cast<const std::int32_t*>(bytes(c.target)+kResearchPodLevelOffset));
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_hybrid_state(5,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
 }
 
 bool hybrid_station_has_queue_capacity(void* producer) noexcept {
-    if (!producer || !readable_range(
-            bytes(producer) + kObjectClassOffset, sizeof(void*)) ||
-        !readable_range(bytes(producer) + kQueueCountOffset,
-                        sizeof(std::uint32_t))) {
-        return false;
-    }
-    void* producer_class = *reinterpret_cast<void**>(
-        bytes(producer) + kObjectClassOffset);
-    RuntimeClassLists* lists = runtime_lists_for_class(producer_class);
-    const std::uint32_t count =
-        *reinterpret_cast<const std::uint32_t*>(
-            bytes(producer) + kQueueCountOffset);
-    return lists && lists->has_yard &&
-        !has_evolution_barrier(producer) &&
-        count < kNativeQueueCapacity;
+    struct Context {void* producer;void* producer_class=nullptr;RuntimeClassLists* lists=nullptr;std::exception_ptr error{};} context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);(void)a;
+        try{switch(op){
+        case 0:return c.producer!=nullptr;
+        case 1:return readable_range(bytes(c.producer)+kObjectClassOffset,sizeof(void*));
+        case 2:return readable_range(bytes(c.producer)+kQueueCountOffset,sizeof(std::uint32_t));
+        case 3:c.producer_class=*reinterpret_cast<void**>(bytes(c.producer)+kObjectClassOffset);return 0;
+        case 4:c.lists=runtime_lists_for_class(c.producer_class);return 0;
+        case 5:return *reinterpret_cast<const std::uint32_t*>(bytes(c.producer)+kQueueCountOffset);
+        case 6:return c.lists!=nullptr;
+        case 7:return c.lists->has_yard;
+        case 8:return has_evolution_barrier(c.producer);
+        case 9:return kNativeQueueCapacity;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_hybrid_state(6,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
 }
 
 bool active_hybrid_queue(void* producer) noexcept {
-    if (!producer || !readable_range(
-            bytes(producer) + kObjectClassOffset, sizeof(void*)) ||
-        !readable_range(bytes(producer) + kCurrentBuildClassOffset,
-                        sizeof(void*)) ||
-        !readable_range(bytes(producer) + kQueueCountOffset,
-                        sizeof(std::uint32_t))) {
-        return false;
-    }
-    void* producer_class = *reinterpret_cast<void**>(
-        bytes(producer) + kObjectClassOffset);
-    RuntimeClassLists* lists = runtime_lists_for_class(producer_class);
-    const std::uint32_t count =
-        *reinterpret_cast<const std::uint32_t*>(
-            bytes(producer) + kQueueCountOffset);
-    void* active_class = *reinterpret_cast<void**>(
-        bytes(producer) + kCurrentBuildClassOffset);
-    // A ResearchStation only opts into the full queue display when it also
-    // publishes a yard list. Ordinary research-only stations retain their
-    // native single-job display.
-    return lists && lists->has_yard && (active_class || count != 0);
+    struct Context {void* producer;void* producer_class=nullptr;RuntimeClassLists* lists=nullptr;std::exception_ptr error{};} context{producer};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);(void)a;
+        try{switch(op){
+        case 0:return c.producer!=nullptr;
+        case 1:return readable_range(bytes(c.producer)+kObjectClassOffset,sizeof(void*));
+        case 2:return readable_range(bytes(c.producer)+kCurrentBuildClassOffset,sizeof(void*));
+        case 3:return readable_range(bytes(c.producer)+kQueueCountOffset,sizeof(std::uint32_t));
+        case 4:c.producer_class=*reinterpret_cast<void**>(bytes(c.producer)+kObjectClassOffset);return 0;
+        case 5:c.lists=runtime_lists_for_class(c.producer_class);return 0;
+        case 6:return *reinterpret_cast<const std::uint32_t*>(bytes(c.producer)+kQueueCountOffset);
+        case 7:return reinterpret_cast<std::uintptr_t>(*reinterpret_cast<void**>(bytes(c.producer)+kCurrentBuildClassOffset));
+        case 8:return c.lists!=nullptr;
+        case 9:return c.lists->has_yard;
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_hybrid_state(7,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return result!=0;
 }
 
 void* single_hybrid_station(void* craft_array) noexcept {
-    if (!readable_range(craft_array, 12)) return nullptr;
-    void** selected = *reinterpret_cast<void***>(craft_array);
-    const std::int32_t count = *reinterpret_cast<const std::int32_t*>(
-        bytes(craft_array) + 8);
-    if (count != 1 || !readable_range(selected, sizeof(void*)) ||
-        !readable_range(selected[0], kObjectClassOffset + sizeof(void*))) {
-        return nullptr;
-    }
-    void* station = selected[0];
-    void* station_class = *reinterpret_cast<void**>(
-        bytes(station) + kObjectClassOffset);
-    RuntimeClassLists* lists = runtime_lists_for_class(station_class);
-    if (!lists || !lists->has_yard ||
-        (!lists->has_explicit_research && !lists->legacy_research)) {
-        return nullptr;
-    }
-    return station;
+    struct Context {void* craft_array;void** selected=nullptr;void* station=nullptr;void* station_class=nullptr;RuntimeClassLists* lists=nullptr;std::exception_ptr error{};} context{craft_array};
+    const auto step=+[](void* opaque,std::uint32_t op,std::uintptr_t a) noexcept ->std::uint64_t {
+        auto& c=*static_cast<Context*>(opaque);(void)a;
+        try{switch(op){
+        case 0:return readable_range(c.craft_array,12);
+        case 1:c.selected=*reinterpret_cast<void***>(c.craft_array);return 0;
+        case 2:return static_cast<std::uint32_t>(*reinterpret_cast<const std::int32_t*>(bytes(c.craft_array)+8));
+        case 3:return readable_range(c.selected,sizeof(void*));
+        case 4:return readable_range(c.selected[0],kObjectClassOffset+sizeof(void*));
+        case 5:c.station=c.selected[0];return 0;
+        case 6:c.station_class=*reinterpret_cast<void**>(bytes(c.station)+kObjectClassOffset);return 0;
+        case 7:c.lists=runtime_lists_for_class(c.station_class);return 0;
+        case 8:return c.lists!=nullptr;
+        case 9:return c.lists->has_yard;
+        case 10:return c.lists->has_explicit_research;
+        case 11:return c.lists->legacy_research!=nullptr;
+        case 12:return reinterpret_cast<std::uintptr_t>(c.station);
+        default:return 0;
+        }}catch(...){c.error=std::current_exception();return UINT64_MAX;}
+    };
+    const auto result=a2fo_rs_stage8_hybrid_state(8,step,&context);
+    if(context.error)std::rethrow_exception(context.error);
+    return reinterpret_cast<void*>(static_cast<std::uintptr_t>(result));
 }
 
 bool selection_contains(void* craft_array, void* target) noexcept {
-    if (!target || !readable_range(craft_array, 12)) return false;
-    void** selected = *reinterpret_cast<void***>(craft_array);
-    const std::int32_t count = *reinterpret_cast<const std::int32_t*>(
-        bytes(craft_array) + 8);
-    if (count <= 0 || count > 256 ||
-        !readable_range(selected,
-                        static_cast<std::size_t>(count) * sizeof(void*))) {
-        return false;
-    }
-    for (std::int32_t index = 0; index < count; ++index) {
-        if (selected[index] == target) return true;
-    }
-    return false;
+    struct Context {
+        void* craft_array;
+        void* target;
+        void** selected = nullptr;
+        std::int32_t count = 0;
+        std::exception_ptr error;
+    } context{craft_array, target, nullptr, 0, {}};
+    const auto step = +[](void* opaque, std::uint32_t operation,
+                          std::size_t index) noexcept -> std::uint64_t {
+        auto& state = *static_cast<Context*>(opaque);
+        try {
+            switch (operation) {
+                case 0: return state.target != nullptr;
+                case 1: return readable_range(state.craft_array, 12);
+                case 2:
+                    state.selected = *reinterpret_cast<void***>(
+                        state.craft_array);
+                    return 0;
+                case 3:
+                    state.count = *reinterpret_cast<const std::int32_t*>(
+                        bytes(state.craft_array) + 8);
+                    return static_cast<std::uint32_t>(state.count);
+                case 4:
+                    return state.count > 0 && state.count <= 256 &&
+                        readable_range(state.selected,
+                            static_cast<std::size_t>(state.count) *
+                            sizeof(void*));
+                case 5: return state.selected[index] == state.target;
+                default: return 0;
+            }
+        } catch (...) {
+            state.error = std::current_exception();
+            return UINT64_MAX;
+        }
+    };
+    const bool result = a2fo_rs_stage9_hybrid_runtime(
+        0, &context, step) != 0;
+    if (context.error) std::rethrow_exception(context.error);
+    return result;
 }
 
 void* single_build_submenu_producer(void* craft_array) noexcept {
@@ -2041,34 +2068,30 @@ void* single_refit_source(void* craft_array) noexcept {
 
 void* free_refit_root_button(void** buttons) noexcept {
     if (!buttons) return nullptr;
-    void* first_free = nullptr;
-    void* const refit_mode_info = g_refit_menu_mode_info.data();
-    for (std::size_t index = 0;
-         index < kFoPopupBackButtonIndex; ++index) {
-        void* button = buttons[index];
+    struct Context { void** buttons; } context{buttons};
+    const auto probe = +[](void* opaque, std::size_t index,
+                           std::uint32_t) noexcept -> std::uint32_t {
+        auto& context = *static_cast<Context*>(opaque);
+        void* button = context.buttons[index];
         if (!button || button == g_refit_back_button || !readable_range(
                 bytes(button) + kControlButtonModeInfoOffset,
                 sizeof(void*)) || !readable_range(
                 bytes(button) + kControlButtonPressFunctionOffset,
-                sizeof(void*))) {
-            continue;
-        }
+                sizeof(void*))) return 0;
         void* mode_info = *reinterpret_cast<void**>(
             bytes(button) + kControlButtonModeInfoOffset);
         void* press_function = *reinterpret_cast<void**>(
             bytes(button) + kControlButtonPressFunctionOffset);
-        // Prefer reusing our surviving binding if Fleet Ops retained it
-        // across an incremental refresh. Every native or mod-provided action,
-        // including special-weapon/teleport callbacks, has either a ModeInfo
-        // or a press function and is therefore never selected as storage.
-        if (mode_info == refit_mode_info && !press_function) {
-            return button;
-        }
-        if (!first_free && !mode_info && !press_function) {
-            first_free = button;
-        }
-    }
-    return first_free;
+        // A surviving Refit binding wins; only a truly blank control is a
+        // fallback. Native actions may occupy either inspected field.
+        if (mode_info == g_refit_menu_mode_info.data() && !press_function)
+            return 1;
+        return !mode_info && !press_function ? 5u : 0u;
+    };
+    const auto result = a2fo_rs_stage10_hybrid_visit(
+        4, kFoPopupBackButtonIndex, &context, probe);
+    return result.status || result.index == kFoPopupBackButtonIndex
+        ? nullptr : buttons[result.index];
 }
 
 void bind_refit_buttons(void* craft_array,
@@ -2177,46 +2200,84 @@ void bind_refit_buttons(void* craft_array,
     // is a transient UI flag, not the action/visibility state consumed by the
     // final palette compactor. Menus 2-4 cannot be used because they
     // dereference Producer state which an ordinary Craft does not own.
-    for (std::size_t index = 0; index < kFoPopupButtonCount; ++index) {
-        void* button = buttons[index];
+    struct ClearContext { void** buttons; } clear_context{buttons};
+    const auto clear = +[](void* opaque, std::size_t index,
+                           std::uint32_t) noexcept -> std::uint32_t {
+        const auto& context = *static_cast<ClearContext*>(opaque);
+        void* button = context.buttons[index];
         if (button) {
             a2fo_call_thiscall_0(
                 at(g_armada, kControlButtonClearRva), button);
         }
-    }
-    for (std::size_t item_index = 0; item_index < count; ++item_index) {
+        return 0;
+    };
+    a2fo_rs_stage10_hybrid_visit(
+        1, kFoPopupButtonCount, &clear_context, clear);
+    struct BindContext {
+        void** buttons;
+        const A2FO_RefitUiItem* items;
+        void* source;
+        ControlButtonStateModeInfoFunction state_mode_info;
+    } bind_context{buttons, items.data(), source, state_mode_info};
+    const auto bind = +[](void* opaque, std::size_t item_index,
+                          std::uint32_t) noexcept -> std::uint32_t {
+        const auto& context = *static_cast<BindContext*>(opaque);
         const std::size_t button_index =
             kFirstRefitPaletteButtonIndex + item_index;
         if (button_index >= kFoPopupButtonCount ||
-            !items[item_index].target_class) {
-            break;
-        }
-        void* button = buttons[button_index];
+            !context.items[item_index].target_class) return 1;
+        void* button = context.buttons[button_index];
         if (!button || !writable_range(
                 bytes(button) + kControlButtonStateOffset,
                 sizeof(std::uint32_t)) || !writable_range(
                 bytes(button) + kControlButtonModeInfoOffset,
                 sizeof(void*))) {
-            continue;
+            return 0;
         }
         void* mode_info = g_refit_mode_info[item_index].data();
         *reinterpret_cast<std::uint32_t*>(
             bytes(mode_info) + kModeInfoTypeOffset) = 1;
         *reinterpret_cast<void**>(
             bytes(mode_info) + kModeInfoTargetClassOffset) =
-            items[item_index].target_class;
+            context.items[item_index].target_class;
         *reinterpret_cast<std::uint32_t*>(
             bytes(mode_info) + kModeInfoActionIndexOffset) = 0;
-        state_mode_info(
-            button, mode_info, items[item_index].enabled ? 1u : 0u);
+        context.state_mode_info(
+            button, mode_info,
+            context.items[item_index].enabled ? 1u : 0u);
         g_refit_bindings[g_refit_binding_count++] = {
-            button, mode_info, source, items[item_index].target_class,
+            button, mode_info, context.source,
+            context.items[item_index].target_class,
             RefitButtonKind::destination};
-    }
+        return 0;
+    };
+    a2fo_rs_stage10_hybrid_visit(6, count, &bind_context, bind);
     if (g_refit_back_button && g_refit_back_mode_info) {
         state_mode_info(
             g_refit_back_button, g_refit_back_mode_info, 1u);
     }
+}
+
+void* first_popup_button_for_mode_info(
+    void** buttons, void* const* mode_info) noexcept {
+    struct Context { void** buttons; void* const* mode_info; void* matched{}; } context{buttons, mode_info};
+    const auto probe = +[](void* opaque, std::size_t index,
+                           std::uint32_t) noexcept -> std::uint32_t {
+        auto& context = *static_cast<Context*>(opaque);
+        void* button = context.buttons[index];
+        if (!button || !readable_range(
+                bytes(button) + kControlButtonModeInfoOffset,
+                sizeof(void*))) return 0;
+        void* primary = *reinterpret_cast<void**>(
+            bytes(button) + kControlButtonModeInfoOffset);
+        if(primary != *context.mode_info)return 0;
+        context.matched=button;
+        return 1;
+    };
+    const auto selected = a2fo_rs_stage10_hybrid_visit(
+        0, kFoPopupButtonCount, &context, probe);
+    return selected.status || selected.index == kFoPopupButtonCount
+        ? nullptr : context.matched;
 }
 
 void rebase_refit_buttons_after_layout() noexcept {
@@ -2227,100 +2288,81 @@ void rebase_refit_buttons_after_layout() noexcept {
             buttons, kFoPopupButtonCount * sizeof(void*))) {
         return;
     }
-    for (std::size_t binding_index = 0;
-         binding_index < g_refit_binding_count; ++binding_index) {
+    struct RebaseContext { void** buttons; } rebase_context{buttons};
+    const auto rebase = +[](void* opaque, std::size_t binding_index,
+                            std::uint32_t phase) noexcept -> std::uint32_t {
+        if (phase == 0) return binding_index < g_refit_binding_count;
+        const auto& context = *static_cast<RebaseContext*>(opaque);
         RefitButtonBinding& binding = g_refit_bindings[binding_index];
-        for (std::size_t button_index = 0;
-             button_index < kFoPopupButtonCount; ++button_index) {
-            void* button = buttons[button_index];
-            if (!button || !readable_range(
-                    bytes(button) + kControlButtonModeInfoOffset,
-                    sizeof(void*))) {
-                continue;
-            }
-            void* primary = *reinterpret_cast<void**>(
-                bytes(button) + kControlButtonModeInfoOffset);
-            // +0x88 is a callback pointer, not an alternate ModeInfo. Native
-            // palette compaction copies our ModeInfo into the primary slot.
-            if (primary == binding.mode_info) {
-                binding.button = button;
-                break;
-            }
-        }
-    }
+        // Fleet Ops compaction copies ModeInfo into the primary slot. The
+        // adjacent callback field is not a second ModeInfo.
+        void* button = first_popup_button_for_mode_info(
+            context.buttons, &binding.mode_info);
+        if (button) binding.button = button;
+        return 0;
+    };
+    a2fo_rs_stage10_hybrid_live_bindings(1, &rebase_context, rebase);
     if (g_refit_back_mode_info) {
-        for (std::size_t button_index = 0;
-             button_index < kFoPopupButtonCount; ++button_index) {
-            void* button = buttons[button_index];
-            if (!button || !readable_range(
-                    bytes(button) + kControlButtonModeInfoOffset,
-                    sizeof(void*))) {
-                continue;
-            }
-            void* primary = *reinterpret_cast<void**>(
-                bytes(button) + kControlButtonModeInfoOffset);
-            if (primary == g_refit_back_mode_info) {
-                g_refit_back_button = button;
-                break;
-            }
-        }
+        void* button = first_popup_button_for_mode_info(
+            buttons, &g_refit_back_mode_info);
+        if (button) g_refit_back_button = button;
     }
 
     // Fleet Ops compacts controls by backing-array order. Rotate only the
     // bound actions after layout so Refit appears immediately before Back;
     // its pre-layout storage was selected dynamically from a genuinely blank
     // control after all native and special-weapon actions were bound.
-    RefitButtonBinding* menu_binding = nullptr;
-    std::size_t refit_index = kFoPopupButtonCount;
-    std::size_t back_index = kFoPopupButtonCount;
-    for (std::size_t binding_index = 0;
-         binding_index < g_refit_binding_count; ++binding_index) {
-        if (g_refit_bindings[binding_index].kind ==
-                RefitButtonKind::menu) {
-            menu_binding = &g_refit_bindings[binding_index];
-            break;
-        }
-    }
+    const auto menu_probe = +[](void*, std::size_t index,
+                                std::uint32_t phase) noexcept -> std::uint32_t {
+        if (phase == 0) return index < g_refit_binding_count;
+        return g_refit_bindings[index].kind == RefitButtonKind::menu
+            ? 1u : 0u;
+    };
+    const auto menu = a2fo_rs_stage10_hybrid_live_bindings(
+        0, nullptr, menu_probe);
+    RefitButtonBinding* menu_binding =
+        menu.status
+            ? nullptr : &g_refit_bindings[menu.index];
     if (!menu_binding) return;
-    for (std::size_t button_index = 0;
-         button_index < kFoPopupButtonCount; ++button_index) {
-        void* button = buttons[button_index];
+    struct PositionContext {
+        void** buttons;
+        RefitButtonBinding* menu_binding;
+    } position_context{buttons, menu_binding};
+    const auto position_probe = +[](void* opaque, std::size_t index,
+                                    std::uint32_t) noexcept -> std::uint32_t {
+        const auto& context = *static_cast<PositionContext*>(opaque);
+        void* button = context.buttons[index];
         if (!button || !readable_range(
                 bytes(button) + kControlButtonModeInfoOffset,
                 sizeof(void*))) {
-            continue;
+            return 0;
         }
         void* mode_info = *reinterpret_cast<void**>(
             bytes(button) + kControlButtonModeInfoOffset);
-        if (mode_info == menu_binding->mode_info) {
-            refit_index = button_index;
-        }
-        if (g_refit_back_mode_info &&
-            mode_info == g_refit_back_mode_info) {
-            back_index = button_index;
-        }
-    }
+        return (mode_info == context.menu_binding->mode_info ? 1u : 0u) |
+            (g_refit_back_mode_info && mode_info == g_refit_back_mode_info
+                ? 2u : 0u);
+    };
+    const auto positions = a2fo_rs_stage10_hybrid_refit_positions(
+        kFoPopupButtonCount, &position_context, position_probe);
+    const std::size_t refit_index = positions.refit_index;
+    const std::size_t back_index = positions.back_index;
     if (refit_index >= kFoPopupButtonCount || back_index == 0 ||
         back_index >= kFoPopupButtonCount) {
         return;
     }
     const std::size_t desired_index = back_index - 1;
     if (desired_index == refit_index) return;
-    if (refit_index < desired_index) {
-        for (std::size_t index = refit_index;
-             index < desired_index; ++index) {
-            a2fo_call_thiscall_1(
-                at(g_armada, kControlButtonCopyRva), buttons[index],
-                reinterpret_cast<std::uintptr_t>(buttons[index + 1]));
-        }
-    } else {
-        for (std::size_t index = refit_index;
-             index > desired_index; --index) {
-            a2fo_call_thiscall_1(
-                at(g_armada, kControlButtonCopyRva), buttons[index],
-                reinterpret_cast<std::uintptr_t>(buttons[index - 1]));
-        }
-    }
+    struct RotationContext { void** buttons; } rotation_context{buttons};
+    const auto copy = +[](void* opaque, std::size_t from,
+                          std::size_t to) noexcept {
+        const auto& context = *static_cast<RotationContext*>(opaque);
+        a2fo_call_thiscall_1(
+            at(g_armada, kControlButtonCopyRva), context.buttons[from],
+            reinterpret_cast<std::uintptr_t>(context.buttons[to]));
+    };
+    a2fo_rs_stage10_hybrid_rotate(
+        refit_index, desired_index, &rotation_context, copy);
     auto state_mode_info =
         reinterpret_cast<ControlButtonStateModeInfoFunction>(at(
             g_fleet_ops, kFoControlButtonStateModeInfoRva));
@@ -2401,45 +2443,72 @@ private:
 };
 
 void apply_build_submenu_parent_states(void* producer) noexcept {
-    if (!producer || !g_fleet_ops || !readable_range(
-            bytes(producer) + kObjectClassOffset, sizeof(void*))) {
-        return;
-    }
-    void* producer_class = *reinterpret_cast<void**>(
-        bytes(producer) + kObjectClassOffset);
-    LiveBuildSubmenuClass* menus = live_submenus_for_class(producer_class);
-    if (!menus || g_active_build_submenu_parent) return;
-    void** popup_buttons = at<void*>(
-        g_fleet_ops, kFoPopupButtonPointerArrayRva);
-    if (!readable_range(
-            popup_buttons, kFoPopupButtonCount * sizeof(void*))) {
-        return;
-    }
-    for (LiveBuildSubmenuPage& page : menus->pages) {
-        for (std::size_t index = 0; index < kFoPopupButtonCount; ++index) {
-            void* button = popup_buttons[index];
-            if (!button || !readable_range(
-                    bytes(button) + kControlButtonModeInfoOffset,
-                    sizeof(void*))) {
-                continue;
+    struct Context {
+        void* producer;
+        LiveBuildSubmenuClass* menus = nullptr;
+        void** buttons = nullptr;
+        std::vector<LiveBuildSubmenuPage>::iterator page;
+        std::vector<LiveBuildSubmenuPage>::iterator end;
+        std::exception_ptr error;
+    } context{producer, nullptr, nullptr, {}, {}, {}};
+    const auto step = +[](void* opaque, std::uint32_t operation,
+                          std::size_t index) noexcept -> std::uint64_t {
+        auto& state = *static_cast<Context*>(opaque);
+        try {
+            switch (operation) {
+                case 0: return state.producer != nullptr;
+                case 1: return g_fleet_ops != nullptr;
+                case 2:
+                    return readable_range(bytes(state.producer) +
+                        kObjectClassOffset, sizeof(void*));
+                case 3:
+                    state.menus = live_submenus_for_class(
+                        *reinterpret_cast<void**>(bytes(state.producer) +
+                            kObjectClassOffset));
+                    return 0;
+                case 4:
+                    return state.menus != nullptr &&
+                        g_active_build_submenu_parent == nullptr;
+                case 5:
+                    state.buttons = at<void*>(g_fleet_ops,
+                        kFoPopupButtonPointerArrayRva);
+                    return readable_range(state.buttons,
+                        kFoPopupButtonCount * sizeof(void*));
+                case 6:
+                    state.page = state.menus->pages.begin();
+                    state.end = state.menus->pages.end();
+                    return 0;
+                case 7: return state.page != state.end;
+                case 8: {
+                    void* button = state.buttons[index];
+                    if (!button || !readable_range(
+                            bytes(button) + kControlButtonModeInfoOffset,
+                            sizeof(void*))) return 0;
+                    void* mode_info = *reinterpret_cast<void**>(
+                        bytes(button) + kControlButtonModeInfoOffset);
+                    if (!mode_info || !readable_range(
+                            bytes(mode_info) + kModeInfoTargetClassOffset,
+                            sizeof(void*)) ||
+                        *reinterpret_cast<void**>(
+                            bytes(mode_info) + kModeInfoTargetClassOffset) !=
+                            state.page->parent_class ||
+                        !writable_range(
+                            bytes(button) + kControlButtonStateOffset,
+                            sizeof(std::uint32_t))) return 0;
+                    *reinterpret_cast<std::uint32_t*>(bytes(button) +
+                        kControlButtonStateOffset) = 1u;
+                    return 0;
+                }
+                case 9: ++state.page; return 0;
+                default: return 0;
             }
-            void* mode_info = *reinterpret_cast<void**>(
-                bytes(button) + kControlButtonModeInfoOffset);
-            if (!mode_info || !readable_range(
-                    bytes(mode_info) + kModeInfoTargetClassOffset,
-                    sizeof(void*)) ||
-                *reinterpret_cast<void**>(
-                    bytes(mode_info) + kModeInfoTargetClassOffset) !=
-                    page.parent_class ||
-                !writable_range(
-                    bytes(button) + kControlButtonStateOffset,
-                    sizeof(std::uint32_t))) {
-                continue;
-            }
-            *reinterpret_cast<std::uint32_t*>(
-                bytes(button) + kControlButtonStateOffset) = 1u;
+        } catch (...) {
+            state.error = std::current_exception();
+            return UINT64_MAX;
         }
-    }
+    };
+    a2fo_rs_stage9_hybrid_runtime(11, &context, step);
+    if (context.error) std::rethrow_exception(context.error);
 }
 
 void update_research_buttons_with_queue(void* station) noexcept {
@@ -2457,150 +2526,219 @@ void update_research_buttons_with_queue(void* station) noexcept {
 }
 
 void disable_queued_research_buttons(void* station) noexcept {
-    if (!station || !readable_range(
-            bytes(station) + kCurrentBuildClassOffset - sizeof(void*),
-            sizeof(void*)) ||
-        !readable_range(bytes(station) + kProducerButtonListOffset,
-                        sizeof(void*))) {
-        return;
-    }
-
-    void** build_items = *reinterpret_cast<void***>(
-        bytes(station) + kCurrentBuildClassOffset - sizeof(void*));
-    void* button_list = *reinterpret_cast<void**>(
-        bytes(station) + kProducerButtonListOffset);
-    if (!readable_range(
-            build_items, kNativeResearchButtonCount * sizeof(void*)) ||
-        !writable_range(bytes(button_list) + kButtonListEnabledMaskOffset,
-                        sizeof(std::uint32_t))) {
-        return;
-    }
-
-    auto* enabled_mask = reinterpret_cast<std::uint32_t*>(
-        bytes(button_list) + kButtonListEnabledMaskOffset);
-    bool disabled_conflict = false;
-    for (std::size_t index = 0;
-         index < kNativeResearchButtonCount; ++index) {
-        void* target_class = build_items[index];
-        if (!target_class ||
-            !hybrid_production_has_queued_research_conflict(
-                station, target_class)) {
-            continue;
-        }
-        *enabled_mask &= ~(std::uint32_t{1} << (index + 1));
-        // Fleet Ops copies ButtonList state into a separate array of popup
-        // ControlButtons. Match the control by its already-bound ModeInfo
-        // target and change only its state. Rebinding by an assumed visual
-        // index can copy this pod's ModeInfo over the neighbouring button.
-        void** popup_buttons = at<void*>(
-            g_fleet_ops, kFoPopupButtonPointerArrayRva);
-        for (std::size_t control_index = 0;
-             control_index < kFoPopupButtonCount; ++control_index) {
-            void** popup_button = popup_buttons + control_index;
-            if (!readable_range(popup_button, sizeof(void*)) ||
-                !*popup_button || !readable_range(
-                    bytes(*popup_button) + kControlButtonModeInfoOffset,
-                    sizeof(void*))) {
-                continue;
+    struct Context {
+        void* station;
+        void** build_items = nullptr;
+        void* button_list = nullptr;
+        std::uint32_t* enabled_mask = nullptr;
+        void* target_class = nullptr;
+        void** popup_buttons = nullptr;
+        std::exception_ptr error;
+    } context{station, nullptr, nullptr, nullptr, nullptr, nullptr, {}};
+    const auto step = +[](void* opaque, std::uint32_t operation,
+                          std::size_t index) noexcept -> std::uint64_t {
+        auto& state = *static_cast<Context*>(opaque);
+        try {
+            switch (operation) {
+                case 0: return state.station != nullptr;
+                case 1:
+                    return readable_range(bytes(state.station) +
+                        kCurrentBuildClassOffset - sizeof(void*),
+                        sizeof(void*));
+                case 2:
+                    return readable_range(bytes(state.station) +
+                        kProducerButtonListOffset, sizeof(void*));
+                case 3:
+                    state.build_items = *reinterpret_cast<void***>(
+                        bytes(state.station) + kCurrentBuildClassOffset -
+                        sizeof(void*));
+                    state.button_list = *reinterpret_cast<void**>(
+                        bytes(state.station) + kProducerButtonListOffset);
+                    return 0;
+                case 4:
+                    if (!readable_range(state.build_items,
+                            kNativeResearchButtonCount * sizeof(void*)) ||
+                        !writable_range(bytes(state.button_list) +
+                            kButtonListEnabledMaskOffset,
+                            sizeof(std::uint32_t))) return 0;
+                    state.enabled_mask = reinterpret_cast<std::uint32_t*>(
+                        bytes(state.button_list) +
+                        kButtonListEnabledMaskOffset);
+                    return 1;
+                case 5:
+                    state.target_class = state.build_items[index];
+                    return state.target_class &&
+                        hybrid_production_has_queued_research_conflict(
+                            state.station, state.target_class);
+                case 6:
+                    *state.enabled_mask &=
+                        ~(std::uint32_t{1} << (index + 1));
+                    return 0;
+                case 7:
+                    state.popup_buttons = at<void*>(g_fleet_ops,
+                        kFoPopupButtonPointerArrayRva);
+                    return 0;
+                case 8: {
+                    void** popup_button = state.popup_buttons + index;
+                    if (!readable_range(popup_button, sizeof(void*)) ||
+                        !*popup_button || !readable_range(
+                            bytes(*popup_button) +
+                            kControlButtonModeInfoOffset,
+                            sizeof(void*))) return 0;
+                    void* mode_info = *reinterpret_cast<void**>(
+                        bytes(*popup_button) +
+                        kControlButtonModeInfoOffset);
+                    if (!readable_range(bytes(mode_info) +
+                            kModeInfoTargetClassOffset,
+                            sizeof(void*)) ||
+                        *reinterpret_cast<void**>(bytes(mode_info) +
+                            kModeInfoTargetClassOffset) !=
+                            state.target_class ||
+                        !writable_range(bytes(*popup_button) +
+                            kControlButtonStateOffset,
+                            sizeof(std::uint32_t))) return 0;
+                    *reinterpret_cast<std::uint32_t*>(
+                        bytes(*popup_button) +
+                        kControlButtonStateOffset) = 0;
+                    return 0;
+                }
+                case 9:
+                    if (!g_logged_queued_research_button_disabled) {
+                        g_logged_queued_research_button_disabled = true;
+                        log_message("Hybrid ResearchStation disabled research "
+                                    "buttons for active or queued pod "
+                                    "conflicts");
+                    }
+                    return 0;
+                default: return 0;
             }
-            void* mode_info = *reinterpret_cast<void**>(
-                bytes(*popup_button) + kControlButtonModeInfoOffset);
-            if (!readable_range(
-                    bytes(mode_info) + kModeInfoTargetClassOffset,
-                    sizeof(void*)) ||
-                *reinterpret_cast<void**>(
-                    bytes(mode_info) + kModeInfoTargetClassOffset) !=
-                    target_class ||
-                !writable_range(
-                    bytes(*popup_button) + kControlButtonStateOffset,
-                    sizeof(std::uint32_t))) {
-                continue;
-            }
-            *reinterpret_cast<std::uint32_t*>(
-                bytes(*popup_button) + kControlButtonStateOffset) = 0;
+        } catch (...) {
+            state.error = std::current_exception();
+            return UINT64_MAX;
         }
-        disabled_conflict = true;
-    }
-    if (disabled_conflict && !g_logged_queued_research_button_disabled) {
-        g_logged_queued_research_button_disabled = true;
-        log_message("Hybrid ResearchStation disabled research buttons for "
-                    "active or queued pod conflicts");
-    }
+    };
+    a2fo_rs_stage9_hybrid_runtime(12, &context, step);
+    if (context.error) std::rethrow_exception(context.error);
 }
 
 void prepare_hybrid_station_menu(void* station,
                                  std::uint32_t menu) noexcept {
-    if (!station || !writable_range(
-            bytes(station) + kCurrentBuildClassOffset - sizeof(void*),
-            sizeof(void*))) {
-        return;
-    }
-    void* station_class = *reinterpret_cast<void**>(
-        bytes(station) + kObjectClassOffset);
-    RuntimeClassLists* lists = runtime_lists_for_class(station_class);
-    if (!lists) return;
-
-    void** selected_items = nullptr;
-    if (menu == kBuildMenu &&
-        (lists->has_yard || lists->has_construct)) {
-        const bool show_construct = lists->has_construct &&
-            (g_hybrid_build_palette == HybridBuildPalette::construct ||
-             !lists->has_yard);
-        selected_items = show_construct ? lists->construct.data()
-                                        : lists->yard.data();
-        *reinterpret_cast<void***>(
-            bytes(station) + kCurrentBuildClassOffset - sizeof(void*)) =
-            selected_items;
-        // The ResearchStation override would reinterpret attached upgrade pods
-        // over these slots. The Producer base refresh is the correct yard path.
-        g_queue_enabled_button_station = station;
-        a2fo_call_thiscall_0(
-            at(g_armada, kProducerUpdateBuildButtonsRva), station);
-        g_queue_enabled_button_station = nullptr;
-        return;
-    }
-    if (menu == kEvolveMenu && lists->has_evolve) {
-        selected_items = lists->evolve.data();
-        *reinterpret_cast<void***>(
-            bytes(station) + kCurrentBuildClassOffset - sizeof(void*)) =
-            selected_items;
-        // Evolution uses Producer timing, resources, and FIFO state. The
-        // Evolver-only cocoon fields deliberately never touch this host.
-        g_queue_enabled_button_station = station;
-        a2fo_call_thiscall_0(
-            at(g_armada, kProducerUpdateBuildButtonsRva), station);
-        g_queue_enabled_button_station = nullptr;
-        return;
-    }
-    if (menu != kResearchMenu) return;
-
-    selected_items = lists->has_explicit_research
-        ? lists->research.data() : lists->legacy_research;
-    if (!selected_items) return;
-    *reinterpret_cast<void***>(
-        bytes(station) + kCurrentBuildClassOffset - sizeof(void*)) =
-        selected_items;
-    update_research_buttons_with_queue(station);
+    struct Context {
+        void* station;
+        std::uint32_t menu;
+        RuntimeClassLists* lists = nullptr;
+        std::exception_ptr error;
+    } context{station, menu, nullptr, {}};
+    const auto step = +[](void* opaque, std::uint32_t operation,
+                          std::size_t index) noexcept -> std::uint64_t {
+        auto& state = *static_cast<Context*>(opaque);
+        try {
+            switch (operation) {
+                case 0: return state.station != nullptr;
+                case 1:
+                    return writable_range(bytes(state.station) +
+                        kCurrentBuildClassOffset - sizeof(void*),
+                        sizeof(void*));
+                case 2:
+                    state.lists = runtime_lists_for_class(
+                        *reinterpret_cast<void**>(
+                            bytes(state.station) + kObjectClassOffset));
+                    return 0;
+                case 3: return state.lists != nullptr;
+                case 4: return state.menu;
+                case 5: return state.lists->has_yard;
+                case 6: return state.lists->has_construct;
+                case 7:
+                    return g_hybrid_build_palette ==
+                        HybridBuildPalette::construct;
+                case 8: {
+                    void** selected = index ? state.lists->construct.data()
+                                             : state.lists->yard.data();
+                    *reinterpret_cast<void***>(bytes(state.station) +
+                        kCurrentBuildClassOffset - sizeof(void*)) = selected;
+                    g_queue_enabled_button_station = state.station;
+                    a2fo_call_thiscall_0(
+                        at(g_armada, kProducerUpdateBuildButtonsRva),
+                        state.station);
+                    g_queue_enabled_button_station = nullptr;
+                    return 0;
+                }
+                case 9: return state.lists->has_evolve;
+                case 10:
+                    *reinterpret_cast<void***>(bytes(state.station) +
+                        kCurrentBuildClassOffset - sizeof(void*)) =
+                        state.lists->evolve.data();
+                    g_queue_enabled_button_station = state.station;
+                    a2fo_call_thiscall_0(
+                        at(g_armada, kProducerUpdateBuildButtonsRva),
+                        state.station);
+                    g_queue_enabled_button_station = nullptr;
+                    return 0;
+                case 11: {
+                    void** selected = state.lists->has_explicit_research
+                        ? state.lists->research.data()
+                        : state.lists->legacy_research;
+                    if (!selected) return 0;
+                    *reinterpret_cast<void***>(bytes(state.station) +
+                        kCurrentBuildClassOffset - sizeof(void*)) = selected;
+                    return 1;
+                }
+                case 12:
+                    update_research_buttons_with_queue(state.station);
+                    return 0;
+                default: return 0;
+            }
+        } catch (...) {
+            state.error = std::current_exception();
+            return UINT64_MAX;
+        }
+    };
+    a2fo_rs_stage9_hybrid_runtime(5, &context, step);
+    if (context.error) std::rethrow_exception(context.error);
 }
 
 void prepare_selected_hybrid_menus(void* craft_array,
                                    std::uint32_t menu) noexcept {
-    if ((menu != kBuildMenu && menu != kResearchMenu &&
-         menu != kEvolveMenu) ||
-        !readable_range(craft_array, 12)) {
-        return;
-    }
-    void** selected = *reinterpret_cast<void***>(craft_array);
-    const std::int32_t raw_count = *reinterpret_cast<const std::int32_t*>(
-        bytes(craft_array) + 8);
-    if (raw_count <= 0 || raw_count > 256 ||
-        !readable_range(selected,
-                        static_cast<std::size_t>(raw_count) * sizeof(void*))) {
-        return;
-    }
-    for (std::int32_t index = 0; index < raw_count; ++index) {
-        prepare_hybrid_station_menu(selected[index], menu);
-    }
+    struct Context {
+        void* craft_array;
+        std::uint32_t menu;
+        void** selected = nullptr;
+        std::int32_t count = 0;
+        std::exception_ptr error;
+    } context{craft_array, menu, nullptr, 0, {}};
+    const auto step = +[](void* opaque, std::uint32_t operation,
+                          std::size_t index) noexcept -> std::uint64_t {
+        auto& state = *static_cast<Context*>(opaque);
+        try {
+            switch (operation) {
+                case 0: return state.menu;
+                case 1: return readable_range(state.craft_array, 12);
+                case 2:
+                    state.selected = *reinterpret_cast<void***>(
+                        state.craft_array);
+                    return 0;
+                case 3:
+                    state.count = *reinterpret_cast<const std::int32_t*>(
+                        bytes(state.craft_array) + 8);
+                    return static_cast<std::uint32_t>(state.count);
+                case 4:
+                    return state.count > 0 && state.count <= 256 &&
+                        readable_range(state.selected,
+                            static_cast<std::size_t>(state.count) *
+                            sizeof(void*));
+                case 5:
+                    prepare_hybrid_station_menu(
+                        state.selected[index], state.menu);
+                    return 0;
+                default: return 0;
+            }
+        } catch (...) {
+            state.error = std::current_exception();
+            return UINT64_MAX;
+        }
+    };
+    a2fo_rs_stage9_hybrid_runtime(6, &context, step);
+    if (context.error) std::rethrow_exception(context.error);
 }
 
 std::uintptr_t __attribute__((fastcall)) producer_is_busy_hook(
@@ -2893,16 +3031,20 @@ void rebase_hybrid_build_root_buttons_after_compaction(
         return;
     }
 
-    void* yard_mode_button = nullptr;
-    void* construct_mode_button = nullptr;
-    void* first_legacy_build_button = nullptr;
-    void* second_legacy_build_button = nullptr;
-    for (std::size_t index = 0; index < kFoPopupButtonCount; ++index) {
-        void* button = button_pointers[index];
+    struct Context { void** buttons;std::array<void*,kFoPopupButtonCount> seen{}; } context{button_pointers};
+    const auto probe = +[](void* opaque, std::size_t index,
+                           std::uint32_t phase) noexcept -> std::uint32_t {
+        auto& context = *static_cast<Context*>(opaque);
+        if (phase != 0) {
+            return context.seen[index] != context.seen[phase - 1]
+                ? 1u : 0u;
+        }
+        void* button = context.buttons[index];
+        context.seen[index]=button;
         if (!button || !readable_range(
                 bytes(button) + kControlButtonModeInfoOffset,
                 2 * sizeof(void*))) {
-            continue;
+            return 0;
         }
         void* primary_mode = *reinterpret_cast<void**>(
             bytes(button) + kControlButtonModeInfoOffset);
@@ -2914,33 +3056,19 @@ void rebase_hybrid_build_root_buttons_after_compaction(
         const bool construct_mode =
             primary_mode == g_hybrid_construct_mode_info.data() ||
             alternate_mode == g_hybrid_construct_mode_info.data();
-        if (yard_mode && !yard_mode_button) {
-            yard_mode_button = button;
-        }
-        if (construct_mode && !construct_mode_button) {
-            construct_mode_button = button;
-        }
-        // Preserve the earlier shared-ModeInfo recovery as a compatibility
-        // fallback if another hook copies or replaces our cloned pointer.
-        if (yard_mode) {
-            if (!first_legacy_build_button) {
-                first_legacy_build_button = button;
-            } else if (button != first_legacy_build_button &&
-                       !second_legacy_build_button) {
-                second_legacy_build_button = button;
-            }
-        }
-    }
+        return (yard_mode ? 1u : 0u) | (construct_mode ? 2u : 0u);
+    };
+    const auto roots = a2fo_rs_stage10_hybrid_roots(
+        kFoPopupButtonCount, lists->has_yard, &context, probe);
 
     if (lists->has_yard) {
-        g_last_hybrid_yard_root_button = yard_mode_button
-            ? yard_mode_button : first_legacy_build_button;
+        g_last_hybrid_yard_root_button = roots.yard_index < kFoPopupButtonCount
+            ? context.seen[roots.yard_index] : nullptr;
     }
     if (lists->has_construct) {
-        g_last_hybrid_construct_root_button = construct_mode_button
-            ? construct_mode_button
-            : lists->has_yard ? second_legacy_build_button
-                              : first_legacy_build_button;
+        g_last_hybrid_construct_root_button =
+            roots.construct_index < kFoPopupButtonCount
+                ? context.seen[roots.construct_index] : nullptr;
     }
     if (lists->has_yard && lists->has_construct &&
         g_last_hybrid_yard_root_button &&
@@ -3361,45 +3489,77 @@ void restore_research_palette_after_button_press() noexcept {
 }
 
 void select_hybrid_build_palette(void* button) noexcept {
-    if (!button || !g_fleet_ops || !g_last_single_hybrid_selection ||
-        !readable_range(
-            bytes(g_last_single_hybrid_selection) + kObjectClassOffset,
-            sizeof(void*))) {
-        return;
-    }
-    void* station_class = *reinterpret_cast<void**>(
-        bytes(g_last_single_hybrid_selection) + kObjectClassOffset);
-    RuntimeClassLists* lists = runtime_lists_for_class(station_class);
-    if (!lists) return;
-
-    void** construct_pointer = at<void*>(
-        g_fleet_ops, kFoPopupConstructionButtonPointerRva);
-    const bool current_construct_pointer =
-        readable_range(construct_pointer, sizeof(void*)) &&
-        button == *construct_pointer;
-    if (lists->has_construct &&
-        (button == g_last_hybrid_construct_root_button ||
-         current_construct_pointer)) {
-        g_hybrid_build_palette = HybridBuildPalette::construct;
-        g_hybrid_build_palette_press_armed = true;
-        if (!g_logged_hybrid_construct_root_press) {
-            g_logged_hybrid_construct_root_press = true;
-            log_message("Hybrid Construction root button selected its "
-                        "separate constructItem palette");
+    struct Context {
+        void* button;
+        RuntimeClassLists* lists = nullptr;
+        bool current_construct = false;
+        bool current_yard = false;
+        std::exception_ptr error;
+    } context{button, nullptr, false, false, {}};
+    const auto step = +[](void* opaque, std::uint32_t operation,
+                          std::size_t) noexcept -> std::uint64_t {
+        auto& state = *static_cast<Context*>(opaque);
+        try {
+            switch (operation) {
+                case 0: return state.button != nullptr;
+                case 1: return g_fleet_ops != nullptr;
+                case 2: return g_last_single_hybrid_selection != nullptr;
+                case 3:
+                    return readable_range(
+                        bytes(g_last_single_hybrid_selection) +
+                        kObjectClassOffset, sizeof(void*));
+                case 4:
+                    state.lists = runtime_lists_for_class(
+                        *reinterpret_cast<void**>(
+                            bytes(g_last_single_hybrid_selection) +
+                            kObjectClassOffset));
+                    return 0;
+                case 5: return state.lists != nullptr;
+                case 6: {
+                    void** pointer = at<void*>(g_fleet_ops,
+                        kFoPopupConstructionButtonPointerRva);
+                    state.current_construct = readable_range(
+                        pointer, sizeof(void*)) && state.button == *pointer;
+                    return 0;
+                }
+                case 7: return state.lists->has_construct;
+                case 8:
+                    return state.button ==
+                        g_last_hybrid_construct_root_button ||
+                        state.current_construct;
+                case 9:
+                    g_hybrid_build_palette = HybridBuildPalette::construct;
+                    g_hybrid_build_palette_press_armed = true;
+                    if (!g_logged_hybrid_construct_root_press) {
+                        g_logged_hybrid_construct_root_press = true;
+                        log_message("Hybrid Construction root button selected "
+                                    "its separate constructItem palette");
+                    }
+                    return 0;
+                case 10: {
+                    void** pointer = at<void*>(g_fleet_ops,
+                        kFoPopupSpareRootButtonPointerRva);
+                    state.current_yard = readable_range(
+                        pointer, sizeof(void*)) && state.button == *pointer;
+                    return 0;
+                }
+                case 11: return state.lists->has_yard;
+                case 12:
+                    return state.button == g_last_hybrid_yard_root_button ||
+                        state.current_yard;
+                case 13:
+                    g_hybrid_build_palette = HybridBuildPalette::yard;
+                    g_hybrid_build_palette_press_armed = true;
+                    return 0;
+                default: return 0;
+            }
+        } catch (...) {
+            state.error = std::current_exception();
+            return UINT64_MAX;
         }
-        return;
-    }
-    void** yard_pointer = at<void*>(
-        g_fleet_ops, kFoPopupSpareRootButtonPointerRva);
-    const bool current_yard_pointer =
-        readable_range(yard_pointer, sizeof(void*)) &&
-        button == *yard_pointer;
-    if (lists->has_yard &&
-        (button == g_last_hybrid_yard_root_button ||
-         current_yard_pointer)) {
-        g_hybrid_build_palette = HybridBuildPalette::yard;
-        g_hybrid_build_palette_press_armed = true;
-    }
+    };
+    a2fo_rs_stage9_hybrid_runtime(9, &context, step);
+    if (context.error) std::rethrow_exception(context.error);
 }
 
 void* pressed_mode_info(void* button) noexcept {
@@ -3610,12 +3770,19 @@ bool handle_refit_button_press(void* button) noexcept {
         // ControlButton path execute it after clearing our private page state.
         return false;
     }
-    for (std::size_t index = 0;
-         index < g_refit_binding_count; ++index) {
-        const RefitButtonBinding& binding = g_refit_bindings[index];
-        if (button != binding.button && mode_info != binding.mode_info) {
-            continue;
-        }
+    struct Context { void* button; void* mode_info; } context{button, mode_info};
+    const auto probe = +[](void* opaque, std::size_t index,
+                           std::uint32_t phase) noexcept -> std::uint32_t {
+        if (phase == 0) return index < g_refit_binding_count;
+        const auto& context = *static_cast<Context*>(opaque);
+        const auto& binding = g_refit_bindings[index];
+        return context.button == binding.button ||
+               context.mode_info == binding.mode_info ? 1u : 0u;
+    };
+    const auto selected = a2fo_rs_stage10_hybrid_live_bindings(
+        0, &context, probe);
+    if (!selected.status) {
+        const RefitButtonBinding& binding = g_refit_bindings[selected.index];
         if (binding.kind == RefitButtonKind::menu) {
             g_refit_palette_open = true;
             g_refit_palette_source = binding.source;
@@ -3661,89 +3828,140 @@ void finish_refit_halt(void* source) noexcept {
 }
 
 void refresh_live_build_submenu_palette(void* producer) noexcept {
-    if (!producer || !g_last_popup || !g_last_popup_craft_array ||
-        !g_popup_update_buttons_hook.gateway || !writable_range(
-            bytes(g_last_popup) + kPopupCurrentMenuOffset,
-            sizeof(std::uint32_t))) {
-        return;
-    }
-    *reinterpret_cast<std::uint32_t*>(
-        bytes(g_last_popup) + kPopupCurrentMenuOffset) = kBuildMenu;
-    const auto render_page = [&]() {
-        LiveBuildSubmenuPaletteScope scope(producer, kBuildMenu);
-        a2fo_call_thiscall_3(
-            g_popup_update_buttons_hook.gateway, g_last_popup,
-            reinterpret_cast<std::uintptr_t>(g_last_popup_craft_array),
-            g_last_popup_argument2, g_last_popup_argument3);
+    struct Context {
+        void* producer;
+        std::uint32_t* menu_slot = nullptr;
+        std::exception_ptr error;
+    } context{producer, nullptr, {}};
+    const auto step = +[](void* opaque, std::uint32_t operation,
+                          std::size_t) noexcept -> std::uint64_t {
+        auto& state = *static_cast<Context*>(opaque);
+        try {
+            switch (operation) {
+                case 0: return state.producer != nullptr;
+                case 1: return g_last_popup != nullptr;
+                case 2: return g_last_popup_craft_array != nullptr;
+                case 3: return g_popup_update_buttons_hook.gateway != nullptr;
+                case 4:
+                    return writable_range(
+                        bytes(g_last_popup) + kPopupCurrentMenuOffset,
+                        sizeof(std::uint32_t));
+                case 5:
+                    if (!state.menu_slot) {
+                        *reinterpret_cast<std::uint32_t*>(
+                            bytes(g_last_popup) + kPopupCurrentMenuOffset) =
+                            kBuildMenu;
+                    } else {
+                        *state.menu_slot = kBuildMenu;
+                    }
+                    return 0;
+                case 6: {
+                    LiveBuildSubmenuPaletteScope scope(
+                        state.producer, kBuildMenu);
+                    a2fo_call_thiscall_3(
+                        g_popup_update_buttons_hook.gateway, g_last_popup,
+                        reinterpret_cast<std::uintptr_t>(
+                            g_last_popup_craft_array),
+                        g_last_popup_argument2, g_last_popup_argument3);
+                    return 0;
+                }
+                case 7:
+                    state.menu_slot = reinterpret_cast<std::uint32_t*>(
+                        bytes(g_last_popup) + kPopupCurrentMenuOffset);
+                    return *state.menu_slot != kBuildMenu;
+                case 8:
+                    apply_build_submenu_parent_states(state.producer);
+                    return 0;
+                default: return 0;
+            }
+        } catch (...) {
+            state.error = std::current_exception();
+            return UINT64_MAX;
+        }
     };
-    render_page();
-
-    auto* menu = reinterpret_cast<std::uint32_t*>(
-        bytes(g_last_popup) + kPopupCurrentMenuOffset);
-    if (*menu != kBuildMenu) {
-        // The first refresh can inherit Fleet Operations' ordinary
-        // post-build root transition. Reassert menu 2 and bind the child page
-        // once more so both the stored mode and visible controls agree.
-        *menu = kBuildMenu;
-        render_page();
-    }
-    *menu = kBuildMenu;
-    apply_build_submenu_parent_states(producer);
+    a2fo_rs_stage9_hybrid_runtime(7, &context, step);
+    if (context.error) std::rethrow_exception(context.error);
 }
 
 bool handle_live_build_submenu_press(void* button) noexcept {
-    void* producer = g_last_single_build_submenu_selection;
-    if (!producer || !readable_range(
-            bytes(producer) + kObjectClassOffset, sizeof(void*))) {
-        return false;
-    }
-    void* producer_class = *reinterpret_cast<void**>(
-        bytes(producer) + kObjectClassOffset);
-    LiveBuildSubmenuClass* menus = live_submenus_for_class(producer_class);
-    if (!menus) return false;
-
-    void* mode_info = pressed_mode_info(button);
-    std::uint32_t type = 0;
-    void* target_class = nullptr;
-    if (mode_info && readable_range(
-            bytes(mode_info) + kModeInfoTargetClassOffset,
-            sizeof(void*))) {
-        type = *reinterpret_cast<const std::uint32_t*>(
-            bytes(mode_info) + kModeInfoTypeOffset);
-        target_class = *reinterpret_cast<void**>(
-            bytes(mode_info) + kModeInfoTargetClassOffset);
-    }
-
-    LiveBuildSubmenuPage* selected_page = type == 1
-        ? submenu_page_for_parent(menus, target_class) : nullptr;
-    if (selected_page) {
-        // Always consume the presentation parent. A disabled control should
-        // not normally dispatch, but this guard also prevents a direct or
-        // stale callback from ever constructing the dummy ODF.
-        g_active_build_submenu_parent = selected_page->parent_class;
-        refresh_live_build_submenu_palette(producer);
-        if (!g_logged_build_submenu_opened) {
-            g_logged_build_submenu_opened = true;
-            log_message("Live build parent opened its child palette; "
-                        "presentation ODF was not queued");
+    struct Context {
+        void* button;
+        void* producer = nullptr;
+        LiveBuildSubmenuClass* menus = nullptr;
+        LiveBuildSubmenuPage* page = nullptr;
+        std::uint32_t type = 0;
+        void* target_class = nullptr;
+        std::exception_ptr error;
+    } context{button, nullptr, nullptr, nullptr, 0, nullptr, {}};
+    const auto step = +[](void* opaque, std::uint32_t operation,
+                          std::size_t) noexcept -> std::uint64_t {
+        auto& state = *static_cast<Context*>(opaque);
+        try {
+            switch (operation) {
+                case 0:
+                    state.producer = g_last_single_build_submenu_selection;
+                    return state.producer != nullptr;
+                case 1:
+                    return readable_range(bytes(state.producer) +
+                        kObjectClassOffset, sizeof(void*));
+                case 2:
+                    state.menus = live_submenus_for_class(
+                        *reinterpret_cast<void**>(bytes(state.producer) +
+                            kObjectClassOffset));
+                    return 0;
+                case 3: return state.menus != nullptr;
+                case 4: {
+                    void* mode_info = pressed_mode_info(state.button);
+                    if (mode_info && readable_range(
+                            bytes(mode_info) + kModeInfoTargetClassOffset,
+                            sizeof(void*))) {
+                        state.type = *reinterpret_cast<const std::uint32_t*>(
+                            bytes(mode_info) + kModeInfoTypeOffset);
+                        state.target_class = *reinterpret_cast<void**>(
+                            bytes(mode_info) + kModeInfoTargetClassOffset);
+                    }
+                    return 0;
+                }
+                case 5:
+                    state.page = state.type == 1
+                        ? submenu_page_for_parent(
+                            state.menus, state.target_class) : nullptr;
+                    return state.page != nullptr;
+                case 6:
+                    g_active_build_submenu_parent =
+                        state.page->parent_class;
+                    return 0;
+                case 7:
+                    refresh_live_build_submenu_palette(state.producer);
+                    return 0;
+                case 8:
+                    if (!g_logged_build_submenu_opened) {
+                        g_logged_build_submenu_opened = true;
+                        log_message("Live build parent opened its child "
+                                    "palette; presentation ODF was not queued");
+                    }
+                    return 0;
+                case 9: return g_active_build_submenu_parent != nullptr;
+                case 10: return state.type != 1;
+                case 11: g_active_build_submenu_parent = nullptr; return 0;
+                case 12:
+                    if (!g_logged_build_submenu_back) {
+                        g_logged_build_submenu_back = true;
+                        log_message("Live build submenu Back restored the "
+                                    "yard's main build list");
+                    }
+                    return 0;
+                default: return 0;
+            }
+        } catch (...) {
+            state.error = std::current_exception();
+            return UINT64_MAX;
         }
-        return true;
-    }
-
-    if (g_active_build_submenu_parent && type != 1) {
-        // The native Build palette's non-item control is Back. Keep menu 2
-        // active and replace the child page with the yard's main list; a
-        // second Back press then follows Fleet Ops to its ordinary root.
-        g_active_build_submenu_parent = nullptr;
-        refresh_live_build_submenu_palette(producer);
-        if (!g_logged_build_submenu_back) {
-            g_logged_build_submenu_back = true;
-            log_message("Live build submenu Back restored the yard's main "
-                        "build list");
-        }
-        return true;
-    }
-    return false;
+    };
+    const bool result = a2fo_rs_stage9_hybrid_runtime(
+        8, &context, step) != 0;
+    if (context.error) std::rethrow_exception(context.error);
+    return result;
 }
 
 // Native PopupPalette::CheckCanExecute distinguishes a constructor from a
@@ -4023,18 +4241,28 @@ std::size_t collect_queued_construction_ghosts(
     EnterCriticalSection(&g_registry_lock);
     const auto found = g_hybrid_construction.find(station);
     if (found != g_hybrid_construction.end()) {
-        for (const HybridConstructionState::Placement& placement :
-             found->second.placements) {
-            if (!placement.target_class || !placement.build_interface ||
-                placement.queue_id == active_id ||
-                count >= ghosts.size() ||
-                !readable_range(
-                    bytes(placement.build_interface) +
-                        kBuildPositionInterfaceMatrixOffset,
-                    kBuildPositionInterfaceMatrixSize)) {
-                continue;
+        struct Context {
+            HybridConstructionState* state;
+            std::array<QueuedConstructionGhost,
+                       kNativeQueueCapacity>* ghosts;
+            std::uint32_t active_id;
+        } context{&found->second, &ghosts, active_id};
+        const auto probe = +[](void* opaque, std::size_t index,
+                               std::uint32_t phase) noexcept
+            -> std::uint32_t {
+            auto& context = *static_cast<Context*>(opaque);
+            const auto& placement = context.state->placements[index];
+            if (phase == 0) {
+                return placement.target_class && placement.build_interface &&
+                       placement.queue_id != context.active_id &&
+                       readable_range(
+                           bytes(placement.build_interface) +
+                               kBuildPositionInterfaceMatrixOffset,
+                           kBuildPositionInterfaceMatrixSize) ? 1u : 0u;
             }
-            QueuedConstructionGhost& ghost = ghosts[count++];
+            const std::size_t output = phase - 1;
+            if (output >= context.ghosts->size()) return 2;
+            QueuedConstructionGhost& ghost = (*context.ghosts)[output];
             ghost.target_class = placement.target_class;
             ghost.queue_id = placement.queue_id;
             std::memcpy(
@@ -4042,7 +4270,11 @@ std::size_t collect_queued_construction_ghosts(
                 bytes(placement.build_interface) +
                     kBuildPositionInterfaceMatrixOffset,
                 kBuildPositionInterfaceMatrixSize);
-        }
+            return 0;
+        };
+        const auto selected = a2fo_rs_stage10_hybrid_visit(
+            5, found->second.placements.size(), &context, probe);
+        count = selected.status ? 0 : selected.index;
     }
     LeaveCriticalSection(&g_registry_lock);
     return count;
@@ -4379,37 +4611,68 @@ std::uintptr_t __attribute__((fastcall)) research_finish_hook(
 std::uint32_t collect_hybrid_build_queue(
     void* producer,
     std::array<void*, kNativeQueueCapacity>& queue) noexcept {
-    queue.fill(nullptr);
-    if (!active_hybrid_queue(producer)) return 0;
-
-    void* active_class = *reinterpret_cast<void**>(
-        bytes(producer) + kCurrentBuildClassOffset);
-    const std::uint32_t active_id = readable_range(
-        bytes(producer) + kCurrentQueueIdOffset, sizeof(std::uint32_t))
-        ? *reinterpret_cast<const std::uint32_t*>(
-              bytes(producer) + kCurrentQueueIdOffset)
-        : 0;
-    std::uint32_t populated = 0;
-    if (active_class) queue[populated++] = active_class;
-
-    void* queue_item = *reinterpret_cast<void**>(
-        bytes(producer) + kQueueHeadOffset);
-    while (queue_item && populated < kNativeQueueCapacity) {
-        if (!readable_range(
-                queue_item, kQueueItemIdOffset + sizeof(std::uint32_t))) {
-            break;
+    struct Context {
+        void* producer;
+        std::array<void*, kNativeQueueCapacity>& queue;
+        void* active_class = nullptr;
+        std::uint32_t active_id = 0;
+        void* queue_item = nullptr;
+        std::exception_ptr error;
+    } context{producer, queue, nullptr, 0, nullptr, {}};
+    const auto step = +[](void* opaque, std::uint32_t operation,
+                          std::size_t index) noexcept -> std::uint64_t {
+        auto& state = *static_cast<Context*>(opaque);
+        try {
+            switch (operation) {
+                case 0: state.queue.fill(nullptr); return 0;
+                case 1: return active_hybrid_queue(state.producer);
+                case 2:
+                    state.active_class = *reinterpret_cast<void**>(
+                        bytes(state.producer) + kCurrentBuildClassOffset);
+                    return state.active_class != nullptr;
+                case 3:
+                    state.active_id = readable_range(
+                        bytes(state.producer) + kCurrentQueueIdOffset,
+                        sizeof(std::uint32_t))
+                        ? *reinterpret_cast<const std::uint32_t*>(
+                              bytes(state.producer) + kCurrentQueueIdOffset)
+                        : 0;
+                    return 0;
+                case 4: state.queue[index] = state.active_class; return 0;
+                case 5:
+                    state.queue_item = *reinterpret_cast<void**>(
+                        bytes(state.producer) + kQueueHeadOffset);
+                    return 0;
+                case 6: return state.queue_item != nullptr;
+                case 7:
+                    return readable_range(state.queue_item,
+                        kQueueItemIdOffset + sizeof(std::uint32_t));
+                case 8: {
+                    void* queued_class = *reinterpret_cast<void**>(
+                        state.queue_item);
+                    const std::uint32_t queued_id =
+                        *reinterpret_cast<const std::uint32_t*>(
+                            bytes(state.queue_item) + kQueueItemIdOffset);
+                    if (state.active_class && queued_id == state.active_id)
+                        return 0;
+                    state.queue[index] = queued_class;
+                    return 1;
+                }
+                case 9:
+                    state.queue_item = *reinterpret_cast<void**>(
+                        bytes(state.queue_item) + kQueueItemNextOffset);
+                    return 0;
+                default: return 0;
+            }
+        } catch (...) {
+            state.error = std::current_exception();
+            return UINT64_MAX;
         }
-        void* queued_class = *reinterpret_cast<void**>(queue_item);
-        const std::uint32_t queued_id =
-            *reinterpret_cast<const std::uint32_t*>(
-                bytes(queue_item) + kQueueItemIdOffset);
-        if (!active_class || queued_id != active_id) {
-            queue[populated++] = queued_class;
-        }
-        queue_item = *reinterpret_cast<void**>(
-            bytes(queue_item) + kQueueItemNextOffset);
-    }
-    return populated;
+    };
+    const auto result = a2fo_rs_stage9_hybrid_runtime(
+        1, &context, step);
+    if (context.error) std::rethrow_exception(context.error);
+    return static_cast<std::uint32_t>(result);
 }
 
 void __attribute__((fastcall)) race_icon_render_hook(
@@ -4451,25 +4714,47 @@ struct SpriteVector {
 
 bool research_single_sprite_name(
     void* target_class, std::array<char, 260>& name) noexcept {
-    name.fill('\0');
-    if (!target_class || !readable_range(
-            bytes(target_class) + kClassBaseNameOffset, sizeof(void*))) {
-        return false;
-    }
-    const char* basename = *reinterpret_cast<const char* const*>(
-        bytes(target_class) + kClassBaseNameOffset);
-    if (!basename) return false;
-    for (std::size_t index = 0; index + 3 < name.size(); ++index) {
-        if (!readable_range(basename + index, sizeof(char))) return false;
-        name[index] = basename[index];
-        if (name[index] == '\0') {
-            name[index] = '_';
-            name[index + 1] = 's';
-            name[index + 2] = '\0';
-            return index != 0;
+    struct Context {
+        void* target_class;
+        std::array<char, 260>& name;
+        const char* basename = nullptr;
+        std::exception_ptr error;
+    } context{target_class, name, nullptr, {}};
+    const auto step = +[](void* opaque, std::uint32_t operation,
+                          std::size_t index) noexcept -> std::uint64_t {
+        auto& state = *static_cast<Context*>(opaque);
+        try {
+            switch (operation) {
+                case 0: state.name.fill('\0'); return 0;
+                case 1: return state.target_class != nullptr;
+                case 2:
+                    return readable_range(bytes(state.target_class) +
+                        kClassBaseNameOffset, sizeof(void*));
+                case 3:
+                    state.basename = *reinterpret_cast<const char* const*>(
+                        bytes(state.target_class) + kClassBaseNameOffset);
+                    return state.basename != nullptr;
+                case 4:
+                    if (!readable_range(state.basename + index,
+                                        sizeof(char))) return 256;
+                    state.name[index] = state.basename[index];
+                    return static_cast<std::uint8_t>(state.name[index]);
+                case 5:
+                    state.name[index] = '_';
+                    state.name[index + 1] = 's';
+                    state.name[index + 2] = '\0';
+                    return 0;
+                default: return 0;
+            }
+        } catch (...) {
+            state.error = std::current_exception();
+            return UINT64_MAX;
         }
-    }
-    return false;
+    };
+    const bool found = a2fo_rs_stage9_hybrid_runtime(
+        10, &context, step) == 1;
+    if (context.error) std::rethrow_exception(context.error);
+    return found;
 }
 
 bool draw_research_hover_wireframe(
@@ -4704,10 +4989,35 @@ bool hybrid_production_has_evolution_barrier(void* producer) noexcept {
 
 bool hybrid_production_should_defer_construct_order(
     void* producer, void* target_class) noexcept {
-    const bool defer = producer && target_class &&
-        producer == g_hybrid_construct_placement_press_station &&
-        target_has_explicit_method(
-            producer, target_class, ProductionMethod::construct);
+    struct Context {
+        void* producer;
+        void* target_class;
+        std::exception_ptr error;
+    } context{producer, target_class, {}};
+    const auto step = +[](void* opaque, std::uint32_t operation,
+                          std::size_t) noexcept -> std::uint64_t {
+        auto& state = *static_cast<Context*>(opaque);
+        try {
+            switch (operation) {
+                case 0: return state.producer != nullptr;
+                case 1: return state.target_class != nullptr;
+                case 2:
+                    return state.producer ==
+                        g_hybrid_construct_placement_press_station;
+                case 3:
+                    return target_has_explicit_method(
+                        state.producer, state.target_class,
+                        ProductionMethod::construct);
+                default: return 0;
+            }
+        } catch (...) {
+            state.error = std::current_exception();
+            return UINT64_MAX;
+        }
+    };
+    const bool defer = a2fo_rs_stage9_hybrid_runtime(
+        3, &context, step) != 0;
+    if (context.error) std::rethrow_exception(context.error);
     if (defer && !g_logged_hybrid_construct_premature_order) {
         g_logged_hybrid_construct_premature_order = true;
         log_message("Hybrid Construction blocked a premature button-order; "
@@ -4732,59 +5042,111 @@ void clear_hybrid_construct_placements(void* producer) noexcept {
 
 bool hybrid_production_has_queued_research_conflict(
     void* producer, void* target_class) noexcept {
-    if (!hybrid_research_target(producer, target_class) ||
-        !readable_range(bytes(producer) + kCurrentBuildClassOffset,
-                        sizeof(void*)) ||
-        !readable_range(bytes(producer) + kQueueHeadOffset,
-                        sizeof(void*))) {
-        return false;
-    }
-
-    auto conflicts_with_target = [producer, target_class](
-                                     void* existing_class) noexcept {
-        if (!existing_class) return false;
-        if (existing_class == target_class) return true;
-        return hybrid_research_target(producer, existing_class) &&
-            research_classes_conflict(existing_class, target_class);
-    };
-
-    void* active_class = *reinterpret_cast<void**>(
-        bytes(producer) + kCurrentBuildClassOffset);
-    if (conflicts_with_target(active_class)) return true;
-
-    void* queue_item = *reinterpret_cast<void**>(
-        bytes(producer) + kQueueHeadOffset);
-    for (std::uint32_t visited = 0;
-         queue_item && visited < kNativeQueueCapacity; ++visited) {
-        if (!readable_range(
-                queue_item, kQueueItemNextOffset + sizeof(void*))) {
-            break;
+    struct Context {
+        void* producer;
+        void* target_class;
+        void* existing_class = nullptr;
+        void* queue_item = nullptr;
+        std::exception_ptr error;
+    } context{producer, target_class, nullptr, nullptr, {}};
+    const auto step = +[](void* opaque, std::uint32_t operation,
+                          std::size_t) noexcept -> std::uint64_t {
+        auto& state = *static_cast<Context*>(opaque);
+        try {
+            switch (operation) {
+                case 0:
+                    return hybrid_research_target(state.producer,
+                                                  state.target_class);
+                case 1:
+                    return readable_range(
+                        bytes(state.producer) + kCurrentBuildClassOffset,
+                        sizeof(void*));
+                case 2:
+                    return readable_range(
+                        bytes(state.producer) + kQueueHeadOffset,
+                        sizeof(void*));
+                case 3:
+                    state.existing_class = *reinterpret_cast<void**>(
+                        bytes(state.producer) + kCurrentBuildClassOffset);
+                    return 0;
+                case 4:
+                    if (!state.existing_class) return 0;
+                    if (state.existing_class == state.target_class) return 1;
+                    return hybrid_research_target(
+                        state.producer, state.existing_class) &&
+                        research_classes_conflict(
+                            state.existing_class, state.target_class);
+                case 5:
+                    state.queue_item = *reinterpret_cast<void**>(
+                        bytes(state.producer) + kQueueHeadOffset);
+                    return 0;
+                case 6: return state.queue_item != nullptr;
+                case 7:
+                    return readable_range(state.queue_item,
+                        kQueueItemNextOffset + sizeof(void*));
+                case 8:
+                    state.existing_class = *reinterpret_cast<void**>(
+                        state.queue_item);
+                    return 0;
+                case 9:
+                    state.queue_item = *reinterpret_cast<void**>(
+                        bytes(state.queue_item) + kQueueItemNextOffset);
+                    return 0;
+                default: return 0;
+            }
+        } catch (...) {
+            state.error = std::current_exception();
+            return UINT64_MAX;
         }
-        void* queued_class = *reinterpret_cast<void**>(queue_item);
-        if (conflicts_with_target(queued_class)) return true;
-        queue_item = *reinterpret_cast<void**>(
-            bytes(queue_item) + kQueueItemNextOffset);
-    }
-    return false;
+    };
+    const bool result = a2fo_rs_stage9_hybrid_runtime(
+        2, &context, step) != 0;
+    if (context.error) std::rethrow_exception(context.error);
+    return result;
 }
 
 void retain_hybrid_research_menu_after_order(
     void* producer, void* target_class) noexcept {
-    if (!hybrid_research_target(producer, target_class)) return;
-    if (g_control_button_press_depth != 0) {
-        // The popup may refresh dozens of times inside one click. Keep a
-        // separate press-scoped marker which those refreshes cannot consume;
-        // the outer ControlButton callback clears it after its final post-pass.
-        g_post_press_research_menu_station = producer;
-    }
-    g_retain_research_menu_station = producer;
-    g_retain_research_menu_refreshes = kRetainResearchMenuRefreshLimit;
-    g_retain_research_menu_saw_root = false;
-    if (!g_logged_research_menu_retention_armed) {
-        g_logged_research_menu_retention_armed = true;
-        log_message("Hybrid ResearchStation armed Research palette retention "
-                    "for a pod order");
-    }
+    struct Context {
+        void* producer;
+        void* target_class;
+        std::exception_ptr error;
+    } context{producer, target_class, {}};
+    const auto step = +[](void* opaque, std::uint32_t operation,
+                          std::size_t) noexcept -> std::uint64_t {
+        auto& state = *static_cast<Context*>(opaque);
+        try {
+            switch (operation) {
+                case 0:
+                    return hybrid_research_target(state.producer,
+                                                  state.target_class);
+                case 1: return g_control_button_press_depth != 0;
+                case 2:
+                    g_post_press_research_menu_station = state.producer;
+                    return 0;
+                case 3:
+                    g_retain_research_menu_station = state.producer;
+                    return 0;
+                case 4:
+                    g_retain_research_menu_refreshes =
+                        kRetainResearchMenuRefreshLimit;
+                    return 0;
+                case 5: g_retain_research_menu_saw_root = false; return 0;
+                case 6: return g_logged_research_menu_retention_armed;
+                case 7:
+                    g_logged_research_menu_retention_armed = true;
+                    log_message("Hybrid ResearchStation armed Research "
+                                "palette retention for a pod order");
+                    return 0;
+                default: return 0;
+            }
+        } catch (...) {
+            state.error = std::current_exception();
+            return UINT64_MAX;
+        }
+    };
+    a2fo_rs_stage9_hybrid_runtime(4, &context, step);
+    if (context.error) std::rethrow_exception(context.error);
 }
 
 // The assembly dispatchers call Fleet Ops first, preserve its result register
@@ -5335,77 +5697,136 @@ bool register_live_build_submenus(
             at(g_armada, kGameObjectClassFindRva));
         if (!find_class) return false;
 
-        for (std::size_t parent_index = 0;
-             parent_index < kRuntimeBuildListCapacity; ++parent_index) {
-            const build_submenu::Page& configured =
-                config.pages[parent_index];
-            if (configured.empty()) continue;
-            void* parent_class = menus->visible_root[parent_index];
-            if (!parent_class) {
-                log_message("buildItem" + std::to_string(parent_index) +
-                            " has Refit children in " + source_odf +
-                            " but no native parent item");
-                continue;
-            }
-            if (submenu_page_for_parent(menus.get(), parent_class)) {
-                log_message("Duplicate build-submenu parent class in " +
-                            source_odf + " at buildItem" +
-                            std::to_string(parent_index) + "; later page "
-                            "ignored");
-                continue;
-            }
+        struct PageContext {
+            LiveBuildSubmenuClass* menus;
+            const build_submenu::Config* config;
+            const std::string* source_odf;
+            FindClassFunction find_class;
             LiveBuildSubmenuPage page{};
-            page.parent_index = parent_index;
-            page.parent_class = parent_class;
             std::size_t valid_children = 0;
-            for (std::size_t child_index = 0;
-                 child_index < kRuntimeBuildListCapacity; ++child_index) {
-                const std::string& name =
-                    configured.children[child_index];
-                if (name.empty()) continue;
-                void* child_class = find_class(name.c_str());
-                if (!child_class) {
-                    log_message("buildItem" +
-                                std::to_string(parent_index) + "Refit" +
-                                std::to_string(child_index) + " in " +
-                                source_odf + " could not resolve '" + name +
-                                "'");
-                    continue;
+            std::exception_ptr error{};
+        } page_context{menus.get(), &config, &source_odf, find_class};
+        const auto page_step = +[](void* opaque, std::uint32_t op,
+                                   std::size_t parent_index,
+                                   std::size_t child_index,
+                                   std::size_t) noexcept -> std::uint32_t {
+            auto& c = *static_cast<PageContext*>(opaque);
+            try {
+                const auto& configured = c.config->pages[parent_index];
+                switch (op) {
+                    case 0: {
+                        if (configured.empty()) return 0;
+                        void* parent_class =
+                            c.menus->visible_root[parent_index];
+                        if (!parent_class) return 1;
+                        if (submenu_page_for_parent(c.menus, parent_class))
+                            return 2;
+                        c.page = {};
+                        c.page.parent_index = parent_index;
+                        c.page.parent_class = parent_class;
+                        c.valid_children = 0;
+                        return 3;
+                    }
+                    case 1:
+                        log_message("buildItem" +
+                            std::to_string(parent_index) +
+                            " has Refit children in " + *c.source_odf +
+                            " but no native parent item");
+                        return 0;
+                    case 2:
+                        log_message("Duplicate build-submenu parent class in " +
+                            *c.source_odf + " at buildItem" +
+                            std::to_string(parent_index) +
+                            "; later page ignored");
+                        return 0;
+                    case 3: {
+                        const std::string& name =
+                            configured.children[child_index];
+                        if (name.empty()) return 0;
+                        void* child_class = c.find_class(name.c_str());
+                        if (!child_class) return 1;
+                        c.page.children[child_index] = child_class;
+                        ++c.valid_children;
+                        return 2;
+                    }
+                    case 4: {
+                        const std::string& name =
+                            configured.children[child_index];
+                        log_message("buildItem" +
+                            std::to_string(parent_index) + "Refit" +
+                            std::to_string(child_index) + " in " +
+                            *c.source_odf + " could not resolve '" + name +
+                            "'");
+                        return 0;
+                    }
+                    case 5:
+                        if (c.valid_children != 0)
+                            c.menus->pages.push_back(c.page);
+                        return 0;
                 }
-                page.children[child_index] = child_class;
-                ++valid_children;
+            } catch (...) {
+                c.error = std::current_exception();
+                return UINT32_MAX;
             }
-            if (valid_children != 0) menus->pages.push_back(page);
-        }
+            return 0;
+        };
+        a2fo_rs_stage10_hybrid_submenus(
+            0, kRuntimeBuildListCapacity, kRuntimeBuildListCapacity,
+            &page_context, page_step);
+        if (page_context.error) std::rethrow_exception(page_context.error);
         if (menus->pages.empty()) return false;
 
-        std::size_t effective_count = 0;
-        for (std::size_t root_index = 0;
-             root_index < kRuntimeBuildListCapacity; ++root_index) {
-            void* root_item = menus->visible_root[root_index];
-            LiveBuildSubmenuPage* page =
-                submenu_page_for_parent(menus.get(), root_item);
-            if (page && page->parent_index == root_index) {
-                for (void* child : page->children) {
-                    if (!child) continue;
-                    if (effective_count >= kRuntimeBuildListCapacity) {
-                        log_message("Expanded build list in " + source_odf +
-                                    " exceeds the 57-item Producer limit; "
-                                    "submenus rejected");
-                        return false;
+        struct FlattenContext {
+            LiveBuildSubmenuClass* menus;
+            const std::string* source_odf;
+            LiveBuildSubmenuPage* page = nullptr;
+            std::exception_ptr error{};
+        } flatten_context{menus.get(), &source_odf};
+        const auto flatten_step = +[](void* opaque, std::uint32_t op,
+                                      std::size_t root_index,
+                                      std::size_t child_index,
+                                      std::size_t output) noexcept
+            -> std::uint32_t {
+            auto& c = *static_cast<FlattenContext*>(opaque);
+            try {
+                switch (op) {
+                    case 0: {
+                        void* root_item = c.menus->visible_root[root_index];
+                        c.page = submenu_page_for_parent(c.menus, root_item);
+                        if (c.page && c.page->parent_index == root_index)
+                            return 1;
+                        return root_item ? 2u : 0u;
                     }
-                    menus->effective_items[effective_count++] = child;
+                    case 1:
+                        return c.page->children[child_index] ? 1u : 0u;
+                    case 2:
+                        c.menus->effective_items[output] =
+                            c.page->children[child_index];
+                        return 0;
+                    case 3:
+                        c.menus->effective_items[output] =
+                            c.menus->visible_root[root_index];
+                        return 0;
+                    case 4:
+                        log_message("Expanded build list in " +
+                            *c.source_odf +
+                            " exceeds the 57-item Producer limit; "
+                            "submenus rejected");
+                        return 0;
                 }
-            } else if (root_item) {
-                if (effective_count >= kRuntimeBuildListCapacity) {
-                    log_message("Expanded build list in " + source_odf +
-                                " exceeds the 57-item Producer limit; "
-                                "submenus rejected");
-                    return false;
-                }
-                menus->effective_items[effective_count++] = root_item;
+            } catch (...) {
+                c.error = std::current_exception();
+                return UINT32_MAX;
             }
-        }
+            return 0;
+        };
+        const auto flattened = a2fo_rs_stage10_hybrid_submenus(
+            1, kRuntimeBuildListCapacity, kRuntimeBuildListCapacity,
+            &flatten_context, flatten_step);
+        if (flatten_context.error)
+            std::rethrow_exception(flatten_context.error);
+        if (flattened.status) return false;
+        const std::size_t effective_count = flattened.count;
 
         void** effective_items = menus->effective_items.data();
         EnterCriticalSection(&g_registry_lock);
@@ -5506,57 +5927,58 @@ std::size_t publish_research_station_hybrid_items(
 
     auto runtime = std::make_unique<RuntimeClassLists>();
     runtime->legacy_research = legacy_research;
-    const bool declared_construct = std::any_of(
-        entries.begin(), entries.end(), [](const ProductionListEntry& entry) {
-            return entry.method == ProductionMethod::construct;
-        });
-    const bool declared_yard = std::any_of(
-        entries.begin(), entries.end(), [](const ProductionListEntry& entry) {
-            return entry.method == ProductionMethod::yard;
-        });
-    const bool declared_research = std::any_of(
-        entries.begin(), entries.end(), [](const ProductionListEntry& entry) {
-            return entry.method == ProductionMethod::research;
-        });
-    const bool declared_evolve = std::any_of(
-        entries.begin(), entries.end(), [](const ProductionListEntry& entry) {
-            return entry.method == ProductionMethod::evolve;
-        });
     auto find_class = reinterpret_cast<FindClassByProjectIdFunction>(
         at(g_armada, kGameObjectClassFindProjectIdRva));
-    std::size_t construct_published = 0;
-    std::size_t yard_published = 0;
-    std::size_t research_published = 0;
-    std::size_t evolve_published = 0;
-    for (const ProductionListEntry& entry : entries) {
-        if (entry.method != ProductionMethod::construct &&
-            entry.method != ProductionMethod::yard &&
-            entry.method != ProductionMethod::research &&
-            entry.method != ProductionMethod::evolve) {
-            continue;
+    struct PublishContext {
+        const std::vector<ProductionListEntry>* entries;
+        RuntimeClassLists* runtime;
+        FindClassByProjectIdFunction find_class;
+        void* item_class = nullptr;
+    } publish_context{&entries, runtime.get(), find_class};
+    const auto publish_step = +[](void* opaque, std::uint32_t op,
+                                  std::size_t index,
+                                  std::uint32_t method) noexcept
+        -> std::size_t {
+        auto& c = *static_cast<PublishContext*>(opaque);
+        const ProductionListEntry& entry = (*c.entries)[index];
+        switch (op) {
+            case 0:
+                return static_cast<std::uint32_t>(entry.method) == method;
+            case 1:
+                return static_cast<std::uint32_t>(entry.method);
+            case 2:
+                c.item_class = c.find_class(&entry.project_id);
+                if (!c.item_class) {
+                    log_message("Hybrid production target project " +
+                                std::to_string(entry.project_id) +
+                                " could not be loaded for the command panel");
+                }
+                return c.item_class ? 1u : 0u;
+            case 3:
+                return entry.index;
+            case 4:
+                if (method == 1) c.runtime->construct[entry.index] =
+                    c.item_class;
+                else if (method == 2) c.runtime->yard[entry.index] =
+                    c.item_class;
+                else if (method == 3) c.runtime->research[entry.index] =
+                    c.item_class;
+                else c.runtime->evolve[entry.index] = c.item_class;
+                return 0;
         }
-        void* item_class = find_class(&entry.project_id);
-        if (!item_class) {
-            log_message("Hybrid production target project " +
-                        std::to_string(entry.project_id) +
-                        " could not be loaded for the command panel");
-            continue;
-        }
-        if (entry.index >= kRuntimeBuildListCapacity) continue;
-        if (entry.method == ProductionMethod::construct) {
-            runtime->construct[entry.index] = item_class;
-            ++construct_published;
-        } else if (entry.method == ProductionMethod::yard) {
-            runtime->yard[entry.index] = item_class;
-            ++yard_published;
-        } else if (entry.method == ProductionMethod::research) {
-            runtime->research[entry.index] = item_class;
-            ++research_published;
-        } else {
-            runtime->evolve[entry.index] = item_class;
-            ++evolve_published;
-        }
-    }
+        return 0;
+    };
+    const auto published = a2fo_rs_stage10_hybrid_publish(
+        entries.size(), kRuntimeBuildListCapacity, &publish_context,
+        publish_step);
+    const bool declared_construct = published.declared[0] != 0;
+    const bool declared_yard = published.declared[1] != 0;
+    const bool declared_research = published.declared[2] != 0;
+    const bool declared_evolve = published.declared[3] != 0;
+    const std::size_t construct_published = published.published[0];
+    const std::size_t yard_published = published.published[1];
+    const std::size_t research_published = published.published[2];
+    const std::size_t evolve_published = published.published[3];
     runtime->has_construct = declared_construct && construct_published != 0;
     runtime->has_yard = declared_yard && yard_published != 0;
     runtime->has_explicit_research =

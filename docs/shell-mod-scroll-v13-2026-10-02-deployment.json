@@ -1,0 +1,45 @@
+{
+  "created_utc": "2026-10-02T14:27:24.561530+00:00",
+  "module": "A2FOShellDisplay",
+  "version": "v13",
+  "source_root": "/home/tamsynn/A2FOHookExtensions",
+  "artifact": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOShellDisplay.dll",
+  "installed": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOShellDisplay.dll",
+  "sha256": "22f8817d7b534f6721f6973885f05a25f8f6b16aef4f41843de97e5f16f5a201",
+  "installed_mtime_utc": "2026-10-02T14:27:24.410553+00:00",
+  "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/mod-scroll-v13-20261002T140057Z",
+  "previous_dll_sha256": "a42bbffef7c0f811d5341427b899adc2e69b9ab0539b487ae7ac1dc5988180e0",
+  "unchanged_inputs_sha256": {
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.dll": "74b3274a19f8ca1370b37ee2b8834b9634a638994e83507fd160387efc9bb035",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe": "470bf8f4b0196e22fe179d3845cab671e74d9af19cf90a7dafed0b0bbd394318",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll": "d2a0829e87aaa927e27146b90be61fc6359c6cbf3d81aed2c644019dd375b9b6",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/info.ini": "42639e533412cd47a27ab23bdcd16a3a7f3fc23d48c3bbd49f53ccf834bd3da6",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/info.ini": "09c1552037754797e05cf994a61f4b5145794302074de44c4edacb613f7a2211",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/settings_saves_logs/mods/A2FO Settings Test/Settings.xml": "c1251fe5f87df0550f52560dfd3e83fc7668669712c1b7eb93705dc9cda04051",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/animations/Intro.bik": "567f13968e6cb3a31a4884f135f3f04a236a775f511d8371f93f700deb92b9ae",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/animations/Paramount.bik": "ebcf5dbd49075fa85463eeb871be78a5932152f96d86f37a5d8083e0b749c9c6",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/animations/MadDocSoftware.bik": "1221fb6be1e3a4d14402002e5d2ae42bf774fe1f1a8c9ed95b8c4ea4b11c4166",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/animations/Activision.bik": "8f3338b7a5aa1b8ffe54a24a1c3ed38e77de74e13631f099756897420bf087fc"
+  },
+  "target_ui": "Fleet Ops mod selection screen, TModSettingsForm.grdModSelect TNextGrid",
+  "live_v12_evidence": "User acceptedintro scaling/flicker correction; subsequent modselection scrolling refresh reportedlaggy",
+  "static_consumer_evidence": "Installed FO ScrollContent17f048/17f07e andShowRow19ff8e..1a01a0 useScrollWindowEx thunk9684 IAT24c0b4, flags2; clip/updateRECTalias",
+  "correction": "AdaptScrollWindowEx physicalarguments/logicaloutputs; shiftpersistentlogicalcache withScrollDC andpublishaffectedarea; BeginPaint boundedoutwarddirtylogicalclip with1pixelguard",
+  "validation": [
+    "make shell-display-test: sixheadless suites passed",
+    "MemoryDIB scrollfixture verifies scalednativeargs, de-aliasedinput/outputrect, logicalupdateRECT/HRGN andexposedregioninvalidate",
+    "Patternedcachedrows movepositive,negative,horizontally; exposedstripepartialpaint preservesotherscrolledrows andphysicalpixels",
+    "BeginPaint dirtyrectangle andlogicalDCclip guardedratherthanfullpage; EndPaint originalphysicalPAINTSTRUCT preserved",
+    "First-use cacheinitialization invalidation, nativeERROR unchangedcache/outputs, inactive/untracked/childmoving/smoothscroll passthrough",
+    "Actualmodule smoke andmovie-start tests passed withinstalled Armada/FO imagesmappedasdata",
+    "Independent sourceandfixture review: rareallocation/regionconversionfailureshandled; no confirmednormalSW_INVALIDATE regression",
+    "Existing bufferednativeintro, originalmovie-start, canvas andlifecycle suites passed"
+  ],
+  "live_acceptance": "v13 pending fullrestart andmanualwheel/arrows/thumbtracking/selection test ofmodmenu inbothdirections",
+  "limitations": [
+    "Headlessfixtures do notestablish perceivedlive responsiveness",
+    "NativeScreenshot/detail-loadingcosts notprofiled orchanged",
+    "Child-movingandsmoothscroll retainoriginalbehavior",
+    "No game startup orGUI/input automation executed"
+  ]
+}

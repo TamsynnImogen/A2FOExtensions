@@ -1,110 +1,318 @@
 #include "squadron_state.hpp"
-
+#include "../../rust/domain_state_ffi.h"
 #include <algorithm>
+#include <exception>
 #include <limits>
-#include <set>
+#include <vector>
 
 namespace a2fo::squadrons {
 namespace {
-std::vector<Slot> slots_for(const Definition& def) {
-    std::vector<Slot> slots;
-    slots.reserve(def.size());
-    for (const auto& row : def.members)
-        for (std::uint32_t ordinal = 0; ordinal < row.count; ++ordinal)
-            slots.push_back({row.row, ordinal, row.odf, 0});
-    return slots;
+A2foRsBytes bytes(const std::string &value) noexcept {
+    return {reinterpret_cast<const std::uint8_t *>(value.data()), value.size()};
 }
-
-bool repair_ready(const Squadron& squad, const RepairContext& repair) {
-    if (!squad.definition.reinforce_at_yard || !repair.yard ||
-        repair.team != squad.team || !repair.compatible ||
-        !repair.accepted_repair_cycle || squad.live_count() == 0) return false;
-    std::set<ObjectId> expected;
-    for (const auto& slot : squad.slots) if (slot.member) expected.insert(slot.member);
-    const std::set<ObjectId> present(repair.serviced_members.begin(),
-                                     repair.serviced_members.end());
-    return present.size() == repair.serviced_members.size() && present == expected;
+A2foRsSqSlot rs(const Slot &slot) noexcept {
+    return {slot.row, slot.ordinal, bytes(slot.odf), slot.member};
+}
+std::uint8_t slot_at(void *raw, std::size_t index, A2foRsSqSlot *output) noexcept {
+    const auto &slots = *static_cast<const std::vector<Slot> *>(raw);
+    if (index >= slots.size())
+        return 0;
+    *output = rs(slots[index]);
+    return 1;
+}
+A2foRsSqRepair rs(const RepairContext &repair) noexcept {
+    return {repair.yard,
+            repair.team,
+            static_cast<std::uint8_t>(repair.compatible),
+            static_cast<std::uint8_t>(repair.accepted_repair_cycle),
+            repair.serviced_members.data(),
+            repair.serviced_members.size()};
+}
+A2foRsSqReplacement rs(const Replacement &value) noexcept {
+    return {value.ticket, value.squad, value.yard,
+            value.team,   value.slot,  bytes(value.odf)};
+}
+A2foRsSqView rs(const Squadron &squad) noexcept {
+    return {squad.id,
+            squad.team,
+            squad.slots.size(),
+            static_cast<std::uint8_t>(squad.definition.reinforce_at_yard),
+            static_cast<std::uint8_t>(squad.replacement.has_value()),
+            squad.replacement ? rs(*squad.replacement) : A2foRsSqReplacement{}};
+}
+std::vector<A2foRsSqSlot> rs_slots(const std::vector<Slot> &slots) {
+    std::vector<A2foRsSqSlot> result;
+    result.reserve(slots.size());
+    for (const auto &slot : slots)
+        result.push_back(rs(slot));
+    return result;
+}
+std::vector<Slot> slots_for(const Definition &def) {
+    std::vector<A2foRsSqRow> rows;
+    rows.reserve(def.members.size());
+    for (const auto &row : def.members)
+        rows.push_back({row.row, row.count, bytes(row.odf)});
+    std::vector<A2foRsSqSlot> expanded(def.size());
+    const auto count =
+        a2fo_rs_sq_expand(rows.data(), rows.size(), expanded.data(), expanded.size());
+    std::vector<Slot> result;
+    result.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto &slot = expanded[i];
+        result.push_back(
+            {slot.row, slot.ordinal,
+             std::string(reinterpret_cast<const char *>(slot.odf.data), slot.odf.size),
+             0});
+    }
+    return result;
+}
+using SquadMap = std::map<SquadId, Squadron>;
+using MemberMap = std::map<ObjectId, SquadId>;
+using LaunchSet = std::set<SquadId>;
+struct Context {
+    const SquadMap *squads;
+    const MemberMap *membership;
+    const LaunchSet *launching;
+    Selection *selection = nullptr;
+    std::exception_ptr error;
+    Context(const SquadMap *s, const MemberMap *m, const LaunchSet *l,
+            Selection *out = nullptr)
+        : squads(s), membership(m), launching(l), selection(out) {}
+};
+std::uint8_t get_squad(void *raw, std::uint64_t id, A2foRsSqView *output) noexcept {
+    auto &context = *static_cast<Context *>(raw);
+    const auto it = context.squads->find(id);
+    if (it == context.squads->end())
+        return 0;
+    *output = rs(it->second);
+    return 1;
+}
+std::uint8_t next_squad(void *raw, std::uint64_t *cursor,
+                        A2foRsSqView *output) noexcept {
+    auto &context = *static_cast<Context *>(raw);
+    const auto it = context.squads->upper_bound(*cursor);
+    if (it == context.squads->end())
+        return 0;
+    *cursor = it->first;
+    *output = rs(it->second);
+    return 1;
+}
+std::uint8_t get_slot(void *raw, std::uint64_t id, std::size_t index,
+                      A2foRsSqSlot *output) noexcept {
+    auto &context = *static_cast<Context *>(raw);
+    const auto it = context.squads->find(id);
+    if (it == context.squads->end() || index >= it->second.slots.size())
+        return 0;
+    *output = rs(it->second.slots[index]);
+    return 1;
+}
+std::uint64_t member_squad(void *raw, std::uint64_t member) noexcept {
+    auto &context = *static_cast<Context *>(raw);
+    const auto it = context.membership->find(member);
+    return it == context.membership->end() ? 0 : it->second;
+}
+std::uint8_t launching(void *raw, std::uint64_t id) noexcept {
+    return static_cast<Context *>(raw)->launching->count(id) != 0;
+}
+void emit_tile(void *raw, A2foRsSqTile tile) noexcept {
+    auto &context = *static_cast<Context *>(raw);
+    if (context.error)
+        return;
+    try {
+        context.selection->tiles.push_back(
+            {tile.squad, tile.representative, tile.live, tile.maximum});
+    } catch (...) {
+        context.error = std::current_exception();
+    }
+}
+void emit_member(void *raw, std::uint64_t member) noexcept {
+    auto &context = *static_cast<Context *>(raw);
+    if (context.error)
+        return;
+    try {
+        context.selection->members.push_back(member);
+    } catch (...) {
+        context.error = std::current_exception();
+    }
+}
+A2foRsSqOps ops(Context &context) noexcept {
+    return {&context,     get_squad, next_squad, get_slot,
+            member_squad, launching, emit_tile,  emit_member};
+}
+void rethrow(const Context &context) {
+    if (context.error)
+        std::rethrow_exception(context.error);
+}
+std::vector<A2foRsSqCraft> crafts(const std::vector<Craft> &members,
+                                  std::vector<std::string> &keys) {
+    keys.reserve(members.size());
+    for (const auto &craft : members)
+        keys.push_back(odf_key(craft.odf));
+    std::vector<A2foRsSqCraft> result;
+    result.reserve(members.size());
+    for (std::size_t i = 0; i < members.size(); ++i)
+        result.push_back({members[i].id, members[i].team, bytes(keys[i])});
+    return result;
+}
+A2foRsSqCraft craft(const Craft &value, std::string &key) {
+    key = odf_key(value.odf);
+    return {value.id, value.team, bytes(key)};
+}
+const char *create_error(int code) noexcept {
+    switch (code) {
+    case 2:
+        return "initial complement must be complete";
+    case 3:
+        return "squad IDs exhausted";
+    case 4:
+        return "global squadron limit reached";
+    case 5:
+        return "team squadron limit reached";
+    case 6:
+        return "member identity, owner or ODF does not match its configured slot";
+    case 7:
+        return "a Craft cannot occupy multiple squadron slots";
+    case 8:
+        return "first launching member does not match slot zero";
+    default:
+        return "invalid squadron admission";
+    }
+}
+const char *reserve_error(int code) noexcept {
+    switch (code) {
+    case 9:
+        return "squadron no longer exists";
+    case 10:
+        return "initial squad launch is still in progress";
+    case 11:
+        return "a replacement is already reserved";
+    case 12:
+        return "all survivors must be in the accepted yard repair cycle";
+    case 13:
+        return "a squad member cannot serve as its repair yard";
+    case 14:
+        return "replacement IDs exhausted";
+    case 15:
+        return "squadron is already at full strength";
+    default:
+        return "invalid replacement reservation";
+    }
+}
+struct SavedContext {
+    const Snapshot *saved;
+    const ClassResolver *resolver;
+    std::string problem;
+    std::exception_ptr exception;
+};
+std::uint8_t saved_squad(void *raw, std::size_t index, A2foRsSqView *output) noexcept {
+    auto &context = *static_cast<SavedContext *>(raw);
+    if (index >= context.saved->squads.size())
+        return 0;
+    *output = rs(context.saved->squads[index]);
+    return 1;
+}
+std::uint8_t saved_row(void *raw, std::size_t squad, std::size_t index,
+                       A2foRsSqRow *output) noexcept {
+    auto &context = *static_cast<SavedContext *>(raw);
+    const auto &rows = context.saved->squads[squad].definition.members;
+    if (index >= rows.size())
+        return 0;
+    const auto &row = rows[index];
+    *output = {row.row, row.count, bytes(row.odf)};
+    return 1;
+}
+std::uint8_t saved_slot(void *raw, std::size_t squad, std::size_t index,
+                        A2foRsSqSlot *output) noexcept {
+    auto &context = *static_cast<SavedContext *>(raw);
+    const auto &slots = context.saved->squads[squad].slots;
+    if (index >= slots.size())
+        return 0;
+    *output = rs(slots[index]);
+    return 1;
+}
+std::uint8_t saved_validate(void *raw, std::size_t index) noexcept {
+    auto &context = *static_cast<SavedContext *>(raw);
+    if (context.exception)
+        return 0;
+    try {
+        context.problem = validate_definition(context.saved->squads[index].definition,
+                                              *context.resolver);
+        return context.problem.empty();
+    } catch (...) {
+        context.exception = std::current_exception();
+        return 0;
+    }
 }
 } // namespace
 
 std::uint32_t Squadron::live_count() const noexcept {
-    return static_cast<std::uint32_t>(std::count_if(slots.begin(), slots.end(),
-                                       [](const Slot& slot) { return slot.member != 0; }));
+    return a2fo_rs_sq_live_at(const_cast<std::vector<Slot> *>(&slots), slot_at,
+                              slots.size());
 }
-
 ObjectId Squadron::representative() const noexcept {
-    for (const auto& slot : slots) if (slot.member) return slot.member;
-    return 0;
+    return a2fo_rs_sq_representative_at(const_cast<std::vector<Slot> *>(&slots),
+                                        slot_at, slots.size());
 }
-
 std::string Squadron::badge() const {
-    return std::to_string(live_count()) + "/" + std::to_string(slots.size());
+    char buffer[64]{};
+    const auto size =
+        a2fo_rs_sq_badge(live_count(), slots.size(),
+                         reinterpret_cast<std::uint8_t *>(buffer), sizeof(buffer));
+    return {buffer, size};
 }
-
-const Squadron* Registry::find(SquadId id) const noexcept {
+const Squadron *Registry::find(SquadId id) const noexcept {
     const auto found = squads_.find(id);
     return found == squads_.end() ? nullptr : &found->second;
 }
-
-const Squadron* Registry::containing(ObjectId member) const noexcept {
+const Squadron *Registry::containing(ObjectId member) const noexcept {
     const auto found = membership_.find(member);
     return found == membership_.end() ? nullptr : find(found->second);
 }
-
 bool Registry::reserved_yard(ObjectId id) const noexcept {
-    return std::any_of(squads_.begin(), squads_.end(), [id](const auto& item) {
-        return item.second.replacement && item.second.replacement->yard == id;
-    });
+    Context context{&squads_, &membership_, &launching_};
+    return a2fo_rs_sq_reserved_yard(ops(context), id) != 0;
 }
-
-Result<SquadId> Registry::create(const Definition& def, TeamId team,
-                                  const std::vector<Craft>& members,
-                                  const ClassResolver& resolve) {
+Result<SquadId> Registry::create(const Definition &def, TeamId team,
+                                 const std::vector<Craft> &members,
+                                 const ClassResolver &resolve) {
     if (const auto error = validate_definition(def, resolve); !error.empty())
         return {{}, error};
-    if (members.size() != def.size()) return {{}, "initial complement must be complete"};
-    if (next_squad_ == std::numeric_limits<SquadId>::max()) return {{}, "squad IDs exhausted"};
-    if (squads_.size() >= kMaxSquads) return {{}, "global squadron limit reached"};
-    const auto team_count = std::count_if(squads_.begin(), squads_.end(),
-                            [team](const auto& item) { return item.second.team == team; });
-    if (static_cast<std::size_t>(team_count) >= kMaxSquadsPerTeam)
-        return {{}, "team squadron limit reached"};
-
-    Squadron squad{next_squad_, team, def, slots_for(def), {}};
+    const auto slots = slots_for(def);
+    const auto records = rs_slots(slots);
+    std::vector<std::string> keys;
+    const auto members_rs = crafts(members, keys);
+    Context context{&squads_, &membership_, &launching_};
+    const auto plan = a2fo_rs_sq_create(ops(context), next_squad_, squads_.size(), team,
+                                        records.data(), records.size(),
+                                        members_rs.data(), members_rs.size(), 0);
+    if (plan.code != 0)
+        return {{}, create_error(plan.code)};
+    Squadron squad{next_squad_, team, def, slots, {}};
     std::map<ObjectId, SquadId> new_membership;
     for (std::size_t i = 0; i < members.size(); ++i) {
-        const auto& craft = members[i];
-        if (!craft.id || reserved_yard(craft.id) || craft.team != team || odf_key(craft.odf) != squad.slots[i].odf)
-            return {{}, "member identity, owner or ODF does not match its configured slot"};
-        if (membership_.count(craft.id) || !new_membership.emplace(craft.id, squad.id).second)
-            return {{}, "a Craft cannot occupy multiple squadron slots"};
-        squad.slots[i].member = craft.id;
+        new_membership.emplace(members[i].id, squad.id);
+        squad.slots[i].member = members[i].id;
     }
-    // Allocate everything before publishing either index. map::merge moves
-    // already allocated nodes, so an allocation failure leaves no half squad.
     squads_.emplace(squad.id, std::move(squad));
     membership_.merge(new_membership);
     return {next_squad_++, {}};
 }
-
-Result<SquadId> Registry::create_launching(
-    const Definition& def, TeamId team, const Craft& first,
-    const ClassResolver& resolve) {
+Result<SquadId> Registry::create_launching(const Definition &def, TeamId team,
+                                           const Craft &first,
+                                           const ClassResolver &resolve) {
     if (const auto error = validate_definition(def, resolve); !error.empty())
         return {{}, error};
-    if (next_squad_ == std::numeric_limits<SquadId>::max())
-        return {{}, "squad IDs exhausted"};
-    if (squads_.size() >= kMaxSquads)
-        return {{}, "global squadron limit reached"};
-    const auto team_count = std::count_if(squads_.begin(), squads_.end(),
-        [team](const auto& item) { return item.second.team == team; });
-    if (static_cast<std::size_t>(team_count) >= kMaxSquadsPerTeam)
-        return {{}, "team squadron limit reached"};
-    Squadron squad{next_squad_, team, def, slots_for(def), {}};
-    if (!first.id || first.team != team ||
-        odf_key(first.odf) != squad.slots[0].odf ||
-        membership_.count(first.id) || reserved_yard(first.id))
-        return {{}, "first launching member does not match slot zero"};
+    const auto slots = slots_for(def);
+    const auto records = rs_slots(slots);
+    std::string key;
+    const auto first_rs = craft(first, key);
+    Context context{&squads_, &membership_, &launching_};
+    const auto plan =
+        a2fo_rs_sq_create(ops(context), next_squad_, squads_.size(), team,
+                          records.data(), records.size(), &first_rs, 1, 1);
+    if (plan.code != 0)
+        return {{}, create_error(plan.code)};
+    Squadron squad{next_squad_, team, def, slots, {}};
     squad.slots[0].member = first.id;
     std::map<ObjectId, SquadId> new_membership;
     std::set<SquadId> new_launching;
@@ -115,189 +323,190 @@ Result<SquadId> Registry::create_launching(
     launching_.merge(new_launching);
     return {next_squad_++, {}};
 }
-
-bool Registry::add_launching(SquadId id, std::size_t index,
-                            const Craft& craft) {
-    const auto found = squads_.find(id);
-    if (found == squads_.end() || !launching_.count(id) ||
-        index >= found->second.slots.size() ||
-        !craft.id || craft.team != found->second.team ||
-        membership_.count(craft.id) || reserved_yard(craft.id)) return false;
-    auto& slot = found->second.slots[index];
-    if (slot.member || odf_key(craft.odf) != slot.odf) return false;
-    membership_.emplace(craft.id, id);
-    slot.member = craft.id;
+bool Registry::add_launching(SquadId id, std::size_t index, const Craft &value) {
+    std::string key;
+    const auto record = craft(value, key);
+    Context context{&squads_, &membership_, &launching_};
+    const auto plan = a2fo_rs_sq_add_launching(ops(context), id, index, record);
+    if (plan.code != 0)
+        return false;
+    membership_.emplace(value.id, id);
+    squads_.find(id)->second.slots[index].member = value.id;
     return true;
 }
-
 bool Registry::finish_launching(SquadId id) {
-    if (!launching_.erase(id)) return false;
-    const auto found = squads_.find(id);
-    if (found != squads_.end() && found->second.live_count() == 0)
-        squads_.erase(found);
+    Context context{&squads_, &membership_, &launching_};
+    const auto plan = a2fo_rs_sq_finish_launching(ops(context), id);
+    if (plan.code != 0)
+        return false;
+    launching_.erase(id);
+    if (plan.retire)
+        squads_.erase(id);
     return true;
 }
-
 Removal Registry::remove(ObjectId member) {
+    Context context{&squads_, &membership_, &launching_};
+    const auto plan = a2fo_rs_sq_remove(ops(context), member, 0, 0);
+    if (plan.code != 0)
+        return {};
     const auto member_it = membership_.find(member);
-    if (member_it == membership_.end()) return {};
-    const auto squad_it = squads_.find(member_it->second);
-    auto& squad = squad_it->second;
-    for (auto& slot : squad.slots) if (slot.member == member) slot.member = 0;
+    const auto squad_it = squads_.find(plan.id);
+    auto &squad = squad_it->second;
+    for (auto &slot : squad.slots)
+        if (slot.member == member)
+            slot.member = 0;
     membership_.erase(member_it);
-    Removal result{true,
-        squad.live_count() == 0 && !launching_.count(squad.id), {}};
+    Removal result{true, plan.retire != 0, {}};
     if (result.squad_retired) {
         result.cancelled = std::move(squad.replacement);
         squads_.erase(squad_it);
     }
     return result;
 }
-
 Removal Registry::change_owner(ObjectId member, TeamId new_owner) {
-    const auto* squad = containing(member);
-    if (!squad || squad->team == new_owner) return {};
-    return remove(member);
+    Context context{&squads_, &membership_, &launching_};
+    const auto plan = a2fo_rs_sq_remove(ops(context), member, new_owner, 1);
+    return plan.code == 0 ? remove(member) : Removal{};
 }
-
-Result<Replacement> Registry::reserve_replacement(SquadId id, const RepairContext& repair) {
-    const auto found = squads_.find(id);
-    if (found == squads_.end()) return {{}, "squadron no longer exists"};
-    auto& squad = found->second;
-    if (launching_.count(id)) return {{}, "initial squad launch is still in progress"};
-    if (squad.replacement) return {{}, "a replacement is already reserved"};
-    if (!repair_ready(squad, repair)) return {{}, "all survivors must be in the accepted yard repair cycle"};
-    if (membership_.count(repair.yard)) return {{}, "a squad member cannot serve as its repair yard"};
-    if (next_ticket_ == std::numeric_limits<TicketId>::max()) return {{}, "replacement IDs exhausted"};
-    for (std::uint32_t i = 0; i < squad.slots.size(); ++i) {
-        if (squad.slots[i].member) continue;
-        Replacement request{next_ticket_, id, repair.yard, squad.team, i, squad.slots[i].odf};
-        // Copy the return value before committing the reservation.
-        Result<Replacement> result{request, {}};
-        squad.replacement = std::move(request);
-        ++next_ticket_;
-        return result;
-    }
-    return {{}, "squadron is already at full strength"};
-}
-
-bool Registry::complete_replacement(TicketId ticket, const Craft& craft,
-                                      const RepairContext& repair) {
-    if (!ticket || !craft.id || membership_.count(craft.id) || reserved_yard(craft.id)) return false;
-    for (auto& item : squads_) {
-        auto& squad = item.second;
-        if (!squad.replacement || squad.replacement->ticket != ticket) continue;
-        const auto& request = *squad.replacement;
-        if (repair.yard != request.yard || !repair_ready(squad, repair) ||
-            craft.team != request.team || odf_key(craft.odf) != request.odf ||
-            craft.id == repair.yard || squad.slots[request.slot].member) return false;
-        membership_.emplace(craft.id, squad.id);
-        squad.slots[request.slot].member = craft.id;
-        squad.replacement.reset();
-        return true;
-    }
-    return false;
-}
-
-std::optional<Replacement> Registry::cancel_replacement(TicketId ticket) {
-    for (auto& item : squads_) {
-        auto& pending = item.second.replacement;
-        if (!pending || pending->ticket != ticket) continue;
-        auto result = std::move(pending);
-        pending.reset();
-        return result;
-    }
-    return {};
-}
-
-std::vector<Replacement> Registry::cancel_yard(ObjectId yard) {
-    std::vector<Replacement> result;
-    // Allocate/copy before mutation so callers cannot lose a refund record.
-    for (const auto& item : squads_)
-        if (item.second.replacement && item.second.replacement->yard == yard)
-            result.push_back(*item.second.replacement);
-    for (const auto& request : result) cancel_replacement(request.ticket);
+Result<Replacement> Registry::reserve_replacement(SquadId id,
+                                                  const RepairContext &repair) {
+    Context context{&squads_, &membership_, &launching_};
+    const auto plan = a2fo_rs_sq_reserve(ops(context), id, next_ticket_, rs(repair));
+    if (plan.code != 0)
+        return {{}, reserve_error(plan.code)};
+    auto &squad = squads_.find(id)->second;
+    Replacement request{next_ticket_, id,        repair.yard,
+                        squad.team,   plan.slot, squad.slots[plan.slot].odf};
+    Result<Replacement> result{request, {}};
+    squad.replacement = std::move(request);
+    ++next_ticket_;
     return result;
 }
-
-Result<Selection> Registry::select(const std::vector<Craft>& selected, TeamId team,
-                                    std::size_t physical_limit) const {
-    std::set<SquadId> groups;
-    std::set<ObjectId> ordinary;
-    for (const auto& craft : selected) {
-        if (!craft.id || craft.team != team) continue;
-        if (const auto* squad = containing(craft.id)) {
-            if (squad->team != team) return {{}, "stale ownership in squad selection"};
-            groups.insert(squad->id);
-        } else ordinary.insert(craft.id);
+bool Registry::complete_replacement(TicketId ticket, const Craft &value,
+                                    const RepairContext &repair) {
+    std::string key;
+    const auto record = craft(value, key);
+    Context context{&squads_, &membership_, &launching_};
+    const auto plan = a2fo_rs_sq_complete(ops(context), ticket, record, rs(repair));
+    if (plan.code != 0)
+        return false;
+    auto &squad = squads_.find(plan.id)->second;
+    membership_.emplace(value.id, squad.id);
+    squad.slots[plan.slot].member = value.id;
+    squad.replacement.reset();
+    return true;
+}
+std::optional<Replacement> Registry::cancel_replacement(TicketId ticket) {
+    Context context{&squads_, &membership_, &launching_};
+    const auto plan = a2fo_rs_sq_cancel(ops(context), ticket);
+    if (plan.code != 0)
+        return {};
+    auto &pending = squads_.find(plan.id)->second.replacement;
+    auto result = std::move(pending);
+    pending.reset();
+    return result;
+}
+std::vector<Replacement> Registry::cancel_yard(ObjectId yard) {
+    Context context{&squads_, &membership_, &launching_};
+    std::vector<TicketId> tickets(squads_.size());
+    const auto count =
+        a2fo_rs_sq_cancel_yard(ops(context), yard, tickets.data(), tickets.size());
+    std::vector<Replacement> result;
+    result.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto plan = a2fo_rs_sq_cancel(ops(context), tickets[i]);
+        result.push_back(*squads_.find(plan.id)->second.replacement);
     }
+    for (std::size_t i = 0; i < count; ++i)
+        cancel_replacement(tickets[i]);
+    return result;
+}
+Result<Selection> Registry::select(const std::vector<Craft> &selected, TeamId team,
+                                   std::size_t physical_limit) const {
+    std::vector<A2foRsSqCraft> records;
+    records.reserve(selected.size());
+    for (const auto &value : selected)
+        records.push_back({value.id, value.team, {}});
     Selection result;
-    for (const auto id : groups) {
-        const auto& squad = *find(id);
-        if (squad.live_count() > physical_limit - result.members.size())
-            return {{}, "expanded selection exceeds verified native command capacity"};
-        result.tiles.push_back({id, squad.representative(), squad.live_count(),
-                               static_cast<std::uint32_t>(squad.slots.size())});
-        for (const auto& slot : squad.slots) if (slot.member) result.members.push_back(slot.member);
-    }
-    if (ordinary.size() > physical_limit - result.members.size())
+    Context context{&squads_, &membership_, &launching_, &result};
+    const auto code = a2fo_rs_sq_select(ops(context), records.data(), records.size(),
+                                        team, physical_limit);
+    rethrow(context);
+    if (code == 16)
+        return {{}, "stale ownership in squad selection"};
+    if (code == 17)
         return {{}, "expanded selection exceeds verified native command capacity"};
-    for (const auto id : ordinary) {
-        result.tiles.push_back({0, id, 1, 1});
-        result.members.push_back(id);
-    }
     return {std::move(result), {}};
 }
-
 Snapshot Registry::snapshot() const {
     Snapshot result{1, next_squad_, next_ticket_, {}};
-    result.squads.reserve(squads_.size());
-    for (const auto& item : squads_) result.squads.push_back(item.second);
+    std::vector<SquadId> ids(squads_.size());
+    Context context{&squads_, &membership_, &launching_};
+    const auto count = a2fo_rs_sq_snapshot_ids(ops(context), ids.data(), ids.size());
+    result.squads.reserve(count);
+    for (std::size_t i = 0; i < count; ++i)
+        result.squads.push_back(squads_.find(ids[i])->second);
     return result;
 }
-
-bool Registry::restore(const Snapshot& saved, const ClassResolver& resolve, std::string& error) {
-    const auto fail = [&](const std::string& reason) { error = reason; return false; };
-    if (saved.version != 1 || !saved.next_squad || !saved.next_ticket || saved.squads.size() > kMaxSquads)
-        return fail("unsupported or invalid squadron snapshot header");
-    Registry candidate;
-    std::map<TeamId, std::uint32_t> team_counts;
-    std::set<TicketId> tickets;
-    for (const auto& squad : saved.squads) {
-        if (!squad.id || squad.id >= saved.next_squad || candidate.squads_.count(squad.id))
-            return fail("duplicate or invalid saved squad identity");
-        if (++team_counts[squad.team] > kMaxSquadsPerTeam) return fail("saved team exceeds squadron limit");
-        if (const auto problem = validate_definition(squad.definition, resolve); !problem.empty()) return fail(problem);
-        const auto configured = slots_for(squad.definition);
-        if (squad.slots.size() != configured.size() || squad.live_count() == 0)
-            return fail("saved squad has invalid slots or no survivors");
-        for (std::size_t i = 0; i < configured.size(); ++i) {
-            const auto& slot = squad.slots[i];
-            if (slot.row != configured[i].row || slot.ordinal != configured[i].ordinal || slot.odf != configured[i].odf)
-                return fail("saved slot differs from configured composition");
-            if (slot.member && !candidate.membership_.emplace(slot.member, squad.id).second)
-                return fail("saved Craft occupies multiple slots");
+bool Registry::restore(const Snapshot &saved, const ClassResolver &resolve,
+                       std::string &error) {
+    SavedContext context{&saved, &resolve, {}, {}};
+    A2foRsSqSavedOps callbacks{&context, saved_squad, saved_row, saved_slot,
+                               saved_validate};
+    const auto code =
+        a2fo_rs_sq_restore_check(callbacks, saved.version, saved.next_squad,
+                                 saved.next_ticket, saved.squads.size());
+    if (context.exception)
+        std::rethrow_exception(context.exception);
+    if (code != 0) {
+        switch (code) {
+        case 18:
+            error = "unsupported or invalid squadron snapshot header";
+            break;
+        case 19:
+            error = "duplicate or invalid saved squad identity";
+            break;
+        case 20:
+            error = "saved team exceeds squadron limit";
+            break;
+        case 21:
+            error = context.problem;
+            break;
+        case 22:
+            error = "saved squad has invalid slots or no survivors";
+            break;
+        case 23:
+            error = "saved slot differs from configured composition";
+            break;
+        case 24:
+            error = "saved Craft occupies multiple slots";
+            break;
+        case 25:
+            error = "invalid saved replacement reservation";
+            break;
+        case 26:
+            error = "saved repair yard is a squad member";
+            break;
+        default:
+            error = "invalid squadron snapshot";
+            break;
         }
-        if (squad.replacement) {
-            const auto& request = *squad.replacement;
-            if (!squad.definition.reinforce_at_yard || !request.ticket || request.ticket >= saved.next_ticket ||
-                !tickets.insert(request.ticket).second || request.squad != squad.id ||
-                request.team != squad.team || !request.yard || request.slot >= squad.slots.size() ||
-                squad.slots[request.slot].member || request.odf != squad.slots[request.slot].odf)
-                return fail("invalid saved replacement reservation");
-        }
-        candidate.squads_.emplace(squad.id, squad);
+        return false;
     }
-    for (const auto& item : candidate.squads_)
-        if (item.second.replacement && candidate.membership_.count(item.second.replacement->yard))
-            return fail("saved repair yard is a squad member");
-    squads_.swap(candidate.squads_);
-    membership_.swap(candidate.membership_);
+    SquadMap candidate_squads;
+    MemberMap candidate_members;
+    for (const auto &squad : saved.squads) {
+        for (const auto &slot : squad.slots)
+            if (slot.member)
+                candidate_members.emplace(slot.member, squad.id);
+        candidate_squads.emplace(squad.id, squad);
+    }
+    squads_.swap(candidate_squads);
+    membership_.swap(candidate_members);
     launching_.clear();
     next_squad_ = saved.next_squad;
     next_ticket_ = saved.next_ticket;
     error.clear();
     return true;
 }
-
 } // namespace a2fo::squadrons

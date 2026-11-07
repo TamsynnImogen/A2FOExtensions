@@ -7,6 +7,8 @@
 
 #include "../../sdk/include/a2fo_module_api.h"
 #include "../../sdk/include/a2fo_supported_armada.hpp"
+#include "../../rust/stage9_rgb_runtime_ffi.h"
+#include "../../rust/stage10_rgb_completion_ffi.h"
 
 #include <windows.h>
 
@@ -16,19 +18,18 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <limits>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace {
 
 constexpr const char* kModuleName = "A2FORGBTextures";
-constexpr const char* kTexturesPrefix = "textures\\";
-constexpr const char* kRgbPrefix = "rgb\\";
-constexpr const char* kIndex8Prefix = "index8\\";
-constexpr const char* kCompressedPrefix = "compressed\\";
 
 // Armada II 1.1 locations. These are validated before the IAT pointer is
 // changed; docs/addresses.md is the human-readable register for them.
@@ -89,12 +90,10 @@ enum class RootTgaRoute {
 struct RootTgaCandidate {
     std::string physical;
     // Armada 1 stores manually authored mip levels as name_1.tga,
-    // name_2.tga, and so on. Fleet Operations' flattened root lookup can
-    // request those names while retaining the base texture dimensions. When
-    // a decreasing, same-aspect and same-format mip chain is present, serve
-    // the base image to that flattened request so the native row decoder
-    // receives enough pixels. Direct RGB/Index8/Compressed requests remain
-    // unchanged.
+    // name_2.tga, and so on. Keep the validated base relationship so inherited
+    // cross-root mip chains can be checked/synthesized safely, but preserve the
+    // authored mip file itself for ordinary same-root requests. This avoids
+    // substituting the full-resolution base image during distant LOD rendering.
     std::string legacy_mip_base;
     RootTgaRoute route = RootTgaRoute::none;
     // Extension roots are enumerated from lowest to highest precedence. Keep
@@ -165,33 +164,30 @@ bool readable_range(const void* pointer, std::size_t size) {
 }
 
 std::string join_path(const std::string& left, const std::string& right) {
-    if (left.empty()) return right;
-    if (right.empty()) return left;
-    if (left.back() == '\\' || left.back() == '/') return left + right;
-    return left + "\\" + right;
+    switch (a2fo_rs_stage9_rgb_join_policy(
+            reinterpret_cast<const std::uint8_t*>(left.data()),
+            left.size(), right.size())) {
+    case 0: return right;
+    case 1: return left;
+    case 2: return left + right;
+    default: return left + "\\" + right;
+    }
+}
+
+std::uint8_t native_ascii_lower(std::uint8_t value) noexcept {
+    return static_cast<std::uint8_t>(std::tolower(value));
 }
 
 std::string lower_normalized(std::string value) {
-    std::transform(
-        value.begin(), value.end(), value.begin(), [](unsigned char ch) {
-            if (ch == '/') return '\\';
-            return static_cast<char>(std::tolower(ch));
-        });
+    a2fo_rs_stage9_rgb_normalize(
+        reinterpret_cast<std::uint8_t*>(value.data()), value.size(),
+        &native_ascii_lower);
     return value;
-}
-
-std::uint16_t little_u16(const std::uint8_t* bytes) {
-    return static_cast<std::uint16_t>(bytes[0]) |
-           (static_cast<std::uint16_t>(bytes[1]) << 8);
 }
 
 bool native_true_colour_tga_header(const std::uint8_t* source,
                                    std::size_t size) {
-    if (!source || size < 18) return false;
-    const std::uint16_t width = little_u16(source + 12);
-    const std::uint16_t height = little_u16(source + 14);
-    return width != 0 && height != 0 && source[1] == 0 && source[2] == 2 &&
-           (source[16] == 24 || source[16] == 32);
+    return a2fo_rs_stage9_rgb_native_tga_header(source, size);
 }
 
 enum class TgaPreparation {
@@ -200,214 +196,39 @@ enum class TgaPreparation {
     unsupported,
 };
 
+struct TgaOutputContext {
+    std::vector<std::uint8_t>* output;
+    std::exception_ptr failure;
+};
+
+bool tga_emit(void* opaque, std::uint32_t operation,
+              const std::uint8_t* bytes, std::size_t length,
+              std::size_t capacity) noexcept {
+    auto& context = *static_cast<TgaOutputContext*>(opaque);
+    try {
+        if (operation == 0) {
+            context.output->assign(bytes, bytes + length);
+            context.output->reserve(capacity);
+        } else {
+            context.output->insert(context.output->end(), bytes,
+                                   bytes + length);
+        }
+        return true;
+    } catch (...) {
+        context.failure = std::current_exception();
+        return false;
+    }
+}
+
 TgaPreparation prepare_tga_for_rgb_loader(
     const std::vector<std::uint8_t>& source,
     std::vector<std::uint8_t>& output) {
     output.clear();
-    if (source.size() < 18) return TgaPreparation::unsupported;
-
-    if (native_true_colour_tga_header(source.data(), source.size())) {
-        return TgaPreparation::compatible;
-    }
-
-    const std::uint8_t id_length = source[0];
-    const std::uint8_t color_map_type = source[1];
-    const std::uint8_t image_type = source[2];
-    const std::uint16_t color_map_first = little_u16(source.data() + 3);
-    const std::uint16_t color_map_length = little_u16(source.data() + 5);
-    const std::uint8_t color_map_depth = source[7];
-    const std::uint16_t width = little_u16(source.data() + 12);
-    const std::uint16_t height = little_u16(source.data() + 14);
-    const std::uint8_t pixel_depth = source[16];
-
-    if (width == 0 || height == 0) return TgaPreparation::unsupported;
-
-    enum class PixelKind { color_mapped, true_color, grayscale };
-    PixelKind kind{};
-    bool rle = false;
-    switch (image_type) {
-    case 1:
-        kind = PixelKind::color_mapped;
-        break;
-    case 2:
-        kind = PixelKind::true_color;
-        break;
-    case 3:
-        kind = PixelKind::grayscale;
-        break;
-    case 9:
-        kind = PixelKind::color_mapped;
-        rle = true;
-        break;
-    case 10:
-        kind = PixelKind::true_color;
-        rle = true;
-        break;
-    case 11:
-        kind = PixelKind::grayscale;
-        rle = true;
-        break;
-    default:
-        return TgaPreparation::unsupported;
-    }
-
-    std::size_t cursor = 18u + id_length;
-    if (cursor > source.size()) return TgaPreparation::unsupported;
-
-    std::size_t palette_offset = 0;
-    std::size_t palette_entry_bytes = 0;
-    if (kind == PixelKind::color_mapped) {
-        if (color_map_type != 1 || color_map_length == 0 ||
-            (pixel_depth != 8 && pixel_depth != 16) ||
-            (color_map_depth != 15 && color_map_depth != 16 &&
-             color_map_depth != 24 && color_map_depth != 32)) {
-            return TgaPreparation::unsupported;
-        }
-        palette_entry_bytes = (color_map_depth + 7u) / 8u;
-        const std::size_t palette_size =
-            static_cast<std::size_t>(color_map_length) * palette_entry_bytes;
-        if (palette_size > source.size() - cursor) {
-            return TgaPreparation::unsupported;
-        }
-        palette_offset = cursor;
-        cursor += palette_size;
-    } else if (color_map_type != 0) {
-        return TgaPreparation::unsupported;
-    }
-
-    std::size_t input_pixel_bytes = 0;
-    std::size_t output_pixel_bytes = 3;
-    if (kind == PixelKind::color_mapped) {
-        input_pixel_bytes = pixel_depth / 8u;
-        output_pixel_bytes = color_map_depth == 32 ? 4u : 3u;
-    } else if (kind == PixelKind::true_color) {
-        if (pixel_depth != 16 && pixel_depth != 24 && pixel_depth != 32) {
-            return TgaPreparation::unsupported;
-        }
-        input_pixel_bytes = (pixel_depth + 7u) / 8u;
-        output_pixel_bytes = pixel_depth == 32 ? 4u : 3u;
-    } else {
-        if (pixel_depth != 8 && pixel_depth != 16) {
-            return TgaPreparation::unsupported;
-        }
-        input_pixel_bytes = pixel_depth / 8u;
-        output_pixel_bytes = pixel_depth == 16 ? 4u : 3u;
-    }
-
-    const std::size_t pixel_count =
-        static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
-    constexpr std::size_t kMaximumPreparedTgaSize = 256u * 1024u * 1024u;
-    if (pixel_count >
-        (kMaximumPreparedTgaSize - 18u) / output_pixel_bytes) {
-        return TgaPreparation::unsupported;
-    }
-
-    output.assign(18u, 0);
-    output[2] = 2;  // Uncompressed true-colour TGA.
-    std::memcpy(output.data() + 8, source.data() + 8, 8);
-    output[16] = static_cast<std::uint8_t>(output_pixel_bytes * 8u);
-    output[17] = static_cast<std::uint8_t>(
-        (source[17] & 0x30u) | (output_pixel_bytes == 4u ? 8u : 0u));
-    output.reserve(18u + pixel_count * output_pixel_bytes);
-
-    const auto expand_5_bit = [](std::uint16_t value) -> std::uint8_t {
-        value &= 0x1fu;
-        return static_cast<std::uint8_t>((value << 3u) | (value >> 2u));
-    };
-    const auto read_pixel = [&](std::size_t& input,
-                                std::array<std::uint8_t, 4>& pixel) -> bool {
-        if (input > source.size() ||
-            input_pixel_bytes > source.size() - input) {
-            return false;
-        }
-        pixel = {0, 0, 0, 255};
-        if (kind == PixelKind::color_mapped) {
-            std::uint32_t palette_index = source[input];
-            if (input_pixel_bytes == 2) {
-                palette_index |= static_cast<std::uint32_t>(
-                    source[input + 1]) << 8u;
-            }
-            input += input_pixel_bytes;
-            if (palette_index < color_map_first ||
-                palette_index >=
-                    static_cast<std::uint32_t>(color_map_first) +
-                        color_map_length) {
-                return false;
-            }
-            const std::size_t entry = palette_offset +
-                (palette_index - color_map_first) * palette_entry_bytes;
-            if (color_map_depth == 24 || color_map_depth == 32) {
-                pixel[0] = source[entry];
-                pixel[1] = source[entry + 1];
-                pixel[2] = source[entry + 2];
-                if (color_map_depth == 32) pixel[3] = source[entry + 3];
-            } else {
-                const std::uint16_t packed = little_u16(source.data() + entry);
-                pixel[0] = expand_5_bit(packed);
-                pixel[1] = expand_5_bit(packed >> 5u);
-                pixel[2] = expand_5_bit(packed >> 10u);
-            }
-            return true;
-        }
-        if (kind == PixelKind::true_color) {
-            if (pixel_depth == 16) {
-                const std::uint16_t packed = little_u16(source.data() + input);
-                pixel[0] = expand_5_bit(packed);
-                pixel[1] = expand_5_bit(packed >> 5u);
-                pixel[2] = expand_5_bit(packed >> 10u);
-            } else {
-                pixel[0] = source[input];
-                pixel[1] = source[input + 1];
-                pixel[2] = source[input + 2];
-                if (pixel_depth == 32) pixel[3] = source[input + 3];
-            }
-            input += input_pixel_bytes;
-            return true;
-        }
-        pixel[0] = pixel[1] = pixel[2] = source[input];
-        if (pixel_depth == 16) pixel[3] = source[input + 1];
-        input += input_pixel_bytes;
-        return true;
-    };
-    const auto append_pixel = [&](const std::array<std::uint8_t, 4>& pixel) {
-        output.insert(output.end(), pixel.begin(),
-                      pixel.begin() + output_pixel_bytes);
-    };
-
-    std::size_t emitted = 0;
-    while (emitted < pixel_count) {
-        std::size_t packet_count = pixel_count - emitted;
-        bool repeated = false;
-        if (rle) {
-            if (cursor >= source.size()) return TgaPreparation::unsupported;
-            const std::uint8_t packet = source[cursor++];
-            packet_count = (packet & 0x7fu) + 1u;
-            repeated = (packet & 0x80u) != 0;
-            if (packet_count > pixel_count - emitted) {
-                return TgaPreparation::unsupported;
-            }
-        }
-        if (repeated) {
-            std::array<std::uint8_t, 4> pixel{};
-            if (!read_pixel(cursor, pixel)) return TgaPreparation::unsupported;
-            for (std::size_t index = 0; index < packet_count; ++index) {
-                append_pixel(pixel);
-            }
-        } else {
-            for (std::size_t index = 0; index < packet_count; ++index) {
-                std::array<std::uint8_t, 4> pixel{};
-                if (!read_pixel(cursor, pixel)) {
-                    return TgaPreparation::unsupported;
-                }
-                append_pixel(pixel);
-            }
-        }
-        emitted += packet_count;
-        if (!rle) break;
-    }
-    return emitted == pixel_count
-        ? TgaPreparation::converted
-        : TgaPreparation::unsupported;
+    TgaOutputContext context{&output, {}};
+    const auto result = a2fo_rs_stage9_rgb_prepare_tga(
+        source.data(), source.size(), &tga_emit, &context);
+    if (context.failure) std::rethrow_exception(context.failure);
+    return static_cast<TgaPreparation>(result);
 }
 
 bool read_binary_file(const std::string& path,
@@ -452,14 +273,7 @@ bool read_binary_prefix(const std::string& path, std::uint8_t* bytes,
     return ok;
 }
 
-struct TgaHeaderSummary {
-    std::uint16_t width = 0;
-    std::uint16_t height = 0;
-    std::uint8_t color_map_type = 0;
-    std::uint8_t image_type = 0;
-    std::uint8_t color_map_depth = 0;
-    std::uint8_t pixel_depth = 0;
-};
+using TgaHeaderSummary = A2foRgbTgaHeader;
 
 bool tga_filename(const std::string& filename);
 
@@ -467,51 +281,62 @@ bool read_tga_header_summary(const std::string& path,
                              TgaHeaderSummary& summary) {
     std::array<std::uint8_t, 18> header{};
     if (!read_binary_prefix(path, header.data(), header.size())) return false;
-    summary.width = little_u16(header.data() + 12);
-    summary.height = little_u16(header.data() + 14);
-    summary.color_map_type = header[1];
-    summary.image_type = header[2];
-    summary.color_map_depth = header[7];
-    summary.pixel_depth = header[16];
-    return summary.width != 0 && summary.height != 0 &&
-           summary.pixel_depth != 0;
+    return a2fo_rs_stage9_rgb_header_summary(
+        header.data(), header.size(), &summary);
 }
 
 bool same_tga_pixel_format(const TgaHeaderSummary& left,
                            const TgaHeaderSummary& right) {
-    return left.color_map_type == right.color_map_type &&
-           left.image_type == right.image_type &&
-           left.color_map_depth == right.color_map_depth &&
-           left.pixel_depth == right.pixel_depth;
+    return a2fo_rs_stage9_rgb_same_pixel_format(&left, &right);
 }
 
 bool parse_manual_mip_key(const std::string& key, std::string& stem,
                           std::uint32_t& level) {
     stem.clear();
     level = 0;
-    if (!tga_filename(key) || key.size() <= 6) return false;
-
-    const std::size_t extension = key.size() - 4;
-    const std::size_t separator = key.rfind('_', extension - 1);
-    const std::size_t slash = key.find_last_of("\\/");
-    if (separator == std::string::npos ||
-        (slash != std::string::npos && separator <= slash) ||
-        separator + 1 == extension) {
-        return false;
-    }
-
-    std::uint32_t parsed = 0;
-    for (std::size_t index = separator + 1; index < extension; ++index) {
-        const unsigned char byte =
-            static_cast<unsigned char>(key[index]);
-        if (byte < '0' || byte > '9') return false;
-        parsed = parsed * 10u + static_cast<std::uint32_t>(byte - '0');
-        if (parsed > 8u) return false;
-    }
-    if (parsed == 0) return false;
-    stem.assign(key, 0, separator);
-    level = parsed;
+    A2foRgbMip mip{};
+    if (!a2fo_rs_stage9_rgb_manual_mip(
+            reinterpret_cast<const std::uint8_t*>(key.data()),
+            key.size(), &mip)) return false;
+    stem.assign(key, 0, mip.stem_length);
+    level = mip.level;
     return true;
+}
+
+struct MipChainContext {
+    MipChainContext(const std::unordered_map<std::string, std::string>& entries,
+                    const std::string& requested_stem,
+                    const TgaHeaderSummary& original)
+        : files(entries), stem(requested_stem), base(original),
+          previous(original) {}
+    const std::unordered_map<std::string, std::string>& files;
+    const std::string& stem;
+    TgaHeaderSummary base;
+    TgaHeaderSummary previous;
+    std::exception_ptr failure;
+};
+
+std::uint32_t rgb_mip_chain_step(void* opaque, std::uint32_t,
+                                 std::size_t current) noexcept {
+    auto& context = *static_cast<MipChainContext*>(opaque);
+    try {
+        const std::string current_key = context.stem + "_" +
+            std::to_string(current) + ".tga";
+        const auto mip = context.files.find(current_key);
+        if (mip == context.files.end()) return 0;
+        TgaHeaderSummary header{};
+        if (!read_tga_header_summary(mip->second, header) ||
+            !a2fo_rs_stage9_rgb_mip_step(
+                context.base.width, context.base.height,
+                context.previous.width, context.previous.height,
+                header.width, header.height,
+                same_tga_pixel_format(context.base, header))) return 0;
+        context.previous = header;
+        return 1;
+    } catch (...) {
+        context.failure = std::current_exception();
+        return UINT32_MAX;
+    }
 }
 
 std::string validated_manual_mip_base(
@@ -520,42 +345,16 @@ std::string validated_manual_mip_base(
     std::string stem;
     std::uint32_t level = 0;
     if (!parse_manual_mip_key(key, stem, level)) return {};
-
     const auto base = files.find(stem + ".tga");
     if (base == files.end()) return {};
-
     TgaHeaderSummary base_header{};
     if (!read_tga_header_summary(base->second, base_header)) return {};
-
-    // Require the complete 1..N chain, a matching aspect ratio, strictly
-    // decreasing dimensions, and an identical TGA pixel format. Legacy mods
-    // did not consistently use exact half-size levels, so the flattened route
-    // normalizes any smaller same-aspect chain. Same-sized animation frames
-    // such as explosion_1.tga remain on their original files.
-    TgaHeaderSummary previous_header = base_header;
-    for (std::uint32_t current = 1; current <= level; ++current) {
-        const std::string current_key =
-            stem + "_" + std::to_string(current) + ".tga";
-        const auto mip = files.find(current_key);
-        if (mip == files.end()) return {};
-
-        TgaHeaderSummary mip_header{};
-        if (!read_tga_header_summary(mip->second, mip_header) ||
-            !same_tga_pixel_format(base_header, mip_header)) {
-            return {};
-        }
-        const bool same_aspect =
-            static_cast<std::uint64_t>(mip_header.width) *
-                base_header.height ==
-            static_cast<std::uint64_t>(base_header.width) *
-                mip_header.height;
-        if (!same_aspect || mip_header.width >= previous_header.width ||
-            mip_header.height >= previous_header.height) {
-            return {};
-        }
-        previous_header = mip_header;
-    }
-    return base->second;
+    // Preserve the complete, same-format, decreasing-aspect chain contract.
+    MipChainContext context{files, stem, base_header};
+    const bool valid = a2fo_rs_stage9_rgb_validate_mip_chain(
+        level, &rgb_mip_chain_step, &context);
+    if (context.failure) std::rethrow_exception(context.failure);
+    return valid ? base->second : std::string{};
 }
 
 class ConversionLockGuard {
@@ -618,83 +417,161 @@ bool write_prepared_tga(const std::vector<std::uint8_t>& bytes,
     return true;
 }
 
+struct TgaResizeContext {
+    std::vector<std::uint8_t>* output;
+    std::exception_ptr failure;
+};
+
+std::uint8_t* tga_resize_allocate(void* opaque, std::size_t size) noexcept {
+    auto& context = *static_cast<TgaResizeContext*>(opaque);
+    try {
+        context.output->assign(size, 0);
+        return context.output->data();
+    } catch (...) {
+        context.failure = std::current_exception();
+        return nullptr;
+    }
+}
+
 bool resize_true_colour_tga(const std::vector<std::uint8_t>& source,
                             std::uint16_t target_width,
                             std::uint16_t target_height,
                             std::vector<std::uint8_t>& output) {
     output.clear();
-    if (source.size() < 18 || target_width == 0 || target_height == 0 ||
-        !native_true_colour_tga_header(source.data(), source.size())) {
-        return false;
-    }
+    TgaResizeContext context{&output, {}};
+    const bool result = a2fo_rs_stage9_rgb_resize_tga(
+        source.data(), source.size(), target_width, target_height,
+        &tga_resize_allocate, &context);
+    if (context.failure) std::rethrow_exception(context.failure);
+    return result;
+}
 
-    const std::uint16_t source_width = little_u16(source.data() + 12);
-    const std::uint16_t source_height = little_u16(source.data() + 14);
-    const std::size_t pixel_bytes = source[16] / 8u;
-    const std::size_t pixel_offset = 18u + source[0];
-    if (target_width > source_width || target_height > source_height ||
-        source_width % target_width != 0 ||
-        source_height % target_height != 0 ||
-        pixel_bytes < 3u || pixel_bytes > 4u) {
-        return false;
-    }
+struct TgaWorkflowContext {
+    TgaWorkflowContext(const std::string& source_value,
+                       std::string& prepared_value,
+                       const std::string& cache_key_value,
+                       std::uint16_t width = 0,
+                       std::uint16_t height = 0,
+                       bool resized = false)
+        : source(source_value), prepared(prepared_value),
+          cache_key(cache_key_value), target_width(width),
+          target_height(height), resizing(resized) {}
 
-    const std::size_t source_pixel_count =
-        static_cast<std::size_t>(source_width) * source_height;
-    if (pixel_offset > source.size() ||
-        source_pixel_count > (source.size() - pixel_offset) / pixel_bytes) {
-        return false;
-    }
+    const std::string& source;
+    std::string& prepared;
+    const std::string& cache_key;
+    std::uint16_t target_width = 0;
+    std::uint16_t target_height = 0;
+    bool resizing = false;
+    std::vector<std::uint8_t> input;
+    std::vector<std::uint8_t> converted;
+    std::vector<std::uint8_t> resized;
+    TgaPreparation result = TgaPreparation::unsupported;
+    std::exception_ptr failure;
+};
 
-    constexpr std::size_t kMaximumPreparedTgaSize = 256u * 1024u * 1024u;
-    const std::size_t target_pixel_count =
-        static_cast<std::size_t>(target_width) * target_height;
-    if (target_pixel_count >
-        (kMaximumPreparedTgaSize - 18u) / pixel_bytes) {
-        return false;
-    }
-
-    output.assign(18u + target_pixel_count * pixel_bytes, 0);
-    output[2] = 2;
-    // Preserve the image origin and orientation while dropping any image-ID
-    // field. Pixel rows remain in the source's stored order.
-    std::memcpy(output.data() + 8, source.data() + 8, 4);
-    output[12] = static_cast<std::uint8_t>(target_width & 0xffu);
-    output[13] = static_cast<std::uint8_t>(target_width >> 8u);
-    output[14] = static_cast<std::uint8_t>(target_height & 0xffu);
-    output[15] = static_cast<std::uint8_t>(target_height >> 8u);
-    output[16] = source[16];
-    output[17] = source[17];
-
-    const std::size_t horizontal_scale = source_width / target_width;
-    const std::size_t vertical_scale = source_height / target_height;
-    const std::uint64_t sample_count =
-        static_cast<std::uint64_t>(horizontal_scale) * vertical_scale;
-    for (std::size_t y = 0; y < target_height; ++y) {
-        for (std::size_t x = 0; x < target_width; ++x) {
-            const std::size_t destination =
-                18u + (y * target_width + x) * pixel_bytes;
-            for (std::size_t channel = 0; channel < pixel_bytes; ++channel) {
-                std::uint64_t total = 0;
-                for (std::size_t source_y = 0;
-                     source_y < vertical_scale; ++source_y) {
-                    const std::size_t row =
-                        y * vertical_scale + source_y;
-                    for (std::size_t source_x = 0;
-                         source_x < horizontal_scale; ++source_x) {
-                        const std::size_t column =
-                            x * horizontal_scale + source_x;
-                        const std::size_t input = pixel_offset +
-                            (row * source_width + column) * pixel_bytes;
-                        total += source[input + channel];
-                    }
-                }
-                output[destination + channel] = static_cast<std::uint8_t>(
-                    (total + sample_count / 2u) / sample_count);
+std::uint32_t tga_workflow_step(void* opaque, std::uint32_t operation,
+                                std::size_t) noexcept {
+    auto& context = *static_cast<TgaWorkflowContext*>(opaque);
+    try {
+        if (context.resizing) {
+            switch (operation) {
+            case 0: {
+                const auto cached = g_prepared_texture_files.find(
+                    context.cache_key);
+                if (cached == g_prepared_texture_files.end()) return 0;
+                context.prepared = cached->second;
+                return 1;
+            }
+            case 1:
+                return g_unusable_texture_files.count(context.cache_key) != 0;
+            case 2:
+                return read_binary_file(context.source, context.input);
+            case 3:
+                context.result = prepare_tga_for_rgb_loader(
+                    context.input, context.converted);
+                return static_cast<std::uint32_t>(context.result);
+            case 4: {
+                const auto* pixels = context.result == TgaPreparation::compatible
+                    ? &context.input
+                    : context.result == TgaPreparation::converted
+                        ? &context.converted : nullptr;
+                return pixels && resize_true_colour_tga(
+                    *pixels, context.target_width, context.target_height,
+                    context.resized) &&
+                    write_prepared_tga(context.resized, context.prepared);
+            }
+            case 5:
+                g_prepared_texture_files[context.cache_key] = context.prepared;
+                g_generated_texture_files.push_back(context.prepared);
+                return 1;
+            case 6:
+                g_unusable_texture_files.insert(context.cache_key);
+                return 1;
+            default:
+                return 0;
             }
         }
+        switch (operation) {
+        case 0: {
+            const auto cached = g_prepared_texture_files.find(context.cache_key);
+            if (cached == g_prepared_texture_files.end()) return 0;
+            context.prepared = cached->second;
+            return 1;
+        }
+        case 1:
+            if (g_compatible_texture_files.count(context.cache_key) == 0)
+                return 0;
+            context.prepared = context.source;
+            return 1;
+        case 2:
+            return g_unusable_texture_files.count(context.cache_key) != 0;
+        case 3: {
+            std::array<std::uint8_t, 18> header{};
+            if (!read_binary_prefix(context.source, header.data(), header.size()) ||
+                !native_true_colour_tga_header(header.data(), header.size()))
+                return 0;
+            g_compatible_texture_files.insert(context.cache_key);
+            context.prepared = context.source;
+            return 1;
+        }
+        case 4: {
+            const bool read = read_binary_file(context.source, context.input);
+            context.result = read
+                ? prepare_tga_for_rgb_loader(context.input, context.converted)
+                : TgaPreparation::unsupported;
+            return static_cast<std::uint32_t>(context.result);
+        }
+        case 5:
+            g_compatible_texture_files.insert(context.cache_key);
+            context.prepared = context.source;
+            return 1;
+        case 6:
+            return write_prepared_tga(context.converted, context.prepared);
+        case 7: {
+            g_prepared_texture_files[context.cache_key] = context.prepared;
+            g_generated_texture_files.push_back(context.prepared);
+            const LONG count = InterlockedIncrement(&g_conversion_log_count);
+            if (count <= 16) {
+                log_line("Prepared legacy TGA for the true-colour loader: " +
+                         context.source + " -> " + context.prepared);
+            } else if (count == 17) {
+                log_line("Further legacy TGA preparation logs suppressed");
+            }
+            return 1;
+        }
+        case 8:
+            g_unusable_texture_files.insert(context.cache_key);
+            log_line("Unsupported legacy TGA cannot use the true-colour fallback: " +
+                     context.source);
+            return 1;
+        default:
+            return 0;
+        }
+    } catch (...) {
+        context.failure = std::current_exception();
+        return UINT32_MAX;
     }
-    return true;
 }
 
 bool prepare_resized_legacy_tga(const std::string& source,
@@ -704,46 +581,15 @@ bool prepare_resized_legacy_tga(const std::string& source,
     prepared.clear();
     ConversionLockGuard lock;
     if (!lock.locked()) return false;
-
     const std::string cache_key = lower_normalized(source) + "|mip=" +
         std::to_string(target_width) + "x" +
         std::to_string(target_height);
-    const auto cached = g_prepared_texture_files.find(cache_key);
-    if (cached != g_prepared_texture_files.end()) {
-        prepared = cached->second;
-        return true;
-    }
-    if (g_unusable_texture_files.find(cache_key) !=
-        g_unusable_texture_files.end()) {
-        return false;
-    }
-
-    std::vector<std::uint8_t> input;
-    std::vector<std::uint8_t> converted;
-    std::vector<std::uint8_t> resized;
-    if (!read_binary_file(source, input)) {
-        g_unusable_texture_files.insert(cache_key);
-        return false;
-    }
-    const TgaPreparation result =
-        prepare_tga_for_rgb_loader(input, converted);
-    const std::vector<std::uint8_t>* pixels = nullptr;
-    if (result == TgaPreparation::compatible) {
-        pixels = &input;
-    } else if (result == TgaPreparation::converted) {
-        pixels = &converted;
-    }
-    if (!pixels ||
-        !resize_true_colour_tga(*pixels, target_width, target_height,
-                                resized) ||
-        !write_prepared_tga(resized, prepared)) {
-        g_unusable_texture_files.insert(cache_key);
-        return false;
-    }
-
-    g_prepared_texture_files[cache_key] = prepared;
-    g_generated_texture_files.push_back(prepared);
-    return true;
+    TgaWorkflowContext context{source, prepared, cache_key,
+                               target_width, target_height, true};
+    const bool result = a2fo_rs_stage9_rgb_resize_workflow(
+        &tga_workflow_step, &context);
+    if (context.failure) std::rethrow_exception(context.failure);
+    return result;
 }
 
 bool prepare_legacy_tga(const std::string& source,
@@ -752,96 +598,146 @@ bool prepare_legacy_tga(const std::string& source,
     ConversionLockGuard lock;
     if (!lock.locked()) return false;
     const std::string cache_key = lower_normalized(source);
-    const auto cached = g_prepared_texture_files.find(cache_key);
-    if (cached != g_prepared_texture_files.end()) {
-        prepared = cached->second;
-        return true;
-    }
-    if (g_compatible_texture_files.find(cache_key) !=
-        g_compatible_texture_files.end()) {
-        prepared = source;
-        return true;
-    }
-    if (g_unusable_texture_files.find(cache_key) !=
-        g_unusable_texture_files.end()) {
-        return false;
-    }
-
-    std::array<std::uint8_t, 18> header{};
-    if (read_binary_prefix(source, header.data(), header.size()) &&
-        native_true_colour_tga_header(header.data(), header.size())) {
-        g_compatible_texture_files.insert(cache_key);
-        prepared = source;
-        return true;
-    }
-
-    std::vector<std::uint8_t> input;
-    std::vector<std::uint8_t> output;
-    const bool read = read_binary_file(source, input);
-    const TgaPreparation result = read
-        ? prepare_tga_for_rgb_loader(input, output)
-        : TgaPreparation::unsupported;
-    if (result == TgaPreparation::compatible) {
-        g_compatible_texture_files.insert(cache_key);
-        prepared = source;
-        return true;
-    }
-    if (result == TgaPreparation::converted &&
-        write_prepared_tga(output, prepared)) {
-        g_prepared_texture_files[cache_key] = prepared;
-        g_generated_texture_files.push_back(prepared);
-        const LONG count = InterlockedIncrement(&g_conversion_log_count);
-        if (count <= 16) {
-            log_line("Prepared legacy TGA for the true-colour loader: " +
-                     source + " -> " + prepared);
-        } else if (count == 17) {
-            log_line("Further legacy TGA preparation logs suppressed");
-        }
-        return true;
-    }
-    g_unusable_texture_files.insert(cache_key);
-    log_line("Unsupported legacy TGA cannot use the true-colour fallback: " +
-             source);
-    return false;
+    TgaWorkflowContext context{source, prepared, cache_key};
+    const bool result = a2fo_rs_stage9_rgb_prepare_workflow(
+        &tga_workflow_step, &context);
+    if (context.failure) std::rethrow_exception(context.failure);
+    return result;
 }
 
 bool ascii_equal(const std::string& left, const char* right) {
-    if (!right || left.size() != std::strlen(right)) return false;
-    for (std::size_t index = 0; index < left.size(); ++index) {
-        if (std::tolower(static_cast<unsigned char>(left[index])) !=
-            std::tolower(static_cast<unsigned char>(right[index]))) {
-            return false;
-        }
-    }
-    return true;
+    if (!right) return false;
+    return a2fo_rs_stage9_rgb_ascii_equal(
+        reinterpret_cast<const std::uint8_t*>(left.data()), left.size(),
+        reinterpret_cast<const std::uint8_t*>(right), std::strlen(right),
+        &native_ascii_lower);
 }
 
 bool is_legacy_texture_directory(const std::string& name) {
-    return ascii_equal(name, "RGB") || ascii_equal(name, "Index8") ||
-           ascii_equal(name, "Compressed");
+    return a2fo_rs_stage9_rgb_legacy_directory(
+        reinterpret_cast<const std::uint8_t*>(name.data()), name.size(),
+        &native_ascii_lower);
 }
 
 bool tga_filename(const std::string& filename);
 bool dds_filename(const std::string& filename);
 
+struct ChildDirectoryContext {
+    ChildDirectoryContext(const std::string& directory,
+                          const char* requested)
+        : parent(directory), wanted(requested) {}
+
+    const std::string& parent;
+    const char* wanted;
+    std::string result;
+    WIN32_FIND_DATAA data{};
+    HANDLE search = INVALID_HANDLE_VALUE;
+    std::exception_ptr failure;
+};
+
+std::uint32_t rgb_find_child_step(void* opaque, std::uint32_t operation,
+                                  std::size_t) noexcept {
+    auto& context = *static_cast<ChildDirectoryContext*>(opaque);
+    try {
+        if (operation == 0) {
+            context.search = FindFirstFileA(
+                join_path(context.parent, "*").c_str(), &context.data);
+            return context.search != INVALID_HANDLE_VALUE;
+        }
+        if (operation == 1) {
+            const std::string name = context.data.cFileName;
+            if ((context.data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
+                (context.data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 ||
+                name == "." || name == ".." ||
+                !ascii_equal(name, context.wanted)) return 0;
+            context.result = join_path(context.parent, name);
+            return 1;
+        }
+        if (operation == 2)
+            return FindNextFileA(context.search, &context.data) != 0;
+        if (operation == 3) {
+            FindClose(context.search);
+            return 1;
+        }
+        return 0;
+    } catch (...) {
+        context.failure = std::current_exception();
+        return UINT32_MAX;
+    }
+}
+
 std::string find_child_directory(const std::string& parent,
                                  const char* wanted) {
-    WIN32_FIND_DATAA data{};
-    HANDLE search = FindFirstFileA(join_path(parent, "*").c_str(), &data);
-    if (search == INVALID_HANDLE_VALUE) return {};
+    ChildDirectoryContext context{parent, wanted};
+    a2fo_rs_stage9_rgb_find_child(&rgb_find_child_step, &context);
+    if (context.failure) std::rethrow_exception(context.failure);
+    return std::move(context.result);
+}
 
-    std::string result;
-    do {
-        const std::string name = data.cFileName;
-        if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
-            (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0 &&
-            name != "." && name != ".." && ascii_equal(name, wanted)) {
-            result = join_path(parent, name);
-            break;
+struct TextureScanFrame {
+    std::string directory;
+    std::string relative;
+    std::string physical;
+    std::string child_relative;
+    bool exclude_top_level_legacy = false;
+    WIN32_FIND_DATAA data{};
+    HANDLE search = INVALID_HANDLE_VALUE;
+};
+
+struct TextureScanContext {
+    std::array<TextureScanFrame, 34> frames;
+    std::unordered_map<std::string, std::string>& files;
+    std::exception_ptr failure;
+};
+
+std::uint32_t rgb_scan_step(void* opaque, std::uint32_t operation,
+                            std::size_t depth) noexcept {
+    auto& context = *static_cast<TextureScanContext*>(opaque);
+    auto& frame = context.frames[depth];
+    try {
+        if (operation == 0) {
+            frame.search = FindFirstFileA(
+                join_path(frame.directory, "*").c_str(), &frame.data);
+            return frame.search != INVALID_HANDLE_VALUE;
         }
-    } while (FindNextFileA(search, &data));
-    FindClose(search);
-    return result;
+        if (operation == 1) {
+            const std::string name = frame.data.cFileName;
+            if (name == "." || name == ".." ||
+                (frame.data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+                return 0;
+            frame.physical = join_path(frame.directory, name);
+            frame.child_relative = frame.relative.empty()
+                ? name : join_path(frame.relative, name);
+            if ((frame.data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+                if (frame.exclude_top_level_legacy && frame.relative.empty() &&
+                    is_legacy_texture_directory(name)) return 0;
+                return 1;
+            }
+            return 2;
+        }
+        if (operation == 2) {
+            auto& child = context.frames[depth + 1];
+            child.directory = frame.physical;
+            child.relative = frame.child_relative;
+            child.exclude_top_level_legacy = false;
+            return 1;
+        }
+        if (operation == 3)
+            return FindNextFileA(frame.search, &frame.data) != 0;
+        if (operation == 4) {
+            FindClose(frame.search);
+            return 1;
+        }
+        if (operation == 5) {
+            context.files[lower_normalized(frame.child_relative)] =
+                frame.physical;
+            return 1;
+        }
+        return 0;
+    } catch (...) {
+        context.failure = std::current_exception();
+        return UINT32_MAX;
+    }
 }
 
 void scan_texture_directory(const std::string& directory,
@@ -850,134 +746,218 @@ void scan_texture_directory(const std::string& directory,
                             bool exclude_top_level_legacy,
                             std::unordered_map<std::string, std::string>& files) {
     if (depth > 32) return;
-
-    WIN32_FIND_DATAA data{};
-    HANDLE search = FindFirstFileA(join_path(directory, "*").c_str(), &data);
-    if (search == INVALID_HANDLE_VALUE) return;
-
-    do {
-        const std::string name = data.cFileName;
-        if (name == "." || name == ".." ||
-            (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
-            continue;
-        }
-        const std::string physical = join_path(directory, name);
-        const std::string child_relative =
-            relative.empty() ? name : join_path(relative, name);
-        if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-            if (exclude_top_level_legacy && relative.empty() &&
-                is_legacy_texture_directory(name)) {
-                continue;
-            }
-            scan_texture_directory(physical, child_relative, depth + 1,
-                                   false, files);
-        } else {
-            files[lower_normalized(child_relative)] = physical;
-        }
-    } while (FindNextFileA(search, &data));
-    FindClose(search);
+    TextureScanContext context{{}, files, {}};
+    context.frames[0].directory = directory;
+    context.frames[0].relative = relative;
+    context.frames[0].exclude_top_level_legacy = exclude_top_level_legacy;
+    a2fo_rs_stage9_rgb_scan_directory(&rgb_scan_step, &context);
+    if (context.failure) std::rethrow_exception(context.failure);
 }
 
-struct LegacyTextureDiscovery {
-    std::uint32_t roots_found = 0;
-    std::uint32_t rgb_roots = 0;
-    std::uint32_t index8_roots = 0;
-    std::uint32_t compressed_roots = 0;
+using LegacyTextureDiscovery = A2foRgbDiscovery;
+
+struct RootScanState {
+    std::string textures;
+    std::unordered_map<std::string, std::string> root_files;
+    std::unordered_map<std::string, std::string> rgb_files;
+    std::unordered_map<std::string, std::string> index8_files;
+    std::unordered_map<std::string, std::string> compressed_files;
+    std::unordered_map<std::string, RootTgaCandidate> candidates;
+    std::array<std::string, 3> folders;
 };
+
+struct RgbDiscoveryContext {
+    std::optional<RootScanState> root;
+    std::uint32_t root_index = 0;
+    std::exception_ptr failure;
+};
+
+using RgbFileMap = std::unordered_map<std::string, std::string>;
+
+struct RgbFileTraversal {
+    RgbFileTraversal(RgbDiscoveryContext& discovery, RgbFileMap& source,
+                     std::uint32_t mode, std::size_t route)
+        : discovery(discovery), source(source), next(source.cbegin()),
+          current(source.cend()), mode(mode), route(route) {}
+
+    RgbDiscoveryContext& discovery;
+    RgbFileMap& source;
+    RgbFileMap::const_iterator next;
+    RgbFileMap::const_iterator current;
+    std::uint32_t mode;
+    std::size_t route;
+};
+
+std::uint32_t rgb_file_traversal_step(void* opaque, std::uint32_t operation,
+                                      std::size_t) noexcept {
+    auto& traversal = *static_cast<RgbFileTraversal*>(opaque);
+    try {
+        if (operation == 0) {
+            if (traversal.next == traversal.source.cend()) return 0;
+            traversal.current = traversal.next++;
+            return 1;
+        }
+        const auto& file = *traversal.current;
+        if (operation == 1) {
+            return traversal.mode == 3 ? dds_filename(file.first)
+                 : traversal.mode == 6 ? tga_filename(file.first) : 0;
+        }
+        if (operation == 2) {
+            if (traversal.mode == 3) {
+                g_root_texture_files[file.first] = file.second;
+            } else if (traversal.mode == 5) {
+                auto* exact = traversal.route == 0 ? &g_compressed_files
+                            : traversal.route == 1 ? &g_index8_files
+                                                   : &g_rgb_files;
+                (*exact)[file.first] = file.second;
+            } else if (traversal.mode == 6) {
+                const RootTgaRoute route = traversal.route == 0
+                    ? RootTgaRoute::compressed
+                    : traversal.route == 1 ? RootTgaRoute::index8
+                    : traversal.route == 2 ? RootTgaRoute::rgb
+                                           : RootTgaRoute::root;
+                traversal.discovery.root->candidates[file.first] = {
+                    file.second,
+                    validated_manual_mip_base(traversal.source, file.first),
+                    route,
+                    traversal.discovery.root_index};
+            }
+            return 1;
+        }
+        if (operation == 3 && traversal.mode == 3) {
+            A2foRgbSpan basename{};
+            if (a2fo_rs_stage9_rgb_dds_alias(
+                    reinterpret_cast<const std::uint8_t*>(file.first.data()),
+                    file.first.size(), &basename)) {
+                g_root_texture_files[file.first.substr(
+                    basename.start, basename.length)] = file.second;
+            }
+            return 1;
+        }
+        return 0;
+    } catch (...) {
+        traversal.discovery.failure = std::current_exception();
+        return UINT32_MAX;
+    }
+}
+
+struct RgbCandidateTraversal {
+    explicit RgbCandidateTraversal(RgbDiscoveryContext& discovery)
+        : discovery(discovery), next(discovery.root->candidates.cbegin()),
+          current(discovery.root->candidates.cend()) {}
+
+    RgbDiscoveryContext& discovery;
+    std::unordered_map<std::string, RootTgaCandidate>::const_iterator next;
+    std::unordered_map<std::string, RootTgaCandidate>::const_iterator current;
+};
+
+std::uint32_t rgb_candidate_traversal_step(void* opaque,
+                                           std::uint32_t operation,
+                                           std::size_t) noexcept {
+    auto& traversal = *static_cast<RgbCandidateTraversal*>(opaque);
+    try {
+        if (operation == 0) {
+            if (traversal.next == traversal.discovery.root->candidates.cend())
+                return 0;
+            traversal.current = traversal.next++;
+            return 1;
+        }
+        if (operation == 2) {
+            const auto& candidate = *traversal.current;
+            g_flattened_tga_candidates[candidate.first].push_back(
+                candidate.second);
+            return 1;
+        }
+        return 0;
+    } catch (...) {
+        traversal.discovery.failure = std::current_exception();
+        return UINT32_MAX;
+    }
+}
+
+std::uint32_t run_rgb_file_traversal(RgbDiscoveryContext& context,
+                                     RgbFileMap& source,
+                                     std::uint32_t mode,
+                                     std::size_t route = 0) {
+    RgbFileTraversal traversal(context, source, mode, route);
+    return a2fo_rs_stage10_rgb_traverse(
+        mode, &rgb_file_traversal_step, &traversal) ? 1 : UINT32_MAX;
+}
+
+std::uint32_t rgb_discovery_step(void* opaque, std::uint32_t operation,
+                                 std::size_t index) noexcept {
+    auto& context = *static_cast<RgbDiscoveryContext*>(opaque);
+    try {
+        if (operation == 0) {
+            const std::uint32_t count = g_api->extension_root_count();
+            return count > 4096 ? 4097 : count;
+        }
+        if (operation == 8) {
+            log_line("Extension-root count is invalid");
+            return 1;
+        }
+        if (operation == 1) {
+            const char* path = g_api->extension_root(
+                static_cast<std::uint32_t>(index));
+            if (!path || !*path) return 0;
+            const std::string textures = find_child_directory(path, "Textures");
+            if (textures.empty()) return 0;
+            context.root.emplace();
+            context.root->textures = textures;
+            context.root_index = static_cast<std::uint32_t>(index);
+            return 1;
+        }
+        auto& root = *context.root;
+        if (operation == 2) {
+            scan_texture_directory(root.textures, {}, 0, true,
+                                   root.root_files);
+            return 1;
+        }
+        if (operation == 3) {
+            return run_rgb_file_traversal(context, root.root_files, 3);
+        }
+        const char* names[] = {"Compressed", "Index8", "RGB"};
+        if (operation == 4) {
+            root.folders[index] = find_child_directory(
+                root.textures, names[index]);
+            return !root.folders[index].empty();
+        }
+        auto* files = index == 0 ? &root.compressed_files
+                    : index == 1 ? &root.index8_files : &root.rgb_files;
+        if (operation == 5) {
+            scan_texture_directory(root.folders[index], {}, 0, false, *files);
+            return run_rgb_file_traversal(context, *files, 5, index);
+        }
+        if (operation == 6) {
+            auto* candidates = index == 0 ? &root.compressed_files
+                             : index == 1 ? &root.index8_files
+                             : index == 2 ? &root.rgb_files
+                                          : &root.root_files;
+            return run_rgb_file_traversal(context, *candidates, 6, index);
+        }
+        if (operation == 7) {
+            RgbCandidateTraversal traversal(context);
+            return a2fo_rs_stage10_rgb_traverse(
+                7, &rgb_candidate_traversal_step, &traversal)
+                ? 1 : UINT32_MAX;
+        }
+        return 0;
+    } catch (...) {
+        context.failure = std::current_exception();
+        return UINT32_MAX;
+    }
+}
 
 bool discover_legacy_texture_files(LegacyTextureDiscovery& discovery) {
     discovery = {};
     if (!g_api || !g_api->extension_root_count || !g_api->extension_root) {
         return false;
     }
-
-    const std::uint32_t count = g_api->extension_root_count();
-    if (count > 4096) {
-        log_line("Extension-root count is invalid");
-        return false;
-    }
-    for (std::uint32_t index = 0; index < count; ++index) {
-        const char* root = g_api->extension_root(index);
-        if (!root || !*root) continue;
-        const std::string textures = find_child_directory(root, "Textures");
-        if (textures.empty()) continue;
-
-        std::unordered_map<std::string, std::string> root_files;
-        std::unordered_map<std::string, std::string> rgb_files;
-        std::unordered_map<std::string, std::string> index8_files;
-        std::unordered_map<std::string, std::string> compressed_files;
-        scan_texture_directory(textures, {}, 0, true, root_files);
-        for (const auto& file : root_files) {
-            // Roots arrive from lowest to highest precedence, so the active
-            // mod remains the winner for direct root/DDS lookups. The map is
-            // never queried for another extension, so avoid retaining a
-            // duplicate path entry for every other texture asset.
-            if (dds_filename(file.first)) {
-                g_root_texture_files[file.first] = file.second;
-            }
-        }
-
-        bool root_has_legacy_textures = false;
-        const auto scan_legacy_folder = [&](
-            const char* folder_name,
-            std::unordered_map<std::string, std::string>& root_files,
-            std::unordered_map<std::string, std::string>& exact_files,
-            std::uint32_t& folder_roots) {
-            const std::string folder =
-                find_child_directory(textures, folder_name);
-            if (folder.empty()) return;
-            root_has_legacy_textures = true;
-            ++folder_roots;
-            scan_texture_directory(folder, {}, 0, false, root_files);
-            for (const auto& file : root_files) {
-                exact_files[file.first] = file.second;
-            }
-        };
-
-        // Keep each legacy folder as a separate namespace so precedence and
-        // pixel-format preparation remain explicit. Fleet Operations rewrites
-        // Armada's only generated pathname to the root Textures directory;
-        // every flattened TGA candidate is validated and RLE/indexed variants
-        // are expanded before they enter that retained true-colour loader.
-        scan_legacy_folder("Compressed", compressed_files,
-                           g_compressed_files,
-                           discovery.compressed_roots);
-        scan_legacy_folder("Index8", index8_files, g_index8_files,
-                           discovery.index8_roots);
-        scan_legacy_folder("RGB", rgb_files, g_rgb_files,
-                           discovery.rgb_roots);
-
-        // Pick one format per key inside this extension root, then append that
-        // root's winner to the precedence chain. A child Index8/Compressed
-        // file must override a parent's RGB copy; folder preference is only a
-        // tie-breaker when the same root contains more than one variant.
-        std::unordered_map<std::string, RootTgaCandidate> root_candidates;
-        const auto publish = [&](
-            const std::unordered_map<std::string, std::string>& files,
-            RootTgaRoute route) {
-            for (const auto& file : files) {
-                // This precedence chain is only queried by the root-TGA
-                // route. Other legacy files remain available through their
-                // direct RGB/Index8/Compressed maps.
-                if (!tga_filename(file.first)) continue;
-                root_candidates[file.first] = {
-                    file.second,
-                    validated_manual_mip_base(files, file.first),
-                    route,
-                    index};
-            }
-        };
-        publish(compressed_files, RootTgaRoute::compressed);
-        publish(index8_files, RootTgaRoute::index8);
-        publish(rgb_files, RootTgaRoute::rgb);
-        publish(root_files, RootTgaRoute::root);
-        for (const auto& candidate : root_candidates) {
-            g_flattened_tga_candidates[candidate.first].push_back(
-                candidate.second);
-        }
-        if (root_has_legacy_textures) ++discovery.roots_found;
-    }
-    return discovery.roots_found != 0;
+    RgbDiscoveryContext context;
+    const bool result = a2fo_rs_stage9_rgb_discover(
+        &rgb_discovery_step, &context, &discovery);
+    if (context.failure) std::rethrow_exception(context.failure);
+    return result;
 }
 
 template <std::size_t Size>
@@ -1146,43 +1126,131 @@ enum class TextureRequest {
 
 const std::unordered_map<std::string, std::string>*
 direct_legacy_files(TextureRequest request) {
-    switch (request) {
-    case TextureRequest::direct_rgb:
-        return &g_rgb_files;
-    case TextureRequest::direct_index8:
-        return &g_index8_files;
-    case TextureRequest::direct_compressed:
-        return &g_compressed_files;
-    default:
-        return nullptr;
-    }
+    const std::array<const std::unordered_map<std::string, std::string>*, 3>
+        files{{&g_rgb_files, &g_index8_files, &g_compressed_files}};
+    const auto index = a2fo_rs_stage9_rgb_direct_index(
+        static_cast<std::uint32_t>(request));
+    return index < files.size() ? files[index] : nullptr;
 }
 
 const char* direct_legacy_folder_name(TextureRequest request) {
-    switch (request) {
-    case TextureRequest::direct_rgb:
-        return "RGB";
-    case TextureRequest::direct_index8:
-        return "Index8";
-    case TextureRequest::direct_compressed:
-        return "Compressed";
-    default:
-        return "legacy";
-    }
+    constexpr std::array<const char*, 4> labels{{
+        "RGB", "Index8", "Compressed", "legacy"}};
+    return labels[a2fo_rs_stage9_rgb_direct_index(
+        static_cast<std::uint32_t>(request))];
 }
 
 const char* root_tga_route_name(RootTgaRoute route) {
-    switch (route) {
-    case RootTgaRoute::root:
-        return "root Textures";
-    case RootTgaRoute::rgb:
-        return "RGB";
-    case RootTgaRoute::index8:
-        return "Index8 (prepared true-colour)";
-    case RootTgaRoute::compressed:
-        return "Compressed (prepared true-colour)";
-    default:
-        return "none";
+    constexpr std::array<const char*, 5> labels{{
+        "root Textures", "RGB", "Index8 (prepared true-colour)",
+        "Compressed (prepared true-colour)", "none"}};
+    return labels[a2fo_rs_stage9_rgb_root_label(
+        static_cast<std::uint32_t>(route))];
+}
+
+struct RootSelectionContext {
+    RootSelectionContext(const std::string& requested,
+                         std::string& output,
+                         RootTgaRoute& selected,
+                         const std::vector<RootTgaCandidate>* entries)
+        : key(requested), physical(output), route(selected),
+          candidates(entries) {}
+
+    const std::string& key;
+    std::string& physical;
+    RootTgaRoute& route;
+    const std::vector<RootTgaCandidate>* candidates;
+    const std::vector<RootTgaCandidate>* bases = nullptr;
+    const RootTgaCandidate* effective_base = nullptr;
+    TgaHeaderSummary effective_base_header{};
+    std::uint32_t mip_level = 0;
+    std::uint16_t expected_width = 0;
+    std::uint16_t expected_height = 0;
+    std::exception_ptr failure;
+};
+
+std::uint32_t rgb_root_selection_step(void* opaque,
+                                       std::uint32_t operation,
+                                       std::size_t index) noexcept {
+    auto& context = *static_cast<RootSelectionContext*>(opaque);
+    try {
+        if (operation == 0) {
+            std::string stem;
+            if (!parse_manual_mip_key(context.key, stem, context.mip_level))
+                return 0;
+            const auto found = g_flattened_tga_candidates.find(stem + ".tga");
+            if (found == g_flattened_tga_candidates.end()) return 0;
+            context.bases = &found->second;
+            return static_cast<std::uint32_t>(context.bases->size());
+        }
+        if (operation == 1) {
+            const auto& candidate = (*context.bases)[index];
+            if (!read_tga_header_summary(candidate.physical,
+                                         context.effective_base_header))
+                return 0;
+            context.effective_base = &candidate;
+            return 1;
+        }
+        if (operation == 2)
+            return static_cast<std::uint32_t>(context.candidates->size());
+        const auto& candidate = (*context.candidates)[index];
+        if (operation == 3) {
+            if (candidate.legacy_mip_base.empty() || !context.effective_base)
+                return 0;
+            return a2fo_rs_stage9_rgb_synthesis_dimensions(
+                context.effective_base->root_index, candidate.root_index,
+                context.effective_base_header.width,
+                context.effective_base_header.height, context.mip_level,
+                &context.expected_width, &context.expected_height);
+        }
+        if (operation == 4) {
+            TgaHeaderSummary inherited{};
+            return a2fo_rs_stage9_rgb_inherited_is_large_enough(
+                read_tga_header_summary(candidate.physical, inherited),
+                inherited.width, inherited.height,
+                context.expected_width, context.expected_height);
+        }
+        if (operation == 5) {
+            if (!prepare_resized_legacy_tga(
+                    context.effective_base->physical,
+                    context.expected_width, context.expected_height,
+                    context.physical)) return 0;
+            context.route = context.effective_base->route;
+            const LONG count = InterlockedIncrement(
+                &g_cross_root_mip_synthesis_log_count);
+            if (count <= 16) {
+                log_line("Synthesized inherited manual mip from " +
+                         context.effective_base->physical + " at " +
+                         std::to_string(context.expected_width) + "x" +
+                         std::to_string(context.expected_height) + " -> " +
+                         context.physical);
+            } else if (count == 17) {
+                log_line("Further inherited manual-mip synthesis "
+                         "logs suppressed");
+            }
+            return 1;
+        }
+        if (operation == 6) {
+            if (!prepare_legacy_tga(candidate.physical, context.physical))
+                return 0;
+            if (!candidate.legacy_mip_base.empty()) {
+                const LONG count = InterlockedIncrement(
+                    &g_manual_mip_redirect_log_count);
+                if (count <= 16) {
+                    log_line("Legacy manual-mip root request preserved: " +
+                             candidate.physical + " -> " + context.physical);
+                } else if (count == 17) {
+                    log_line("Further legacy manual-mip preservation logs "
+                             "suppressed");
+                }
+            }
+            context.route = candidate.route;
+            return 1;
+        }
+        return 0;
+    } catch (...) {
+        context.failure = std::current_exception();
+        return UINT32_MAX;
     }
 }
 
@@ -1192,130 +1260,25 @@ bool select_root_tga(const std::string& key, std::string& physical,
     route = RootTgaRoute::none;
     const auto found = g_flattened_tga_candidates.find(key);
     if (found == g_flattened_tga_candidates.end()) return false;
-
-    // Resolve the base independently from the requested companion. A child
-    // mod may replace name.tga without shipping name_1.tga, leaving the latter
-    // to resolve from a parent whose mip chain was authored for a much smaller
-    // base. Feeding that inherited buffer to the native row converter causes
-    // an out-of-bounds read. Preserve compatible inherited chains, but create
-    // the missing level from the effective child base when the inherited
-    // normalized source is too small.
-    std::string mip_stem;
-    std::uint32_t mip_level = 0;
-    const RootTgaCandidate* effective_base = nullptr;
-    TgaHeaderSummary effective_base_header{};
-    if (parse_manual_mip_key(key, mip_stem, mip_level)) {
-        const auto base =
-            g_flattened_tga_candidates.find(mip_stem + ".tga");
-        if (base != g_flattened_tga_candidates.end()) {
-            for (auto candidate = base->second.rbegin();
-                 candidate != base->second.rend(); ++candidate) {
-                if (read_tga_header_summary(candidate->physical,
-                                            effective_base_header)) {
-                    effective_base = &*candidate;
-                    break;
-                }
-            }
-        }
-    }
-
-    for (auto candidate = found->second.rbegin();
-         candidate != found->second.rend(); ++candidate) {
-        // The retained fallback is Armada's true-colour loader regardless of
-        // which physical folder supplied the winning file. Validate all TGA
-        // routes so type-9/10/11 RLE files in root Textures or RGB receive the
-        // same bounded expansion already used by Index8 and Compressed.
-        const std::string& source = candidate->legacy_mip_base.empty()
-            ? candidate->physical : candidate->legacy_mip_base;
-
-        if (!candidate->legacy_mip_base.empty() && effective_base &&
-            effective_base->root_index > candidate->root_index) {
-            const std::uint32_t divisor = 1u << mip_level;
-            if (effective_base_header.width % divisor == 0 &&
-                effective_base_header.height % divisor == 0) {
-                const std::uint16_t expected_width =
-                    static_cast<std::uint16_t>(
-                        effective_base_header.width / divisor);
-                const std::uint16_t expected_height =
-                    static_cast<std::uint16_t>(
-                        effective_base_header.height / divisor);
-                TgaHeaderSummary inherited_header{};
-                const bool inherited_is_large_enough =
-                    read_tga_header_summary(source, inherited_header) &&
-                    inherited_header.width >= expected_width &&
-                    inherited_header.height >= expected_height;
-                if (!inherited_is_large_enough) {
-                    if (!prepare_resized_legacy_tga(
-                            effective_base->physical, expected_width,
-                            expected_height, physical)) {
-                        // Never fall back to the known-undersized inherited
-                        // buffer. A failed synthesis is a missing texture, not
-                        // a process-ending native pixel overread.
-                        continue;
-                    }
-                    route = effective_base->route;
-                    const LONG count = InterlockedIncrement(
-                        &g_cross_root_mip_synthesis_log_count);
-                    if (count <= 16) {
-                        log_line("Synthesized inherited manual mip from " +
-                                 effective_base->physical + " at " +
-                                 std::to_string(expected_width) + "x" +
-                                 std::to_string(expected_height) + " -> " +
-                                 physical);
-                    } else if (count == 17) {
-                        log_line("Further inherited manual-mip synthesis "
-                                 "logs suppressed");
-                    }
-                    return true;
-                }
-            }
-        }
-
-        if (!prepare_legacy_tga(source, physical)) {
-            continue;
-        }
-        if (!candidate->legacy_mip_base.empty()) {
-            const LONG count = InterlockedIncrement(
-                &g_manual_mip_redirect_log_count);
-            if (count <= 16) {
-                log_line("Legacy manual-mip root request normalized: " +
-                         candidate->physical + " -> " + physical);
-            } else if (count == 17) {
-                log_line("Further legacy manual-mip normalization logs "
-                         "suppressed");
-            }
-        }
-        route = candidate->route;
-        return true;
-    }
-    return false;
-}
-
-bool strip_prefix(std::string& value, const char* prefix) {
-    const std::size_t length = std::strlen(prefix);
-    if (value.compare(0, length, prefix) != 0) return false;
-    value.erase(0, length);
-    return true;
-}
-
-bool strip_legacy_texture_prefix(std::string& value) {
-    return strip_prefix(value, kRgbPrefix) ||
-           strip_prefix(value, kIndex8Prefix) ||
-           strip_prefix(value, kCompressedPrefix);
+    // Rust walks the effective base and precedence chain. The native step
+    // retains file reads, conversion cache, log counters, and source objects.
+    RootSelectionContext context{key, physical, route, &found->second};
+    const bool result = a2fo_rs_stage9_rgb_select_root(
+        &rgb_root_selection_step, &context);
+    if (context.failure) std::rethrow_exception(context.failure);
+    return result;
 }
 
 bool tga_filename(const std::string& filename) {
-    constexpr const char* suffix = ".tga";
-    return filename.size() >= std::strlen(suffix) &&
-           filename.compare(filename.size() - std::strlen(suffix),
-                            std::strlen(suffix), suffix) == 0;
+    return a2fo_rs_stage9_rgb_tga_filename(
+        reinterpret_cast<const std::uint8_t*>(filename.data()),
+        filename.size());
 }
 
 bool dds_filename(const std::string& filename) {
-    constexpr const char* suffix = ".dds";
-    return filename.size() >= std::strlen(suffix) &&
-           filename.compare(filename.size() - std::strlen(suffix),
-                            std::strlen(suffix), suffix) == 0;
+    return a2fo_rs_stage9_rgb_dds_filename(
+        reinterpret_cast<const std::uint8_t*>(filename.data()),
+        filename.size());
 }
 
 TextureRequest texture_request(const char* filename, const char* mode,
@@ -1324,124 +1287,129 @@ TextureRequest texture_request(const char* filename, const char* mode,
         return TextureRequest::none;
     }
     std::string normalized = lower_normalized(filename);
-    while (normalized.size() >= 2 && normalized[0] == '.' &&
-           normalized[1] == '\\') {
-        normalized.erase(0, 2);
+    A2foRgbSpan span{};
+    const std::uint32_t request = a2fo_rs_stage9_rgb_request(
+        reinterpret_cast<const std::uint8_t*>(normalized.data()),
+        normalized.size(), &span);
+    key = normalized.substr(span.start, span.length);
+    return static_cast<TextureRequest>(request);
+}
+
+struct FopenRouteContext {
+    FopenRouteContext(FopenFn native_open, const char* requested,
+                     const char* requested_mode, const std::string& lookup_key,
+                     TextureRequest lookup_route)
+        : original(native_open), filename(requested), mode(requested_mode),
+          key(lookup_key), request(lookup_route) {}
+
+    FopenFn original;
+    const char* filename;
+    const char* mode;
+    const std::string& key;
+    TextureRequest request;
+    std::string physical;
+    const std::string* legacy = nullptr;
+    RootTgaRoute route = RootTgaRoute::none;
+    FILE* file = nullptr;
+    std::exception_ptr failure;
+};
+
+std::uint32_t rgb_fopen_step(void* opaque, std::uint32_t operation,
+                             std::size_t) noexcept {
+    auto& context = *static_cast<FopenRouteContext*>(opaque);
+    try {
+        if (operation == 0) {
+            const auto root = g_root_texture_files.find(context.key);
+            if (root == g_root_texture_files.end()) return 0;
+            context.file = context.original(root->second.c_str(), context.mode);
+            if (!context.file) return 0;
+            if (InterlockedCompareExchange(
+                    &g_root_redirect_log_count, 1, 0) == 0) {
+                log_line(std::string("First root texture redirect: ") +
+                         context.filename + " -> " + root->second);
+            }
+            return 1;
+        }
+        if (operation == 1) {
+            if (!select_root_tga(context.key, context.physical,
+                                 context.route)) return 0;
+            context.file = context.original(context.physical.c_str(),
+                                            context.mode);
+            if (!context.file) return 0;
+            if (context.route == RootTgaRoute::root) {
+                if (InterlockedCompareExchange(
+                        &g_root_redirect_log_count, 1, 0) == 0) {
+                    log_line(std::string("First root texture redirect: ") +
+                             context.filename + " -> " + context.physical);
+                }
+            } else if (InterlockedCompareExchange(
+                           &g_redirect_log_count, 1, 0) == 0) {
+                log_line(std::string("First legacy texture fallback (") +
+                         root_tga_route_name(context.route) + "): " +
+                         context.filename + " -> " + context.physical);
+            }
+            return 1;
+        }
+        if (operation == 2) {
+            const LONG missing = InterlockedIncrement(&g_missing_log_count);
+            if (missing <= 16) {
+                log_line(std::string("Legacy texture file not mapped: ") +
+                         context.filename);
+            } else if (missing == 17) {
+                log_line("Further unmapped legacy texture filenames "
+                         "suppressed");
+            }
+            return 1;
+        }
+        if (operation == 3) {
+            const auto* files = direct_legacy_files(context.request);
+            const auto found = files->find(context.key);
+            if (found == files->end()) return 0;
+            context.legacy = &found->second;
+            context.physical = *context.legacy;
+            return 1;
+        }
+        if (operation == 4) {
+            if (context.request == TextureRequest::direct_rgb &&
+                tga_filename(context.key)) {
+                return prepare_legacy_tga(*context.legacy,
+                                          context.physical);
+            }
+            return 1;
+        }
+        if (operation == 6) {
+            if (InterlockedCompareExchange(
+                    &g_redirect_log_count, 1, 0) == 0) {
+                std::string route = "First legacy texture fallback (";
+                route += direct_legacy_folder_name(context.request);
+                route += ")";
+                log_line(route + ": " + context.filename + " -> " +
+                         context.physical);
+            }
+            context.file = context.original(context.physical.c_str(),
+                                            context.mode);
+            return 1;
+        }
+        return 0;
+    } catch (...) {
+        context.failure = std::current_exception();
+        return UINT32_MAX;
     }
-    const std::size_t textures = normalized.rfind(kTexturesPrefix);
-    if (textures != std::string::npos) {
-        key = normalized.substr(textures + std::strlen(kTexturesPrefix));
-    } else {
-        const std::size_t separator = normalized.find_last_of('\\');
-        key = separator == std::string::npos
-            ? normalized
-            : normalized.substr(separator + 1);
-    }
-    if (strip_prefix(key, kRgbPrefix)) {
-        return key.empty() ? TextureRequest::none
-                           : TextureRequest::direct_rgb;
-    }
-    if (strip_prefix(key, kIndex8Prefix)) {
-        return key.empty() ? TextureRequest::none
-                           : TextureRequest::direct_index8;
-    }
-    if (strip_prefix(key, kCompressedPrefix)) {
-        return key.empty() ? TextureRequest::none
-                           : TextureRequest::direct_compressed;
-    }
-    if (!key.empty() && tga_filename(key)) {
-        return TextureRequest::fleetops_root_tga;
-    }
-    constexpr const char* dds_suffix = ".dds";
-    if (key.size() >= std::strlen(dds_suffix) &&
-        key.compare(key.size() - std::strlen(dds_suffix),
-                    std::strlen(dds_suffix), dds_suffix) == 0) {
-        return TextureRequest::fleetops_root_dds;
-    }
-    return TextureRequest::none;
 }
 
 FILE* __cdecl legacy_texture_fopen(const char* filename,
                                    const char* mode) noexcept {
     FopenFn original = g_original_fopen;
     if (!original) return nullptr;
-
     try {
         std::string key;
         const TextureRequest request = texture_request(filename, mode, key);
-        if (request != TextureRequest::none) {
-            if (request == TextureRequest::fleetops_root_dds) {
-                const auto root = g_root_texture_files.find(key);
-                if (root != g_root_texture_files.end()) {
-                    if (FILE* file = original(root->second.c_str(), mode)) {
-                        if (InterlockedCompareExchange(
-                                &g_root_redirect_log_count, 1, 0) == 0) {
-                            log_line(std::string("First root texture redirect: ") +
-                                     filename + " -> " + root->second);
-                        }
-                        return file;
-                    }
-                }
-                // Never present TGA bytes to Fleet Ops' DDS enhancement path.
-                return original(filename, mode);
-            }
-
-            if (request == TextureRequest::fleetops_root_tga) {
-                std::string physical;
-                RootTgaRoute route = RootTgaRoute::none;
-                if (select_root_tga(key, physical, route)) {
-                    if (FILE* file = original(physical.c_str(), mode)) {
-                        if (route == RootTgaRoute::root) {
-                            if (InterlockedCompareExchange(
-                                    &g_root_redirect_log_count, 1, 0) == 0) {
-                                log_line(std::string(
-                                    "First root texture redirect: ") +
-                                    filename + " -> " + physical);
-                            }
-                        } else if (InterlockedCompareExchange(
-                                       &g_redirect_log_count, 1, 0) == 0) {
-                            log_line(std::string(
-                                "First legacy texture fallback (") +
-                                root_tga_route_name(route) + "): " +
-                                filename + " -> " + physical);
-                        }
-                        return file;
-                    }
-                }
-                const LONG missing =
-                    InterlockedIncrement(&g_missing_log_count);
-                if (missing <= 16) {
-                    log_line(std::string("Legacy texture file not mapped: ") +
-                             filename);
-                } else if (missing == 17) {
-                    log_line("Further unmapped legacy texture filenames "
-                             "suppressed");
-                }
-                return original(filename, mode);
-            }
-
-            const auto* direct_files = direct_legacy_files(request);
-            if (direct_files) {
-                const auto legacy = direct_files->find(key);
-                if (legacy == direct_files->end()) {
-                    return original(filename, mode);
-                }
-                std::string physical = legacy->second;
-                if (request == TextureRequest::direct_rgb &&
-                    tga_filename(key) &&
-                    !prepare_legacy_tga(legacy->second, physical)) {
-                    return original(filename, mode);
-                }
-                if (InterlockedCompareExchange(
-                        &g_redirect_log_count, 1, 0) == 0) {
-                    std::string route = "First legacy texture fallback (";
-                    route += direct_legacy_folder_name(request);
-                    route += ")";
-                    log_line(route + ": " + filename + " -> " +
-                             physical);
-                }
-                return original(physical.c_str(), mode);
-            }
+        FopenRouteContext context{original, filename, mode, key, request};
+        const bool fallback = a2fo_rs_stage9_rgb_fopen_route(
+            static_cast<std::uint32_t>(request), &rgb_fopen_step, &context);
+        if (!context.failure && request != TextureRequest::none) {
+            if (fallback) return original(filename, mode);
+            return context.file;
         }
     } catch (...) {
         // Never throw through msvcrt or the Armada caller.
@@ -1449,25 +1417,68 @@ FILE* __cdecl legacy_texture_fopen(const char* filename,
     return original(filename, mode);
 }
 
+struct MappedTextureContext {
+    MappedTextureContext(const std::string& key_value,
+                         TextureRequest request_value,
+                         std::string& output)
+        : key(key_value), request(request_value), physical(output),
+          direct_files(direct_legacy_files(request_value)) {}
+
+    const std::string& key;
+    TextureRequest request;
+    std::string& physical;
+    const std::unordered_map<std::string, std::string>* direct_files;
+    const std::string* legacy = nullptr;
+    std::exception_ptr failure;
+};
+
+std::uint32_t rgb_mapped_step(void* opaque, std::uint32_t operation,
+                              std::size_t) noexcept {
+    auto& context = *static_cast<MappedTextureContext*>(opaque);
+    try {
+        if (operation == 0) {
+            RootTgaRoute route = RootTgaRoute::none;
+            return select_root_tga(context.key, context.physical, route);
+        }
+        if (operation == 1) {
+            const auto found = context.direct_files->find(context.key);
+            if (found == context.direct_files->end()) return 0;
+            context.legacy = &found->second;
+            return 1;
+        }
+        if (operation == 2) {
+            // Armada probes RGB/TGA even when Legacy supplied only DDS.
+            const std::string dds_key =
+                context.key.substr(0, context.key.size() - 4u) + ".dds";
+            const auto dds = g_root_texture_files.find(dds_key);
+            if (dds == g_root_texture_files.end()) return 0;
+            context.physical = dds->second;
+            return 1;
+        }
+        if (operation == 3)
+            return prepare_legacy_tga(*context.legacy, context.physical);
+        if (operation == 4) {
+            context.physical = *context.legacy;
+            return 1;
+        }
+        return 0;
+    } catch (...) {
+        context.failure = std::current_exception();
+        return UINT32_MAX;
+    }
+}
+
 bool mapped_tga_path(const char* filename, std::string& physical) {
     physical.clear();
     std::string key;
     const TextureRequest request = texture_request(filename, "rb", key);
-    const auto* direct_files = direct_legacy_files(request);
-    if (!direct_files && request != TextureRequest::fleetops_root_tga) {
-        return false;
-    }
-    if (request == TextureRequest::fleetops_root_tga) {
-        RootTgaRoute route = RootTgaRoute::none;
-        return select_root_tga(key, physical, route);
-    }
-    const auto legacy = direct_files->find(key);
-    if (legacy == direct_files->end()) return false;
-    if (request == TextureRequest::direct_rgb && tga_filename(key)) {
-        return prepare_legacy_tga(legacy->second, physical);
-    }
-    physical = legacy->second;
-    return true;
+    MappedTextureContext context{key, request, physical};
+    const bool result = a2fo_rs_stage9_rgb_mapped_route(
+        static_cast<std::uint32_t>(request),
+        request == TextureRequest::direct_rgb && tga_filename(key),
+        &rgb_mapped_step, &context);
+    if (context.failure) std::rethrow_exception(context.failure);
+    return result;
 }
 
 bool __cdecl file_exists_hook(const char* filename) noexcept {
@@ -1560,36 +1571,86 @@ bool bounded_string(const char* source, std::string& value) {
 
 bool texture_name_and_key(void* texture, std::string& name,
                           std::string& key) {
-    if (!texture || !readable_range(
-            static_cast<const std::uint8_t*>(texture) + 0x08,
-            sizeof(const char*))) {
-        return false;
-    }
-    const char* source = *reinterpret_cast<const char* const*>(
-        static_cast<const std::uint8_t*>(texture) + 0x08);
-    if (!bounded_string(source, name)) return false;
-
-    key = lower_normalized(name);
-    while (key.size() >= 2 && key[0] == '.' && key[1] == '\\') {
-        key.erase(0, 2);
-    }
-    if (key.compare(0, std::strlen(kTexturesPrefix),
-                    kTexturesPrefix) == 0) {
-        key.erase(0, std::strlen(kTexturesPrefix));
-    }
-    strip_legacy_texture_prefix(key);
-    if (dds_filename(key)) {
-        key.replace(key.size() - 4, 4, ".tga");
-    } else if (!tga_filename(key)) {
-        key += ".tga";
-    }
-    return !key.empty();
+    struct Context {
+        void* texture;
+        std::string& name;
+        std::string& key;
+        std::string normalized;
+        const char* source = nullptr;
+        std::exception_ptr failure;
+    } context{texture, name, key, {}, nullptr, {}};
+    const auto step = +[](void* opaque, std::uint32_t operation,
+                          std::size_t) noexcept -> std::uint32_t {
+        auto& state = *static_cast<Context*>(opaque);
+        try {
+            switch (operation) {
+                case 0: return state.texture != nullptr;
+                case 1:
+                    return readable_range(
+                        static_cast<const std::uint8_t*>(state.texture) +
+                        0x08, sizeof(const char*));
+                case 2:
+                    state.source = *reinterpret_cast<const char* const*>(
+                        static_cast<const std::uint8_t*>(state.texture) +
+                        0x08);
+                    return bounded_string(state.source, state.name);
+                case 3: {
+                    state.normalized = lower_normalized(state.name);
+                    A2foRgbSpan span{};
+                    const std::uint32_t suffix =
+                        a2fo_rs_stage9_rgb_name_key(
+                            reinterpret_cast<const std::uint8_t*>(
+                                state.normalized.data()),
+                            state.normalized.size(), &span);
+                    state.key = state.normalized.substr(
+                        span.start, span.length);
+                    return suffix;
+                }
+                case 4:
+                    state.key.replace(state.key.size() - 4, 4, ".tga");
+                    return 0;
+                case 5: state.key += ".tga"; return 0;
+                case 6: return !state.key.empty();
+                default: return 0;
+            }
+        } catch (...) {
+            state.failure = std::current_exception();
+            return UINT32_MAX;
+        }
+    };
+    const bool result = a2fo_rs_stage9_rgb_texture_name(step, &context);
+    if (context.failure) std::rethrow_exception(context.failure);
+    return result;
 }
 
 bool legacy_texture_key_exists(const std::string& key) {
-    return g_rgb_files.find(key) != g_rgb_files.end() ||
-           g_index8_files.find(key) != g_index8_files.end() ||
-           g_compressed_files.find(key) != g_compressed_files.end();
+    struct Context {
+        const std::string& key;
+        std::exception_ptr failure;
+    } context{key, {}};
+    const auto step = +[](void* opaque, std::uint32_t,
+                          std::size_t index) noexcept -> std::uint32_t {
+        auto& state = *static_cast<Context*>(opaque);
+        try {
+            switch (index) {
+                case 0:
+                    return g_rgb_files.find(state.key) != g_rgb_files.end();
+                case 1:
+                    return g_index8_files.find(state.key) !=
+                        g_index8_files.end();
+                case 2:
+                    return g_compressed_files.find(state.key) !=
+                        g_compressed_files.end();
+                default: return 0;
+            }
+        } catch (...) {
+            state.failure = std::current_exception();
+            return UINT32_MAX;
+        }
+    };
+    const bool result = a2fo_rs_stage9_rgb_key_exists(step, &context);
+    if (context.failure) std::rethrow_exception(context.failure);
+    return result;
 }
 
 #if 0
@@ -2080,54 +2141,87 @@ void restore_fopen_bridge() {
 }
 
 void clear_conversion_cache() {
-    if (g_conversion_lock_ready) {
-        EnterCriticalSection(&g_conversion_lock);
-        for (const std::string& file : g_generated_texture_files) {
-            DeleteFileA(file.c_str());
+    struct Context {
+        std::vector<std::string>::iterator file;
+        std::vector<std::string>::iterator end;
+        std::exception_ptr failure;
+    } context{};
+    const auto step = +[](void* opaque, std::uint32_t operation,
+                          std::size_t) noexcept -> std::uint32_t {
+        auto& state = *static_cast<Context*>(opaque);
+        try {
+            switch (operation) {
+                case 0: return g_conversion_lock_ready;
+                case 1: EnterCriticalSection(&g_conversion_lock); return 0;
+                case 2:
+                    state.file = g_generated_texture_files.begin();
+                    state.end = g_generated_texture_files.end();
+                    return 0;
+                case 3: return state.file != state.end;
+                case 4: DeleteFileA(state.file->c_str()); return 0;
+                case 5: ++state.file; return 0;
+                case 6: g_generated_texture_files.clear(); return 0;
+                case 7: g_prepared_texture_files.clear(); return 0;
+                case 8: g_compatible_texture_files.clear(); return 0;
+                case 9: g_unusable_texture_files.clear(); return 0;
+                case 10: return !g_conversion_cache_directory.empty();
+                case 11:
+                    RemoveDirectoryA(g_conversion_cache_directory.c_str());
+                    g_conversion_cache_directory.clear();
+                    return 0;
+                case 12: LeaveCriticalSection(&g_conversion_lock); return 0;
+                case 13: DeleteCriticalSection(&g_conversion_lock); return 0;
+                case 14: g_conversion_lock_ready = false; return 0;
+                case 15: g_conversion_cache_directory.clear(); return 0;
+                default: return 0;
+            }
+        } catch (...) {
+            state.failure = std::current_exception();
+            return UINT32_MAX;
         }
-        g_generated_texture_files.clear();
-        g_prepared_texture_files.clear();
-        g_compatible_texture_files.clear();
-        g_unusable_texture_files.clear();
-        if (!g_conversion_cache_directory.empty()) {
-            RemoveDirectoryA(g_conversion_cache_directory.c_str());
-            g_conversion_cache_directory.clear();
-        }
-        LeaveCriticalSection(&g_conversion_lock);
-        DeleteCriticalSection(&g_conversion_lock);
-        g_conversion_lock_ready = false;
-    } else {
-        g_generated_texture_files.clear();
-        g_prepared_texture_files.clear();
-        g_compatible_texture_files.clear();
-        g_unusable_texture_files.clear();
-        g_conversion_cache_directory.clear();
-    }
+    };
+    a2fo_rs_stage9_rgb_clear_conversion(step, &context);
+    if (context.failure) std::rethrow_exception(context.failure);
 }
 
 void clear_state() {
-    restore_fopen_bridge();
-    clear_conversion_cache();
-    g_rgb_files.clear();
-    g_index8_files.clear();
-    g_compressed_files.clear();
-    g_root_texture_files.clear();
-    g_flattened_tga_candidates.clear();
-    g_root_directory.clear();
-    g_fopen_slot = nullptr;
-    g_original_fopen = nullptr;
-    g_armada = nullptr;
-    InterlockedExchange(&g_redirect_log_count, 0);
-    InterlockedExchange(&g_missing_log_count, 0);
-    InterlockedExchange(&g_recovery_log_count, 0);
-    InterlockedExchange(&g_blend_guard_log_count, 0);
-    InterlockedExchange(&g_root_redirect_log_count, 0);
-    InterlockedExchange(&g_scan_grid_guard_log_count, 0);
-    InterlockedExchange(&g_conversion_log_count, 0);
-    InterlockedExchange(&g_conversion_file_counter, 0);
-    InterlockedExchange(&g_manual_mip_redirect_log_count, 0);
-    InterlockedExchange(&g_cross_root_mip_synthesis_log_count, 0);
-    g_api = nullptr;
+    struct Context { std::exception_ptr failure; } context{};
+    const auto step = +[](void* opaque, std::uint32_t operation,
+                          std::size_t) noexcept -> std::uint32_t {
+        auto& state = *static_cast<Context*>(opaque);
+        try {
+            switch (operation) {
+                case 0: restore_fopen_bridge(); return 0;
+                case 1: clear_conversion_cache(); return 0;
+                case 2: g_rgb_files.clear(); return 0;
+                case 3: g_index8_files.clear(); return 0;
+                case 4: g_compressed_files.clear(); return 0;
+                case 5: g_root_texture_files.clear(); return 0;
+                case 6: g_flattened_tga_candidates.clear(); return 0;
+                case 7: g_root_directory.clear(); return 0;
+                case 8: g_fopen_slot = nullptr; return 0;
+                case 9: g_original_fopen = nullptr; return 0;
+                case 10: g_armada = nullptr; return 0;
+                case 11: InterlockedExchange(&g_redirect_log_count, 0); return 0;
+                case 12: InterlockedExchange(&g_missing_log_count, 0); return 0;
+                case 13: InterlockedExchange(&g_recovery_log_count, 0); return 0;
+                case 14: InterlockedExchange(&g_blend_guard_log_count, 0); return 0;
+                case 15: InterlockedExchange(&g_root_redirect_log_count, 0); return 0;
+                case 16: InterlockedExchange(&g_scan_grid_guard_log_count, 0); return 0;
+                case 17: InterlockedExchange(&g_conversion_log_count, 0); return 0;
+                case 18: InterlockedExchange(&g_conversion_file_counter, 0); return 0;
+                case 19: InterlockedExchange(&g_manual_mip_redirect_log_count, 0); return 0;
+                case 20: InterlockedExchange(&g_cross_root_mip_synthesis_log_count, 0); return 0;
+                case 21: g_api = nullptr; return 0;
+                default: return 0;
+            }
+        } catch (...) {
+            state.failure = std::current_exception();
+            return UINT32_MAX;
+        }
+    };
+    a2fo_rs_stage9_rgb_clear_state(step, &context);
+    if (context.failure) std::rethrow_exception(context.failure);
 }
 
 }  // namespace

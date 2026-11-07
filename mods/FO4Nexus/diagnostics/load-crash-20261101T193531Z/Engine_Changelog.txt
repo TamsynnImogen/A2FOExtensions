@@ -1,0 +1,602 @@
+JanB, 2026
+
+Game engines modifications changelog:
+
+- changes the version number of the game engine from 4.0.0.Jan (40000) to 5.0.0.Bob (50000)
+
+- fixes a bug stemming from the old Armada 2 engine where the AI would ignore techlevels for the fifth 
+techtree entry in the list of multiplayer/instant action techtrees
+
+- probetorpedo ordnances (classlabel = "probetorpedo") can now use the "detectCloak" parameter: 
+setting "detectCloak = 1" will make the probetorpedo reveal cloaked ships within its sensor range
+
+- utritium ball objects (classlabel = "u_ball_obj") can now use weapons with "special = 1", this is 
+useful because utritium balls require fewer CPU calculations than "craft" or "pod" classlabel objects
+
+- AreaEffectMissile weapons (classlabel = "areamissile") now have additional possible "hitcondition" 
+values: 3 requires the target to be an allied craft with weakened shields, 4 requires it to be an 
+allied craft with both weakened shields and hull damage, and 5 requires it to be an allied craft with 
+hull damage, these additional modes make it possible to properly target one allied craft at a time, 
+instead of the weapon's target lock remaining stuck on the nearest allied craft
+
+- adding "freighterSize = 0" to a station's odf file now makes it center on the cross of footprint 
+tiles, instead of between them when the station is set to automatic footprint alignment with the map 
+grid (footprintAligned = 1) when constructed, this enables 2x2 and 4x4 footprints for small stations 
+such as defense platforms
+
+- the footprints of objects that block construction of a station are no longer rendered across the 
+entire map, but limited to a distance from the center of the camera equal to the maximum camera zoom 
+out level (OVERVIEW_MAX_HEIGHT in RTS_CFG.h), this significantly boosts game performance when a human 
+player is looking to place a station, especially on large maps with fog and shroud turned off
+
+- the easy/normal (lowest difficulty of the three AI levels) AI can now use an AIP different from 
+"a2_aggressive.aip" (which is used by the medium AI and used to be forced on the easy AI as well), 
+the game will now look for "a2_easy_aggre.aip" and if it can find it in the AIP folder it will load 
+that instead of "a2_aggressive.aip", if it cannot find the file then it will default to 
+"a2_aggressive.aip", note that after 1800 in-game seconds the game will still switch to the endgame AIP 
+(which is "a2_modified_aggressive.aip" for the easy AI). This means that now the easy AI can be tweaked 
+separately from the medium AI by something other than the speed and cost handicaps in RTS_CFG.h
+
+- fixes a bug where AI-controlled cargo ships would become passive after traveling through a wormhole, 
+and both human-controlled and neutral (Ferengi) cargo ships can now automatically travel through 
+wormholes to trade
+
+- mining freighters controlled by human players can now automatically travel through wormholes during 
+the mining process
+
+- ships can no longer use the "guard" command to follow enemy ships that are invisible to the player, 
+for example because they're cloaked or have moved into the fog/shroud
+
+- artillery ships (armed with weapons with ordnance of classlabel "artillery") will now prefer 
+stations (is_starbase = 1) over ships when looking for a new target
+
+- craft with a replaceweapon will delete themselves if 1) the weapon explicitly has 
+"warpInSpeed = 0.0", 2) the craft does not have enough special energy left to spawn an object using 
+the replaceweapon, and 3) it has no living spawned objects (children), this can be used to, for 
+example, create fighter squadrons independent of a carrier, with a spawning ship disguised as a wing 
+leader, that will stop existing when all fighters in the squadron have been destroyed
+
+- adds the MIN_TACT_ZOOM parameter that can be added to either RTS_CFG.h or ART_CFG.h, that will set 
+the minimum zoom level in the tactical view (hotkey "Caps Lock"), increasing this value above 1.0 
+reduces clipping issues when the NEAR_CLIPPING_PLANE parameter is higher than 20.0, example value: 
+"float MIN_TACT_ZOOM = 1.1;"
+
+- stations can no longer be decomissioned while being boarded via transporter or Borg holding beam
+
+- shipyards (or any stations) that are part of a numbered group can now be selected using the 
+"Alt+Number" hotkey (or whichever key has been set for the "alt" entry in Input.map), even when 
+there are ships in the same numbered group, note that any ships produced by the shipyard will 
+automatically inherit the group number, but shipyards do not count against the 30-ship limit for 
+groups
+
+- multiple shipyards or starbases can now be selected simultaneously (and given build orders 
+through hotkeys) if they have a value for the "buildhardpoint" parameter in their odf file, they 
+will be treated as if they have "preferredselect = 0", just like freighters and construction ships, 
+so they won't automatically be selected when dragging a selection box that includes combat ships
+
+- adds a "Team Colors" checkbox to the Graphics Settings menu, note that team colors will only 
+appear on ship models that support them, which the models in Roots or the stock Fleet Ops 4.0 
+submod do not, but the models in the A2 Classic submod do
+
+- point defense weapons (classlabel = "pointdefenselaser" and classlabel = "ordnancedefenseweapon"), 
+such as the Nebula Class' Point Defense Phaser in the A2 Classic submod and the Remoore's weapon in 
+the stock Fleet Ops 4.0 now obey the shotdelay parameter so their firing rate can be limited
+
+- point defense weapons with classlabel = "ordnancedefenseweapon" can now intercept "bullet" type 
+ordnances, such as classlabel = "artillery"
+
+- issuing a second priority-repair command (hotkey "X" in Roots) to a ship already on its way to a 
+priority-repair now no longer stops the ship, only a stop command (hotkey "S") will, this also makes 
+using the combination with the "W" hotkey (select all damaged ships in a fleet, note that the key 
+entry is called "select_next_ship" in Input.map) more practical
+
+- explosion wreckage chunks now reliably display Borgified textures and mesh nodes if the exploding 
+ship or station had a Borg crew and Borgified textures, also the other way around non-Borg explosion 
+wreckage chunks will reliably display normal textures and no Borg mesh nodes
+
+- slightly increases (by 50 units, so half a grid cell) the distance from a shipyard where a ship 
+can enter a repair queue, this means large ships will get stuck less often while trying to repair 
+and ships with disabled engines don't need to be tractored as close to the shipyard as before
+
+- ships and stations with weldinganimspeed = 0.0 in their ODF can now be ordered to start a 
+transport attack using their normal transporter system, against on an enemy that still has its 
+shields up, this is similar to the transport attack command of assault ships in the original 
+Armada II game, but differs in that it uses the normal transporter system so it will default to a 
+normal transport when the target is friendly or has its shields down, and it cannot be triggered by 
+special weapon autonomy, nor be used by the AI, also only assault ships have marines that can 
+capture enemy vessels more quickly than regular crew
+
+- special weapons with classlabel = "fedrepairteam" or classlabel = "esconverter" will no longer 
+auto-fire on ships with disabled shields, such as ships in certain nebulas, and 
+classlabel = "fedrepairteam" will no longer auto-fire on ships that don't have a shield generator
+
+- various special weapons that are meant to target allied craft, for example 
+classlabel = "fedshieldemitter", or classlabel = "esconverter" (aka the Energy-Shield Converter, 
+aka the Shield Projectors in Roots and the A2 Classic submod) will no longer be distracted by 
+cloaked craft or craft that don't come with shields, and Energy-Shield Converters now obey the 
+"ignoreShield" command
+
+- planets (classlabel = "planet") in the A2 Classic submod are now rendered as smoother spheres
+
+- ships controlled by the AI can now be forced to use attack patterns during combat: add 
+"northbuffer = 1" to a ship's odf to get it to circle the enemy during combat, add 
+"westbuffer = 1" to get it to use the cloverleaf attack pattern, add "eastbuffer = 1" to get it 
+to use the arrow/fly-by pattern, note that the "cfgDOGFIGHT_RADIUS_MODIFIER" and 
+"cfgCLOVERLEAF_RADIUS_MODIFIER" parameters in RTS_CFG.h influence the radius of the attack 
+pattern
+
+- in multiplayer/instant action the AI will no longer explode derelict ships (or any ships with 
+"lifesupporthitpoints = 0" in its odf file) before large attacks and in these attacks fighters 
+(classlabel "Fighter") will no longer be sent out to attack enemy bases independent of their 
+mothership 
+
+- shipyards now restore a ship's special energy reserve at the end of the repair process
+
+- a repair ship (classlabel "RepairShip") can now automatically repair other ships and stations 
+while it's on medium movement autonomy, if the target is within the range of the repair beam, 
+it will not move to get close enough to a target or to follow it unless it's on high movement 
+autonomy
+
+- replaceweapons now always deduct their special energy cost, even when they're automatically 
+activated through "replacementinstantplayer = 1" or "replacementinstantAI = 1", this means 
+special energy can now be used to restrict/control a replaceweapon
+
+- fixes a crash that would randomly occur on some systems during the loading bar when starting 
+a game, with an error message that with an address that typically ends in "3010", for example: 
+"Access violation at address 028D3010 in module 'FleetOpsHook.dll'
+
+- craft can now use "Borgified" textures (textures with the "_b" suffix) even when the model 
+has a bump map, both .tga and .dds files are supported
+
+- craft now already display Borg hull nodes and textures during construction if the shipyard or 
+construction ship building them has a Borg crew, and the silhoutte displayed when trying to 
+place a station with a construction ship now has Borg textures if the player race is Borg
+
+- the tooltip for caplists (capacity list) in xml techtrees is hidden when the item (special 
+weapon or craft) is part of the caplist with capvalue="127", this allows for more complicated 
+tech tree requirements while maintaining clean tooltips
+
+- target invalidation (from ordnances with "forceInvalidateTarget = 1") by weapons such as the 
+Borg Holding Beam now also stops multi-targeting cannonimp weapons from firing on the targeted 
+craft
+
+- when exiting the game after taking a screenshot using the "ALT+P" hotkey there will no longer 
+be a dialog asking to open the screenshot folder, instead the folder is opened automatically, 
+without the dialog there is no longer an issue with the screen being stuck on a low resolution 
+with an unclickable dialog if shell menu magnification is active
+
+- fighters (like the Cardassian fighter drones) will now follow their mothership into a wormhole
+
+- fast ships guarding a slower ship heading for a wormhole no longer race far ahead of the
+slower ship
+
+- fixes a bug in the game engine where the footprint of a station under construction was not
+removed if the station was grown/evolved by an evolver (like a Species 8472 embryo) and the
+evolver was destroyed before the process was complete
+
+- units created by an evolver now no longer inherit the evolver's name but are assigned a name
+from one of the possible names in their own odf file
+
+- ships that are promoted to a higher rank (or transformed by a replaceweapon with cloakenable
+= 1) while cloaked with a classlabel "CloakingDevice" cloaking device now keep being
+rendered with the proper transparency level of their 3D model
+
+- the AI has been reprogrammed to make cloaked AI-controlled fleets decloak when they stop
+moving if enemy ships are nearby, making the AI use cloaking more effectively and preventing
+AI fleets from staying passive while permanently cloaked
+
+- the minimap is now always visible (not hidden) in the instant action/multiplayer setup menu
+
+- AI-controlled fleets are now less "hesitant", instead of constantly trying to reform and retreat
+
+- fighters spawned by a replaceweapon with replacementRegisterAsNew = 0 (so they don't
+show up in the Admiral's Log) can now look for alternative carriers or be recycled if their
+original carrier is lost
+
+- the AI has been reprogrammed to make cloaked AI-controlled ships decloak when they, or a
+nearby ally, are under attack
+
+- the AI now chooses resources moons in order of distance (instead of resource type) to decide
+where to build its expansions, giving it a more compact and logical base building posture, this
+can be overruled in the AIP files
+
+- when a cloaked ship reaches the location it was sent to with an attack-move order it now
+decloaks (this also improves the AI’s use of cloaked attack fleets)
+
+- it is now possible to have classic cloaks (classlabel "CloakingDevice" instead of
+"CloakingDeviceImp") not lower the shields (set unsafeCloakDistance = 0 in the cloak's odf
+file) and/or automatically cloak as soon as a vessel is created (set stepSize = 0 in the cloak's odf
+file), note that classic cloaks make ships better visible on-screen for the player and decrease
+game performance less than "CloakingDeviceImp" cloaks
+
+- ships that have been given a command to attack a target outside their weapons range will now
+fire on targets of opportunity while they're traveling towards their commanded target
+
+- the game is now fully compatible with "Parallels Desktop" and "Wine", so it can be played on
+Mac and Linux systems
+
+- fixes a glitch where AI-controlled ships would sometimes stay completely passive for long
+periods of time after exiting a wormhole, not even defending themselves when attacked
+
+- when a ship uses a ram weapon its destruction is now logged in the admiral’s log and
+resources can be refunded to the player just like when the ship is destroyed normally
+
+- ships can now reliably gain XP for promotion to a higher rank by using artillery weapons
+(classlabel "artillery") to destroy other craft
+
+- in multiplayer/instant action Hard and Merciless AIs will now switch to the
+"a2_very_aggressive.aip" AIP after 1800 in-game seconds, down from 2400 seconds (at
+gamespeed 3 an in-game second equals 1 real-life second, at gamespeed 6 it equals 0.5 real-life
+seconds), which allows late-game behavior to kick in earlier for the AI
+
+- regeneration weapons (classlabel = "regeneration") with special = 1 are no longer hardcoded to
+require more than 100 special energy and the ship to be under attack, in order to be activated by
+the special weapon autonomy
+
+- regeneration weapons (classlabel = "regeneration") now get triggered properly by special
+weapon autonomy for ships without a shield system, and now will also trigger when there is
+hull damage but no shield damage
+
+- Borg holding beams (classlabel "holding_bm"), auto assimilator beams (classLabel
+"borgbore"), and the transport attack type are no longer automatically triggered through special
+weapon autonomy for human players (but still do for AI-controlled ships)
+
+- adding the line "collisionRadius = 2" (without quotation marks) to a ship's odf now stops it
+from being added to AI fleets or considered for AI strategic goals (it also won't be counted
+against "min_attack_force" and other such parameters by the AI), this is particularly useful for
+fighters
+
+- in multiplayer/instant action Normal AIs will now switch to the "a2_modified_aggressive.aip"
+AIP after 1800 in-game seconds whereas before a normal AI would never switch to late-game
+behavior
+
+- the AI can now recognize different units (odf files) as variants of the same unit for its build
+order: objects with the same (positive) value for distanceBelowGrid in their odf file will be
+counted as being the same unit, this means the AI will not try to "rebuild" this object if it is
+promoted to a higher rank or is transformed by a replaceweapon, this also prevents the AI from
+getting stuck in its build list when a unit with a unit cap is promoted to a higher rank
+
+- ships will now keep following their formation after ranking up or being replaced via a
+replaceweapon
+
+- much improved behavior for fleet formations, they will now continue to move when their leader is 
+split off for most reasons: destroyed, replaced, ranked up, ordered to go to a shipyard for repairs, 
+etc...
+
+- when the leader of a formation is destroyed or replaced by a replaceweapon the other ships in the 
+formation will now continue on to the formation's original destination 
+
+- when the leader of a formation receives a repair, mining, build, colonize, scout, or search & 
+destroy command while the rest of the fleet is not selected, the leader will no longer drag the rest 
+of the ships with it
+
+- ships that were ordered to go into a wormhole and then get replaced by a replaceweapon, or rank up, 
+now remember that order 
+
+- shipyards and starbases that get replaced by a replaceweapon now remember their rally point
+
+- if a vessel that was recrewing gets replaced by a replaceweapon, or ranks up, into another vessel 
+that can recrew than that other vessel will keep recrewing 
+
+- fighters will now attack the specific target their mothership is ordered to attack, even if they
+were already attacking a different target, fighters will now also fire at targets at opportunity
+while the mothership is moving, these changes make microing motherships/carriers more useful
+
+- weapons with the classlabel "cannonimp" can now autotarget terrain objects (resource moons,
+wormholes, nebulas, etc...) if their ordnance has "specialenergycost = -1" in its odf file
+
+- it is now possible to use two different cocoon models for evolvers (like the Species 8472
+embryos), apart from the default "8472_cocoon.sod" model an evolver can now alternatively
+use "8472_cocoon2.sod" if it has "crewhitpercent = 0" in its odf file
+
+- ships (including fighters) will now correctly remember their attack pattern ("cloverleaf",
+"circle", etc...) after loading a savegame
+
+- the "select next ship on the screen" hotkey (default "[") now selects all damaged combat ships
+on the screen so they can be pulled to the back or send away for repairs, ships count as damaged
+if they have hull damage, shield strength below 60% of maximum strength, or a gravity mine
+attached to them
+
+- ships that have been given the "Priority Repair" command will now properly ignore all
+other commands when lining up behind a shipyard
+
+- adding the line "upbuffer = 0" to a ship's odf file now makes a moving ship explode within 2
+seconds after taking fatal damage, instead of within 4 seconds
+
+- adding the line "downbuffer = 0" to a ship or station's odf file now prevents explosions from
+ordnances hitting the hull from being rendered this is handy for tiny craft that are smaller than
+the explosions themselves
+
+- rangedObjectAffector special weapons with affectorType=2 (like the Fleet ECM Enhancer in
+Roots) can now be activated by special weapons autonomy when the ship isn't in active combat
+itself, just like affectorType 1 (Fleet Coordination) can be activated
+
+- weapons can now be forced to strictly fire backwards (relative to the ship's longitudinal axis),
+for this the weapon requires the lines "fireeventid = "emptyevent"", "restrictfirearc = 1" and a
+non-zero positive value for firearc, for example "firearc = 0.8", note that this does not work with
+"phaser" ordnances, but it does work with "unibeam" and "unitorpedo" ordnances
+
+- the game engine is now able to show fullscreen shell menus in combination with dxwrapper
+
+- fixes a bug in the game engine where the AI ignored the "ignoretechtree = 0" command for a
+replaceweapon, this used to happen in Roots singleplayer missions
+
+- slightly changes the position of the race selection tab in the instant action/multiplayer menu to
+solve issues with sluggish mouse selection
+
+- evolvers that can build stations, like the Species 8472 Passive Embryo in Roots, will now first
+move to the exact location your ordered them to build, instead of them starting building as soon
+as they're within 100 units from the commanded build location
+
+- fixes the invalid pointer crashes in the Fleet Ops 4.0 engine
+
+- movement autonomy has been modified: high autonomy remains, the same, but on low and
+medium ships will not move to assist nearby allies, on medium ships in a fleet will now all
+move up to be able to fire on a manually selected target, in exactly the same way as on high
+autonomy, in general ships on low or medium will now require a lot less babysitting and
+medium autonomy is now actually useful
+
+- increases the size of the shell menus by 50 percent (from 800x600 to 1200x900)
+
+- ships using a cloaking device with classlabel "CloakingDevice" no longer have their alert
+status automatically set to yellow when they cloak (this was bugged in the stock game where
+the alert status would stay yellow even after decloaking)
+
+- disables the checksum protection on the fleetopshook.dll file (with permission from Doca
+Cola, the lead developer of the original Fleet Operations project) others can improve it further
+
+- construction ships can now fire regular weapons while building something
+
+- shell menu and button fonts no longer resize to outsized proportions when Windows desktop
+scaling is enabled on the user's system
+
+- the game now shows tooltips on objects belonging to other teams
+
+- the user profile, savegames, saved maps, etc... are now stored in a different folder to avoid
+interference with other versions of Fleet Operations, the path is the same but ends in
+"Star Trek Armada II Fleet Ops Config" instead of "Star Trek Armada II Fleet Operations"
+
+- ships using a cloaking device with classlabel "CloakingDeviceImp" are now more visible
+against the background of space (for their owner and allies)
+
+- construction ships can now build stations from farther away (100 units instead of 15), vastly
+reducing the chance they'll get stuck trying to reach a hard-to-reach build location
+
+- stations (the object needs to have ainame = "StarbaseProcess") can now be ordered to use 
+special weapons while building a ship
+
+- nebula objects are now hardcoded to not rotate, except for the rotation animation
+from their .sod models
+
+- provides a hack that can make ships fire conventional weapons while cloaked with a classlabel
+"CloakingDevice" cloak, for this set avoidanceclass = 151 in the ship's ODF
+
+- mining ships replacing into another mining ship will now keep following their mining orders
+
+- mining ships can now fire both regular and special weapons while mining
+
+- fixes a glitch where AI-controlled ships would sometimes stay completely passive for long
+periods of time after exiting a wormhole, not even defending themselves when attacked
+
+- large ships will now return fire when attacked by a smaller ship at the edge of the larger ship's
+sensor range (sensor/weapons range mismatch for large ships has been reduced)
+
+- ships that have been given a command to attack a target outside their weapons range will now
+fire on targets of opportunity while they're traveling towards their commanded target
+
+- ships replacing into another ship while moving to a shipyard's rally point will now keep
+moving towards that rally point
+
+- a replaceweapon with "replacementInstantPlayer = 1" or "replacementInstantAI = 1", and 
+"requiredCrew = 1", will not activate while its owner is busy building/researching
+
+- setting a non-zero value for "lodShift" for an ordnance gives the weapon that the ordnance belongs 
+to a damage multiplier equal to the value of "lodShift" (greater than 1.0 means more damage) against 
+targets whose shields are either completely down, or so weak that their hitpoints are less than the 
+base damage ("Damagebase" value) of the ordnance, this allows modders to create weapons that deal 
+more (or less) damage to hulls than to shields
+
+- setting the "lodShift" parameter for Borg holding beam and assimilation beam ordnances 
+(classlabel = "borgbore" and classlabel = "holding_bm"), prevents them from invalidating the targeted 
+ship for regular weapons if the crew count of the target is above this value, note that the "lodShift" 
+parameter also regulates shield damage vs. hull damage, so it's best to only use it in the context of 
+target invalidation for weapons that don't do damage
+
+- ships that have different combat and regular impulse speeds, such as most ships in the A2 Classic 
+submod, now will use their regular speed instead of the slower combat speed when given an attack order 
+against a target that is beyond the ship's weapons range
+
+- for races that use the "trackX" option in their odf file to list music tracks those tracks will now 
+play in random order, note that if "singleplayermusic" is set in a race odf it will override the trackX 
+list while in singleplayer mode
+
+- shield remodulation ordnances (classlabel = "remodulation") with needtarget = 0 can now be used by 
+special weapon autonomy if special = 1 without crashing the game, they'll automatically target the 
+ship that carries the weapon itself
+
+- when trying to build a station with footprintaligned = 1 (all stations in Roots, also all stations 
+in TM) the footprint tiles will now turn red if they get too close to the edge of the map to build, 
+as determined by MAP_EDGE_BUFFER in RTS_CFG.h
+
+- adds new optional parameters to ART_CFG.h that set the color for type 2 rangedobjectaffector weapons 
+(ECM in Roots): 
+float cfgTy2Lit_R: red (0.0 to 1.0) component of the custom color (default: 0.0)
+float cfgTy2Lit_G: green (0.0 to 1.0) component of the custom color (default: 0.5)
+float cfgTy2Lit_B: blue (0.0 to 1.0) component of the custom color (default: 1.0)
+
+- adds new optional parameters to ART_CFG.h that set the color for hull reflections 
+(especially with bump maps) when both type 1 and type 2 rangedobjectaffector weapons (ECM and Fleet 
+Coordination in Roots) are being applied to the craft:
+int USE_ROACOMBI_LIGHT: force a custom defined color (1), or (default) just have the game engine mix 
+the colors of the two light sources (0)
+float cfgCombiLit_R: red (0.0 to 1.0) component of the custom color (default: 1.0)
+float cfgCombiLit_G: green (0.0 to 1.0) component of the custom color (default: 0.25)
+float cfgCombiLit_B: blue (0.0 to 1.0) component of the custom color (default: 0.0)
+
+- type 1 rangedobjectaffectors now affect hitchance when their "rangefactor" value is negative, for 
+example "rangefactor = -0.2" cancels out an enemy type 2 affector (ECM) with "percentreduction = 0.2"
+
+- adds the new "hitChanceMod" parameter to weapon odfs, it can have values 0 through 3: 
+0: default, and normal hitchance behavior
+1: stations (with no engine hitpoints) do not automatically get a hitchance of 1.0
+2: stations do not automatically get a hitchance of 1.0, AND rangedobjectaffectors do not affect the 
+hitchance
+3: rangedobjectaffectors do not affect the hitchance
+
+- rangedObjectAffector special weapons (like the Fleet ECM Enhancer and Fleet Coordination in Roots) 
+can now be made to shutdown automatically once the ship (or any ally within the ship's sensor range) 
+has not been under attack for at least 10 seconds AND the weapon has been active for at least the 
+duration of the "timeBetween" value, to activate this behavior set "hitChanceMod = 3" for the weapon
+
+- the Clairvoyance ability (classlabel = "clairvoyance") in the A2 Classic submod now obeys 
+the "SpecialValue" parameter
+
+- construction ships can now have an unlimited build range if "avoidanceclass = 99" in their odf file, 
+this enables static construction ships, for example for tower defense maps
+
+- unitorpedo and unibeam ordnances will now apply all listed affects simultaneously on a target 100% of 
+the time for any effect with a nonzero percent value, if the ordnance odf has "affectedsystems = 99"
+
+- setting an invalid value for "shieldGeometryName" in an ordnance odf now makes the ordnance use the 
+"shield down" effect when impacting the target's shields , instead of crashing the game, also setting 
+a nonzero "damageBase" value (though no damage will actually be applied) for a shieldinversion ordnance 
+(classLabel = "shieldinv") makes it use the target's regular shield impact effect
+
+- changes the limit on the number of playable factions in multiplayer from 8 (7 factions and the 
+"random" faction setting) to 16 (15 factions and the "random" faction setting)
+
+- setting a negative value for the speedModifier parameter of a speedboost weapon (classlabel = 
+"speed_boost") now boosts the buildspeed of an affected shipyards, construction ships, etc... while the 
+weapon is active
+
+- ships with multiple regular (special = 0) weapons can now skip some of them when calculating the 
+engagement range when attacking, allowing them to move in closer than the range of their longest-ranged 
+weapon: set buttonslot = 9999 in the weapon odf for its range to be skipped, note that this does not 
+work correctly when the weapon's index in the ship's odf is "weapon1"
+
+- ships and stations with "avoidanceclass = 123", or "avoidanceclass = 124", no longer reflect light 
+from rangedObjectAffector special weapons with affectorType=2, like the Fleet ECM Enhancer in Roots
+
+- ships and stations with "avoidanceclass = 124", or "avoidanceclass = 125", no longer reflect light 
+from rangedObjectAffector special weapons with affectorType=1, like Fleet Coordination in Roots
+
+- ships given a "Search and Destroy" command now converge more efficiently at targets that are outside 
+the range of the ship's own sensors but are visible to the ship's team, they will now also use impulse 
+speed, not combat speed, while searching, and will decloak when they've found a target 
+
+- AI-controlled ships acting under a strategic AI "exploration" goal (which is different from the "Scout" 
+command) will now attack targets of opportunity they come across, similar to "Search and Destroy" 
+
+- beneficialbuild requirements (blue footprint) can now also be satisfied by allied ships/stations/planets, 
+and the footprints for beneficialbuild are rendered more clearly, especially with "beneficialbuildforce = 1" 
+
+- setting "percentNebulaWarn = 0" in a station's odf prevents the race/faction icon from disappearing from 
+the station's systems display when it has a full (10 items) build queue
+
+- global (with keyword "Global", and "SoundPriority 2" in events.dat) audio/text messages can now be made to 
+appear only for allies, or enemies, for allies set shrink 0.023 in the Marker section of the event, for 
+enemies set shrink 0.024, any other shrink value will make the message appear for all players, note that if 
+you don't want a marker to appear on the minimap you can set the radius to 1 and the color to 0 0 0
+
+- the classlabel = "temporal" ordnance (which can be used by classlabel = "u_ball_obj" objects) can now be 
+made to use audio/text message events other than the hardcoded TemporalDisplacementWarning, to do this set a 
+hitChanceMod value for the weapon that fires the ordnance, many values are possible, for example the value 
+38 leads to the SelfDestructCancel event, both 44 and 0 lead to the (default) TemporalDisplacementWarning 
+event, 45 leads to the BlackHoleCreatorWarning event, and 60 leads to the PlanetConquered event
+
+- weapons with classlabel = "deathchant" ordnances now won't display the Wdeathch.tga over affected ships and 
+stations if the ordnance has "turnModifier = 99.0"
+
+- activating a corbomite reflector weapon (classLabel = "reflectweapon") with "reflectionRatio = 0.0" and 
+"reflectMissile = 1" now makes the shipyard repeat the current build queue until the weapon is deactivated, 
+note that ships that exceed a build cap or tech requirement will be removed from the queue
+
+- ships can now skip ranks when being promoted after they receive a large enough XP boost
+
+- there is now a way to increase the officer limit during a game: when an object with 
+"percentNebulaWarn = 0.12345" is built by a producer the officier limit for its team is increased by the 
+object's "maxextraweapons" value, this same amount is deducted again when the object is destroyed
+
+- if a faction has "crewaccumulationrate = 0" in their race odf they will use alternative versions of the 
+biomatter resource icon and tooltips in Dynamic_Localized_Strings.h, for example "GUI_CP_BIOMA_ALT_RES" instead 
+of "GUI_CP_BIOMATTER_RES", for the resource icon in the top left corner of the screen you have to edit the value 
+of "resourcePanel.0" in the faction's gui sprite file, note this uses the "EnemyDetected" even instead of the
+"InsufficientBiomatter" event in events.dat
+
+- negative resource costs for buildable objects and special weapons will now be displayed on tooltips and 
+negative resource costs for buildable objects no longer turn into large positive costs when the global build cost 
+slider is adjusted 
+
+- when a faction's race odf has "usesXXXX = 0" (for example "usesDilithium = 0") the relevant resource will no 
+longer be displayed in special weapon tooltips and replaceweapons will now correctly ignore the resource
+
+- fixes an issue where Borg Holding Beams could leave a target derelict (zero crew) if the target's crew count 
+was a multiple of the beam's boarding party size when the beam grabbed the target
+
+- the main game can now be launched from the mod loader menu of a mod so you don't have to exit to desktop to go 
+back to the main game 
+
+- the game's settings, savegame files, and crash logs are no longer stored in the hardcoded 
+"C:\Users\[username]\AppData\Roaming\Star Trek Armada II Fleet Ops Config" folder, but in the new 
+"settings_saves_logs" folder inside the game's installation folder, for example 
+"C:\Fleet Ops Roots\Data\settings_saves_logs", this means multiple installations, for example Roots and 
+Tactical Maneuvers, never conflict with each other's settings, and that these files are easier to find, the 
+Roots installer automatically grants write permissions to the folder it installs the game into, but if 
+somehow the game ends up inside a write-protected folder the game will store its settings in 
+"C:\Users[username]\AppData\Local\VirtualStore\[install_folder_name]\Data\settings_saves_logs" 
+
+- adds the DEFAULT_GAMESPEED parameter that can be added to either RTS_CFG.h or ART_CFG.h, this will set 
+the default gamespeed for a new installation, or when choosing default settings in the advanced game settings 
+of a multiplayer or instant action setup, if not provided it defaults to 5, example: 
+"int cfgDEFAULT_GAMESPEED = 3;", this value used to be hardcoded in ArmadaL.exe, but not anymore, which also 
+means different values can now be set for individual submods
+
+- adds the GAMESPEED_SCALING parameter that can be added to either RTS_CFG.h or ART_CFG.h, it will scale the 
+gamespeed by this factor, which is very useful for testing pruposes, if not provided it defaults to 0.33333334, 
+example to double the gamespeeds: "float GAMESPEED_SCALING = 0.66666667;"
+
+- adds the cfgBUILDTIME_TOOLTIP parameter that can be added to either RTS_CFG.h or ART_CFG.h, 
+this determines how build times show up in tooltips: 
+0 (default): build time is not displayed
+1 build time is displayed, using a rounded value of the buildTime property of the craft, and the 
+GUI_CP_BUILDTIME_RES string in Dynamic_Localized_Strings.h
+2 build time is displayed using the officerCost property of the craft
+note that 1 and 2 both scale with the Ship Build Time slider from the advanced settings menu
+
+- adds the LOAD_DELAY parameter to ART_CFG.h that adds a delay (in milliseconds) when the loadbar finishes so 
+players get time to read the loading screen tip, default to the previously hardcoded value of 500
+
+- latinum nebulas now obey the "lifeTimer" parameter, so they can auto-deletes after a given amount of time
+
+- the green circle when hovering the mosue cursor over the sensor system of a craft now displays the full range, 
+instead of only being 60% of the full range
+
+- setting "spriteduration = 0.0" in an ordnance odf with classlabel = "minebm" now makes the mining beam add any 
+mined resources directly to the player's resource account, instead of into the freighter's cargo hold, and setting 
+"explosionUnitsPerLatinum = 0.0123" in a mining freighter (classlabel = "freighter") odf now automatically makes 
+the freighter seek out resources to mine as soon as it is created
+
+- the tooltip for the shield and hull health bars in the ship's display now also lists the shield strength
+
+- adds the "shieldScale" parameter that can be set in an objects odf in order to scale the size of the shield bubble, 
+but unlike the "shieldPad" parameter it does not affect the object's size for physics/collision/footprint, it does 
+also scales the size of the selection reticle
+
+- adds RGB color parameters that can be set in gui cfg files (even per faction) for weapon and system icons in the 
+ship's display: "weaponIconColor", "systemIconHealthyColor", "systemIconLowColor", "systemIconCriticalColor", 
+"systemIconDisabledColor", and "officerIconColor", weapon icons can use systemIconHealthyColor (for example for 
+passive dummy weapons) by setting "buttonslot = -1", example to get a red officer icon for the Klingons, add the 
+following line to \Data\misc\gui_klingon.cfg: "officerIconColor =	1	0	0"
+
+- the game engine can now address up to 4GB of RAM (previously the limit was 3GB), which
+means the game engine can now better handle memory-hungry mods.
+
+
+
+
+
+
+In loving memory of Bob (2012-2026)
+
+You were the best cat I would have ever wished for and my faithful modding assistant, 
+always nesting on my lap when I needed you. Words cannot express how much I miss you.

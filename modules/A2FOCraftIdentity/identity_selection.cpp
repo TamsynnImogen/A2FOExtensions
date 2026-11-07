@@ -6,18 +6,12 @@
  */
 
 #include "identity_selection.hpp"
+#include "../../rust/gameplay_ffi.h"
 
 namespace a2fo::craft_identity {
-bool aligned_identity_index(
-    std::int32_t craft_name_index,
-    std::size_t entry_count,
-    std::size_t* output) noexcept {
-    if (output) *output = 0;
-    if (craft_name_index < 0) return false;
-    const auto index = static_cast<std::size_t>(craft_name_index);
-    if (index >= entry_count) return false;
-    if (output) *output = index;
-    return true;
+bool aligned_identity_index(std::int32_t craft_name_index, std::size_t entry_count,
+                            std::size_t *output) noexcept {
+    return a2fo_rs_gameplay_identity_index(craft_name_index, entry_count, output) != 0;
 }
 
-}  // namespace a2fo::craft_identity
+} // namespace a2fo::craft_identity

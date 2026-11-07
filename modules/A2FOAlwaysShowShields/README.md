@@ -1,5 +1,16 @@
 # Persistent shield visibility
 
+## Built-in integration
+
+The core-provided `A2FOAlwaysShowShields` name keeps an independent module
+policy, and configured class metadata remains available while the feature is
+off. If policy changes, tracked native effects stop at the next game callback
+after the activation generation changes. The built-in uses core-owned
+CraftClass, Craft simulation/cleanup, and render callbacks first, with the
+standalone observers retained as fallbacks. Its hooks remain resident; policy
+does not unpatch them. The standalone SDK target remains available for
+compatibility builds.
+
 A2FOAlwaysShowShields.dll adds one optional object ODF command:
 
     alwaysShowShields = 1

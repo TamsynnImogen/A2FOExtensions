@@ -1,0 +1,33 @@
+{
+  "status": "deployed for next launch; live monitor-filling acceptance pending",
+  "timestamp": "20261018-221407",
+  "target": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOShellDisplay.dll",
+  "sha256": "c364fa31788d6c1a08769d93ed9db56c93c6a218e4bb626eb3ff25711dc5bd19",
+  "previous_sha256": "cfb69b564132ec59620572c0f54edae4b83a798c8d5644df60868d8847d19007",
+  "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/borderless-monitor-20261018-221407",
+  "protected_unchanged": {
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FORefitMenus.dll": "3ce8a6d6699f7a75f481bb94bc2fda8d236ca231a31d1c4b958e947fc85ac51d",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FORefitMenus.ini": "ad7ed38800935476383a206bf9811a5f6d6c4f8f6f3e1e55937568d23ff7ff6f",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/info.ini": "d40efd9f80bc8e07d95186ede2ddd2a44277c758f45ac58171712f8eaa9a7192",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/test/info.ini": "68cef7963cf436691dc775dae6efc07d9ed4a9545d1b71f596b1d3b8a76061ac",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/STA2 Classic Mod/info.ini": "9f599f3f5217d0219d80ef0dd8a01990a72e9995b51a0b5cc372ff709cf77976",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/settings_saves_logs/Settings.xml": "c83bb247596d01c0b5dc8a339256df34f16024813963cf63d466ac15785c7455",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOArmadaProfiles.txt": "08ffa42a487354a7959fa5d4b184eb8120b331d2bca62284ac59f0da1cb52dac",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.dll": "45be55e79afe53365dc26f1e4238bfcd9d74120299215b52bca6458f072d4b05",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe": "817b1ddb9876cfb9c5d781b42d2513de48fef9cbdbc408aa43c878c573581a18",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll": "3fd18eeee4201a9a1297ac26b3eb88f78c5f72e8c55a62c25179f1d4932e4c11"
+  },
+  "tests": {
+    "shell_suites": "7 passed",
+    "installed_pair_display_smoke": "passed",
+    "independent_review": "no confirmed ABI or geometry regression",
+    "native_game": "pending user restart and visual acceptance"
+  },
+  "source_sha256": {
+    "modules/A2FOShellDisplay/module.cpp": "8e02c58a7582f4fdb7521b00daaaa19ae15f08fdc1303e040b0a59cd8986710d",
+    "modules/A2FOShellDisplay/bink_video.cpp": "73dfdb2095d07f755991a9ab73c77ac29f6a98b6b293214db3474005db8783a7",
+    "tests/shell_display_native_smoke.cpp": "a69d06d65e929bd53acc04fd0afa76f272487dbb553bfe6b5cc7d00219ac348b",
+    "tests/shell_intro_test.cpp": "9e803970c687d0c879058563c28e6dd98f0374e82325cecbe0f9cf798b1fbac8"
+  },
+  "input_automation": false
+}

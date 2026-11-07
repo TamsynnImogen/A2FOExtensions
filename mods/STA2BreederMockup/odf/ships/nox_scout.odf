@@ -1,0 +1,9 @@
+#include "8472_scout.odf"
+
+baseName = "8472_scout"
+unitName = "Brood Scout"
+tooltip = "Scout Strain"
+verboseTooltip = "Select Scout genes for this breeder. A seed comes from a friendly Mother within 800. Offspring retain the Species 8472 Scout costs, build time and weapons."
+shipIsBuiltByEvolution = 0
+breederSeed = "nox_seed_scout"
+breederResult = "nox_breeder_scout"

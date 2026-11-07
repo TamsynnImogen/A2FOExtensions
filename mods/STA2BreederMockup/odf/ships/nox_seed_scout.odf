@@ -1,0 +1,4 @@
+#include "nox_seed_base.odf"
+
+unitName = "Scout Seed"
+tooltip = "Scout Seed"

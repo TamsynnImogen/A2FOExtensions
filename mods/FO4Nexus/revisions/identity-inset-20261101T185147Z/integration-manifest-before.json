@@ -1,0 +1,157 @@
+{
+  "parent": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/Fleet Ops 4.0",
+  "required_modules": [
+    "A2FOInfoIni",
+    "A2FOFeaturePack",
+    "A2FOBuildTooltips",
+    "A2FOCraftIdentity",
+    "A2FODirectionalShields",
+    "A2FOEnergySystems",
+    "A2FOFireArcs",
+    "A2FOResources",
+    "A2FOWeaponDamageControls"
+  ],
+  "active_modules": [
+    "A2FOAlwaysShowShields",
+    "A2FOAnimatedHardpoints",
+    "A2FOCheats",
+    "A2FOHybridBuild",
+    "A2FOInstantActionSettings",
+    "A2FOMissionSelector",
+    "A2FONebulaRenderer",
+    "A2FONormalWeaponTech",
+    "A2FOPointDefenseCycles",
+    "A2FORGBTextures",
+    "A2FOSwarmSystem",
+    "A2FOTextureVariants",
+    "A2FOTurrets",
+    "A2FOWreckage"
+  ],
+  "files": [
+    {
+      "path": "info.ini",
+      "source_sha256": "22e67489dec48250fab529f9984588cd6bb3a4ad1423f730af594dfa1610c08b",
+      "sha256": "30a04700782c9fd89033716a4fe4911437113c87388e65f717c3675bc1ea6243"
+    },
+    {
+      "path": "misc/gui_interface_misc.cfg",
+      "source_sha256": "74f5e33bd1913360e7f43fd6f14cc6e3c659674b6fa3f2f37456727bbc0c6779",
+      "sha256": "a4c8136571290698b7c618c133135bba083ab5aaa6020c5a4c01049050eed0d7"
+    },
+    {
+      "path": "RTS_CFG.h",
+      "source_sha256": "5ad93b820f3cb2482501ebf06a0ab9ba7966e995e840058c5f2198a2e3372bb1",
+      "sha256": "303a07c692ef985fe3572a41ea0b96af1d381fd3aab2d672723ed2a581f9cd98"
+    }
+  ],
+  "ui_rectangles": {
+    "infoSingleCaptainTextArea": [
+      627,
+      0,
+      580,
+      20
+    ],
+    "infoSingleRegistryTextArea": [
+      627,
+      22,
+      580,
+      20
+    ],
+    "infoSinglePhotonTorpedoesTextArea": [
+      627,
+      44,
+      580,
+      20
+    ],
+    "infoSingleQuantumTorpedoesTextArea": [
+      627,
+      44,
+      580,
+      20
+    ],
+    "infoSingleShuttleCraftTextArea": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "infoSingleDirectionalShieldsGraphicArea": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "infoSingleDirectionalShieldsForwardAftTextArea": [
+      627,
+      66,
+      580,
+      20
+    ],
+    "infoSingleDirectionalShieldsPortStarboardTextArea": [
+      627,
+      88,
+      580,
+      20
+    ],
+    "infoSingleExperienceBarArea": [
+      627,
+      109,
+      580,
+      3
+    ],
+    "infoBuildCaptainTextArea": [
+      627,
+      3,
+      270,
+      20
+    ],
+    "infoBuildRegistryTextArea": [
+      915,
+      3,
+      290,
+      20
+    ],
+    "infoBuildPhotonTorpedoesTextArea": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "infoBuildQuantumTorpedoesTextArea": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "infoBuildShuttleCraftTextArea": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "infoBuildDirectionalShieldsGraphicArea": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "infoBuildDirectionalShieldsForwardAftTextArea": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "infoBuildDirectionalShieldsPortStarboardTextArea": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "infoBuildExperienceBarArea": [
+      0,
+      0,
+      0,
+      0
+    ]
+  }
+}

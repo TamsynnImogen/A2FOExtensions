@@ -1,5 +1,13 @@
 # Three-dimensional weapon fire arcs
 
+## Built-in integration
+
+The core-provided `A2FOFireArcs` name retains its own module policy. The
+runtime remains disabled when `firearc=0` in `RTS_CFG.h`; the built-in policy
+does not override that setting. Built-in hooks remain resident for the process
+lifetime, and policy changes gate behavior without unpatching them. The
+standalone SDK target remains available for compatibility builds.
+
 `A2FOFireArcs.dll` gives an ordinary weapon an optional firing volume which is
 fixed to its owner. It answers one question: **is the target direction inside
 the volume from which this weapon is allowed to fire?**
@@ -383,3 +391,33 @@ the same DLLs and weapon ODF values.
 Weapons without custom commands retain Fleet Operations' native behaviour.
 Invalid custom commands also fall back to the native path rather than leaving
 the weapon partially configured.
+
+
+## Checkpoint — 2026-10-27: A2FOFireArcs component conversion complete
+
+FireArcs portable policy conversion is complete at source/build/headless level.
+Rust owns the remaining text/config control, runtime and class admission,
+fail-open geometry routing, native weapon-vector bounds, UI colour refresh and
+selection, and x87-compatible radius/colour calculations. Native hooks, binary
+signatures/offsets, checked object access, STL/stream lifetimes, CRT calls and
+exception scopes retain their C++ boundaries.
+
+Passed: 203 Rust tests, formatting, host and i686 Windows Clippy, both release
+archives, integrated and standalone DLL builds, 168 original/current native
+pairs (336 executions, 7,601 equal trace lines), 1,656 numeric
+rows across all 12 x87 precision/rounding modes, and four existing built-in
+lifecycle cases. Five native allocation failure and guard cases also match.
+Active fixture scenarios require successful initialization and
+an explicit completion marker. The original module uses authenticated frozen
+headers and archive10's independent dependency archive. All 30 source-referenced
+Rust implementations are linked. Integrated 197 and standalone 3 public
+exports/ordinals are unchanged; no new system imports. Seventeen native
+functions/classes, constants, and five native headers/assembly files are pinned
+unchanged. The incremental build reuses unchanged native object cache.
+
+Evidence: `build/rust-migration-stage10/fire-arcs/checkpoint-v2/validation.json`.
+The component is `completed_pending_census`. Strict common-DLL census credit
+remains 116/151, with 35 uncredited records; this component awaits that shared
+refresh. No strict verifier binding or historical receipt was weakened or
+re-credited. The previous A1/SOL and Resources artifacts remain preserved.
+No deployment or game launch occurred; in-game acceptance remains pending.

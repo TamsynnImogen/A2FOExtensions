@@ -1,0 +1,20 @@
+{
+  "status": "installed menu backgrounds selected; Refit 3D scene rendering disabled; restart required",
+  "timestamp": "20261019-003700",
+  "config": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FORefitMenus.ini",
+  "sha256": "646586fd780353a0e0dd637b33665d8b7565fa350efcc7fbdb5d8fd739989ea9",
+  "previous_sha256": "e83915c19036e31a7c3b42b35480b9eaa2a9b22ea0bc2e8513a0e433d0ed5ae7",
+  "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/refit-static-backgrounds-20261019-003700/A2FORefitMenus.ini",
+  "protected_unchanged": {
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FORefitMenus.dll": "acda0f91b8f6458253cead3aadc4d346909dce7f273659a6de8a66c842b1df0d",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOShellDisplay.dll": "c364fa31788d6c1a08769d93ed9db56c93c6a218e4bb626eb3ff25711dc5bd19",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/ArmadaL.exe": "817b1ddb9876cfb9c5d781b42d2513de48fef9cbdbc408aa43c878c573581a18",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/FleetOpsHook.dll": "3fd18eeee4201a9a1297ac26b3eb88f78c5f72e8c55a62c25179f1d4932e4c11",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/refit/A2FORefitScene.dll": "21de74ba7f72b80ce9409f78f5ff6596f863425f15b0a4494c9e8871c49757dc",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/RefitScene/Render3D.ini": "5329219c6489cf21698305aeef73cc3d0727437f8a5d8a2e7fca6b1a5d3134dd",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.dll": "45be55e79afe53365dc26f1e4238bfcd9d74120299215b52bca6458f072d4b05",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.ini": "8830d04dbcd3d5c45671748cc8a3999cbb5e52f5ff19636d3f01a42c8bb9abdd",
+    "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/info.ini": "d40efd9f80bc8e07d95186ede2ddd2a44277c758f45ac58171712f8eaa9a7192"
+  },
+  "runtime_acceptance": "pending; no game launch performed"
+}

@@ -1,0 +1,88 @@
+{
+  "deployed_at_utc": "2026-10-03T11:36:26.425028+00:00",
+  "build_id": "20261003-roots-reviewed-compatibility-profiles-1",
+  "engine_sha256": "3423ad8f04dc4a9eafe812fea81c6c53fea0df640b10bcc975902e207f834306",
+  "fleetops_sha256": "d2a0829e87aaa927e27146b90be61fc6359c6cbf3d81aed2c644019dd375b9b6",
+  "backup": "/home/tamsynn/A2FOHookExtensions/.deployment-backups/engine-compat-20261003-112749",
+  "files": [
+    {
+      "file": "A2FOExtensions.dll",
+      "sha256": "94754f2225e2eb2122c890f2803930b6e891cd159c4891f01ce4008a4c6f7ac8",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/A2FOExtensions.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOExtensions.dll"
+    },
+    {
+      "file": "A2FORendererHelper.exe",
+      "sha256": "7296f67c694a52ebd593bc5fa77357ff6ce32264f91f1ad46cefa734e77b2fb8",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/A2FORendererHelper.exe",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FORendererHelper.exe"
+    },
+    {
+      "file": "A2FOArmadaProfiles.txt",
+      "sha256": "a9cd3788f7498200f197f31aaaa55014ff8e32d12f9dc658fed35f002c2527b7",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/A2FOArmadaProfiles.txt",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/A2FOArmadaProfiles.txt"
+    },
+    {
+      "file": "modules/A2FOAnimations.dll",
+      "sha256": "857538fef0be103bcd2c2ef6d2ad4be18f829adfdb40d17de57400bf31712c63",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOAnimations.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOAnimations.dll"
+    },
+    {
+      "file": "modules/A2FOAnimatedHardpoints.dll",
+      "sha256": "7c7685770405c9091abd205632a78f97811ef1e488c32d260a751d832c7dcb35",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOAnimatedHardpoints.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOAnimatedHardpoints.dll"
+    },
+    {
+      "file": "modules/A2FOBuildTooltips.dll",
+      "sha256": "cfee975684dd5bbaafb7ec54fcc8633c4eff68e3e3d6b198c9c24f84ec48e494",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOBuildTooltips.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOBuildTooltips.dll"
+    },
+    {
+      "file": "modules/A2FOCollectiveXP.dll",
+      "sha256": "f8a50701b6e2cd11e75f24fd449625f0b622b5c39ec760519761bab8202fcffd",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOCollectiveXP.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOCollectiveXP.dll"
+    },
+    {
+      "file": "modules/A2FOCraftIdentity.dll",
+      "sha256": "b6b8cc88db2cae5e3c8809bb8f61edf024ba011e02c21e2258321e4889a3c69a",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOCraftIdentity.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOCraftIdentity.dll"
+    },
+    {
+      "file": "modules/A2FOInstantActionSettings.dll",
+      "sha256": "9f49bb9381ca1beee41b5a76249596d10df7dd5efb6fc2377c6dd2ce90064158",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOInstantActionSettings.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOInstantActionSettings.dll"
+    },
+    {
+      "file": "modules/A2FORGBTextures.dll",
+      "sha256": "e957353a5961e358599c68421c6b660cccd48eb1b0b9896d89d307d5640db73c",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FORGBTextures.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FORGBTextures.dll"
+    },
+    {
+      "file": "modules/A2FOStationRotation.dll",
+      "sha256": "d41bdc93e82d5fc75f4560e6736666e29445bca6adc1515ee59c118a4f979764",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOStationRotation.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOStationRotation.dll"
+    },
+    {
+      "file": "modules/A2FOShellDisplay.dll",
+      "sha256": "1d909ec71bf091ce108f5c5f41f9bc753a9b76c6ec2ed1795baecccacfc06229",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOShellDisplay.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOShellDisplay.dll"
+    },
+    {
+      "file": "modules/A2FOVideo.dll",
+      "sha256": "17be82bfed1851ff6dbc31a8c6d49d992b4616e6fc05fe57635a942a1b494c28",
+      "source": "/home/tamsynn/A2FOHookExtensions/build/modules/A2FOVideo.dll",
+      "destination": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/modules/A2FOVideo.dll"
+    }
+  ],
+  "manual_game_acceptance": "pending"
+}

@@ -1,0 +1,34 @@
+{
+  "parent": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/Fleet Ops 4.0",
+  "asset_source": "/home/tamsynn/A2FOHookExtensions/mods/FO4Nexus/assets/Textures",
+  "artwork_provenance": {
+    "local_reference_test": true,
+    "distribution_provenance": "pending"
+  },
+  "files": [
+    {
+      "source_path": "/home/tamsynn/NVMeData/Fleet Ops Roots/Data/Mods/Fleet Ops 4.0/Sprites/gui_global.spr",
+      "source_sha256": "c87b7c99fffbb1304e207a8a996e76e0f1dc499cb30d859ad6441488a9d75f50",
+      "output_path": "Sprites/gui_global.spr",
+      "output_sha256": "050126945f7e9bb32d624d10ed94cd4a11a96ec9881bcbdcbc5b00b1c4c59f6c"
+    },
+    {
+      "source_path": "generated: nx_ui.spr definition",
+      "source_sha256": null,
+      "output_path": "Sprites/nx_ui.spr",
+      "output_sha256": "872f0aa3fd9824ae0769fb6c2060f0ab021936600749f445da0a4153643dcf5b"
+    },
+    {
+      "source_path": "/home/tamsynn/A2FOHookExtensions/mods/FO4Nexus/assets/Textures/shield_quad.tga",
+      "source_sha256": "80454ea3b78cf7c4c13717c44dbb3afdf8dd050213850d339073dd94d579b58b",
+      "output_path": "Textures/nx_ui_shield_quad.tga",
+      "output_sha256": "80454ea3b78cf7c4c13717c44dbb3afdf8dd050213850d339073dd94d579b58b"
+    },
+    {
+      "source_path": "/home/tamsynn/A2FOHookExtensions/mods/FO4Nexus/assets/Textures/shield_quad_side.tga",
+      "source_sha256": "02f94126ad6b2e68d411bc6184ac0233ea9f6b178d0016a83295bf7b9f3bb374",
+      "output_path": "Textures/nx_ui_shield_quad_side.tga",
+      "output_sha256": "02f94126ad6b2e68d411bc6184ac0233ea9f6b178d0016a83295bf7b9f3bb374"
+    }
+  ]
+}

@@ -4,6 +4,8 @@
 
 #include "turret_combat.hpp"
 
+#include "../../rust/combat_config_ffi.h"
+
 namespace a2fo::turrets {
 
 std::uint32_t attack_order_target_handle(
@@ -11,29 +13,19 @@ std::uint32_t attack_order_target_handle(
     std::uint32_t target_form,
     std::uint32_t target_handle,
     bool target_exists) noexcept {
-    if (command_id != kAttackCommand ||
-        target_form != kObjectCommandTargetForm || target_handle == 0 ||
-        !target_exists) {
-        return 0;
-    }
-    return target_handle;
+    return a2fo_rs_combat_attack_target(
+        command_id, target_form, target_handle, target_exists ? 1 : 0);
 }
 
 OrderTargetState update_order_target(
     std::uint32_t previous_ordered_target_handle,
     std::uint32_t next_ordered_target_handle,
     std::uint32_t current_visual_target_handle) noexcept {
-    OrderTargetState result{};
-    result.ordered_target_handle = next_ordered_target_handle;
-    result.visual_target_handle = current_visual_target_handle;
-    if (next_ordered_target_handle != 0) {
-        result.visual_target_handle = next_ordered_target_handle;
-    } else if (previous_ordered_target_handle != 0 &&
-               current_visual_target_handle ==
-                   previous_ordered_target_handle) {
-        result.visual_target_handle = 0;
-    }
-    return result;
+    A2foRsOrderTargetState output{};
+    a2fo_rs_combat_update_target(previous_ordered_target_handle,
+                                 next_ordered_target_handle,
+                                 current_visual_target_handle, &output);
+    return {output.ordered_target_handle, output.visual_target_handle};
 }
 
 }  // namespace a2fo::turrets

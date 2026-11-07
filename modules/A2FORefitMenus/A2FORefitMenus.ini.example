@@ -1,0 +1,18 @@
+[RefitMenus]
+; Enable the Refit menu presentation independently of the background renderer.
+Enabled=0
+; Refit Instant Action layout; native state and real input are retained.
+InstantAction=1
+; Refit-style loading presentation; native loadscreen.odf bar/tips remain in use.
+; Independent of LiveScene. Missing key defaults to 0 for existing installs.
+LoadingScreen=0
+; Frames between native loading steps, with explicit splash texture cleanup.
+; Requires LoadingScreen=1. Missing key keeps the native loading cadence.
+LoadingAnimation=0
+; Background mode (restart the game after changing this):
+; 0 = use the installed menu background images; no Refit 3D renderer is started.
+; 1 = use Refit's animated 3D scenes, with artwork fallback if unavailable.
+LiveScene=0
+; 3D resolution: 0 = native menu size (within safety limits).
+; Set e.g. 1280 for a cheaper render scaled to the menu. Ignored when LiveScene=0.
+SceneRenderWidth=0

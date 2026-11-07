@@ -1,5 +1,15 @@
 # A2FOStationRotation
 
+## Built-in integration
+
+The core-provided `A2FOStationRotation` name keeps an independent module
+policy. Turning it off stops new rotation input, preview changes, and encoded
+order sends. Existing encoded orders, construction transforms, and footprint
+cleanup are still honored to preserve native orders and objects. On Roots,
+station rotation is already native, so the extension is a no-op. Built-in hooks
+remain resident and policy changes do not unpatch them; the standalone SDK
+target remains available for compatibility builds.
+
 Experimental station placement in 90-degree steps. During a construction
 placement preview, **R** adds 90 degrees and **Shift+R** subtracts 90 degrees.
 Each fresh press turns once; holding R does not repeat. Four presses return to

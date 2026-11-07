@@ -1,0 +1,109 @@
+STAR TREK: ARMADA II
+NETWORK HELP GUIDE
+====================
+Updated: 10/26/01
+
+GameSpy and Your Playername
+
+Your playername may appear as Playername{2} or similar if there
+are other players using your name in the GameSpy lobby.
+They may not be playing Star Trek: Armada II, they could be
+playing any game hosted on GameSpy.
+
+If your playername appears as DefaultName{43} or similar,
+this indicates that GameSpy did not accept some of the
+characters that you used in your name.  Your name will show
+up as intended within the game, however.
+
+In the player list, names listed in red are already in a game
+or a game setup screen.  They will return to this chat room
+when their game is over.  Players listed in white are actually
+present in the lobby right now.
+
+
+
+Joining A Game
+
+At the top of the screen, there is a list of games that you can join.
+(There may not be any joinable games at this time, however, esepecially
+if you are on a LAN.)
+
+White games can be joined by double clicking on them.
+Red Games cannot be joined - they are closed or have already
+   launched.
+Amber Games can never be joined - the game creator has a different
+   version or mod pack.
+
+
+
+Creating A Game
+
+You can create your own game by clicking on the create button.
+You have the option of providing a password, which joining players
+will need to know to gain access to your game.
+
+
+
+GameSpy, Internet Play, and Shared Internet Connections
+
+If you are having difficulty creating or joining games, or if
+other people are unable to join your GameSpy or Internet game,
+then you may get better results after adjusting your network
+configuration.  There are two aspects to this, NAT
+(network address translator) devices, and firewalls.
+
+A NAT is usually a router or switch which permits multiple
+home computers to share a single cable or DSL modem 
+connection on a single IP address.  NAT devices work by 
+making your internally known IP address (that is, the address
+you are known by on your home network) be different from your
+externally known IP address (the address that you are known
+by on the public internet.)  This usually means that other
+people are unable to see games that you create.  Your NAT,
+router or swtich should provide a way to set up a single
+computer as a "DMZ host".  See your NAT, router or switches
+manual for more details.  Some NAT's may also prevent you
+from joining a game.  Again, setting up your computer as
+the "DMZ host" for the network should help. 
+
+Moving your system to become the "DMZ host" will make
+it more exposed to the internet and at a potential risk for 
+security.  It is recommended that you consult with your ISP
+or network administrator before making this change. 
+
+A firewall blocks other computers on the internet from
+contacting your computer through various IP port ranges.
+Many NAT's switches and routers may have a firewall built in.
+This assists with securing your home or corporate network.
+If the ports required to play Star Trek: Armada II
+are blocked, you will be unable to create a game, and you
+may be unable to join a game.  You will need to ensure that
+the GameSpy and DirectPlay 8 ports are permitted through
+your firewall.  The required ports follow:
+
+Firewalls are designed to provide security to your system
+or network.  Activision is not responsible for any issues
+that arise from modifying your security.  It is recommended
+you contact your ISP or network administrator before making
+any changes to your firewall.
+
+
+DirectPlay 8 Ports
+
+2300..2400 UDP inbound and outbound
+6073           TCP inbound and outbound
+
+
+
+
+GameSpy Ports
+
+80         TCP, outbound
+6500     UDP, inbound
+6667     TCP, outbound
+13139   UDP, inbound and outbound
+27900   UDP, inbound and outbound
+28900   TCP, outbound
+29900   TCP, outbound
+29901   TCP, outbound
+

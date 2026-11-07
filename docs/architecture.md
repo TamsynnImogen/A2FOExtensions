@@ -176,12 +176,18 @@ single-sprite result. An entirely missing set resolves to the target class's
 same missing-asset behavior without enabling A1 gameplay policy.
 
 FeaturePack also owns the Fleet Operations BuildYard configuration parser's
-single `RequiredTechnology` project-ID call. It captures
-`moduleXPseudoTechnology` without detouring Armada's shared
-`ParameterDB::GetProjectId`, then composes the pseudo ID with Fleet Operations'
-native technology evaluator. Pseudo-only declarations reuse the native module
-field; dual declarations retain the second ID in a configuration-lifetime
-sidecar.
+single `RequiredTechnology` project-ID call. v6 reads the canonical
+`moduleXTechnologyEntry` command (`moduleXPseudoTechnology` remains an alias)
+and, when the referenced XML technology declaration uses `MODULE=`, writes an
+A2FO-owned synthetic positive project ID into the native field. The availability
+hook consumes that ID before Fleet Operations can index it and evaluates the
+MODULE's real `<obj>` requirements with BuildYard's original RequiredTechnology
+presence routine. Native `moduleXRequiredTechnology` is retained as an AND gate.
+FeaturePack v9 hooks Armada's StandardComponent tooltip setters for AUTOTOOLTIP values bound to
+a MODULE gate, with the v5 FleetOps direct-call scan retained as a fallback. This
+lets the module's `moduleXButtonTooltip` key receive live missing-requirement
+text even when FleetOps reaches localization through an indirect wrapper.
+Real ODF TechnologyEntry values retain the v4 recursive-project fallback.
 
 FeaturePack owns the general Producer queue and ResearchStation class hooks.
 HybridBuild registers a private callback table with FeaturePack so those shared

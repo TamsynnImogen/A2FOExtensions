@@ -549,3 +549,19 @@ the marker is absent.
 Do not keep backup `.dll` files in `Data/modules`. They become separate
 installed module candidates and legacy load-all mods may initialize them.
 Store backups outside the game tree or give them a non-DLL extension.
+
+## Legacy Armada 1 SOD LOD compatibility
+
+A1Compat now applies a conservative Storm3D 1.80-era LOD compatibility policy
+when a loaded geometry hierarchy contains the classic sibling set
+`Geometry/lod0`, `Geometry/lod1`, and `Geometry/lod2`.  Fleet Operations can
+select the legacy `lod0` fallback too aggressively at long range, which causes
+some stock A1 ships and stations to lose large model sections while zooming
+out.  In this exact three-level A1 pattern, A1Compat keeps `lod1` and `lod2`
+visible and marks only `lod0` hidden.
+
+The policy is intentionally structural and runs only while A1Compat is active.
+A2/FO models that expose only `lod1`/`lod2`, single-LOD legacy models, damage
+trees, hardpoints, and unrelated geometry nodes are left unchanged.  Runtime
+diagnostics report each affected ODF as `A1 legacy SOD LOD policy`.
+

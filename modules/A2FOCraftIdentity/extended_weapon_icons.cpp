@@ -1,4 +1,5 @@
 #include "extended_weapon_icons.hpp"
+#include "../../rust/extended_icons_ffi.h"
 
 #include "../../sdk/include/a2fo_module_api.h"
 
@@ -211,12 +212,17 @@ void destroy_icon(void* icon) noexcept {
     std::free(icon);
 }
 
-void destroy_sidecars(void* ship_display) noexcept {
-    const auto found = g_sidecars.find(ship_display);
-    if (found == g_sidecars.end()) return;
-    for (void* icon : found->second.icons) destroy_icon(icon);
-    g_sidecars.erase(found);
+struct SidecarContext {
+    void* ship{};RawRectangle rectangle{};void* systems{};void* craft{};void* icon{};void* method{};
+    std::size_t method_offset{};SidecarIcons pending{};
+    decltype(g_sidecars)::iterator found{};
+};
+std::uintptr_t destroy_step(void* value,std::uint32_t op,std::uint32_t i) noexcept {
+    auto& c=*static_cast<SidecarContext*>(value);
+    switch(op){case 0:c.found=g_sidecars.find(c.ship);return c.found!=g_sidecars.end();
+    case 1:destroy_icon(c.found->second.icons[i]);return 1;case 2:g_sidecars.erase(c.found);return 1;default:return 0;}
 }
+void destroy_sidecars(void* ship_display) noexcept {SidecarContext c{};c.ship=ship_display;a2fo_rs_icon_destroy(&c,&destroy_step);}
 
 void* gui_parameter_db() noexcept {
     return read_at<void*>(
@@ -235,63 +241,27 @@ bool read_systems_display_rectangle(RawRectangle* rectangle) noexcept {
     return (found & 0xffu) != 0;
 }
 
-void create_sidecars(void* ship_display) noexcept {
-    if (!ship_display || !writable_range(ship_display, 0x30c)) return;
-    RawRectangle systems_rectangle{};
-    if (!read_systems_display_rectangle(&systems_rectangle)) {
-        log_line(
-            "infoSingleSystemsDisplay is unavailable; extended weapon icons were not created");
-        return;
-    }
-    void* systems_display = read_at<void*>(
-        ship_display, kSystemsDisplayOffset, nullptr);
-    if (!systems_display) return;
-
-    SidecarIcons sidecars{};
-    for (std::size_t sidecar_index = 0;
-         sidecar_index < sidecars.icons.size(); ++sidecar_index) {
-        void* icon = std::calloc(1, kShipSystemIconSize);
-        if (!icon) {
-            for (void* allocated : sidecars.icons) destroy_icon(allocated);
-            log_line("Could not allocate extended weapon-icon controls");
-            return;
-        }
-        const std::size_t weapon_index =
-            sidecar_index + kNativeWeaponIconLimit;
-        a2fo_identity_call_thiscall_4(
-            at(g_fleet_ops, kShipSystemIconConstructorRva), icon,
-            reinterpret_cast<std::uintptr_t>(ship_display),
-            reinterpret_cast<std::uintptr_t>(&systems_rectangle),
-            static_cast<std::uintptr_t>(weapon_index),
-            reinterpret_cast<std::uintptr_t>(systems_display));
-        if (read_at<std::size_t>(
-                icon, kIconIndexOffset,
-                kExtendedWeaponIconLimit) != weapon_index) {
-            destroy_icon(icon);
-            for (void* allocated : sidecars.icons) destroy_icon(allocated);
-            log_line("Extended weapon-icon constructor validation failed");
-            return;
-        }
-        sidecars.icons[sidecar_index] = icon;
-    }
-
-    try {
-        const auto inserted = g_sidecars.emplace(ship_display, sidecars);
-        if (!inserted.second) {
-            for (void* icon : sidecars.icons) destroy_icon(icon);
-            return;
-        }
-    } catch (...) {
-        for (void* icon : sidecars.icons) destroy_icon(icon);
-        log_line("Could not retain extended weapon-icon controls");
-        return;
-    }
-
-    if (InterlockedCompareExchange(&g_creation_report_count, 1, 0) == 0) {
-        log_line(
-            "Created native-compatible weapon icon controls for slots 33 through 128");
+std::uintptr_t create_step(void* value,std::uint32_t op,std::uint32_t i) noexcept {
+    auto& c=*static_cast<SidecarContext*>(value);
+    switch(op){
+    case 0:return c.ship && writable_range(c.ship,0x30c);
+    case 1:return read_systems_display_rectangle(&c.rectangle);
+    case 2:c.systems=read_at<void*>(c.ship,kSystemsDisplayOffset,nullptr);return c.systems!=nullptr;
+    case 3:c.icon=std::calloc(1,kShipSystemIconSize);return c.icon!=nullptr;
+    case 4:a2fo_identity_call_thiscall_4(at(g_fleet_ops,kShipSystemIconConstructorRva),c.icon,
+        reinterpret_cast<std::uintptr_t>(c.ship),reinterpret_cast<std::uintptr_t>(&c.rectangle),i+kNativeWeaponIconLimit,reinterpret_cast<std::uintptr_t>(c.systems));return 1;
+    case 5:return read_at<std::size_t>(c.icon,kIconIndexOffset,kExtendedWeaponIconLimit);
+    case 6:destroy_icon(c.icon);return 1;
+    case 7:destroy_icon(c.pending.icons[i]);return 1;
+    case 8:c.pending.icons[i]=c.icon;return 1;
+    case 9:try{return g_sidecars.emplace(c.ship,c.pending).second?2:1;}catch(...){return 0;}
+    case 10:return InterlockedCompareExchange(&g_creation_report_count,1,0);
+    case 11:
+        log_line(i==0?"infoSingleSystemsDisplay is unavailable; extended weapon icons were not created":i==1?"Could not allocate extended weapon-icon controls":i==2?"Extended weapon-icon constructor validation failed":i==3?"Could not retain extended weapon-icon controls":"Created native-compatible weapon icon controls for slots 33 through 128");return 1;
+    default:return 0;
     }
 }
+void create_sidecars(void* ship_display) noexcept {SidecarContext c{};c.ship=ship_display;a2fo_rs_icon_create(&c,&create_step);}
 
 bool systems_display_accepts(void* systems_display, void* craft) noexcept {
     // Each native display/simulate gateway has just refreshed this sprite by
@@ -301,23 +271,22 @@ bool systems_display_accepts(void* systems_display, void* craft) noexcept {
         systems_display, kSystemsDisplayActiveSpriteOffset, nullptr);
 }
 
-void run_sidecar_virtuals(
-    void* ship_display, std::size_t method_offset) noexcept {
-    const auto found = g_sidecars.find(ship_display);
-    if (found == g_sidecars.end()) return;
-    void* craft = read_at<void*>(
-        ship_display, kSelectedCraftOffset, nullptr);
-    void* systems_display = read_at<void*>(
-        ship_display, kSystemsDisplayOffset, nullptr);
-    if (!systems_display_accepts(systems_display, craft)) return;
-
-    for (void* icon : found->second.icons) {
-        if (!icon || !write_at(icon, kIconSelectedCraftOffset, craft)) {
-            continue;
-        }
-        void* method = virtual_method(icon, method_offset);
-        if (method) a2fo_identity_call_thiscall_0(method, icon);
+std::uintptr_t virtual_step(void* value,std::uint32_t op,std::uint32_t i) noexcept {
+    auto& c=*static_cast<SidecarContext*>(value);
+    switch(op){
+    case 0:c.found=g_sidecars.find(c.ship);return c.found!=g_sidecars.end();
+    case 1:c.craft=read_at<void*>(c.ship,kSelectedCraftOffset,nullptr);return reinterpret_cast<std::uintptr_t>(c.craft);
+    case 2:c.systems=read_at<void*>(c.ship,kSystemsDisplayOffset,nullptr);return 1;
+    case 3:return systems_display_accepts(c.systems,c.craft);
+    case 4:c.icon=c.found->second.icons[i];return c.icon!=nullptr;
+    case 5:return write_at(c.icon,kIconSelectedCraftOffset,c.craft);
+    case 6:c.method=virtual_method(c.icon,c.method_offset);return reinterpret_cast<std::uintptr_t>(c.method);
+    case 7:a2fo_identity_call_thiscall_0(c.method,c.icon);return 1;
+    default:return 0;
     }
+}
+void run_sidecar_virtuals(void* ship_display,std::size_t method_offset) noexcept {
+    SidecarContext c{};c.ship=ship_display;c.method_offset=method_offset;a2fo_rs_icon_virtuals(&c,&virtual_step);
 }
 
 void update_sidecar_flash(void* ship_display,
@@ -326,126 +295,55 @@ void update_sidecar_flash(void* ship_display,
                   "Fleet Operations hooks require a 32-bit build");
     const auto found = g_sidecars.find(ship_display);
     if (found == g_sidecars.end()) return;
-    float elapsed = 0.0f;
-    std::memcpy(&elapsed, &elapsed_bits, sizeof(elapsed));
     for (void* icon : found->second.icons) {
         float phase = read_at<float>(icon, kIconFlashPhaseOffset, 0.0f);
         std::uint8_t state = read_at<std::uint8_t>(
             icon, kIconFlashStateOffset, 0);
-        phase += elapsed;
-        while (phase > 1.0f) {
-            phase -= 1.0f;
-            state ^= 1u;
-        }
+        a2fo_rs_icon_flash(phase,static_cast<std::uint32_t>(elapsed_bits),state,&phase,&state);
         write_at(icon, kIconFlashPhaseOffset, phase);
         write_at(icon, kIconFlashStateOffset, state);
     }
 }
 
-void __attribute__((fastcall)) cleanup_hook(
-    void* ship_display, void*) noexcept {
-    if (g_hooks_armed) destroy_sidecars(ship_display);
-    if (g_cleanup_hook.gateway) {
-        a2fo_identity_call_thiscall_0(
-            g_cleanup_hook.gateway, ship_display);
+struct HookContext {void* ship;std::uintptr_t elapsed;unsigned kind;};
+A2FO_InlineHook& lifecycle_hook(unsigned kind) noexcept {
+    A2FO_InlineHook* hooks[]{&g_cleanup_hook,&g_post_load_hook,&g_display_single_object_hook,&g_display_single_builder_hook,&g_simulate_single_object_hook,&g_simulate_single_builder_hook,&g_always_game_simulate_hook};return *hooks[kind];
+}
+std::uintptr_t hook_step(void* value,std::uint32_t op,std::uint32_t) noexcept {
+    auto& c=*static_cast<HookContext*>(value);auto& hook=lifecycle_hook(c.kind);
+    switch(op){
+    case 0:destroy_sidecars(c.ship);return 1;
+    case 1:return hook.gateway!=nullptr;
+    case 2:if(c.kind>=4)a2fo_identity_call_thiscall_1(hook.gateway,c.ship,c.elapsed);else a2fo_identity_call_thiscall_0(hook.gateway,c.ship);return 1;
+    case 3:create_sidecars(c.ship);return 1;
+    case 4:run_sidecar_virtuals(c.ship,c.kind>=4?kSimulateVtableOffset:kRenderVtableOffset);return 1;
+    case 5:update_sidecar_flash(c.ship,c.elapsed);return 1;
+    case 6:return g_hooks_armed;
+    default:return 0;
     }
 }
+void dispatch_hook(unsigned kind,void* ship,std::uintptr_t elapsed=0) noexcept {HookContext c{ship,elapsed,kind};a2fo_rs_icon_hook(kind,&c,&hook_step);}
+void __attribute__((fastcall)) cleanup_hook(void* ship,void*) noexcept {dispatch_hook(0,ship);}
+void __attribute__((fastcall)) post_load_hook(void* ship,void*) noexcept {dispatch_hook(1,ship);}
+void __attribute__((fastcall)) display_single_object_hook(void* ship,void*) noexcept {dispatch_hook(2,ship);}
+void __attribute__((fastcall)) display_single_builder_hook(void* ship,void*) noexcept {dispatch_hook(3,ship);}
+void __attribute__((fastcall)) simulate_single_object_hook(void* ship,void*,std::uintptr_t elapsed) noexcept {dispatch_hook(4,ship,elapsed);}
+void __attribute__((fastcall)) simulate_single_builder_hook(void* ship,void*,std::uintptr_t elapsed) noexcept {dispatch_hook(5,ship,elapsed);}
+void __attribute__((fastcall)) always_game_simulate_hook(void* ship,void*,std::uintptr_t elapsed) noexcept {dispatch_hook(6,ship,elapsed);}
 
-void __attribute__((fastcall)) post_load_hook(
-    void* ship_display, void*) noexcept {
-    if (g_hooks_armed) destroy_sidecars(ship_display);
-    if (g_post_load_hook.gateway) {
-        a2fo_identity_call_thiscall_0(
-            g_post_load_hook.gateway, ship_display);
+bool signature_at(unsigned index) noexcept {
+    switch(index){
+    case 0:return signature_matches(g_armada,kParameterDbGetRectangleRva,kExpectedParameterDbGetRectangle);
+    case 1:return signature_matches(g_fleet_ops,kShipSystemIconConstructorRva,kExpectedShipSystemIconConstructor);
+    case 2:return signature_matches(g_fleet_ops,kShipDisplayCleanupRva,kExpectedCleanup);
+    case 3:return signature_matches(g_fleet_ops,kShipDisplayPostLoadRva,kExpectedPostLoad);
+    case 4:return signature_matches(g_fleet_ops,kDisplaySingleObjectRva,kExpectedDisplayOrSimulate);
+    case 5:return signature_matches(g_fleet_ops,kDisplaySingleBuilderRva,kExpectedDisplayOrSimulate);
+    case 6:return signature_matches(g_fleet_ops,kSimulateSingleObjectRva,kExpectedDisplayOrSimulate);
+    case 7:return signature_matches(g_fleet_ops,kSimulateSingleBuilderRva,kExpectedDisplayOrSimulate);
+    case 8:return signature_matches(g_fleet_ops,kAlwaysGameSimulateRva,kExpectedAlwaysGameSimulate);
+    default:return false;
     }
-    if (g_hooks_armed) create_sidecars(ship_display);
-}
-
-void __attribute__((fastcall)) display_single_object_hook(
-    void* ship_display, void*) noexcept {
-    if (g_display_single_object_hook.gateway) {
-        a2fo_identity_call_thiscall_0(
-            g_display_single_object_hook.gateway, ship_display);
-    }
-    if (g_hooks_armed) {
-        run_sidecar_virtuals(ship_display, kRenderVtableOffset);
-    }
-}
-
-void __attribute__((fastcall)) display_single_builder_hook(
-    void* ship_display, void*) noexcept {
-    if (g_display_single_builder_hook.gateway) {
-        a2fo_identity_call_thiscall_0(
-            g_display_single_builder_hook.gateway, ship_display);
-    }
-    if (g_hooks_armed) {
-        run_sidecar_virtuals(ship_display, kRenderVtableOffset);
-    }
-}
-
-void __attribute__((fastcall)) simulate_single_object_hook(
-    void* ship_display, void*, std::uintptr_t elapsed_bits) noexcept {
-    if (g_simulate_single_object_hook.gateway) {
-        a2fo_identity_call_thiscall_1(
-            g_simulate_single_object_hook.gateway, ship_display,
-            elapsed_bits);
-    }
-    if (g_hooks_armed) {
-        run_sidecar_virtuals(ship_display, kSimulateVtableOffset);
-    }
-}
-
-void __attribute__((fastcall)) simulate_single_builder_hook(
-    void* ship_display, void*, std::uintptr_t elapsed_bits) noexcept {
-    if (g_simulate_single_builder_hook.gateway) {
-        a2fo_identity_call_thiscall_1(
-            g_simulate_single_builder_hook.gateway, ship_display,
-            elapsed_bits);
-    }
-    if (g_hooks_armed) {
-        run_sidecar_virtuals(ship_display, kSimulateVtableOffset);
-    }
-}
-
-void __attribute__((fastcall)) always_game_simulate_hook(
-    void* ship_display, void*, std::uintptr_t elapsed_bits) noexcept {
-    if (g_always_game_simulate_hook.gateway) {
-        a2fo_identity_call_thiscall_1(
-            g_always_game_simulate_hook.gateway, ship_display,
-            elapsed_bits);
-    }
-    if (g_hooks_armed) update_sidecar_flash(ship_display, elapsed_bits);
-}
-
-bool preflight_signatures() noexcept {
-    bool supported = signature_matches(
-        g_armada, kParameterDbGetRectangleRva,
-        kExpectedParameterDbGetRectangle);
-    supported = signature_matches(
-        g_fleet_ops, kShipSystemIconConstructorRva,
-        kExpectedShipSystemIconConstructor) && supported;
-    supported = signature_matches(
-        g_fleet_ops, kShipDisplayCleanupRva,
-        kExpectedCleanup) && supported;
-    supported = signature_matches(
-        g_fleet_ops, kShipDisplayPostLoadRva,
-        kExpectedPostLoad) && supported;
-    supported = signature_matches(
-        g_fleet_ops, kDisplaySingleObjectRva,
-        kExpectedDisplayOrSimulate) && supported;
-    supported = signature_matches(
-        g_fleet_ops, kDisplaySingleBuilderRva,
-        kExpectedDisplayOrSimulate) && supported;
-    supported = signature_matches(
-        g_fleet_ops, kSimulateSingleObjectRva,
-        kExpectedDisplayOrSimulate) && supported;
-    supported = signature_matches(
-        g_fleet_ops, kSimulateSingleBuilderRva,
-        kExpectedDisplayOrSimulate) && supported;
-    supported = signature_matches(
-        g_fleet_ops, kAlwaysGameSimulateRva,
-        kExpectedAlwaysGameSimulate) && supported;
-    return supported;
 }
 
 template <std::size_t Size>
@@ -458,68 +356,29 @@ bool install_hook(
         expected.data(), hook) && hook->gateway;
 }
 
-}  // namespace
-
-bool install_extended_weapon_icons(
-    const A2FO_ModuleApi* api,
-    void* armada_module,
-    void* fleetops_module) noexcept {
-    if (!api || !api->install_inline_hook || !armada_module ||
-        !fleetops_module) {
-        return false;
+struct InstallContext {const A2FO_ModuleApi* api;void* armada;void* fleetops;};
+std::uintptr_t install_step(void* value,std::uint32_t op,std::uint32_t i) noexcept {
+    auto& c=*static_cast<InstallContext*>(value);
+    switch(op){
+    case 0:return c.api && c.api->install_inline_hook && c.armada && c.fleetops;
+    case 1:g_api=c.api;g_armada=static_cast<HMODULE>(c.armada);g_fleet_ops=static_cast<HMODULE>(c.fleetops);return 1;
+    case 2:return signature_at(i);
+    case 3:
+        switch(i){
+        case 0:return install_hook(kShipDisplayCleanupRva,reinterpret_cast<void*>(&cleanup_hook),kExpectedCleanup,&g_cleanup_hook);
+        case 1:return install_hook(kShipDisplayPostLoadRva,reinterpret_cast<void*>(&post_load_hook),kExpectedPostLoad,&g_post_load_hook);
+        case 2:return install_hook(kDisplaySingleObjectRva,reinterpret_cast<void*>(&display_single_object_hook),kExpectedDisplayOrSimulate,&g_display_single_object_hook);
+        case 3:return install_hook(kDisplaySingleBuilderRva,reinterpret_cast<void*>(&display_single_builder_hook),kExpectedDisplayOrSimulate,&g_display_single_builder_hook);
+        case 4:return install_hook(kSimulateSingleObjectRva,reinterpret_cast<void*>(&simulate_single_object_hook),kExpectedDisplayOrSimulate,&g_simulate_single_object_hook);
+        case 5:return install_hook(kSimulateSingleBuilderRva,reinterpret_cast<void*>(&simulate_single_builder_hook),kExpectedDisplayOrSimulate,&g_simulate_single_builder_hook);
+        case 6:return install_hook(kAlwaysGameSimulateRva,reinterpret_cast<void*>(&always_game_simulate_hook),kExpectedAlwaysGameSimulate,&g_always_game_simulate_hook);
+        default:return 0;
+        }
+    case 4:g_hooks_armed=i!=0;return 1;
+    case 5:log_line(i==0?"Extended weapon-icon signatures were not found; slots above 32 remain native-only":i==1?"weaponXiconpos capacity extended from 32 to 128 selected-panel controls":"An extended weapon-icon lifecycle hook failed; partial hooks remain pass-through");return 1;
+    default:return 0;
     }
-    g_api = api;
-    g_armada = static_cast<HMODULE>(armada_module);
-    g_fleet_ops = static_cast<HMODULE>(fleetops_module);
-    if (!preflight_signatures()) {
-        log_line(
-            "Extended weapon-icon signatures were not found; slots above 32 remain native-only");
-        return false;
-    }
-
-    bool installed = install_hook(
-        kShipDisplayCleanupRva,
-        reinterpret_cast<void*>(&cleanup_hook), kExpectedCleanup,
-        &g_cleanup_hook);
-    installed = install_hook(
-        kShipDisplayPostLoadRva,
-        reinterpret_cast<void*>(&post_load_hook), kExpectedPostLoad,
-        &g_post_load_hook) && installed;
-    installed = install_hook(
-        kDisplaySingleObjectRva,
-        reinterpret_cast<void*>(&display_single_object_hook),
-        kExpectedDisplayOrSimulate,
-        &g_display_single_object_hook) && installed;
-    installed = install_hook(
-        kDisplaySingleBuilderRva,
-        reinterpret_cast<void*>(&display_single_builder_hook),
-        kExpectedDisplayOrSimulate,
-        &g_display_single_builder_hook) && installed;
-    installed = install_hook(
-        kSimulateSingleObjectRva,
-        reinterpret_cast<void*>(&simulate_single_object_hook),
-        kExpectedDisplayOrSimulate,
-        &g_simulate_single_object_hook) && installed;
-    installed = install_hook(
-        kSimulateSingleBuilderRva,
-        reinterpret_cast<void*>(&simulate_single_builder_hook),
-        kExpectedDisplayOrSimulate,
-        &g_simulate_single_builder_hook) && installed;
-    installed = install_hook(
-        kAlwaysGameSimulateRva,
-        reinterpret_cast<void*>(&always_game_simulate_hook),
-        kExpectedAlwaysGameSimulate,
-        &g_always_game_simulate_hook) && installed;
-
-    g_hooks_armed = installed;
-    if (installed) {
-        log_line(
-            "weaponXiconpos capacity extended from 32 to 128 selected-panel controls");
-    } else {
-        log_line(
-            "An extended weapon-icon lifecycle hook failed; partial hooks remain pass-through");
-    }
-    return installed;
 }
-
+}  // namespace
+bool install_extended_weapon_icons(const A2FO_ModuleApi* api,void* armada,void* fleetops) noexcept {InstallContext c{api,armada,fleetops};return a2fo_rs_icon_install(&c,&install_step)!=0;}
 }  // namespace a2fo::craft_identity

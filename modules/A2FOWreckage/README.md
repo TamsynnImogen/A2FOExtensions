@@ -1,5 +1,9 @@
 # Native wreckage replacements
 
+This feature is now built into `A2FOExtensions.dll`. Keep using `A2FOWreckage`
+in the Modules menu and `info.ini`; its standalone DLL is unnecessary and is
+ignored by the new core. See [built-in module behaviour](../../docs/builtin-modules-stage1.md).
+
 `A2FOWreckage.dll` optionally creates a neutral replacement object when a
 Craft is destroyed:
 

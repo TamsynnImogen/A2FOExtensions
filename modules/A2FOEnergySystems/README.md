@@ -151,6 +151,133 @@ torpedoResupplyRange = 300
 RepairShip. Mode 2 currently requires the provider and receiving Craft to
 have the same team number.
 
+Providers may control self-resupply and filter other Craft independently:
+
+```cpp
+canResupplySelf = 0
+resupplyValidTargets = "type:fighter"
+```
+
+`canResupplySelf` defaults to `1` for compatibility. Set it to `0` when the
+provider must not act as its own provider; another nearby provider can still
+supply it. This setting only affects recharge mode `2`; automatic recharge
+mode `1` works independently. The target filter applies only to other Craft,
+so it does not change the separate self-resupply setting. Use an explicit
+`0` or `1`; an invalid explicit value disables self-resupply and is logged.
+
+`resupplyValidTargets` is one quoted scalar string containing whitespace-
+separated rules, not a native ODF pair array. With the field omitted, other
+Craft are unrestricted. An explicit empty string denies all other Craft, and
+`*` allows all. In an explicit rule list, other Craft that match no rule are
+denied unless `*` is present. Rules are case-insensitive:
+
+- `type:fighter` allows receivers tagged with that type.
+- `!type:bomber` denies receivers tagged with that type.
+- `odf:unit_basename` allows that exact receiver ODF basename.
+- `!odf:unit_basename` denies that exact receiver ODF basename.
+
+To allow all other Craft except bomber-tagged ones, include the wildcard:
+
+```cpp
+resupplyValidTargets = "* !type:bomber"
+```
+
+An optional `.odf` suffix is accepted on ODF names. For a matching receiver,
+an exact ODF rule takes precedence over a type rule, which takes precedence
+over `*` or the default. Malformed rules or conflicting duplicate rules fail
+closed for other Craft and are logged. For example, allow fighter-tagged
+Craft except one exact ODF, while explicitly allowing a different ODF:
+
+```cpp
+resupplyValidTargets = "type:fighter !odf:fed_noncombat_fighter odf:fed_resupply_shuttle"
+```
+
+Receivers set one shared type tag with `resupplyTargetType`; it is compared
+with the provider's `type:` rules. A receiver without that field can still
+match an exact ODF rule or a wildcard/default. For example, a carrier can
+resupply nearby fighter-tagged Craft, while a fighter can receive Photon and
+Quantum ammunition from that carrier:
+
+```cpp
+// Carrier provider
+torpedoResupply = 1
+torpedoResupplyRange = 300
+canResupplySelf = 0
+resupplyValidTargets = "type:fighter"
+
+// Fighter receiver
+resupplyTargetType = "fighter"
+photonTorpedoRechargeMode = 2
+photonTorpedoRate = 1.0
+maxPhotonTorpedoes = 8
+quantumTorpedoRechargeMode = 2
+quantumTorpedoRate = 0.25
+maxQuantumTorpedoes = 4
+```
+
+The same provider filter applies to Photon, Quantum, and Shuttle Craft stores.
+There are no separate per-store provider controls. Existing same-team,
+distance, provider-expiry, and other resupply eligibility rules still apply.
+
+## Resupply weapons
+
+`classLabel = "resupplyweapon"` is a status indicator for a provider. Its
+weapon icon in the selected panel is grey, like a `UtilityWeapon`, while no
+valid receiver is in resupply range. It turns green while one is, and the
+weapon fires automatically at that Craft, so the icon's reload fill follows
+the weapon's `shotDelay`. To keep the shot silent and invisible, omit
+`fireSound` and use a zero-damage ordnance with no visible effect:
+
+```cpp
+// Weapon ODF, mounted on the provider
+classLabel = "resupplyweapon"
+resupplyValidTargets = "type:fighter"   // optional; omitted = any receiver
+ordName = "resupply_marker"             // zero damage, no visible effect
+shotDelay = 2.0
+range = 300                             // at least torpedoResupplyRange
+```
+
+The icon colours come from A2FOCraftIdentity: idle uses
+`passiveWeaponIconColor` (neutral grey when absent), and active uses
+`resupplyWeaponIconColor` (default `0.10 1.00 0.10`). A research-locked
+resupply weapon keeps the normal disabled or hidden icon. The DLL exports
+`A2FOEnergySystems_GetResupplyWeaponState(weapon)`, which returns `-1` for an
+ordinary weapon, `0` when idle and `1` when active.
+
+A receiver is valid, which makes the icon green and lets the weapon fire, only
+when all of the following are true:
+
+- its owner is a resupply provider (see above), and
+- a same-team Craft in provider range has a recharge-mode-`2` store
+  (Photon, Quantum, or Shuttle Craft) that actually went up on this tick
+  because of that provider.
+
+If every nearby Craft is already full, nothing goes up, so the icon stays grey
+and the weapon does not fire. Automatic (mode `1`) recharge never counts, and neither does the
+provider reloading its own stores, so it never fires at its own ship.
+
+The weapon's `resupplyValidTargets` uses the same rule syntax as the provider
+field, but selects which **receivers** this weapon reacts to. For example, a
+carrier can resupply every ship but play its launch-bay effect only for
+fighters. It cannot widen what the provider supplies. The provider's own
+filter is applied first. When several Craft are being reloaded, the weapon
+stays on its current receiver until that receiver stops reloading, then moves
+to the next.
+
+`resupplyweapon` is internally hosted by Armada's native `cannon` class, so
+ordinary weapon commands (`ordName`, `fireSound`, `shotDelay`, `range`,
+hardpoints, and so on) work as usual. Normal targeting is switched off: Craft
+AI and player orders cannot activate it, and any shot aimed at something other
+than the current receiver, or at a ground position, is refused at ordnance
+selection. A receiver stays valid for 0.5 seconds after its last reloaded
+tick. Give the ordnance zero damage; the weapon really fires at an allied
+Craft. Its `range` must cover the provider's `torpedoResupplyRange`, or the
+icon can be green while the cannon is out of range to fire.
+
+A receiver needs this module's `resupplyTargetType` or a matching ODF name to
+pass a type or ODF rule. Native Fleet Operations `validTargets` is not
+consulted for receiver selection.
+
 ## Save games and native access
 
 The three current values are appended to configured Crafts' native save data
@@ -162,3 +289,42 @@ still have no ammunition-store block.
 The DLL exports `Get`, `GetMaximum`, `Get...ReloadSeconds`, `Set`, and `Add`
 functions for Photon Torpedoes, Quantum Torpedoes, and Shuttle Craft. They
 accept a live Craft pointer and use `float` amounts.
+
+
+## Checkpoint — 2026-10-27: EnergySystems and D3D8 unsupported-call components complete
+
+A2FOEnergySystems now routes its remaining portable ammunition-number, colour,
+rectangle, quote-removal, timer-subtraction/admission and amount-addition policy
+through Rust. Existing Rust controls retain class loading, firing, resupply,
+persistence, public amount APIs, parsing and lifecycle sequencing. Native hooks,
+addresses/signatures, checked access, STL lifetime, CRT conversion/formatting,
+exception scopes and the disabled direct UI renderer gate remain native.
+
+The remaining D3D8 census unit, renderer/d3d8_compat/game/unsupported.cpp, already
+routes all 23 unsupported-method diagnostics and return decisions through Rust.
+New full-source tests verify all 23 under normal/custom return, throwing and
+reentrant callbacks, including unchanged poisoned output buffers. Native COM
+boundaries and exception capture/rethrow remain C++; no new graphics features
+or support for those unsupported operations are claimed.
+
+Validation passed: 215 Rust tests, formatting, host/i686 Windows Clippy, both
+release archives, integrated DLL and standalone EnergySystems DLL; 134 full-source
+EnergySystems trace pairs/268 executions (2,810 equal stdout lines), 1,296
+residual numeric rows across 12 x87 precision/rounding modes, the 6,600-row range
+regression, 92 D3D8 cases and built-in batch9 admission. Exceptional timer and
+amount values include NaNs/infinities; x87 sticky flags, C1, control word and stack
+balance are checked for the residual numeric cases. All 44 referenced Rust
+implementations link; integrated 197 and standalone 18 exports/ordinals are
+unchanged, with no new system imports. Twenty-four native functions/layouts,
+constants, SDK/ASM and D3D8 boundary source pins are preserved.
+
+Evidence: build/rust-migration-stage10/energy-systems/checkpoint/validation.json.
+Both units are completed_pending_census; strict totals remain 116/151 with 35
+uncredited records. Four completed components (FireArcs, Nebula controller,
+EnergySystems and D3D8 unsupported-call policy) await shared census validation;
+31 other units still need completion/validation. Existing strict common-DLL and
+archive bindings were not weakened. Isolated candidate: energy-systems/candidate.
+Earlier artifacts, checkpoints and failed attempts are retained. Incremental
+native cache reuse is authenticated; volatile Cargo build locks are explicitly
+excluded from product source pins. No deployment or game launch occurred;
+GPU and in-game acceptance remain pending.

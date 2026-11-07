@@ -7,6 +7,7 @@
 
 #include "../../sdk/include/a2fo_module_api.h"
 #include "firing_cycle.hpp"
+#include "../../rust/module_runtime_b4_ffi.h"
 
 #include <windows.h>
 
@@ -245,70 +246,85 @@ const char* status_description(PolicyStatus status) noexcept {
     return "invalid configuration";
 }
 
+struct RegisterContext {
+    void* weapon_class;
+    void* parameter_db;
+    const char* class_label;
+    std::array<OptionalNumber, kMaximumShotDelays> numbered{};
+    OptionalNumber overflow{}, save_point{}, reset_time{};
+    CyclePolicy policy{};
+};
+
+std::uint64_t register_policy_op(void* opaque, std::uint32_t operation,
+                                 std::uint32_t argument) noexcept {
+    auto& context = *static_cast<RegisterContext*>(opaque);
+    switch (operation) {
+        case 0: {
+            char key[32]{};
+            std::snprintf(key, sizeof(key), "shotDelay%u", argument);
+            context.numbered[argument] = read_optional_number(context.parameter_db, key);
+            return context.numbered[argument].present;
+        }
+        case 1:
+            context.overflow = read_optional_number(context.parameter_db, "shotDelay64");
+            return context.overflow.present;
+        case 2:
+            context.save_point = read_optional_number(context.parameter_db, "saveFireCyclePoint");
+            return context.save_point.present;
+        case 3:
+            context.reset_time = read_optional_number(context.parameter_db, "shotCycleResetTime");
+            return context.reset_time.present;
+        case 4: {
+            char message[240]{};
+            std::snprintf(message, sizeof(message),
+                          "Ignoring %s firing cycle: at most %u numbered delays are supported",
+                          context.class_label, static_cast<unsigned>(kMaximumShotDelays));
+            log_line(message);
+            return 0;
+        }
+        case 5:
+            return static_cast<std::uint32_t>(a2fo::point_defense::build_policy(
+                context.numbered.data(), context.numbered.size(),
+                read_at<float>(context.weapon_class, kShotDelayOnWeaponClassOffset, -1.0f),
+                context.save_point, context.reset_time, &context.policy));
+        case 6: {
+            char message[300]{};
+            std::snprintf(message, sizeof(message),
+                          "Ignoring %s firing cycle: %s; native shotDelay retained",
+                          context.class_label,
+                          status_description(static_cast<PolicyStatus>(argument)));
+            log_line(message);
+            return 0;
+        }
+        case 7:
+            try { g_class_policies[context.weapon_class] = context.policy; return 1; }
+            catch (...) { return 0; }
+        case 8:
+            log_line("Could not retain a point-defense firing-cycle policy");
+            return 0;
+        case 9: {
+            char message[300]{};
+            std::snprintf(message, sizeof(message),
+                          "Registered %s firing cycle: %u delay%s, loop %u, idle reset %.3fs%s",
+                          context.class_label,
+                          static_cast<unsigned>(context.policy.delays.size()),
+                          context.policy.delays.size() == 1 ? "" : "s",
+                          static_cast<unsigned>(context.policy.save_fire_cycle_point),
+                          context.policy.shot_cycle_reset_time,
+                          context.policy.uses_numbered_delays
+                              ? " (numbered delays override shotDelay)" : "");
+            log_line(message);
+            return 0;
+        }
+    }
+    return 0;
+}
+
 void register_policy(void* weapon_class, void* parameter_db,
                      const char* class_label) noexcept {
-    if (!g_runtime_ready || !weapon_class || !parameter_db) return;
-
-    std::array<OptionalNumber, kMaximumShotDelays> numbered{};
-    bool has_numbered = false;
-    for (std::size_t index = 0; index < numbered.size(); ++index) {
-        char key[32]{};
-        std::snprintf(key, sizeof(key), "shotDelay%u",
-                      static_cast<unsigned>(index));
-        numbered[index] = read_optional_number(parameter_db, key);
-        has_numbered = has_numbered || numbered[index].present;
-    }
-    const OptionalNumber overflow = read_optional_number(
-        parameter_db, "shotDelay64");
-    const OptionalNumber save_point = read_optional_number(
-        parameter_db, "saveFireCyclePoint");
-    const OptionalNumber reset_time = read_optional_number(
-        parameter_db, "shotCycleResetTime");
-    const bool any_extension_command = has_numbered || overflow.present ||
-        save_point.present || reset_time.present;
-    if (!any_extension_command) return;
-
-    if (overflow.present) {
-        char message[240]{};
-        std::snprintf(message, sizeof(message),
-                      "Ignoring %s firing cycle: at most %u numbered delays are supported",
-                      class_label, static_cast<unsigned>(kMaximumShotDelays));
-        log_line(message);
-        return;
-    }
-
-    const float legacy_delay = read_at<float>(
-        weapon_class, kShotDelayOnWeaponClassOffset, -1.0f);
-    CyclePolicy policy{};
-    const PolicyStatus status = a2fo::point_defense::build_policy(
-        numbered.data(), numbered.size(), legacy_delay,
-        save_point, reset_time, &policy);
-    if (status != PolicyStatus::valid) {
-        char message[300]{};
-        std::snprintf(message, sizeof(message),
-                      "Ignoring %s firing cycle: %s; native shotDelay retained",
-                      class_label, status_description(status));
-        log_line(message);
-        return;
-    }
-
-    try {
-        g_class_policies[weapon_class] = policy;
-    } catch (...) {
-        log_line("Could not retain a point-defense firing-cycle policy");
-        return;
-    }
-
-    char message[300]{};
-    std::snprintf(
-        message, sizeof(message),
-        "Registered %s firing cycle: %u delay%s, loop %u, idle reset %.3fs%s",
-        class_label, static_cast<unsigned>(policy.delays.size()),
-        policy.delays.size() == 1 ? "" : "s",
-        static_cast<unsigned>(policy.save_fire_cycle_point),
-        policy.shot_cycle_reset_time,
-        policy.uses_numbered_delays ? " (numbered delays override shotDelay)" : "");
-    log_line(message);
+    RegisterContext context{weapon_class, parameter_db, class_label};
+    a2fo_rs_point_register(g_runtime_ready && weapon_class && parameter_db,
+                           &context, &register_policy_op);
 }
 
 const CyclePolicy* policy_for_weapon(void* weapon) noexcept {
@@ -331,33 +347,81 @@ CycleState* state_for_weapon(void* weapon,
     }
 }
 
-float select_delay(void* weapon) noexcept {
-    const CyclePolicy* policy = policy_for_weapon(weapon);
-    if (!policy) {
-        void* weapon_class = read_at<void*>(
-            weapon, kWeaponClassOnWeaponOffset, nullptr);
-        return read_at<float>(weapon_class,
-                              kShotDelayOnWeaponClassOffset, 0.0f);
+struct SelectContext {
+    void* weapon;
+    const CyclePolicy* policy = nullptr;
+    CycleState* state = nullptr;
+};
+std::uint64_t select_op(void* opaque, std::uint32_t operation,
+                        std::uint32_t) noexcept {
+    auto& context = *static_cast<SelectContext*>(opaque);
+    switch (operation) {
+        case 0:
+            context.policy = policy_for_weapon(context.weapon);
+            return context.policy != nullptr;
+        case 1: {
+            void* weapon_class = read_at<void*>(context.weapon,
+                                                  kWeaponClassOnWeaponOffset, nullptr);
+            return float_bits(read_at<float>(weapon_class,
+                               kShotDelayOnWeaponClassOffset, 0.0f));
+        }
+        case 2:
+            context.state = state_for_weapon(context.weapon, *context.policy);
+            return context.state != nullptr;
+        case 3: return float_bits(context.policy->delays.front());
+        case 4: return float_bits(a2fo::point_defense::consume_delay(
+            *context.policy, context.state));
     }
-    CycleState* state = state_for_weapon(weapon, *policy);
-    if (!state) return policy->delays.front();
-    return a2fo::point_defense::consume_delay(*policy, state);
+    return 0;
+}
+float select_delay(void* weapon) noexcept {
+    SelectContext context{weapon};
+    const std::uint32_t bits = a2fo_rs_point_select(&context, &select_op);
+    float result = 0.0f;
+    std::memcpy(&result, &bits, sizeof(result));
+    return result;
 }
 
+struct UpdateContext {
+    void* weapon;
+    float elapsed_seconds;
+    float timer_before;
+    std::uint64_t fire_count_before;
+    const CyclePolicy* policy = nullptr;
+    CycleState* state = nullptr;
+    float timer_after = 0.0f;
+};
+std::uint64_t update_op(void* opaque, std::uint32_t operation,
+                        std::uint32_t argument) noexcept {
+    auto& context = *static_cast<UpdateContext*>(opaque);
+    switch (operation) {
+        case 0:
+            context.policy = policy_for_weapon(context.weapon);
+            return context.policy != nullptr;
+        case 1:
+            context.state = state_for_weapon(context.weapon, *context.policy);
+            return context.state != nullptr;
+        case 2: return context.state->fire_count == context.fire_count_before;
+        case 3:
+            context.timer_after = read_at<float>(context.weapon,
+                kShotTimerOnWeaponOffset, context.timer_before);
+            return std::isfinite(context.timer_before) &&
+                std::isfinite(context.timer_after) &&
+                context.timer_after < context.timer_before;
+        case 4:
+            a2fo::point_defense::update_idle_reset(*context.policy,
+                context.state, argument != 0, context.timer_after,
+                context.elapsed_seconds);
+            return 0;
+    }
+    return 0;
+}
 void update_after_simulation(void* weapon, float elapsed_seconds,
                              float timer_before,
                              std::uint64_t fire_count_before) noexcept {
-    const CyclePolicy* policy = policy_for_weapon(weapon);
-    if (!policy) return;
-    CycleState* state = state_for_weapon(weapon, *policy);
-    if (!state || state->fire_count != fire_count_before) return;
-    const float timer_after = read_at<float>(
-        weapon, kShotTimerOnWeaponOffset, timer_before);
-    const bool timer_advanced = std::isfinite(timer_before) &&
-        std::isfinite(timer_after) && timer_after < timer_before;
-
-    a2fo::point_defense::update_idle_reset(
-        *policy, state, timer_advanced, timer_after, elapsed_seconds);
+    UpdateContext context{weapon, elapsed_seconds, timer_before,
+                          fire_count_before};
+    a2fo_rs_point_update(&context, &update_op);
 }
 
 std::uintptr_t __attribute__((fastcall)) point_defense_build_class_hook(
@@ -380,23 +444,43 @@ std::uintptr_t __attribute__((fastcall)) ordnance_defense_build_class_hook(
     return result;
 }
 
+struct SimulateContext {
+    A2FO_InlineHook* hook;
+    void* weapon;
+    float elapsed_seconds;
+    const CyclePolicy* policy = nullptr;
+    float timer_before = 0.0f;
+    std::uint64_t fire_count_before = 0;
+};
+std::uint64_t simulate_op(void* opaque, std::uint32_t operation,
+                          std::uint32_t) noexcept {
+    auto& context = *static_cast<SimulateContext*>(opaque);
+    switch (operation) {
+        case 0:
+            context.policy = policy_for_weapon(context.weapon);
+            return context.policy != nullptr;
+        case 1:
+            context.timer_before = read_at<float>(context.weapon,
+                                                   kShotTimerOnWeaponOffset, 0.0f);
+            if (context.policy) {
+                CycleState* state = state_for_weapon(context.weapon, *context.policy);
+                if (state) context.fire_count_before = state->fire_count;
+            }
+            return 0;
+        case 2:
+            return a2fo_point_defense_call_thiscall_1(
+                context.hook->gateway, context.weapon, float_bits(context.elapsed_seconds));
+        case 3:
+            update_after_simulation(context.weapon, context.elapsed_seconds,
+                                    context.timer_before, context.fire_count_before);
+            return 0;
+    }
+    return 0;
+}
 std::uintptr_t simulate_with_cycle(A2FO_InlineHook& hook, void* weapon,
                                    float elapsed_seconds) noexcept {
-    const CyclePolicy* policy = policy_for_weapon(weapon);
-    const float timer_before = read_at<float>(
-        weapon, kShotTimerOnWeaponOffset, 0.0f);
-    std::uint64_t fire_count_before = 0;
-    if (policy) {
-        CycleState* state = state_for_weapon(weapon, *policy);
-        if (state) fire_count_before = state->fire_count;
-    }
-    const std::uintptr_t result = a2fo_point_defense_call_thiscall_1(
-        hook.gateway, weapon, float_bits(elapsed_seconds));
-    if (policy) {
-        update_after_simulation(weapon, elapsed_seconds, timer_before,
-                                fire_count_before);
-    }
-    return result;
+    SimulateContext context{&hook, weapon, elapsed_seconds};
+    return a2fo_rs_point_simulate(&context, &simulate_op);
 }
 
 std::uintptr_t __attribute__((fastcall)) point_defense_simulate_hook(
@@ -411,27 +495,41 @@ std::uintptr_t __attribute__((fastcall)) ordnance_defense_simulate_hook(
                                elapsed_seconds);
 }
 
+struct ResetContext {
+    void* weapon;
+    void* weapon_class = nullptr;
+    float native_delay = 0.0f;
+};
+std::uint64_t reset_op(void* opaque, std::uint32_t operation,
+                       std::uint32_t) noexcept {
+    auto& context = *static_cast<ResetContext*>(opaque);
+    switch (operation) {
+        case 0:
+            context.weapon_class = read_at<void*>(context.weapon,
+                                                   kWeaponClassOnWeaponOffset, nullptr);
+            return policy_for_weapon(context.weapon) && context.weapon_class;
+        case 1: {
+            context.native_delay = read_at<float>(context.weapon_class,
+                                                   kShotDelayOnWeaponClassOffset, 0.0f);
+            const float selected_delay = select_delay(context.weapon);
+            write_at(context.weapon_class, kShotDelayOnWeaponClassOffset,
+                     selected_delay);
+            return 0;
+        }
+        case 2:
+            write_at(context.weapon_class, kShotDelayOnWeaponClassOffset,
+                     context.native_delay);
+            return 0;
+        case 3:
+            return a2fo_point_defense_call_thiscall_0(
+                g_weapon_reset_shot_timer_hook.gateway, context.weapon);
+    }
+    return 0;
+}
 std::uintptr_t __attribute__((fastcall)) weapon_reset_shot_timer_hook(
     void* weapon, void*) noexcept {
-    const CyclePolicy* policy = policy_for_weapon(weapon);
-    void* weapon_class = read_at<void*>(
-        weapon, kWeaponClassOnWeaponOffset, nullptr);
-    if (!policy || !weapon_class) {
-        return a2fo_point_defense_call_thiscall_0(
-            g_weapon_reset_shot_timer_hook.gateway, weapon);
-    }
-
-    const float native_delay = read_at<float>(
-        weapon_class, kShotDelayOnWeaponClassOffset, 0.0f);
-    const float selected_delay = select_delay(weapon);
-    // Weapon::mResetShotTimer applies all Fleet Operations/native reload
-    // modifiers after reading WeaponClass::shotDelay. The temporary scoped
-    // substitution therefore preserves that exact modifier path.
-    write_at(weapon_class, kShotDelayOnWeaponClassOffset, selected_delay);
-    const std::uintptr_t result = a2fo_point_defense_call_thiscall_0(
-        g_weapon_reset_shot_timer_hook.gateway, weapon);
-    write_at(weapon_class, kShotDelayOnWeaponClassOffset, native_delay);
-    return result;
+    ResetContext context{weapon};
+    return a2fo_rs_point_reset(&context, &reset_op);
 }
 
 using OutInteger = bool (__cdecl*)(void*, std::int32_t, const char*);
@@ -470,36 +568,48 @@ bool load_cycle_state(void* reader, CycleState* state) noexcept {
     return true;
 }
 
+struct SerialContext {
+    void* weapon;
+    void* stream;
+    bool loading;
+    const CyclePolicy* policy = nullptr;
+    CycleState* state = nullptr;
+};
+std::uint64_t serial_op(void* opaque, std::uint32_t operation,
+                        std::uint32_t) noexcept {
+    auto& context = *static_cast<SerialContext*>(opaque);
+    switch (operation) {
+        case 0:
+            return a2fo_point_defense_call_thiscall_1(
+                context.loading ? g_weapon_load_hook.gateway : g_weapon_save_hook.gateway,
+                context.weapon, reinterpret_cast<std::uintptr_t>(context.stream));
+        case 1:
+            context.policy = policy_for_weapon(context.weapon);
+            return context.policy != nullptr;
+        case 2:
+            context.state = state_for_weapon(context.weapon, *context.policy);
+            return context.state != nullptr;
+        case 3:
+            return context.loading ? load_cycle_state(context.stream, context.state)
+                                   : save_cycle_state(context.stream, *context.state);
+        case 4:
+            *context.state = CycleState{};
+            return 0;
+        case 5:
+            a2fo::point_defense::normalize_state(*context.policy, context.state);
+            return 0;
+    }
+    return 0;
+}
 std::uintptr_t __attribute__((fastcall)) weapon_save_hook(
     void* weapon, void*, void* writer) noexcept {
-    const std::uintptr_t native_saved = a2fo_point_defense_call_thiscall_1(
-        g_weapon_save_hook.gateway, weapon,
-        reinterpret_cast<std::uintptr_t>(writer));
-    if ((native_saved & 0xffu) == 0) return native_saved;
-
-    const CyclePolicy* policy = policy_for_weapon(weapon);
-    if (!policy) return native_saved;
-    CycleState* state = state_for_weapon(weapon, *policy);
-    return state && save_cycle_state(writer, *state) ? 1u : 0u;
+    SerialContext context{weapon, writer, false};
+    return a2fo_rs_point_save(&context, &serial_op);
 }
-
 std::uintptr_t __attribute__((fastcall)) weapon_load_hook(
     void* weapon, void*, void* reader) noexcept {
-    const std::uintptr_t native_loaded = a2fo_point_defense_call_thiscall_1(
-        g_weapon_load_hook.gateway, weapon,
-        reinterpret_cast<std::uintptr_t>(reader));
-    if ((native_loaded & 0xffu) == 0) return native_loaded;
-
-    const CyclePolicy* policy = policy_for_weapon(weapon);
-    if (!policy) return native_loaded;
-    CycleState* state = state_for_weapon(weapon, *policy);
-    if (!state) return native_loaded;
-    if (!load_cycle_state(reader, state)) {
-        *state = CycleState{};
-        return 0u;
-    }
-    a2fo::point_defense::normalize_state(*policy, state);
-    return native_loaded;
+    SerialContext context{weapon, reader, true};
+    return a2fo_rs_point_load(&context, &serial_op);
 }
 
 std::uintptr_t __attribute__((fastcall)) weapon_destructor_hook(
@@ -545,60 +655,76 @@ bool preflight_signatures() noexcept {
                           kExpectedOrdnanceDefenseDelaySite);
 }
 
-bool install_runtime_hooks() noexcept {
-    if (!g_api || !g_api->install_inline_hook || !g_api->patch_jump ||
-        !preflight_signatures()) {
-        return false;
+std::uint64_t point_init_op(void* opaque, std::uint32_t operation,
+                            std::uint32_t index) noexcept {
+    const auto* api = static_cast<const A2FO_ModuleApi*>(opaque);
+    try {
+    switch (operation) {
+        case 0:
+            g_api = api;
+            g_armada = static_cast<HMODULE>(api->armada_module());
+            g_fleet_ops = static_cast<HMODULE>(api->fleetops_module());
+            return g_armada && g_fleet_ops;
+        case 1:
+            g_runtime_ready = index != 0;
+            return 0;
+        case 2:
+            return preflight_signatures();
+        case 3:
+            a2fo_point_defense_odw_continue = at(g_fleet_ops, kOrdnanceDefenseDelayContinueRva);
+            a2fo_point_defense_pdl_timer_ready = at(g_armada, kPointDefenseTimerReadyRva);
+            a2fo_point_defense_pdl_timer_blocked = at(g_armada, kPointDefenseTimerBlockedRva);
+            return 0;
+        case 4:
+            switch (index) {
+                case 0: return install_hook(g_armada, kPointDefenseBuildClassRva,
+                    reinterpret_cast<void*>(&point_defense_build_class_hook),
+                    kExpectedPointDefenseBuildClass, &g_point_defense_build_class_hook);
+                case 1: return install_hook(g_fleet_ops, kOrdnanceDefenseBuildClassRva,
+                    reinterpret_cast<void*>(&ordnance_defense_build_class_hook),
+                    kExpectedOrdnanceDefenseBuildClass, &g_ordnance_defense_build_class_hook);
+                case 2: return install_hook(g_armada, kPointDefenseSimulateRva,
+                    reinterpret_cast<void*>(&point_defense_simulate_hook),
+                    kExpectedPointDefenseSimulate, &g_point_defense_simulate_hook);
+                case 3: return install_hook(g_fleet_ops, kOrdnanceDefenseSimulateRva,
+                    reinterpret_cast<void*>(&ordnance_defense_simulate_hook),
+                    kExpectedOrdnanceDefenseSimulate, &g_ordnance_defense_simulate_hook);
+                case 4: return install_hook(g_armada, kWeaponResetShotTimerRva,
+                    reinterpret_cast<void*>(&weapon_reset_shot_timer_hook),
+                    kExpectedWeaponResetShotTimer, &g_weapon_reset_shot_timer_hook);
+                case 5: return install_hook(g_armada, kWeaponLoadRva,
+                    reinterpret_cast<void*>(&weapon_load_hook),
+                    kExpectedWeaponLoad, &g_weapon_load_hook);
+                case 6: return install_hook(g_armada, kWeaponSaveRva,
+                    reinterpret_cast<void*>(&weapon_save_hook),
+                    kExpectedWeaponSave, &g_weapon_save_hook);
+                case 7: return install_hook(g_armada, kWeaponDestructorRva,
+                    reinterpret_cast<void*>(&weapon_destructor_hook),
+                    kExpectedWeaponDestructor, &g_weapon_destructor_hook);
+                case 8: return api->patch_jump(at(g_armada, kPointDefenseTimerGateRva),
+                    reinterpret_cast<void*>(&a2fo_point_defense_pdl_timer_gate_bridge),
+                    kExpectedPointDefenseTimerGate, sizeof(kExpectedPointDefenseTimerGate));
+                case 9: return api->patch_jump(at(g_fleet_ops, kOrdnanceDefenseDelaySiteRva),
+                    reinterpret_cast<void*>(&a2fo_point_defense_odw_delay_bridge),
+                    kExpectedOrdnanceDefenseDelaySite, sizeof(kExpectedOrdnanceDefenseDelaySite));
+            }
+            return 0;
+        case 5: {
+            char message[240]{};
+            std::snprintf(message, sizeof(message),
+                          "%s initialized: point-defense shotDelay timing and firing cycles",
+                          kBuildId);
+            log_line(message);
+            return 0;
+        }
+        case 6:
+            log_line("Supported point-defense signatures were not found; runtime disabled");
+            return 0;
     }
-
-    a2fo_point_defense_odw_continue = at(
-        g_fleet_ops, kOrdnanceDefenseDelayContinueRva);
-    a2fo_point_defense_pdl_timer_ready = at(
-        g_armada, kPointDefenseTimerReadyRva);
-    a2fo_point_defense_pdl_timer_blocked = at(
-        g_armada, kPointDefenseTimerBlockedRva);
-    const bool installed =
-        install_hook(g_armada, kPointDefenseBuildClassRva,
-                     reinterpret_cast<void*>(&point_defense_build_class_hook),
-                     kExpectedPointDefenseBuildClass,
-                     &g_point_defense_build_class_hook) &&
-        install_hook(g_fleet_ops, kOrdnanceDefenseBuildClassRva,
-                     reinterpret_cast<void*>(&ordnance_defense_build_class_hook),
-                     kExpectedOrdnanceDefenseBuildClass,
-                     &g_ordnance_defense_build_class_hook) &&
-        install_hook(g_armada, kPointDefenseSimulateRva,
-                     reinterpret_cast<void*>(&point_defense_simulate_hook),
-                     kExpectedPointDefenseSimulate,
-                     &g_point_defense_simulate_hook) &&
-        install_hook(g_fleet_ops, kOrdnanceDefenseSimulateRva,
-                     reinterpret_cast<void*>(&ordnance_defense_simulate_hook),
-                     kExpectedOrdnanceDefenseSimulate,
-                     &g_ordnance_defense_simulate_hook) &&
-        install_hook(g_armada, kWeaponResetShotTimerRva,
-                     reinterpret_cast<void*>(&weapon_reset_shot_timer_hook),
-                     kExpectedWeaponResetShotTimer,
-                     &g_weapon_reset_shot_timer_hook) &&
-        install_hook(g_armada, kWeaponLoadRva,
-                     reinterpret_cast<void*>(&weapon_load_hook),
-                     kExpectedWeaponLoad, &g_weapon_load_hook) &&
-        install_hook(g_armada, kWeaponSaveRva,
-                     reinterpret_cast<void*>(&weapon_save_hook),
-                     kExpectedWeaponSave, &g_weapon_save_hook) &&
-        install_hook(g_armada, kWeaponDestructorRva,
-                     reinterpret_cast<void*>(&weapon_destructor_hook),
-                     kExpectedWeaponDestructor,
-                     &g_weapon_destructor_hook) &&
-        g_api->patch_jump(
-            at(g_armada, kPointDefenseTimerGateRva),
-            reinterpret_cast<void*>(&a2fo_point_defense_pdl_timer_gate_bridge),
-            kExpectedPointDefenseTimerGate,
-            sizeof(kExpectedPointDefenseTimerGate)) &&
-        g_api->patch_jump(
-            at(g_fleet_ops, kOrdnanceDefenseDelaySiteRva),
-            reinterpret_cast<void*>(&a2fo_point_defense_odw_delay_bridge),
-            kExpectedOrdnanceDefenseDelaySite,
-            sizeof(kExpectedOrdnanceDefenseDelaySite));
-    return installed;
+    return 0;
+    } catch (...) {
+        return 0;
+    }
 }
 
 }  // namespace
@@ -616,22 +742,13 @@ a2fo_point_defense_advance_pdl_timer(void* weapon, float elapsed_seconds) {
     }
     float timer = read_at<float>(weapon, kShotTimerOnWeaponOffset, 0.0f);
     if (std::isfinite(timer)) {
-        // Match Weapon::UpdateTimer's useful scalar behavior without
-        // re-entering engine code from inside this patched branch. Re-entry is
-        // unsafe for PointDefenseLaser in Roots and was removed after the
-        // first gate build produced a reported crash without an Armada dump.
         if (timer < 0.0f) timer = 0.0f;
         if (std::isfinite(elapsed_seconds) && elapsed_seconds > 0.0f) {
             timer -= elapsed_seconds;
         }
     }
     write_at(weapon, kShotTimerOnWeaponOffset, timer);
-
-    // A partially installed process-lifetime patch must preserve ArmadaL's
-    // former behavior if a later hook fails. Its code cave advanced the timer
-    // here but allowed the candidate search on every active simulation tick.
-    const bool ready = !std::isfinite(timer) || timer <= 0.0f;
-    return (!g_runtime_ready || ready) ? 1u : 0u;
+    return a2fo_rs_point_timer(g_runtime_ready, timer);
 }
 
 extern "C" __declspec(dllexport)
@@ -642,25 +759,8 @@ bool A2FO_CALL A2FO_ModuleInit(const A2FO_ModuleApi* api) {
         !api->install_inline_hook || !api->patch_jump) {
         return false;
     }
-    g_api = api;
-    g_armada = static_cast<HMODULE>(api->armada_module());
-    g_fleet_ops = static_cast<HMODULE>(api->fleetops_module());
-    if (!g_armada || !g_fleet_ops) return false;
-
-    // Hooks consult this flag while installing, but class construction cannot
-    // occur on this deferred startup thread until installation has finished.
-    g_runtime_ready = true;
-    if (!install_runtime_hooks()) {
-        g_runtime_ready = false;
-        log_line("Supported point-defense signatures were not found; runtime disabled");
-        return true;
-    }
-    char message[240]{};
-    std::snprintf(message, sizeof(message),
-                  "%s initialized: point-defense shotDelay timing and firing cycles",
-                  kBuildId);
-    log_line(message);
-    return true;
+    return a2fo_rs_point_init(true, const_cast<A2FO_ModuleApi*>(api),
+                              &point_init_op) != 0;
 }
 
 extern "C" __declspec(dllexport)

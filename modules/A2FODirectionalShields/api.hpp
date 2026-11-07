@@ -29,6 +29,8 @@ using A2FO_DirectionalShieldsEndDamageFn = void (A2FO_CALL*)(
 using A2FO_DirectionalShieldsIsEnabledFn = bool (A2FO_CALL*)(void* craft);
 using A2FO_DirectionalShieldsGetValueFn = float (A2FO_CALL*)(
     void* craft, std::uint32_t facing);
+using A2FO_DirectionalShieldsGetModeFn = std::uint32_t (A2FO_CALL*)(
+    void* craft);
 
 struct A2FO_DirectionalShieldState {
     std::uint32_t struct_size;

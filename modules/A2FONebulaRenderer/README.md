@@ -620,3 +620,32 @@ simulation tick. A null-ParameterDB refresh logs whether SOD materials were
 available, making late-load timing failures visible. The final-suffix ownership
 convention remains `fbattle_emissive_warp_b` / `fbattle_specular_b`, with
 base-map fallback.
+
+
+## Checkpoint — 2026-10-27: A2FONebulaRenderer controller conversion complete
+
+The module's remaining portable policy is in Rust: trim/path rules, native string
+query admission, bounded texture and node-name scans, comma-separated float
+parsing and partial writes, decal scaling, logo colour-key packing, damage
+threshold indices, and longest-suffix comparison. The native STL sort retains
+its exact tie ordering. Native calls, checked access, descriptor layouts and
+storage/exception lifetimes remain C++. The separate core/nebula_renderer.cpp
+unit is unchanged; this completes the ODF/material controller component.
+
+Validation passes: 211 Rust tests, formatting, host/i686 Windows Clippy, host/Win
+release archives, integrated and standalone DLLs, 1,729 equal original/current
+native lines, 360 numeric rows across all 12 x87 precision/rounding modes, six
+native allocation-failure cases and the built-in batch9 admission regression.
+All 41 source-referenced Rust implementations are linked. Integrated 197 and
+standalone 3 public exports/ordinals are unchanged, with no new system imports.
+Eighteen native functions/layouts and the constants/ABI source pins are preserved.
+The C1 rounding flag survives scaling because Rust writes descriptor fields
+directly; native rollback guards preserve buffer frees during exception unwind.
+
+Evidence: build/rust-migration-stage10/nebula-renderer/checkpoint/validation.json.
+The component is completed_pending_census; strict census totals remain 116/151
+with 35 uncredited records. The common-DLL census gate was not relaxed. Both
+FireArcs and Nebula component evidence await that shared refresh. Candidate is
+isolated under nebula-renderer/candidate; prior artifacts/checkpoints are retained.
+This was an incremental build with authenticated native object cache reuse.
+No deployment/game launch occurred; GPU and in-game acceptance remain pending.

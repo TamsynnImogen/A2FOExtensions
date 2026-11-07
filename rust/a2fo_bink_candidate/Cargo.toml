@@ -1,0 +1,24 @@
+[package]
+name = "a2fo-bink-candidate"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "GPL-3.0-or-later"
+
+[lib]
+name = "a2fo_bink_candidate"
+crate-type = ["rlib"]
+
+[[bin]]
+name = "bink_candidate"
+path = "src/bin/bink_candidate.rs"
+
+[[bin]]
+name = "bink_scan"
+path = "src/bin/bink_scan.rs"
+
+[dependencies]
+infinitier_bik_decoder = { path = "../../third_party/rust-bink-evaluation/infinitier_bik_decoder" }
+serde_json = "1"
+sha2 = "=0.10.9"
+tempfile = "=3.27.0"
